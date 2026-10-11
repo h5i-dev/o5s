@@ -207,6 +207,9 @@ theorem inv_create {s : St} (hi : Inv s) {a : Principal} {n : alloc.vec.Vec U8} 
     l.filterMap (fun x => some (g x)) = l.map g := by
   induction l <;> simp_all
 
+@[simp] theorem filterMap_some_id {α} (l : List α) : l.filterMap (fun x => some x) = l := by
+  induction l <;> simp_all
+
 theorem channel_of_member {s : St} (hi : Inv s) {m : Member} (hm : m ∈ s.members) :
     m.channel.val ≤ s.repo.channels.val := by
   obtain ⟨c, hc, hid, -⟩ := hi.members_placed m hm
@@ -413,5 +416,132 @@ theorem registerPaths_added (known : List PathKind) (c0 : U64) :
     · split at h
       · split at h <;> simp at h
       · exact ih _ _ _ _ ha h
+
+theorem inv_propose {s : St} (hi : Inv s) (hcr : s.repo.created = true) {u : U64} {h : alloc.vec.Vec U8}
+    {deps : List U64} {uses : List PathUse} {body : alloc.vec.Vec U8} {ws r}
+    (hp : Model.propose u s h deps uses body = .Ok (ws, r)) : Inv (applyAll s ws) := by
+  unfold Model.propose at hp
+  split at hp
+  · simp at hp
+  split at hp
+  · simp at hp
+  rename_i hdeps
+  split at hp
+  · simp only [core.result.Result.Ok.injEq, Prod.mk.injEq] at hp
+    obtain ⟨rfl, -⟩ := hp
+    simpa [applyAll] using hi
+  rename_i hnohash
+  split at hp
+  · simp at hp
+  rename_i added paths hreg
+  split at hp
+  · simp at hp
+  rename_i hm1
+  split at hp
+  · simp at hp
+  rename_i hm2
+  simp only [core.result.Result.Ok.injEq, Prod.mk.injEq] at hp
+  obtain ⟨rfl, -⟩ := hp
+  have hid := Refine.inc_val hm1
+  have hinc := Refine.inc_val hm2
+  set id := Model.inc s.repo.patches
+  have ha := registerPaths_added s.paths s.repo.paths uses [] s.repo.paths added paths
+    ⟨by simp, by simp, by simp, by simp, le_refl _⟩ hreg
+  have hfresh : ∀ p ∈ s.patches, p.id ≠ id := by
+    intro p hp e; have := hi.patch_fresh p hp; rw [e, hid] at this; omega
+  have hhash : ∀ p ∈ s.patches, p.hash.val ≠ h.val := by
+    intro p hp e
+    have : (s.patches.find? (fun p => decide (p.hash.val = h.val))).map (·.id) = none := by simpa using hnohash
+    simp only [Option.map_eq_none_iff] at this
+    have := List.find?_eq_none.1 this p hp; simp [e] at this
+  have hdk : ∀ d ∈ deps, ∃ p ∈ s.patches, p.id = d := by
+    intro d hd
+    have hall : (deps.all fun i => s.patches.any fun p => decide (p.id = i)) = true := by simpa using hdeps
+    simp only [List.all_eq_true, List.any_eq_true, decide_eq_true_eq] at hall
+    exact hall d hd
+  have hpatches : upsert (·.id) ⟨id, h, u⟩ s.patches = s.patches ++ [⟨id, h, u⟩] :=
+    upsert_fresh _ _ _ (fun y hy => hfresh y hy)
+  have hpaths : puts (·.id) added s.paths = s.paths ++ added :=
+    puts_fresh _ _ _ ha.ids (fun x hx y hy e => by
+      have h1 := (ha.bounds x hx).1; have h2 := hi.path_fresh y hy; rw [e] at h2; omega)
+  rw [applyAll_eq]
+  simp only [List.filterMap_cons, List.filterMap_nil, List.filterMap_append, List.filterMap_map, repoOf, patchOf,
+    depOf, approvalOf, checkOf, channelOf, memberOf, pathOf, eventOf, bodyOf, listingOf, puts_nil, puts_single,
+    Function.comp_def, filterMap_none, filterMap_some_id, filterMap_some_eq_map, List.nil_append, List.append_nil,
+    List.cons_append, List.getLast?_singleton, Option.getD_some, hpatches, hpaths]
+  set D := puts (fun y => (y.patch, y.dependency)) (deps.map (fun d => ({ patch := id, dependency := d } : Dependency))) s.deps
+  have hD : ∀ d ∈ D, d ∈ s.deps ∨ (d.patch = id ∧ d.dependency ∈ deps) := by
+    intro d hd
+    rcases mem_puts _ hd with hd | hd
+    · exact .inl hd
+    · simp only [List.mem_map] at hd; obtain ⟨x, hx, rfl⟩ := hd; exact .inr ⟨rfl, hx⟩
+  have hmemb : ∀ m ∈ s.members, m.patch ≠ id := by
+    intro m hm e
+    obtain ⟨p, hp, hpid⟩ := hi.members_known m hm
+    exact hfresh p hp (hpid.trans e)
+  constructor
+  all_goals simp only [hasPatch, isMember, List.mem_append, List.mem_singleton]
+  · rw [List.map_append, List.nodup_append]
+    refine ⟨hi.patch_keys, by simp, ?_⟩
+    simp only [List.mem_map, List.mem_singleton]
+    rintro _ ⟨p, hp, rfl⟩ _ ⟨_, rfl, rfl⟩; exact hfresh p hp
+  · rintro p (hp | rfl)
+    · have := hi.patch_fresh p hp; rw [hid]; omega
+    · exact le_refl _
+  · rw [List.map_append, List.nodup_append]
+    refine ⟨hi.hashes, by simp, ?_⟩
+    simp only [List.mem_map, List.mem_singleton]
+    rintro _ ⟨p, hp, rfl⟩ _ ⟨_, rfl, rfl⟩; exact hhash p hp
+  · intro d hd
+    rcases hD d hd with hd | ⟨hdp, hdd⟩
+    · obtain ⟨⟨p, hp, h1⟩, ⟨q, hq, h2⟩, h3⟩ := hi.deps_known d hd
+      exact ⟨⟨p, .inl hp, h1⟩, ⟨q, .inl hq, h2⟩, h3⟩
+    · obtain ⟨q, hq, h2⟩ := hdk _ hdd
+      refine ⟨⟨_, .inr rfl, hdp.symm⟩, ⟨q, .inl hq, h2⟩, ?_⟩
+      have := hi.patch_fresh q hq; rw [hdp, hid, ← h2]; omega
+  · intro a ha'
+    obtain ⟨p, hp, h1, h2⟩ := hi.approvals_independent a ha'
+    exact ⟨p, .inl hp, h1, h2⟩
+  · intro c hc
+    obtain ⟨p, hp, h1, h2⟩ := hi.checks_independent c hc
+    exact ⟨p, .inl hp, h1, h2⟩
+  · exact hi.channel_keys
+  · exact hi.channel_fresh
+  · exact hi.channel_labels
+  · exact hi.member_keys
+  · exact hi.members_placed
+  · intro m hm
+    obtain ⟨p, hp, h1⟩ := hi.members_known m hm
+    exact ⟨p, .inl hp, h1⟩
+  · intro m hm d hd hdp
+    rcases hD d hd with hd | ⟨hdp', -⟩
+    · exact hi.closed m hm d hd hdp
+    · exact absurd (hdp.symm.trans hdp') (hmemb m hm)
+  · exact hi.reviewed
+  · intro e he
+    rcases mem_upsert_of he with rfl | he
+    · exact le_refl _
+    · have := hi.event_fresh e he; rw [hinc]; omega
+  · intro b hb
+    rcases mem_upsert_of hb with rfl | hb
+    · exact ⟨_, .inr rfl, rfl⟩
+    · obtain ⟨p, hp, h1⟩ := hi.bodies_known b hb
+      exact ⟨p, .inl hp, h1⟩
+  · rw [List.map_append, List.nodup_append]
+    refine ⟨hi.path_keys, ha.ids, ?_⟩
+    rintro _ hx _ hy e
+    simp only [List.mem_map] at hx hy
+    obtain ⟨k, hk, rfl⟩ := hx; obtain ⟨k', hk', rfl⟩ := hy
+    have h1 := (ha.bounds k' hk').1; have h2 := hi.path_fresh k hk; rw [e] at h2; omega
+  · rintro k (hk | hk)
+    · have := hi.path_fresh k hk; have := ha.le; omega
+    · exact (ha.bounds k hk).2
+  · rw [List.map_append, List.nodup_append]
+    refine ⟨hi.path_labels, ha.labels, ?_⟩
+    rintro _ hx _ hy e
+    simp only [List.mem_map] at hx hy
+    obtain ⟨k, hk, rfl⟩ := hx; obtain ⟨k', hk', rfl⟩ := hy
+    exact ha.fresh k' hk' k hk e
+  · intro hc; simp [hcr] at hc
 
 end o5s_registry.Invariant
