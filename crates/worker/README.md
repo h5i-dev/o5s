@@ -28,4 +28,14 @@ npx wrangler secret put H5I_APP_SECRET
 npx wrangler deploy           # from the repository root; runs crates/worker/build.sh: rustup, wasm target and worker-build if missing
 ```
 
-The root `wrangler.toml` binds the Hyperdrive configuration used by the earlier calculator deployment (`09738769027849ffb2cd540155d430c9`) and places the Worker near it. Tokens issued with `o5s-server token TENANT USER` under the same secret work on both deployments. No deployment has been run from this repository yet.
+The root `wrangler.toml` binds the Hyperdrive configuration used by the earlier calculator deployment (`09738769027849ffb2cd540155d430c9`) and places the Worker near it. Tokens issued with `o5s-server token TENANT USER` under the same secret work on both deployments. 
+## Deployment
+
+Workers Builds deploys `main` as the `o5s` Worker at `https://o5s.koukyosyumei.workers.dev`, against PlanetScale Postgres (`us-east-1`) through Hyperdrive. The `o5s` schema was created with `o5s-server ddl` as the database owner, and `H5I_APP_SECRET` is set as a Worker secret.
+
+On October 11, 2026, after the deployment:
+- `/readyz` returned `{"ready":true}`.
+- Tokens from `o5s-server token` were accepted.
+- `o5s-load o5s --agents 20 --concurrency 4` admitted all 20 proposals with checked contents and no failed requests. It ran the `disjoint` workload (4.4 integrations/s, proposal p50 472 ms) and the `files` workload (4.8/s, p50 394 ms).
+
+These runs confirm the deployment works; they are not throughput measurements. The test repositories were deleted afterwards.
