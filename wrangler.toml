@@ -1,13 +1,15 @@
-# The o5s API on Workers. The JavaScript edge adapter in `cloudflare/` serves
+# The o5s API on Workers (`crates/worker`), configured at the repository root,
+# which Workers Builds uses unless a root directory is set. The JavaScript
+# edge adapter in `cloudflare/` serves
 # Artifacts and forwards everything else here (set its O5S_ORIGIN to this
 # Worker's URL, or bind it as a service).
 # Same name as the Worker deployed from the dashboard (Workers Builds).
 name = "o5s"
-main = "build/index.js"
+main = "crates/worker/build/index.js"
 compatibility_date = "2026-10-01"
 
 [build]
-command = "sh build.sh"
+command = "cd crates/worker && sh build.sh"
 
 # Required by `wrangler preview` (non-production branch builds). Empty: previews
 # use the top-level settings.

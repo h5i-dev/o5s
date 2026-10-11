@@ -13,8 +13,9 @@ target="${CARGO_TARGET_DIR:-target}"
 cargo build -q --release -p o5s-server
 O5S_DATABASE_SCHEMA=o5s "$target/release/o5s-server" ddl | psql -q "$url"
 stage="$(mktemp -d)"
-cp -r crates/worker/build "$stage/"
-grep -v '^\[build\]\|^command = ' crates/worker/wrangler.toml >"$stage/wrangler.toml"
+mkdir -p "$stage/crates/worker"
+cp -r crates/worker/build "$stage/crates/worker/"
+grep -v '^\[build\]\|^command = ' wrangler.toml >"$stage/wrangler.toml"
 echo "H5I_APP_SECRET=$secret" >"$stage/.dev.vars"
 chmod -R a+rwX "$stage"
 docker rm -f o5s-wrangler >/dev/null 2>&1 || true

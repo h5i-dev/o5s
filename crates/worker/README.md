@@ -2,7 +2,7 @@
 
 The o5s API and admin UI as a Rust Worker (`workers-rs` with axum). PostgreSQL is reached through Hyperdrive. The registry kernel, command planning, narrow loads and repository views are the same crates the native server runs (`o5s_pgwire::service`), so the two deployments share one database schema and behaviour. Each command takes a transaction-scoped advisory lock on its repository, which works with Hyperdrive's transaction pooling (see `docs/storage.md`).
 
-Git export and agent workspaces need a filesystem and are answered with 501 here. Artifacts projections are served by the JavaScript edge adapter in `cloudflare/`; point its `O5S_ORIGIN` at this Worker.
+Git export and agent workspaces need a filesystem and are answered with 501 here. Artifacts projections are served by the JavaScript edge adapter in `cloudflare/`; point its `O5S_ORIGIN` at this Worker. The Worker is named `o5s`, like the dashboard Worker that Workers Builds deploys, and its configuration is `wrangler.toml` at the repository root, so the Workers Builds root directory stays the default `/`.
 
 ## Requirements
 
@@ -25,7 +25,7 @@ Create the tables once as the database owner; Hyperdrive roles usually cannot ru
 ```sh
 O5S_DATABASE_SCHEMA=o5s o5s-server ddl | psql "$OWNER_URL"
 npx wrangler secret put H5I_APP_SECRET
-npx wrangler deploy           # runs build.sh: rustup, wasm target and worker-build if missing
+npx wrangler deploy           # from the repository root; runs crates/worker/build.sh: rustup, wasm target and worker-build if missing
 ```
 
-`wrangler.toml` binds the Hyperdrive configuration used by the earlier calculator deployment (`09738769027849ffb2cd540155d430c9`) and places the Worker near it. Tokens issued with `o5s-server token TENANT USER` under the same secret work on both deployments. No deployment has been run from this repository yet.
+The root `wrangler.toml` binds the Hyperdrive configuration used by the earlier calculator deployment (`09738769027849ffb2cd540155d430c9`) and places the Worker near it. Tokens issued with `o5s-server token TENANT USER` under the same secret work on both deployments. No deployment has been run from this repository yet.
