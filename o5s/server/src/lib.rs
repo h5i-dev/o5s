@@ -92,6 +92,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/command", post(command))
         .route("/api/export", post(export))
         .route("/api/worktree", post(worktree))
+        .route("/api/worktree/propose", post(worktree_propose))
         .layer(DefaultBodyLimit::max(4 * 1024 * 1024))
         .with_state(state)
 }
@@ -283,7 +284,7 @@ async fn worktree(State(s): State<AppState>, headers: HeaderMap, body: Bytes) ->
         // consistent patch registry/channel and cannot race each other.
         let store = s.store.lock().unwrap();
         let repo = store.db.repo(&a, &q.repo)?;
-        artifacts::worktree(&s.root, a.tenant, &q.repo, &q.channel, repo)
+        artifacts::worktree(&s.root, a.tenant, a.user, &q.repo, &q.channel, repo)
     })
     .await
     {
@@ -291,6 +292,47 @@ async fn worktree(State(s): State<AppState>, headers: HeaderMap, body: Bytes) ->
         Err(_) => json(
             StatusCode::SERVICE_UNAVAILABLE,
             serde_json::json!({"error":"workspace failed"}),
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceProposal {
+    repo: String,
+    #[serde(default = "main_channel")]
+    channel: String,
+    commit: String,
+    intent: String,
+}
+async fn worktree_propose(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    let a = match actor(&s, &headers) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let q: WorkspaceProposal = match serde_json::from_slice(&body) {
+        Ok(q) => q,
+        Err(e) => {
+            return json(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({"error":e.to_string()}),
+            );
+        }
+    };
+    match tokio::task::spawn_blocking(move || {
+        let mut store = s.store.lock().unwrap();
+        let repo = store.db.repo(&a, &q.repo)?;
+        let proposal = artifacts::workspace_proposal(
+            &s.root, a.tenant, a.user, &q.repo, &q.channel, &q.commit, &q.intent, repo,
+        )?;
+        store.execute(&a, proposal)
+    })
+    .await
+    {
+        Ok(r) => result(r),
+        Err(_) => json(
+            StatusCode::SERVICE_UNAVAILABLE,
+            serde_json::json!({"error":"workspace proposal failed"}),
         ),
     }
 }

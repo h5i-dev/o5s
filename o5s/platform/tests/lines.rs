@@ -290,7 +290,7 @@ fn indexed_range_merge_matches_pairwise_spec_in_every_small_permutation() {
 #[test]
 fn ten_thousand_disjoint_line_agents_render_one_file_without_conflicts() {
     use o5s_platform::lines::LineVersion;
-    let original = "old\n".repeat(10_000);
+    let original: std::sync::Arc<str> = "old\n".repeat(10_000).into();
     let versions: Vec<_> = (0..10_000)
         .map(|n| LineVersion {
             base: 1,

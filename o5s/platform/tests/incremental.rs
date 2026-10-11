@@ -36,6 +36,7 @@ fn long_history_updates_one_register_without_ancestry_table() {
     let work = c.sync_append_only(&r, "main").unwrap();
     assert_eq!(work.processed_patches, 10_000);
     assert_eq!(work.dependency_edges, 9_999);
+    assert_eq!(work.rendered_paths, 1);
     assert_eq!(c.view().unwrap().files["a"], "10000");
     assert_eq!(c.sync_append_only(&r, "main").unwrap(), ViewWork::default());
     add(&mut r, 10_001, vec![10_000], "a", Some("next".into()));
@@ -44,7 +45,8 @@ fn long_history_updates_one_register_without_ancestry_table() {
         ViewWork {
             processed_patches: 1,
             dependency_edges: 1,
-            updated_paths: 1
+            updated_paths: 1,
+            rendered_paths: 1
         }
     );
     add(
@@ -97,4 +99,48 @@ fn differential_causal_dags_tombstones_and_structural_conflicts() {
         c.sync(&r, "main").unwrap();
         assert_eq!(c.view().unwrap(), r.materialize_reference("main").unwrap());
     }
+}
+
+#[test]
+fn output_rebuilds_only_changed_paths_and_related_structural_conflicts() {
+    let mut repo = Repository::default();
+    let mut cache = IncrementalView::default();
+    add(&mut repo, 1, vec![], "a", Some("parent".into()));
+    add(&mut repo, 2, vec![], "z", Some("unrelated".into()));
+    assert_eq!(
+        cache
+            .sync_append_only(&repo, "main")
+            .unwrap()
+            .rendered_paths,
+        2
+    );
+    assert_eq!(
+        cache
+            .sync_append_only(&repo, "main")
+            .unwrap()
+            .rendered_paths,
+        0
+    );
+    add(&mut repo, 3, vec![], "a/b", Some("child".into()));
+    assert_eq!(
+        cache
+            .sync_append_only(&repo, "main")
+            .unwrap()
+            .rendered_paths,
+        2
+    );
+    let view = cache.content().unwrap();
+    assert_eq!(view.conflicts.len(), 2);
+    assert_eq!(view.files["z"], "unrelated");
+    add(&mut repo, 4, vec![3], "a/b", None);
+    assert_eq!(
+        cache
+            .sync_append_only(&repo, "main")
+            .unwrap()
+            .rendered_paths,
+        2
+    );
+    let view = cache.content().unwrap();
+    assert!(view.conflicts.is_empty());
+    assert_eq!(view.files["a"], "parent");
 }

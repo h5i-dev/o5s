@@ -541,42 +541,80 @@ fn render_heads(
             }
         }
     }
-    let mut files = BTreeMap::new();
-    let mut conflicts = BTreeMap::new();
-    for (path, h) in heads {
-        let mut merged = None;
-        if h.len() > 1 && !collisions.contains(path) {
-            merged = lines::LineVersion::merge_all(
-                h.keys().map(|id| versions.get(&(path.clone(), *id))),
-            )
-            .and_then(|v| v.render().ok());
-        }
-        if let Some(content) = merged {
-            files.insert(path.clone(), content);
-            continue;
-        }
-        let first = h.first_key_value().unwrap().1;
-        if !collisions.contains(path) && h.values().all(|v| v == first) {
-            if let Some(content) = first {
-                files.insert(path.clone(), content.clone());
-            }
-        } else {
-            conflicts.insert(
+    let outputs = heads
+        .iter()
+        .map(|(path, h)| {
+            (
                 path.clone(),
-                h.iter()
-                    .map(|(patch, content)| Alternative {
-                        patch: *patch,
-                        content: content.clone(),
-                    })
-                    .collect(),
-            );
-        }
-    }
+                render_path(path, h, versions, collisions.contains(path)),
+            )
+        })
+        .collect();
+    let (files, conflicts) = collect_outputs(&outputs);
     Ok(View {
         files,
         conflicts,
         patches: active.iter().copied().collect(),
     })
+}
+
+#[derive(Clone)]
+enum PathOutput {
+    File(String),
+    Conflict(Vec<Alternative>),
+    Deleted,
+}
+fn render_path(
+    path: &str,
+    heads: &BTreeMap<u64, Option<String>>,
+    versions: &BTreeMap<(String, u64), lines::LineVersion>,
+    collision: bool,
+) -> PathOutput {
+    if heads.len() > 1 && !collision {
+        if let Some(content) = lines::LineVersion::merge_all(
+            heads
+                .keys()
+                .map(|id| versions.get(&(path.to_string(), *id))),
+        )
+        .and_then(|v| v.render().ok())
+        {
+            return PathOutput::File(content);
+        }
+    }
+    let Some((_, first)) = heads.first_key_value() else {
+        return PathOutput::Deleted;
+    };
+    if !collision && heads.values().all(|v| v == first) {
+        first.clone().map_or(PathOutput::Deleted, PathOutput::File)
+    } else {
+        PathOutput::Conflict(
+            heads
+                .iter()
+                .map(|(patch, content)| Alternative {
+                    patch: *patch,
+                    content: content.clone(),
+                })
+                .collect(),
+        )
+    }
+}
+fn collect_outputs(
+    outputs: &BTreeMap<String, PathOutput>,
+) -> (BTreeMap<String, String>, BTreeMap<String, Vec<Alternative>>) {
+    let mut files = BTreeMap::new();
+    let mut conflicts = BTreeMap::new();
+    for (path, output) in outputs {
+        match output {
+            PathOutput::File(content) => {
+                files.insert(path.clone(), content.clone());
+            }
+            PathOutput::Conflict(alternatives) => {
+                conflicts.insert(path.clone(), alternatives.clone());
+            }
+            PathOutput::Deleted => {}
+        }
+    }
+    (files, conflicts)
 }
 
 /// Work counters describe dependency search and changed registers, not wall time.
@@ -585,6 +623,7 @@ pub struct ViewWork {
     pub processed_patches: usize,
     pub dependency_edges: usize,
     pub updated_paths: usize,
+    pub rendered_paths: usize,
 }
 
 /// Append-only channel cache. No transitive-closure table: look backwards only
@@ -596,6 +635,9 @@ pub struct IncrementalView {
     cursor: usize,
     heads: BTreeMap<String, BTreeMap<u64, Option<String>>>,
     versions: BTreeMap<(String, u64), lines::LineVersion>,
+    originals: BTreeMap<(String, u64), std::sync::Weak<str>>,
+    live: BTreeSet<String>,
+    outputs: BTreeMap<String, PathOutput>,
 }
 impl IncrementalView {
     pub fn sync(&mut self, repo: &Repository, channel: &str) -> Result<ViewWork, Refusal> {
@@ -642,6 +684,7 @@ impl IncrementalView {
     }
     fn integrate(&mut self, repo: &Repository, pending: Vec<u64>) -> Result<ViewWork, Refusal> {
         let mut work = ViewWork::default();
+        let mut dirty = BTreeSet::new();
         for id in pending {
             let p = repo
                 .patches
@@ -684,7 +727,17 @@ impl IncrementalView {
                 let heads = self.heads.entry(e.path.clone()).or_default();
                 for d in &found {
                     heads.remove(d);
-                    self.versions.remove(&(e.path.clone(), *d));
+                    if let Some(old) = self.versions.remove(&(e.path.clone(), *d)) {
+                        let key = (e.path.clone(), old.base);
+                        drop(old);
+                        if self
+                            .originals
+                            .get(&key)
+                            .is_some_and(|v| v.strong_count() == 0)
+                        {
+                            self.originals.remove(&key);
+                        }
+                    }
                 }
                 heads.insert(id, e.content.clone());
                 let changes: Vec<_> = p
@@ -694,25 +747,72 @@ impl IncrementalView {
                     .cloned()
                     .collect();
                 if !changes.is_empty() {
-                    self.versions
-                        .insert((e.path.clone(), id), repo.line_version(&e.path, &changes)?);
+                    let key = (e.path.clone(), changes[0].base);
+                    let shared = self.originals.get(&key).and_then(std::sync::Weak::upgrade);
+                    let version = repo.line_version_shared(&e.path, &changes, shared)?;
+                    self.originals
+                        .insert(key, std::sync::Arc::downgrade(&version.original));
+                    self.versions.insert((e.path.clone(), id), version);
                 }
+                if heads.values().any(Option::is_some) {
+                    self.live.insert(e.path.clone());
+                } else {
+                    self.live.remove(&e.path);
+                }
+                dirty.insert(e.path.clone());
+                // Only ancestors and descendants can change structural status.
+                for (i, c) in e.path.char_indices() {
+                    if c == '/' && self.heads.contains_key(&e.path[..i]) {
+                        dirty.insert(e.path[..i].to_string());
+                    }
+                }
+                let prefix = format!("{}/", e.path);
+                dirty.extend(
+                    self.heads
+                        .range(prefix.clone()..)
+                        .take_while(|(path, _)| path.starts_with(&prefix))
+                        .map(|(path, _)| path.clone()),
+                );
                 work.updated_paths += 1;
             }
             self.applied.insert(id);
             work.processed_patches += 1;
         }
+        for path in dirty {
+            let prefix = format!("{path}/");
+            let ancestor = path
+                .char_indices()
+                .any(|(i, c)| c == '/' && self.live.contains(&path[..i]));
+            let descendant = self
+                .live
+                .range(prefix.clone()..)
+                .next()
+                .is_some_and(|p| p.starts_with(&prefix));
+            let collision = self.live.contains(&path) && (ancestor || descendant);
+            self.outputs.insert(
+                path.clone(),
+                render_path(&path, &self.heads[&path], &self.versions, collision),
+            );
+            work.rendered_paths += 1;
+        }
         Ok(work)
     }
     /// Render content without copying the full channel membership history.
     pub fn content(&self) -> Result<View, Refusal> {
-        render_heads(&self.heads, &self.versions, &BTreeSet::new())
+        let (files, conflicts) = collect_outputs(&self.outputs);
+        Ok(View {
+            files,
+            conflicts,
+            patches: Vec::new(),
+        })
     }
     pub fn patch_count(&self) -> usize {
         self.applied.len()
     }
     pub fn view(&self) -> Result<View, Refusal> {
-        render_heads(&self.heads, &self.versions, &self.applied)
+        let mut view = self.content()?;
+        view.patches = self.applied.iter().copied().collect();
+        Ok(view)
     }
 }
 

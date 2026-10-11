@@ -30,3 +30,19 @@ pub fn append_range(mut out: Vec<u8>, bytes: &Vec<u8>, start: usize, end: usize)
     }
     out
 }
+
+/// Sorted byte intervals on one immutable snapshot. The native adapter checks
+/// coordinates and capacity before entering this extracted rendering loop.
+pub fn render_chunks(bytes: &Vec<u8>, chunks: &Vec<(usize, usize, Vec<u8>)>) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut cursor = 0;
+    let mut i = 0;
+    while i < chunks.len() {
+        let chunk = &chunks[i];
+        out = append_range(out, bytes, cursor, chunk.0);
+        out = append_range(out, &chunk.2, 0, chunk.2.len());
+        cursor = chunk.1;
+        i += 1;
+    }
+    append_range(out, bytes, cursor, bytes.len())
+}

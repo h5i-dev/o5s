@@ -360,6 +360,25 @@ async fn detached_workspace_reuse_preserves_edits_and_is_tenant_scoped() {
         std::fs::read_to_string(path.join("a.txt")).unwrap(),
         "agent changes\n"
     );
+    let (status, other) = request(
+        &s,
+        2,
+        1,
+        "/api/worktree",
+        Some(serde_json::json!({"repo":"workspace"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other}");
+    assert_ne!(v["path"], other["path"]);
+    assert_eq!(v["commit"], other["commit"]);
+    assert_eq!(other["dirty"], false);
+    assert_eq!(
+        std::fs::read_to_string(
+            std::path::Path::new(other["path"].as_str().unwrap()).join("a.txt")
+        )
+        .unwrap(),
+        "base\n"
+    );
     let (status, _) = request(
         &s,
         1,
@@ -369,4 +388,106 @@ async fn detached_workspace_reuse_preserves_edits_and_is_tenant_scoped() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn workspace_import_records_snapshot_dependencies_without_altering_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = state(dir.path());
+    command(&s, 1, serde_json::json!({"cmd":"create","repo":"import"})).await;
+    command(&s,1,serde_json::json!({"cmd":"propose","repo":"import","intent":"base","dependencies":[],"edits":[{"path":"a.txt","content":"base\n"},{"path":"b.txt","content":"delete me\n"}]})).await;
+    for (user, body) in [
+        (
+            2,
+            serde_json::json!({"cmd":"approve","repo":"import","patch":1}),
+        ),
+        (
+            3,
+            serde_json::json!({"cmd":"check","repo":"import","patch":1,"passed":true}),
+        ),
+        (
+            1,
+            serde_json::json!({"cmd":"merge","repo":"import","channel":"main","patch":1}),
+        ),
+    ] {
+        command(&s, user, body).await;
+    }
+    let (status, workspace) = request(
+        &s,
+        1,
+        1,
+        "/api/worktree",
+        Some(serde_json::json!({"repo":"import"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{workspace}");
+    let path = std::path::Path::new(workspace["path"].as_str().unwrap());
+    std::fs::write(path.join("a.txt"), "agent edit\n").unwrap();
+    assert!(
+        Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(["add", "a.txt"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    std::fs::write(path.join("a.txt"), "agent edit 二\n").unwrap();
+    std::fs::remove_file(path.join("b.txt")).unwrap();
+    std::fs::create_dir(path.join("src")).unwrap();
+    std::fs::write(path.join("src/新.txt"), "new file\n").unwrap();
+    let body = serde_json::json!({"repo":"import","commit":workspace["commit"],"intent":"Import agent workspace"});
+    let (status, proposed) = request(&s, 1, 1, "/api/worktree/propose", Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{proposed}");
+    let id = proposed["patch"].as_u64().unwrap().to_string();
+    let (_, snapshot) = request(&s, 1, 1, "/api/state?repo=import", None).await;
+    let patch = &snapshot["repository"]["patches"][&id];
+    assert_eq!(patch["dependencies"], serde_json::json!([1]));
+    assert_eq!(patch["author"], 1);
+    assert_eq!(
+        patch["edits"],
+        serde_json::json!([
+            {"path":"a.txt","content":"agent edit 二\n"},
+            {"path":"b.txt","content":null},
+            {"path":"src/新.txt","content":"new file\n"},
+        ])
+    );
+    assert_eq!(
+        std::fs::read_to_string(path.join("a.txt")).unwrap(),
+        "agent edit 二\n"
+    );
+    let staged = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["show", ":a.txt"])
+        .output()
+        .unwrap();
+    assert_eq!(staged.stdout, b"agent edit\n");
+    let (status, repeated) = request(&s, 1, 1, "/api/worktree/propose", Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(proposed["patch"], repeated["patch"]);
+    assert_eq!(repeated["duplicate"], true);
+    assert_eq!(
+        request(&s, 2, 1, "/api/worktree/propose", Some(body.clone()))
+            .await
+            .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        request(&s, 1, 2, "/api/worktree/propose", Some(body.clone()))
+            .await
+            .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let before = std::fs::read(dir.path().join("state.json")).unwrap();
+    let outside = dir.path().join("outside.txt");
+    std::fs::write(&outside, "must not import\n").unwrap();
+    std::os::unix::fs::symlink(&outside, path.join("link.txt")).unwrap();
+    let (status, refusal) = request(&s, 1, 1, "/api/worktree/propose", Some(body)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refusal}");
+    assert!(refusal["error"].as_str().unwrap().contains("symlinks"));
+    assert_eq!(
+        before,
+        std::fs::read(dir.path().join("state.json")).unwrap()
+    );
 }

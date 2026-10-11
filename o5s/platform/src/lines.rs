@@ -15,7 +15,7 @@ pub struct LineEdit {
 #[derive(Clone, Debug)]
 pub struct LineVersion {
     pub base: u64,
-    pub original: String,
+    pub original: std::sync::Arc<str>,
     pub changes: Vec<LineEdit>,
 }
 impl LineVersion {
@@ -27,7 +27,10 @@ impl LineVersion {
         let mut changes = std::collections::BTreeMap::new();
         for version in std::iter::once(Some(first)).chain(versions) {
             let version = version?;
-            if version.base != first.base || version.original != first.original {
+            if version.base != first.base
+                || (!std::sync::Arc::ptr_eq(&version.original, &first.original)
+                    && version.original != first.original)
+            {
                 return None;
             }
             for edit in &version.changes {
@@ -78,35 +81,46 @@ fn render(original: &str, changes: &[LineEdit]) -> Result<String, Refusal> {
         cursor = end;
     }
     let original = original.as_bytes().to_vec();
-    let mut bytes = Vec::new();
-    let mut cursor = 0;
-    for e in changes {
-        bytes = o5s_kernel::interval::append_range(
-            bytes,
-            &original,
-            cursor,
-            boundaries[e.start as usize],
-        );
-        let replacement = e.content.as_bytes().to_vec();
-        bytes = o5s_kernel::interval::append_range(bytes, &replacement, 0, replacement.len());
-        cursor = boundaries[e.end as usize];
-    }
-    bytes = o5s_kernel::interval::append_range(bytes, &original, cursor, original.len());
+    let chunks: Vec<_> = changes
+        .iter()
+        .map(|e| {
+            (
+                boundaries[e.start as usize],
+                boundaries[e.end as usize],
+                e.content.as_bytes().to_vec(),
+            )
+        })
+        .collect();
+    let _capacity = chunks
+        .iter()
+        .try_fold(original.len(), |n, (_, _, text)| n.checked_add(text.len()))
+        .ok_or_else(|| refuse("materialization capacity exceeded"))?;
+    let bytes = o5s_kernel::interval::render_chunks(&original, &chunks);
     String::from_utf8(bytes).map_err(|_| refuse("invalid UTF-8 materialization"))
 }
 impl Repository {
     pub fn line_version(&self, path: &str, changes: &[LineEdit]) -> Result<LineVersion, Refusal> {
+        self.line_version_shared(path, changes, None)
+    }
+    pub(crate) fn line_version_shared(
+        &self,
+        path: &str,
+        changes: &[LineEdit],
+        shared: Option<std::sync::Arc<str>>,
+    ) -> Result<LineVersion, Refusal> {
         let first = changes.first().ok_or_else(|| refuse("empty line edits"))?;
         let base = self
             .patches
             .get(&first.base)
             .ok_or_else(|| refuse("line base not found"))?;
-        let original = base
-            .edits
-            .iter()
-            .find(|e| e.path == path)
-            .and_then(|e| e.content.clone())
-            .ok_or_else(|| refuse("line base file not found"))?;
+        let original = shared.map(Ok).unwrap_or_else(|| {
+            base.edits
+                .iter()
+                .find(|e| e.path == path)
+                .and_then(|e| e.content.as_deref())
+                .map(std::sync::Arc::<str>::from)
+                .ok_or_else(|| refuse("line base file not found"))
+        })?;
         if changes
             .iter()
             .any(|e| e.base != first.base || e.path != path)

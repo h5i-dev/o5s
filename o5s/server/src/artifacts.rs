@@ -148,6 +148,7 @@ pub fn export(
 pub fn worktree(
     root: &Path,
     tenant: u64,
+    agent: u64,
     name: &str,
     channel: &str,
     repo: &Repository,
@@ -164,6 +165,7 @@ pub fn worktree(
         .join(tenant.to_string())
         .join(name)
         .join(channel)
+        .join(agent.to_string())
         .join(commit);
     let reused = path.exists();
     if !reused {
@@ -205,5 +207,162 @@ pub fn worktree(
         ));
     }
     let dirty = !inspect(&["status", "--porcelain"])?.is_empty();
-    Ok(serde_json::json!({"path":path,"commit":commit,"reused":reused,"dirty":dirty}))
+    Ok(serde_json::json!({"path":path,"commit":commit,"agent":agent,"reused":reused,"dirty":dirty}))
+}
+
+/// Read changes from this authenticated agent's detached snapshot. The caller
+/// persists the resulting immutable proposal through the ordinary transaction.
+/// Git files, index and working tree remain untouched.
+pub fn workspace_proposal(
+    root: &Path,
+    tenant: u64,
+    agent: u64,
+    name: &str,
+    channel: &str,
+    commit: &str,
+    intent: &str,
+    repo: &Repository,
+) -> Result<o5s_platform::Command, Refusal> {
+    use o5s_platform::{Command as Proposal, Edit, valid_path};
+    use std::collections::BTreeSet;
+    let refusal = |message: &str| Refusal(message.into());
+    if !valid_name(name)
+        || !valid_name(channel)
+        || commit.len() != 40
+        || !commit.bytes().all(|c| c.is_ascii_hexdigit())
+    {
+        return Err(refusal("invalid workspace identity"));
+    }
+    let membership = repo
+        .channels
+        .get(channel)
+        .ok_or_else(|| refusal("channel not found"))?;
+    let root = std::fs::canonicalize(root).map_err(|e| Refusal(e.to_string()))?;
+    let bare = std::fs::canonicalize(
+        root.join("artifacts")
+            .join(tenant.to_string())
+            .join(format!("{name}.git")),
+    )
+    .map_err(|_| refusal("Git projection not found"))?;
+    let path = root
+        .join("workspaces")
+        .join(tenant.to_string())
+        .join(name)
+        .join(channel)
+        .join(agent.to_string())
+        .join(commit);
+    let run = |args: &[&str]| -> Result<Vec<u8>, Refusal> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&path)
+            .args(args)
+            .output()
+            .map_err(|e| Refusal(e.to_string()))?;
+        if !output.status.success() {
+            return Err(refusal("workspace inspection failed"));
+        }
+        Ok(output.stdout)
+    };
+    let text = |bytes: Vec<u8>| -> Result<String, Refusal> {
+        String::from_utf8(bytes).map_err(|_| refusal("workspace requires UTF-8 text"))
+    };
+    if text(run(&["rev-parse", "HEAD"])?)?.trim() != commit {
+        return Err(refusal(
+            "workspace HEAD changed; select its original snapshot",
+        ));
+    }
+    let common = text(run(&[
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+    ])?)?;
+    if std::fs::canonicalize(common.trim()).map_err(|e| Refusal(e.to_string()))? != bare {
+        return Err(refusal("workspace belongs to a different repository"));
+    }
+    let message = text(run(&["show", "-s", "--format=%B", "HEAD"])?)?;
+    let hashes = message
+        .strip_prefix("o5s verified-admission projection\n\nPatch hashes:\n")
+        .ok_or_else(|| refusal("workspace is not an o5s projection"))?;
+    let mut dependencies = Vec::new();
+    for hash in hashes.lines().filter(|line| !line.is_empty()) {
+        let id = repo
+            .patches
+            .values()
+            .find(|p| p.hash == hash)
+            .map(|p| p.id)
+            .ok_or_else(|| refusal("workspace patch identity not found"))?;
+        if !membership.contains(&id) {
+            return Err(refusal("workspace snapshot is outside this channel"));
+        }
+        dependencies.push(id);
+    }
+    let mut changed = run(&[
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--name-only",
+        "-z",
+        "HEAD",
+        "--",
+    ])?;
+    changed.extend(run(&["ls-files", "--others", "--exclude-standard", "-z"])?);
+    let paths: BTreeSet<_> = changed
+        .split(|b| *b == 0)
+        .filter(|p| !p.is_empty())
+        .map(|p| text(p.to_vec()))
+        .collect::<Result<_, _>>()?;
+    if paths.is_empty() || paths.len() > 1024 {
+        return Err(refusal("1..1024 changed files required"));
+    }
+    let mut edits = Vec::new();
+    let mut total = 0usize;
+    for file in paths {
+        if !valid_path(&file) {
+            return Err(refusal("invalid workspace file path"));
+        }
+        let mut target = path.clone();
+        let mut absent = false;
+        for component in file.split('/') {
+            target.push(component);
+            match std::fs::symlink_metadata(&target) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    return Err(refusal("symlinks are not text patch files"));
+                }
+                Ok(_) => (),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    absent = true;
+                    break;
+                }
+                Err(e) => return Err(Refusal(e.to_string())),
+            }
+        }
+        let content = if absent {
+            None
+        } else {
+            let size = std::fs::metadata(&target)
+                .map_err(|e| Refusal(e.to_string()))?
+                .len();
+            if size > 4 * 1024 * 1024 {
+                return Err(refusal("workspace file exceeds proposal limit"));
+            }
+            let bytes = std::fs::read(&target).map_err(|e| Refusal(e.to_string()))?;
+            total = total
+                .checked_add(bytes.len())
+                .ok_or_else(|| refusal("proposal too large"))?;
+            if total > 4 * 1024 * 1024 {
+                return Err(refusal("workspace proposal exceeds limit"));
+            }
+            Some(text(bytes)?)
+        };
+        edits.push(Edit {
+            path: file,
+            content,
+        });
+    }
+    Ok(Proposal::Propose {
+        repo: name.into(),
+        intent: intent.into(),
+        dependencies,
+        edits,
+    })
 }

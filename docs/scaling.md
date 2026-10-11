@@ -4,7 +4,7 @@ The local platform supports immutable whole-file edits and line ranges anchored 
 
 ## Implemented in the file view
 
-`IncrementalView` keeps causal heads for each path and an append cursor for channels managed by admission. Refresh processes only new membership. It searches dependency ancestry only for current heads on edited paths, stops when those heads have been found, and prunes handles older than every target. Handles are monotonically assigned and dependencies must precede their child. Independent edits with no dependencies skip ancestry search entirely. No transitive-closure table is retained.
+`IncrementalView` keeps causal heads for each path and an append cursor for channels managed by admission. Refresh processes only new membership. It searches dependency ancestry only for current heads on edited paths, stops when those heads have been found, and prunes handles older than every target. Handles are monotonically assigned and dependencies must precede their child. Independent edits with no dependencies skip ancestry search entirely. No transitive-closure table is retained. Derived file/conflict output is cached per path. A batch renders each changed path once and also refreshes only its existing ancestors/descendants when structural conflicts may change. An unchanged refresh renders zero paths; reads still copy and serialize their requested output.
 
 `merge_batch` admits a dependency-ordered batch atomically and persists one snapshot. A rejected member publishes none of the batch. Each member still runs the actual extracted admission kernel. `/api/view` returns files, conflicts, patch count and work counters without copying the patch registry or history of member IDs. The richer admin endpoint still returns historical records.
 
@@ -19,7 +19,7 @@ The fixtures use 10,000 patches/vertices. Counters are asserted in tests:
 | Fixture | Observed work |
 |---|---|
 | Deep chain, all editing one path, first materialization | 10,000 patches and 9,999 searched dependency edges |
-| Same chain, unchanged append-only refresh | Zero new patches, searched edges or changed paths |
+| Same chain, unchanged append-only refresh | Zero new patches, searched edges, changed paths or rendered paths |
 | One appended edit depending on the previous head | One patch, one searched edge, one changed path |
 | New path depending on that chain | No ancestry search for that path |
 | 10,000 independent agents editing one path | Concurrent values retained; no dependency searches |
@@ -29,7 +29,7 @@ These counters exclude authentication, hashing, database cloning, snapshot I/O, 
 
 ## Line-range merge
 
-The range index checks immediate predecessor and successor intervals in a `BTreeMap`, avoiding a quadratic all-pairs overlap pass. Equal edits deduplicate. For k ranges, collecting ranges costs O(k log k); the renderer appends original gaps and replacements once, with work proportional to original and emitted bytes. The actual Rust overlap predicate and append loop have Lean proofs. Exhaustive triples of ranges on four lines, in all six arrival orders, check the index against a separate pairwise specification. A 10,000-agent range fixture merges into one file with exact expected bytes. These are in-memory fixtures, not HTTP throughput measurements.
+The range index checks immediate predecessor and successor intervals in a `BTreeMap`, avoiding a quadratic all-pairs overlap pass. Equal edits deduplicate. A shared `Arc<str>` retains a common immutable base once per active file/base, and weak references are removed when their final head disappears. For k ranges, collecting ranges costs O(k log k); the renderer appends original gaps and replacements once, with work proportional to original and emitted bytes. The actual Rust overlap predicate, append loop and complete multi-range rendering loop have Lean proofs. Exhaustive triples of ranges on four lines, in all six arrival orders, check the index against a separate pairwise specification. A 10,000-agent range fixture merges into one file with exact expected bytes. These are in-memory fixtures, not HTTP throughput measurements.
 
 Proposal preparation walks dependency closure to validate the chosen immutable base. It searches only for current causal heads while scanning that closure, avoiding a retained transitive-closure table. The registry still retains complete per-patch previews, so large common bases incur substantial memory and snapshot costs. No compressed history claim is made.
 

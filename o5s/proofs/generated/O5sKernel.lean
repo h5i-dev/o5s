@@ -1078,6 +1078,59 @@ def interval.append_range
   := do
   interval.append_range_loop out bytes «end» start
 
+/-- [o5s_kernel::interval::render_chunks]: loop body 0:
+    Source: 'o5s/kernel/src/interval.rs', lines 40:4-46:5
+    Visibility: public -/
+@[rust_loop_body]
+def interval.render_chunks_loop.body
+  (bytes : alloc.vec.Vec Std.U8)
+  (chunks : alloc.vec.Vec (Std.Usize × Std.Usize × (alloc.vec.Vec Std.U8)))
+  (out : alloc.vec.Vec Std.U8) (cursor : Std.Usize) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.U8) × Std.Usize × Std.Usize)
+    ((alloc.vec.Vec Std.U8) × Std.Usize))
+  := do
+  let i1 := alloc.vec.Vec.len chunks
+  if i < i1
+  then
+    let (i2, cursor1, v) ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Std.Usize ×
+        Std.Usize × (alloc.vec.Vec Std.U8))) chunks i
+    let out1 ← interval.append_range out bytes cursor i2
+    let i3 := alloc.vec.Vec.len v
+    let out2 ← interval.append_range out1 v 0#usize i3
+    let i4 ← i + 1#usize
+    ok (cont (out2, cursor1, i4))
+  else ok (done (out, cursor))
+
+/-- [o5s_kernel::interval::render_chunks]: loop 0:
+    Source: 'o5s/kernel/src/interval.rs', lines 40:4-46:5
+    Visibility: public -/
+@[rust_loop]
+def interval.render_chunks_loop
+  (bytes : alloc.vec.Vec Std.U8)
+  (chunks : alloc.vec.Vec (Std.Usize × Std.Usize × (alloc.vec.Vec Std.U8)))
+  (out : alloc.vec.Vec Std.U8) (cursor : Std.Usize) (i : Std.Usize) :
+  Result ((alloc.vec.Vec Std.U8) × Std.Usize)
+  := do
+  loop
+    (fun (out1, cursor1, i1) => interval.render_chunks_loop.body bytes chunks
+      out1 cursor1 i1)
+    (out, cursor, i)
+
+/-- [o5s_kernel::interval::render_chunks]:
+    Source: 'o5s/kernel/src/interval.rs', lines 36:0-48:1
+    Visibility: public -/
+def interval.render_chunks
+  (bytes : alloc.vec.Vec Std.U8)
+  (chunks : alloc.vec.Vec (Std.Usize × Std.Usize × (alloc.vec.Vec Std.U8))) :
+  Result (alloc.vec.Vec Std.U8)
+  := do
+  let (out, cursor) ←
+    interval.render_chunks_loop bytes chunks (alloc.vec.Vec.new Std.U8) 0#usize
+      0#usize
+  let i := alloc.vec.Vec.len bytes
+  interval.append_range out bytes cursor i
+
 /-- [o5s_kernel::Principal]
     Source: 'o5s/kernel/src/lib.rs', lines 11:0-14:1
     Visibility: public -/
