@@ -16,7 +16,7 @@ use o5s_platform::{Actor, Command, Database, IncrementalView, Refusal};
 use serde::Deserialize;
 use std::{
     fs::{self, File, OpenOptions},
-    io::Write,
+    io::{BufWriter, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -27,6 +27,120 @@ pub struct Store {
     views: std::collections::BTreeMap<(u64, String, String), IncrementalView>,
     // Held for the process lifetime: no second writer can open the same store.
     _lock: File,
+}
+
+// Only the command's repository can change. Review/check commands change one
+// fact plus the event tail, so their rollback state need not clone patch bodies.
+enum Rollback {
+    Registry { tenant: u64, repo: String, last_id: Option<u64>, events: usize },
+    Channel { tenant: u64, repo: String, channel: String, previous: Option<Vec<u64>>, events: usize },
+    Facts {
+        tenant: u64,
+        repo: String,
+        patch: u64,
+        approvals: Option<std::collections::BTreeSet<u64>>,
+        checked: Option<bool>,
+        events: usize,
+    },
+    Repository {
+        tenant: u64,
+        repo: String,
+        existed: bool,
+        previous: Option<o5s_platform::Repository>,
+    },
+}
+impl Rollback {
+    fn capture(db: &Database, actor: &Actor, command: &Command) -> Self {
+        let name = command.repo();
+        let repository = db.tenants.get(&actor.tenant).and_then(|t| t.get(name));
+        if let Some(repository) = repository {
+            match command {
+                Command::Propose { .. } | Command::ProposeLines { .. } | Command::ProposeGraph { .. } => {
+                    return Self::Registry { tenant: actor.tenant, repo: name.into(),
+                        last_id: repository.patches.last_key_value().map(|(id, _)| *id),
+                        events: repository.events.len() };
+                }
+                Command::Fork { channel, .. } | Command::Merge { channel, .. }
+                | Command::MergeBatch { channel, .. } => {
+                    return Self::Channel { tenant: actor.tenant, repo: name.into(), channel: channel.clone(),
+                        previous: repository.channels.get(channel).cloned(), events: repository.events.len() };
+                }
+                _ => {}
+            }
+            let facts = match command {
+                Command::Approve { patch, .. } => Some((*patch,
+                    repository.patches.get(patch).map(|p| p.approvals.clone()), None)),
+                Command::Check { patch, .. } => Some((*patch, None,
+                    repository.patches.get(patch).map(|p| p.checks_passed))),
+                _ => None,
+            };
+            if let Some((patch, approvals, checked)) = facts {
+                return Self::Facts {
+                    tenant: actor.tenant,
+                    repo: name.into(),
+                    patch,
+                    approvals,
+                    checked,
+                    events: repository.events.len(),
+                };
+            }
+        }
+        Self::Repository {
+            tenant: actor.tenant,
+            repo: name.into(),
+            existed: db.tenants.contains_key(&actor.tenant),
+            previous: repository.cloned(),
+        }
+    }
+
+    fn restore(self, db: &mut Database) {
+        match self {
+            Self::Registry { tenant, repo, last_id, events } => {
+                let repository = db.tenants.get_mut(&tenant).unwrap().get_mut(&repo).unwrap();
+                while repository.patches.last_key_value().is_some_and(|(id, _)|
+                    last_id.is_none_or(|last| *id > last)) {
+                    repository.patches.pop_last();
+                }
+                repository.events.truncate(events);
+            }
+            Self::Channel { tenant, repo, channel, previous, events } => {
+                let repository = db.tenants.get_mut(&tenant).unwrap().get_mut(&repo).unwrap();
+                if let Some(previous) = previous { repository.channels.insert(channel, previous); }
+                else { repository.channels.remove(&channel); }
+                repository.events.truncate(events);
+            }
+            Self::Facts {
+                tenant,
+                repo,
+                patch,
+                approvals,
+                checked,
+                events,
+            } => {
+                let repository = db.tenants.get_mut(&tenant).unwrap().get_mut(&repo).unwrap();
+                if let Some(p) = repository.patches.get_mut(&patch) {
+                    if let Some(approvals) = approvals { p.approvals = approvals; }
+                    if let Some(checked) = checked { p.checks_passed = checked; }
+                }
+                repository.events.truncate(events);
+            }
+            Self::Repository {
+                tenant,
+                repo,
+                existed,
+                previous,
+            } => {
+                if let Some(previous) = previous {
+                    db.tenants.entry(tenant).or_default().insert(repo, previous);
+                } else if let Some(repositories) = db.tenants.get_mut(&tenant) {
+                    repositories.remove(&repo);
+                }
+                if !existed {
+                    db.tenants.remove(&tenant);
+                }
+            }
+        }
+    }
 }
 impl Store {
     pub fn open(root: &Path) -> Result<Self, Box<dyn std::error::Error>> {
@@ -56,21 +170,37 @@ impl Store {
         actor: &Actor,
         command: Command,
     ) -> Result<serde_json::Value, Refusal> {
-        let mut candidate = self.db.clone();
-        let reply = candidate.execute(actor, command)?;
-        let bytes = serde_json::to_vec(&candidate).map_err(|e| Refusal(e.to_string()))?;
         let tmp = self.path.with_extension("json.tmp");
         let parent = File::open(self.path.parent().unwrap()).map_err(|e| Refusal(e.to_string()))?;
+        let rollback = Rollback::capture(&self.db, actor, &command);
+        // The caller holds the store mutex throughout execution and persistence.
+        // No reader can see this tentative state before durable publication.
+        let reply = match self.db.execute(actor, command) {
+            Ok(reply) => reply,
+            Err(error) => {
+                rollback.restore(&mut self.db);
+                return Err(error);
+            }
+        };
+        // The registry returns before mutation for an existing canonical patch.
+        // Preserve its idempotent result without rewriting identical storage.
+        if reply.get("duplicate").and_then(serde_json::Value::as_bool) == Some(true) {
+            return Ok(reply);
+        }
         let persist = || -> std::io::Result<()> {
-            let mut file = File::create(&tmp)?;
-            file.write_all(&bytes)?;
-            file.sync_all()?;
+            let mut file = BufWriter::with_capacity(64 * 1024, File::create(&tmp)?);
+            serde_json::to_writer(&mut file, &self.db).map_err(std::io::Error::other)?;
+            file.flush()?;
+            file.get_ref().sync_all()?;
+            drop(file);
             fs::rename(&tmp, &self.path)?;
 
             Ok(())
         };
-        persist().map_err(|e| Refusal(format!("storage unavailable: {e}")))?;
-        self.db = candidate;
+        if let Err(error) = persist() {
+            rollback.restore(&mut self.db);
+            return Err(Refusal(format!("storage unavailable: {error}")));
+        }
         parent
             .sync_all()
             .map_err(|e| Refusal(format!("committed; directory sync failed: {e}")))?;

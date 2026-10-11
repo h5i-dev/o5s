@@ -12,6 +12,7 @@ struct Fixture {
     url: String,
     auth: Arc<HmacAuth>,
     server: tokio::task::JoinHandle<()>,
+    requests: Arc<Mutex<Vec<String>>>,
 }
 impl Fixture {
     async fn new() -> Self {
@@ -24,14 +25,26 @@ impl Fixture {
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let observed = requests.clone();
+        let app = router(state).layer(axum::middleware::from_fn(
+            move |request: axum::extract::Request, next: axum::middleware::Next| {
+                let observed = observed.clone();
+                async move {
+                    observed.lock().unwrap().push(request.uri().to_string());
+                    next.run(request).await
+                }
+            },
+        ));
         let server = tokio::spawn(async move {
-            axum::serve(listener, router(state)).await.unwrap();
+            axum::serve(listener, app).await.unwrap();
         });
         Self {
             root,
             url,
             auth,
             server,
+            requests,
         }
     }
     fn repo(&self, name: &str) -> std::path::PathBuf {
@@ -337,7 +350,12 @@ async fn unsupported_git_content_is_rejected_before_a_proposal_exists() {
         &["propose", "--intent", "mode"],
         "Executable mode unsupported",
     );
-    assert!(f.ok(&a, 1, &["log"]).as_object().unwrap().is_empty());
+    assert!(
+        f.ok(&a, 1, &["log"])["patches"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -452,4 +470,77 @@ async fn graph_operations_use_portable_nodes_and_reviewed_order_resolution() {
         &["propose", "--intent", "invalid mixed model"],
         "graph document requires graph operations",
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn history_pages_omit_payloads_and_show_fetches_only_one_proposal() {
+    let f = Fixture::new().await;
+    let a = f.repo("paged-history");
+    f.ok(&a, 1, &["connect", "paged-history"]);
+    let mut ids = Vec::new();
+    for i in 0..5 {
+        // Large historical snapshots must never appear in summary responses.
+        fs::write(
+            a.join("file.txt"),
+            format!("version {i}\n{}", "payload\n".repeat(8192)),
+        )
+        .unwrap();
+        ids.push(patch(f.ok(
+            &a,
+            1,
+            &["propose", "--intent", &format!("proposal {i}")],
+        )));
+    }
+    f.requests.lock().unwrap().clear();
+    let first = f.ok(&a, 1, &["log", "--limit", "2"]);
+    assert_eq!(first["patches"].as_array().unwrap().len(), 2);
+    assert_eq!(first["patches"][0]["id"], ids[0]);
+    assert_eq!(first["next_after"], ids[1]);
+    assert_eq!(first["patches"][0]["edit_count"], 1);
+    for summary in first["patches"].as_array().unwrap() {
+        for payload in ["edits", "line_edits", "graph_edits", "dependencies"] {
+            assert!(
+                summary.get(payload).is_none(),
+                "unexpected historical payload: {payload}"
+            );
+        }
+    }
+    assert!(serde_json::to_vec(&first).unwrap().len() < 2048);
+    let second = f.ok(
+        &a,
+        1,
+        &["log", "--after", &ids[1].to_string(), "--limit", "2"],
+    );
+    assert_eq!(second["patches"][0]["id"], ids[2]);
+    assert_eq!(second["next_after"], ids[3]);
+    let last = f.ok(
+        &a,
+        1,
+        &["log", "--after", &ids[3].to_string(), "--limit", "2"],
+    );
+    assert_eq!(last["patches"].as_array().unwrap().len(), 1);
+    assert_eq!(last["patches"][0]["id"], ids[4]);
+    assert!(last["next_after"].is_null());
+    let detail = f.ok(&a, 1, &["show", &ids[2].to_string()]);
+    assert_eq!(detail["intent"], "proposal 2");
+    assert!(
+        detail["edits"][0]["content"]
+            .as_str()
+            .unwrap()
+            .starts_with("version 2\n")
+    );
+    f.fail(&a, 1, &["show", "999999"], "patch not found");
+    let requests = f.requests.lock().unwrap().clone();
+    assert!(requests.iter().any(|uri| uri.starts_with("/api/patches?")));
+    assert!(requests.iter().any(|uri| uri.starts_with("/api/patch?")));
+    assert!(
+        requests.iter().all(|uri| !uri.starts_with("/api/state")),
+        "{requests:?}"
+    );
+    f.requests.lock().unwrap().clear();
+    for limit in ["0", "101"] {
+        let output = f.command(&a, 1, 1, &["log", "--limit", limit]);
+        assert_eq!(output.status.code(), Some(2));
+    }
+    assert!(f.requests.lock().unwrap().is_empty());
 }

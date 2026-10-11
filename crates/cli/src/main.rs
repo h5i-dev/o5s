@@ -98,10 +98,14 @@ enum Action {
     },
     /// Read a proposal and its review/check state.
     Show { patch: u64 },
-    /// List proposals and review/check state.
+    /// Page proposal summaries across all repository channels.
     Log {
-        #[arg(long, default_value = "main")]
-        channel: String,
+        /// Resume after a proposal ID returned as next_after.
+        #[arg(long, default_value_t = 0)]
+        after: u64,
+        /// Number of summaries per page (no file contents are returned).
+        #[arg(long, default_value_t = 50, value_parser = clap::value_parser!(u64).range(1..=100))]
+        limit: u64,
     },
     /// Independently approve an immutable proposal.
     Approve { patch: u64 },
@@ -904,15 +908,26 @@ fn execute(cli: &Cli) -> Result<Value> {
         Action::View { channel } => {
             api.request("/api/view", &[("repo", repo), ("channel", channel)], None)
         }
-        Action::Log { channel } => Ok(api.state(repo, channel)?["repository"]["patches"].clone()),
+        Action::Log { after, limit } => api.request(
+            "/api/patches",
+            &[
+                ("repo", repo),
+                ("after", &after.to_string()),
+                ("limit", &limit.to_string()),
+            ],
+            None,
+        ),
         Action::Show { patch } => {
-            let state = api.state(repo, "main")?;
-            let proposal = state["repository"]["patches"][patch.to_string()].clone();
-            if proposal.is_null() {
-                Err(error("Unknown patch"))
-            } else {
-                Ok(proposal)
-            }
+            let detail = api.request(
+                "/api/patch",
+                &[("repo", repo), ("id", &patch.to_string())],
+                None,
+            )?;
+            detail
+                .get("patch")
+                .filter(|p| p.is_object())
+                .cloned()
+                .ok_or_else(|| error("Server returned an invalid proposal response"))
         }
         Action::Approve { patch } => api.command(repo, json!({"cmd": "approve", "patch": patch})),
         Action::Check { patch, pass, .. } => api.command(
