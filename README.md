@@ -2,7 +2,7 @@
 
 A local, runnable patch platform for concurrent agents, built with Rust, axum and h5i-app. Changes are immutable patches with stable SHA-256 identities and explicit dependencies. Channels select dependency-closed patch sets. Concurrent edits remain visible; a resolution is another reviewed patch. Git is an export format.
 
-The original `calculator/` example has moved to `o5s/`. Its PostgreSQL/Workers sample and arithmetic/storage proofs remain as compatibility coverage. The new platform runs from `o5s/server`, with a separate Cloudflare edge adapter in `o5s/cloudflare`.
+The Axum application lives in `src/`, with the verified Rust kernel in `kernel/`, collaboration logic in `platform/`, Lean proofs in `proofs/` and Cloudflare edge adapter in `cloudflare/`. The original calculator’s PostgreSQL/Workers sample and arithmetic/storage proofs remain as compatibility coverage.
 
 ## Run locally
 
@@ -28,12 +28,12 @@ Select the returned repository in the UI. The demo creates two concurrent change
 
 ```sh
 ./scripts/verify.sh
-h5i app mutate o5s --only merge_
+h5i app mutate . --only merge_
 ```
 
-The verification script runs Rust workspace tests, the Cloudflare adapter tests (Node 24+), extracts the current kernel and runs the h5i-app Lean axiom gate. Proof tooling requires `h5i`, `lake` and the pinned extraction toolchain; `h5i app doctor o5s` checks these dependencies. It may download Lean packages on the first run.
+The verification script runs Rust workspace tests, the Cloudflare adapter tests (Node 24+), extracts the current kernel and runs the h5i-app Lean axiom gate. Proof tooling requires `h5i`, `lake` and the pinned extraction toolchain; `h5i app doctor .` checks these dependencies. It may download Lean packages on the first run.
 
-See [proof scope](docs/proofs.md), [scaling and research](docs/scaling.md), [architecture](docs/architecture.md), [validation](docs/validation.md) and [Cloudflare wiring](o5s/cloudflare/README.md). Apache-2.0; no Pijul implementation code is incorporated.
+See [proof scope](docs/proofs.md), [scaling and research](docs/scaling.md), [architecture](docs/architecture.md), [validation](docs/validation.md) and [Cloudflare wiring](cloudflare/README.md). Apache-2.0; no Pijul implementation code is incorporated.
 
 ## Current boundary
 

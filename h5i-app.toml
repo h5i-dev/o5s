@@ -1,7 +1,7 @@
 # Read by `h5i app` (extract, check, prove, mutate, doctor).
 
 [extract]
-start-from = ["transition", "apply", "sql_writes", "patch::merge", "graph::reachable", "graph::boundary", "graph::summary_rows", "graph::weak_component", "interval::conflict", "interval::splice", "interval::append_range", "interval::render_chunks", "interval::checked_render", "indexed::reachable", "indexed::boundary"]
+start-from = ["transition", "apply", "sql_writes", "patch::merge", "graph::reachable", "graph::boundary", "graph::summary_rows", "graph::weak_component", "interval::conflict", "interval::splice", "interval::append_range", "interval::render_chunks", "interval::checked_render", "indexed::reachable", "indexed::boundary", "coordinates::line_boundaries"]
 schema = true
 include = ["h5i_app_sql", "h5i_app_std"]
 std-specs = true
@@ -36,6 +36,7 @@ theorems = [
   "o5s_kernel.Indexed.reachable_spec",
   "o5s_kernel.Indexed.clear_clean_spec",
   "o5s_kernel.Boundary.boundary_segment",
+  "o5s_kernel.Coordinates.line_boundaries_ordered",
 ]
 
 [[mutant]]
@@ -114,3 +115,15 @@ name = "indexed_live_filter"
 file = "kernel/src/indexed.rs"
 old = "if live[vertex] {"
 new = "if !live[vertex] {"
+
+[[mutant]]
+name = "line_lf_delimiter"
+file = "kernel/src/coordinates.rs"
+old = "byte == b'\\n'"
+new = "byte == b'\\r'"
+
+[[mutant]]
+name = "line_trailing_lf"
+file = "kernel/src/coordinates.rs"
+old = "state.position < length"
+new = "state.position <= length"

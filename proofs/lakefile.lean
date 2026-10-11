@@ -18,4 +18,4 @@ lean_lib Generated where
 
 -- Hand-written spec and proofs.
 @[default_target] lean_lib Proofs where
-  roots := #[`Spec, `Proofs, `Storage, `Patch, `Projection, `Constructor, `Interval, `Splice, `Rendering, `Checked, `Components, `Indexed, `Boundary]
+  roots := #[`Spec, `Proofs, `Storage, `Patch, `Projection, `Constructor, `Interval, `Splice, `Rendering, `Checked, `Components, `Indexed, `Boundary, `Coordinates]

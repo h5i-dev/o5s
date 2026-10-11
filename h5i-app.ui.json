@@ -74,7 +74,7 @@
       "symbol": "o5s_kernel.Proofs.compute_spec",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "theorem compute_spec",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -88,7 +88,7 @@
       "symbol": "o5s_kernel.Proofs.mul_check",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "theorem mul_check",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -102,7 +102,7 @@
       "symbol": "o5s_kernel.Proofs.memory_of_spec",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "theorem memory_of_spec",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -116,7 +116,7 @@
       "symbol": "o5s_kernel.Proofs.transition_total",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "theorem transition_total",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -130,7 +130,7 @@
       "symbol": "o5s_kernel.Proofs.apply_correct",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "theorem apply_correct",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -144,7 +144,7 @@
       "symbol": "o5s_kernel.Proofs.writes_own_memory",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "theorem writes_own_memory",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -158,7 +158,7 @@
       "symbol": "o5s_kernel.Proofs.apply_spec",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "theorem apply_spec",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -172,7 +172,7 @@
       "symbol": "o5s_kernel.Proofs.shape",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "theorem shape",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -186,7 +186,7 @@
       "symbol": "o5s_kernel.Proofs.get_spec",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "theorem get_spec",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -200,7 +200,7 @@
       "symbol": "o5s_kernel.Proofs.get_after",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "theorem get_after",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -214,7 +214,7 @@
       "symbol": "o5s_kernel.Proofs.others_unchanged",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "theorem others_unchanged",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -228,7 +228,7 @@
       "symbol": "o5s_kernel.Proofs.set_then_get",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "theorem set_then_get",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -242,7 +242,7 @@
       "symbol": "o5s_kernel.Storage.sql_writes_spec",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Storage.lean",
+          "path": "proofs/Storage.lean",
           "anchor": "theorem sql_writes_spec",
           "digest": "1363f21862f646be95c00f9ed8949d7cadc2d7f9e72032f6d732bc824a0364b0"
         }
@@ -256,7 +256,7 @@
       "symbol": "o5s_kernel.Storage.stored",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Storage.lean",
+          "path": "proofs/Storage.lean",
           "anchor": "theorem stored",
           "digest": "1363f21862f646be95c00f9ed8949d7cadc2d7f9e72032f6d732bc824a0364b0"
         }
@@ -270,12 +270,12 @@
       "symbol": "o5s_kernel.Storage.pg_stored",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Storage.lean",
+          "path": "proofs/Storage.lean",
           "anchor": "theorem pg_stored",
           "digest": "1363f21862f646be95c00f9ed8949d7cadc2d7f9e72032f6d732bc824a0364b0"
         },
         {
-          "path": "examples/app/o5s/h5i-app.toml",
+          "path": "h5i-app.toml",
           "anchor": "theorems = [\"o5s_kernel.Storage.pg_stored\"]",
           "digest": "55072d975e0a0e728fc884bd63da7ecbe7a8e874a9ae39b273212fc4feb9d41f"
         }
@@ -289,7 +289,7 @@
       "symbol": "o5s_kernel.Proofs.sub_refused",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "theorem sub_refused",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -303,7 +303,7 @@
       "symbol": "o5s_kernel.Spec.eval",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Spec.lean",
+          "path": "proofs/Spec.lean",
           "anchor": "def eval",
           "digest": "341d779a92c79f78da5975e65f256dbbecf88c118f0226b54e6c31aaf85e8089"
         }
@@ -317,7 +317,7 @@
       "symbol": "o5s_kernel.Spec.memOf",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Spec.lean",
+          "path": "proofs/Spec.lean",
           "anchor": "def memOf",
           "digest": "341d779a92c79f78da5975e65f256dbbecf88c118f0226b54e6c31aaf85e8089"
         }
@@ -331,7 +331,7 @@
       "symbol": "o5s_kernel.Storage.step",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Storage.lean",
+          "path": "proofs/Storage.lean",
           "anchor": "def step",
           "digest": "1363f21862f646be95c00f9ed8949d7cadc2d7f9e72032f6d732bc824a0364b0"
         }
@@ -345,7 +345,7 @@
       "symbol": "o5s_kernel.Storage.enc",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Storage.lean",
+          "path": "proofs/Storage.lean",
           "anchor": "def enc",
           "digest": "1363f21862f646be95c00f9ed8949d7cadc2d7f9e72032f6d732bc824a0364b0"
         }
@@ -359,12 +359,12 @@
       "symbol": "o5s_kernel.Storage.app",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Storage.lean",
+          "path": "proofs/Storage.lean",
           "anchor": "def app :",
           "digest": "1363f21862f646be95c00f9ed8949d7cadc2d7f9e72032f6d732bc824a0364b0"
         },
         {
-          "path": "examples/app/o5s/proofs/Storage.lean",
+          "path": "proofs/Storage.lean",
           "anchor": "def sqlA",
           "digest": "1363f21862f646be95c00f9ed8949d7cadc2d7f9e72032f6d732bc824a0364b0"
         }
@@ -378,7 +378,7 @@
       "symbol": "o5s_kernel.Storage.Loads",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Storage.lean",
+          "path": "proofs/Storage.lean",
           "anchor": "def Loads",
           "digest": "1363f21862f646be95c00f9ed8949d7cadc2d7f9e72032f6d732bc824a0364b0"
         }
@@ -392,7 +392,7 @@
       "symbol": "o5s_kernel.Storage.Served",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Storage.lean",
+          "path": "proofs/Storage.lean",
           "anchor": "inductive Served",
           "digest": "1363f21862f646be95c00f9ed8949d7cadc2d7f9e72032f6d732bc824a0364b0"
         }
@@ -406,7 +406,7 @@
       "symbol": "o5s_kernel.Storage.PgServed",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Storage.lean",
+          "path": "proofs/Storage.lean",
           "anchor": "inductive PgServed",
           "digest": "1363f21862f646be95c00f9ed8949d7cadc2d7f9e72032f6d732bc824a0364b0"
         }
@@ -419,7 +419,7 @@
       "description": "The memories vector is shorter than Usize.max, so appending a row cannot overflow its length. `apply_spec`, `get_after` and `others_unchanged` all take this hypothesis.",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "(w : Option Memory) (hroom : s.memories.length < Usize.max) :",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -432,7 +432,7 @@
       "description": "`get_after` and `others_unchanged` hypothesize that `transition` returned Ok and that `apply` turned its write into the next snapshot. A refused command is outside their statement.",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Proofs.lean",
+          "path": "proofs/Proofs.lean",
           "anchor": "(ht : transition a s c = ok (.Ok (w, .Value v))) (hs : apply s w = ok s') :",
           "digest": "63374360bf0820aaa3647d4f94012ef259914feb90f227126aa8f58f06e219f7"
         }
@@ -445,7 +445,7 @@
       "description": "`pg_stored` assumes the table list is valid, has one table with the kernel's key lengths, and that the tenant value is an integer. Whether the deployed database has that schema is not proved.",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Storage.lean",
+          "path": "proofs/Storage.lean",
           "anchor": "theorem pg_stored (hv : Pg.Valid ts) (htv : valKind tv = some .int) (hkl : Pg.klOf ts = kl)",
           "digest": "1363f21862f646be95c00f9ed8949d7cadc2d7f9e72032f6d732bc824a0364b0"
         }
@@ -458,12 +458,12 @@
       "description": "The server turns a bearer token signed with H5I_APP_SECRET into a Principal. Every theorem takes the principal as given; that it is the real person depends on the secret staying secret.",
       "sources": [
         {
-          "path": "examples/app/o5s/server/src/main.rs",
+          "path": "src/main.rs",
           "anchor": "let auth = HmacAuth::<Calc>::new(secret, principal);",
           "digest": "7dc89c72e9ba98f91259da216b4e2fc721b2278cdf6d05a0d99516615d8e4b81"
         },
         {
-          "path": "examples/app/o5s/server/src/lib.rs",
+          "path": "src/lib.rs",
           "anchor": "pub fn principal(",
           "digest": "469080a5829f1e1959d53c4b4f6c5906c887633d58edceacbed517cd9900f206"
         }
@@ -476,12 +476,12 @@
       "description": "`decode_command` must turn the request body into the command the client meant. Since the theorems hold for all commands, a wrong decoding can only produce a command the client could have sent.",
       "sources": [
         {
-          "path": "examples/app/o5s/server/src/lib.rs",
+          "path": "src/lib.rs",
           "anchor": "fn decode_command(",
           "digest": "469080a5829f1e1959d53c4b4f6c5906c887633d58edceacbed517cd9900f206"
         },
         {
-          "path": "examples/app/o5s/server/src/lib.rs",
+          "path": "src/lib.rs",
           "anchor": "enum CommandJson {",
           "digest": "469080a5829f1e1959d53c4b4f6c5906c887633d58edceacbed517cd9900f206"
         }
@@ -494,7 +494,7 @@
       "description": "The framework loads the snapshot of the caller's organization, chosen by `tenant`. The kernel theorems are about one snapshot; keeping tenants apart is enforced by the framework, not by these proofs.",
       "sources": [
         {
-          "path": "examples/app/o5s/server/src/lib.rs",
+          "path": "src/lib.rs",
           "anchor": "fn tenant(actor: &k::Principal) -> TenantId {",
           "digest": "469080a5829f1e1959d53c4b4f6c5906c887633d58edceacbed517cd9900f206"
         }
@@ -507,12 +507,12 @@
       "description": "Each request runs load, transition, write and commit in one SERIALIZABLE transaction with retries, so a refusal commits nothing. This engine behavior is part of the framework's trusted contract.",
       "sources": [
         {
-          "path": "examples/app/o5s/server/src/main.rs",
+          "path": "src/main.rs",
           "anchor": "let engine = Arc::new(Engine::<Calc, CalcStore>::new(",
           "digest": "7dc89c72e9ba98f91259da216b4e2fc721b2278cdf6d05a0d99516615d8e4b81"
         },
         {
-          "path": "examples/app/o5s/TUTORIAL.md",
+          "path": "TUTORIAL.md",
           "anchor": "The engine runs each request in one SERIALIZABLE transaction: it loads the",
           "digest": "ede4638bf97de93469ea481b3e6c4205ebf4705356adb2f28bc0a07bc8832234"
         }
@@ -525,12 +525,12 @@
       "description": "`pg_stored` runs the compiled SQL on a Lean model of PostgreSQL. That the real server, driver and value conversion behave like the model is trusted; the differential test exercises it.",
       "sources": [
         {
-          "path": "examples/app/o5s/proofs/Storage.lean",
+          "path": "proofs/Storage.lean",
           "anchor": "/-! ## On PostgreSQL",
           "digest": "1363f21862f646be95c00f9ed8949d7cadc2d7f9e72032f6d732bc824a0364b0"
         },
         {
-          "path": "examples/app/o5s/TUTORIAL.md",
+          "path": "TUTORIAL.md",
           "anchor": "order. The PostgreSQL statement and `SELECT` semantics remain the trusted",
           "digest": "ede4638bf97de93469ea481b3e6c4205ebf4705356adb2f28bc0a07bc8832234"
         }
@@ -543,12 +543,12 @@
       "description": "The theorems are about the Lean that Charon and Aeneas produced from the kernel. That this matches the compiled Rust, and that Lean and rustc are sound, is trusted.",
       "sources": [
         {
-          "path": "examples/app/o5s/h5i-app.toml",
+          "path": "h5i-app.toml",
           "anchor": "start-from = [\"transition\", \"apply\", \"sql_writes\"]",
           "digest": "55072d975e0a0e728fc884bd63da7ecbe7a8e874a9ae39b273212fc4feb9d41f"
         },
         {
-          "path": "examples/app/o5s/proofs/lakefile.lean",
+          "path": "proofs/lakefile.lean",
           "anchor": "-- Pinned to the Aeneas commit that generated generated/O5sKernel.lean.",
           "digest": "46d84d72c53f946f8b98a7bf7bf4bb5223c18b2f39ed18b5708fdf9e4ad092cd"
         }
@@ -561,7 +561,7 @@
       "description": "A retried request with the same key replays the stored reply instead of running again. This is a framework property, not one of these theorems.",
       "sources": [
         {
-          "path": "examples/app/o5s/server/src/lib.rs",
+          "path": "src/lib.rs",
           "anchor": "impl ReplyCodec<Calc> for CalcStore {",
           "digest": "469080a5829f1e1959d53c4b4f6c5906c887633d58edceacbed517cd9900f206"
         }
@@ -574,12 +574,12 @@
       "description": "The database URL, the signing secret, the listen address and the schema installation come from the environment at startup. Nothing in the proofs covers them.",
       "sources": [
         {
-          "path": "examples/app/o5s/server/src/main.rs",
+          "path": "src/main.rs",
           "anchor": "let url = std::env::var(\"DATABASE_URL\")?;",
           "digest": "7dc89c72e9ba98f91259da216b4e2fc721b2278cdf6d05a0d99516615d8e4b81"
         },
         {
-          "path": "examples/app/o5s/server/src/main.rs",
+          "path": "src/main.rs",
           "anchor": "engine.install_schema().await?;",
           "digest": "7dc89c72e9ba98f91259da216b4e2fc721b2278cdf6d05a0d99516615d8e4b81"
         }
@@ -592,7 +592,7 @@
       "description": "The axum router merges the framework's ready-made /rpc route with a /healthz probe.",
       "sources": [
         {
-          "path": "examples/app/o5s/server/src/main.rs",
+          "path": "src/main.rs",
           "anchor": "let router = Router::new().route(\"/healthz\", get(|| async { \"ok\" })).merge(rpc_router(app));",
           "digest": "7dc89c72e9ba98f91259da216b4e2fc721b2278cdf6d05a0d99516615d8e4b81"
         }
@@ -605,17 +605,17 @@
       "description": "Decodes the request into a Command, encodes a Reply as {\"value\": v}, and maps each refusal to a 422 error code.",
       "sources": [
         {
-          "path": "examples/app/o5s/server/src/lib.rs",
+          "path": "src/lib.rs",
           "anchor": "impl h5i_app_http::Api<Calc> for CalcStore {",
           "digest": "469080a5829f1e1959d53c4b4f6c5906c887633d58edceacbed517cd9900f206"
         },
         {
-          "path": "examples/app/o5s/server/src/lib.rs",
+          "path": "src/lib.rs",
           "anchor": "fn encode_reply(",
           "digest": "469080a5829f1e1959d53c4b4f6c5906c887633d58edceacbed517cd9900f206"
         },
         {
-          "path": "examples/app/o5s/server/src/lib.rs",
+          "path": "src/lib.rs",
           "anchor": "fn encode_error(",
           "digest": "469080a5829f1e1959d53c4b4f6c5906c887633d58edceacbed517cd9900f206"
         }
@@ -628,7 +628,7 @@
       "description": "Points the framework at the kernel's `transition` and `apply` without adding any decision.",
       "sources": [
         {
-          "path": "examples/app/o5s/server/src/lib.rs",
+          "path": "src/lib.rs",
           "anchor": "impl Kernel for Calc {",
           "digest": "469080a5829f1e1959d53c4b4f6c5906c887633d58edceacbed517cd9900f206"
         }
@@ -641,7 +641,7 @@
       "description": "The whole application logic: Set writes the value, Apply reads the caller's memory and runs `compute`, Get reads without writing.",
       "sources": [
         {
-          "path": "examples/app/o5s/kernel/src/lib.rs",
+          "path": "kernel/src/lib.rs",
           "anchor": "pub fn transition(",
           "digest": "7fd72927b26e53c77ce3cabbe240235749fc0721feb9057a19465c15f27b0a48"
         }
@@ -654,12 +654,12 @@
       "description": "The checked u64 arithmetic with explicit overflow, underflow and division by zero tests. `h5i-app.toml` declares the underflow_boundary mutant against the Sub test.",
       "sources": [
         {
-          "path": "examples/app/o5s/kernel/src/lib.rs",
+          "path": "kernel/src/lib.rs",
           "anchor": "pub fn compute(",
           "digest": "7fd72927b26e53c77ce3cabbe240235749fc0721feb9057a19465c15f27b0a48"
         },
         {
-          "path": "examples/app/o5s/h5i-app.toml",
+          "path": "h5i-app.toml",
           "anchor": "name = \"underflow_boundary\"",
           "digest": "55072d975e0a0e728fc884bd63da7ecbe7a8e874a9ae39b273212fc4feb9d41f"
         }
@@ -672,7 +672,7 @@
       "description": "A while loop over the memories that returns the first value for the user, or 0.",
       "sources": [
         {
-          "path": "examples/app/o5s/kernel/src/lib.rs",
+          "path": "kernel/src/lib.rs",
           "anchor": "pub fn memory_of(",
           "digest": "7fd72927b26e53c77ce3cabbe240235749fc0721feb9057a19465c15f27b0a48"
         }
@@ -685,7 +685,7 @@
       "description": "Clones the snapshot and puts the written row with the generated `Memory::put`, which replaces the user's row or appends it.",
       "sources": [
         {
-          "path": "examples/app/o5s/kernel/src/lib.rs",
+          "path": "kernel/src/lib.rs",
           "anchor": "pub fn apply(",
           "digest": "7fd72927b26e53c77ce3cabbe240235749fc0721feb9057a19465c15f27b0a48"
         }
@@ -698,7 +698,7 @@
       "description": "Turns a write set into the table writes the server executes: one put for a memory, nothing otherwise.",
       "sources": [
         {
-          "path": "examples/app/o5s/kernel/src/lib.rs",
+          "path": "kernel/src/lib.rs",
           "anchor": "pub fn sql_writes(",
           "digest": "7fd72927b26e53c77ce3cabbe240235749fc0721feb9057a19465c15f27b0a48"
         }
@@ -711,7 +711,7 @@
       "description": "`schema!` declares the Memory row keyed by user and generates the row operations, SQL writes, decoder and the server's table mapping.",
       "sources": [
         {
-          "path": "examples/app/o5s/kernel/src/lib.rs",
+          "path": "kernel/src/lib.rs",
           "anchor": "pub struct Memory in \"memories\" {",
           "digest": "7fd72927b26e53c77ce3cabbe240235749fc0721feb9057a19465c15f27b0a48"
         }
@@ -724,17 +724,17 @@
       "description": "Loads a tenant's rows with the generated schema loader and writes the rows that `sql_writes` returns.",
       "sources": [
         {
-          "path": "examples/app/o5s/server/src/lib.rs",
+          "path": "src/lib.rs",
           "anchor": "impl Store<Calc> for CalcStore {",
           "digest": "469080a5829f1e1959d53c4b4f6c5906c887633d58edceacbed517cd9900f206"
         },
         {
-          "path": "examples/app/o5s/server/src/lib.rs",
+          "path": "src/lib.rs",
           "anchor": "async fn load(",
           "digest": "469080a5829f1e1959d53c4b4f6c5906c887633d58edceacbed517cd9900f206"
         },
         {
-          "path": "examples/app/o5s/server/src/lib.rs",
+          "path": "src/lib.rs",
           "anchor": "async fn write(",
           "digest": "469080a5829f1e1959d53c4b4f6c5906c887633d58edceacbed517cd9900f206"
         }
@@ -747,7 +747,7 @@
       "description": "Runs 300 random commands through the PostgreSQL engine and the in-memory engine that calls `apply`, and compares replies and final state. It is a test, not a proof, and skips without a test database.",
       "sources": [
         {
-          "path": "examples/app/o5s/server/tests/postgres.rs",
+          "path": "server/tests/postgres.rs",
           "anchor": "async fn store_agrees_with_apply() {",
           "digest": "2e4ceab2e012f1606cdc8771f9215f48d006cb31ebe86a1151ce3fb478c1e699"
         }

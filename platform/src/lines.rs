@@ -66,21 +66,17 @@ fn overlaps(a: &LineEdit, b: &LineEdit) -> bool {
     o5s_kernel::interval::conflict(a.start, a.end, b.start, b.end)
 }
 fn render(original: &str, changes: &[LineEdit]) -> Result<String, Refusal> {
-    let lines: Vec<_> = original.split_inclusive('\n').collect();
-    let mut boundaries = vec![0usize];
-    for line in &lines {
-        boundaries.push(boundaries.last().unwrap() + line.len());
-    }
+    let original = original.as_bytes().to_vec();
+    let boundaries = o5s_kernel::coordinates::line_boundaries(&original);
     let mut cursor = 0;
     for e in changes {
         let start = usize::try_from(e.start).map_err(|_| refuse("invalid line range"))?;
         let end = usize::try_from(e.end).map_err(|_| refuse("invalid line range"))?;
-        if start < cursor || end < start || end > lines.len() {
+        if start < cursor || end < start || end >= boundaries.len() {
             return Err(refuse("invalid or overlapping line range"));
         }
         cursor = end;
     }
-    let original = original.as_bytes().to_vec();
     let chunks: Vec<_> = changes
         .iter()
         .map(|e| {

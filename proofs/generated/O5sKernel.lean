@@ -646,7 +646,7 @@ def Memory.put
   Memory.put_loop v x 0#usize
 
 /-- [o5s_kernel::{impl core::clone::Clone for o5s_kernel::Memory}::clone]:
-    Source: 'o5s/kernel/src/lib.rs', lines 27:13-27:18
+    Source: 'kernel/src/lib.rs', lines 29:13-29:18
     Visibility: public -/
 def Memory.Insts.CoreCloneClone.clone (self : Memory) : Result Memory := do
   ok self
@@ -787,8 +787,79 @@ def decode (r : Rows) : Result (Option Snapshot) := do
   | none => ok none
   | some x => ok (some { memories := x })
 
+/-- [o5s_kernel::coordinates::Scan]
+    Source: 'kernel/src/coordinates.rs', lines 5:0-8:1
+    Visibility: public -/
+structure coordinates.Scan where
+  offsets : alloc.vec.Vec Std.Usize
+  position : Std.Usize
+
+/-- [o5s_kernel::coordinates::step]:
+    Source: 'kernel/src/coordinates.rs', lines 10:0-16:1
+    Visibility: public -/
+def coordinates.step
+  (state : coordinates.Scan) (byte : Std.U8) (length : Std.Usize) :
+  Result coordinates.Scan
+  := do
+  let i ← state.position + 1#usize
+  if byte = 10#u8
+  then
+    if i < length
+    then
+      let v ← alloc.vec.Vec.push state.offsets i
+      ok { offsets := v, position := i }
+    else ok { state with position := i }
+  else ok { state with position := i }
+
+/-- [o5s_kernel::coordinates::line_boundaries]: loop body 0:
+    Source: 'kernel/src/coordinates.rs', lines 26:4-29:5
+    Visibility: public -/
+@[rust_loop_body]
+def coordinates.line_boundaries_loop.body
+  (bytes : alloc.vec.Vec Std.U8) (state : coordinates.Scan) (i : Std.Usize) :
+  Result (ControlFlow (coordinates.Scan × Std.Usize) coordinates.Scan)
+  := do
+  let i1 := alloc.vec.Vec.len bytes
+  if i < i1
+  then
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) bytes
+        i
+    let i3 := alloc.vec.Vec.len bytes
+    let state1 ← coordinates.step state i2 i3
+    let i4 ← i + 1#usize
+    ok (cont (state1, i4))
+  else ok (done state)
+
+/-- [o5s_kernel::coordinates::line_boundaries]: loop 0:
+    Source: 'kernel/src/coordinates.rs', lines 26:4-29:5
+    Visibility: public -/
+@[rust_loop]
+def coordinates.line_boundaries_loop
+  (bytes : alloc.vec.Vec Std.U8) (state : coordinates.Scan) (i : Std.Usize) :
+  Result coordinates.Scan
+  := do
+  loop
+    (fun (state1, i1) => coordinates.line_boundaries_loop.body bytes state1 i1)
+    (state, i)
+
+/-- [o5s_kernel::coordinates::line_boundaries]:
+    Source: 'kernel/src/coordinates.rs', lines 18:0-34:1
+    Visibility: public -/
+def coordinates.line_boundaries
+  (bytes : alloc.vec.Vec Std.U8) : Result (alloc.vec.Vec Std.Usize) := do
+  let offsets ← alloc.vec.Vec.push (alloc.vec.Vec.new Std.Usize) 0#usize
+  let state ←
+    coordinates.line_boundaries_loop bytes { offsets, position := 0#usize }
+      0#usize
+  let i := alloc.vec.Vec.len bytes
+  if i > 0#usize
+  then let i1 := alloc.vec.Vec.len bytes
+       alloc.vec.Vec.push state.offsets i1
+  else ok state.offsets
+
 /-- [o5s_kernel::graph::reachable]:
-    Source: 'o5s/kernel/src/graph.rs', lines 3:0-5:1
+    Source: 'kernel/src/graph.rs', lines 3:0-5:1
     Visibility: public -/
 def graph.reachable
   (edges : alloc.vec.Vec (Std.U64 × Std.U64)) (start : alloc.vec.Vec Std.U64)
@@ -799,7 +870,7 @@ def graph.reachable
     start
 
 /-- [o5s_kernel::graph::dead_edges]: loop body 0:
-    Source: 'o5s/kernel/src/graph.rs', lines 12:4-17:5
+    Source: 'kernel/src/graph.rs', lines 12:4-17:5
     Visibility: public -/
 @[rust_loop_body]
 def graph.dead_edges_loop.body
@@ -825,7 +896,7 @@ def graph.dead_edges_loop.body
   else ok (done out)
 
 /-- [o5s_kernel::graph::dead_edges]: loop 0:
-    Source: 'o5s/kernel/src/graph.rs', lines 12:4-17:5
+    Source: 'kernel/src/graph.rs', lines 12:4-17:5
     Visibility: public -/
 @[rust_loop]
 def graph.dead_edges_loop
@@ -838,7 +909,7 @@ def graph.dead_edges_loop
     (out, i)
 
 /-- [o5s_kernel::graph::dead_edges]:
-    Source: 'o5s/kernel/src/graph.rs', lines 9:0-19:1
+    Source: 'kernel/src/graph.rs', lines 9:0-19:1
     Visibility: public -/
 @[reducible]
 def graph.dead_edges
@@ -849,7 +920,7 @@ def graph.dead_edges
     0#usize
 
 /-- [o5s_kernel::graph::successors]: loop body 0:
-    Source: 'o5s/kernel/src/graph.rs', lines 24:4-29:5
+    Source: 'kernel/src/graph.rs', lines 24:4-29:5
     Visibility: public -/
 @[rust_loop_body]
 def graph.successors_loop.body
@@ -872,7 +943,7 @@ def graph.successors_loop.body
   else ok (done out)
 
 /-- [o5s_kernel::graph::successors]: loop 0:
-    Source: 'o5s/kernel/src/graph.rs', lines 24:4-29:5
+    Source: 'kernel/src/graph.rs', lines 24:4-29:5
     Visibility: public -/
 @[rust_loop]
 def graph.successors_loop
@@ -885,7 +956,7 @@ def graph.successors_loop
     (out, i)
 
 /-- [o5s_kernel::graph::successors]:
-    Source: 'o5s/kernel/src/graph.rs', lines 21:0-31:1
+    Source: 'kernel/src/graph.rs', lines 21:0-31:1
     Visibility: public -/
 @[reducible]
 def graph.successors
@@ -895,7 +966,7 @@ def graph.successors
   graph.successors_loop edges source (alloc.vec.Vec.new Std.U64) 0#usize
 
 /-- [o5s_kernel::graph::keep_live]: loop body 0:
-    Source: 'o5s/kernel/src/graph.rs', lines 36:4-41:5
+    Source: 'kernel/src/graph.rs', lines 36:4-41:5
     Visibility: public -/
 @[rust_loop_body]
 def graph.keep_live_loop.body
@@ -919,7 +990,7 @@ def graph.keep_live_loop.body
   else ok (done out)
 
 /-- [o5s_kernel::graph::keep_live]: loop 0:
-    Source: 'o5s/kernel/src/graph.rs', lines 36:4-41:5
+    Source: 'kernel/src/graph.rs', lines 36:4-41:5
     Visibility: public -/
 @[rust_loop]
 def graph.keep_live_loop
@@ -932,7 +1003,7 @@ def graph.keep_live_loop
     (out, i)
 
 /-- [o5s_kernel::graph::keep_live]:
-    Source: 'o5s/kernel/src/graph.rs', lines 33:0-43:1
+    Source: 'kernel/src/graph.rs', lines 33:0-43:1
     Visibility: public -/
 @[reducible]
 def graph.keep_live
@@ -942,7 +1013,7 @@ def graph.keep_live
   graph.keep_live_loop nodes live (alloc.vec.Vec.new Std.U64) 0#usize
 
 /-- [o5s_kernel::graph::boundary]:
-    Source: 'o5s/kernel/src/graph.rs', lines 47:0-52:1
+    Source: 'kernel/src/graph.rs', lines 47:0-52:1
     Visibility: public -/
 def graph.boundary
   (edges : alloc.vec.Vec (Std.U64 × Std.U64)) (live : alloc.vec.Vec Std.U64)
@@ -955,7 +1026,7 @@ def graph.boundary
   graph.keep_live reached live
 
 /-- [o5s_kernel::graph::summary_rows]: loop body 0:
-    Source: 'o5s/kernel/src/graph.rs', lines 59:4-62:5
+    Source: 'kernel/src/graph.rs', lines 59:4-62:5
     Visibility: public -/
 @[rust_loop_body]
 def graph.summary_rows_loop.body
@@ -977,7 +1048,7 @@ def graph.summary_rows_loop.body
   else ok (done rows)
 
 /-- [o5s_kernel::graph::summary_rows]: loop 0:
-    Source: 'o5s/kernel/src/graph.rs', lines 59:4-62:5
+    Source: 'kernel/src/graph.rs', lines 59:4-62:5
     Visibility: public -/
 @[rust_loop]
 def graph.summary_rows_loop
@@ -990,7 +1061,7 @@ def graph.summary_rows_loop
     (rows, i)
 
 /-- [o5s_kernel::graph::summary_rows]:
-    Source: 'o5s/kernel/src/graph.rs', lines 56:0-64:1
+    Source: 'kernel/src/graph.rs', lines 56:0-64:1
     Visibility: public -/
 @[reducible]
 def graph.summary_rows
@@ -1001,7 +1072,7 @@ def graph.summary_rows
     Std.U64)) 0#usize
 
 /-- [o5s_kernel::graph::weak_edges]: loop body 0:
-    Source: 'o5s/kernel/src/graph.rs', lines 71:4-74:5
+    Source: 'kernel/src/graph.rs', lines 71:4-74:5
     Visibility: public -/
 @[rust_loop_body]
 def graph.weak_edges_loop.body
@@ -1022,7 +1093,7 @@ def graph.weak_edges_loop.body
   else ok (done out)
 
 /-- [o5s_kernel::graph::weak_edges]: loop 0:
-    Source: 'o5s/kernel/src/graph.rs', lines 71:4-74:5
+    Source: 'kernel/src/graph.rs', lines 71:4-74:5
     Visibility: public -/
 @[rust_loop]
 def graph.weak_edges_loop
@@ -1035,7 +1106,7 @@ def graph.weak_edges_loop
     (out, i)
 
 /-- [o5s_kernel::graph::weak_edges]:
-    Source: 'o5s/kernel/src/graph.rs', lines 68:0-76:1
+    Source: 'kernel/src/graph.rs', lines 68:0-76:1
     Visibility: public -/
 def graph.weak_edges
   (edges : alloc.vec.Vec (Std.U64 × Std.U64)) :
@@ -1046,7 +1117,7 @@ def graph.weak_edges
   graph.weak_edges_loop edges out 0#usize
 
 /-- [o5s_kernel::graph::weak_component]:
-    Source: 'o5s/kernel/src/graph.rs', lines 78:0-80:1
+    Source: 'kernel/src/graph.rs', lines 78:0-80:1
     Visibility: public -/
 def graph.weak_component
   (edges : alloc.vec.Vec (Std.U64 × Std.U64)) (seeds : alloc.vec.Vec Std.U64)
@@ -1057,14 +1128,14 @@ def graph.weak_component
   graph.reachable v seeds
 
 /-- [o5s_kernel::indexed::Traversal]
-    Source: 'o5s/kernel/src/indexed.rs', lines 4:0-7:1
+    Source: 'kernel/src/indexed.rs', lines 4:0-7:1
     Visibility: public -/
 structure indexed.Traversal where
   marks : alloc.vec.Vec Bool
   queue : alloc.vec.Vec Std.Usize
 
 /-- [o5s_kernel::indexed::enqueue]: loop body 0:
-    Source: 'o5s/kernel/src/indexed.rs', lines 11:4-18:5
+    Source: 'kernel/src/indexed.rs', lines 11:4-18:5
     Visibility: public -/
 @[rust_loop_body]
 def indexed.enqueue_loop.body
@@ -1097,7 +1168,7 @@ def indexed.enqueue_loop.body
   else ok (done state)
 
 /-- [o5s_kernel::indexed::enqueue]: loop 0:
-    Source: 'o5s/kernel/src/indexed.rs', lines 11:4-18:5
+    Source: 'kernel/src/indexed.rs', lines 11:4-18:5
     Visibility: public -/
 @[rust_loop]
 def indexed.enqueue_loop
@@ -1110,7 +1181,7 @@ def indexed.enqueue_loop
     (state, i)
 
 /-- [o5s_kernel::indexed::enqueue]:
-    Source: 'o5s/kernel/src/indexed.rs', lines 9:0-20:1
+    Source: 'kernel/src/indexed.rs', lines 9:0-20:1
     Visibility: public -/
 @[reducible]
 def indexed.enqueue
@@ -1120,7 +1191,7 @@ def indexed.enqueue
   indexed.enqueue_loop state neighbors 0#usize
 
 /-- [o5s_kernel::indexed::clear]: loop body 0:
-    Source: 'o5s/kernel/src/indexed.rs', lines 24:4-27:5
+    Source: 'kernel/src/indexed.rs', lines 24:4-27:5
     Visibility: public -/
 @[rust_loop_body]
 def indexed.clear_loop.body
@@ -1143,7 +1214,7 @@ def indexed.clear_loop.body
   else ok (done (state.marks, state.queue))
 
 /-- [o5s_kernel::indexed::clear]: loop 0:
-    Source: 'o5s/kernel/src/indexed.rs', lines 24:4-27:5
+    Source: 'kernel/src/indexed.rs', lines 24:4-27:5
     Visibility: public -/
 @[rust_loop]
 def indexed.clear_loop
@@ -1155,14 +1226,14 @@ def indexed.clear_loop
     (state, i)
 
 /-- [o5s_kernel::indexed::clear]:
-    Source: 'o5s/kernel/src/indexed.rs', lines 22:0-29:1
+    Source: 'kernel/src/indexed.rs', lines 22:0-29:1
     Visibility: public -/
 def indexed.clear (state : indexed.Traversal) : Result indexed.Traversal := do
   let (v, v1) ← indexed.clear_loop state 0#usize
   ok { marks := v, queue := v1 }
 
 /-- [o5s_kernel::indexed::reachable]: loop body 0:
-    Source: 'o5s/kernel/src/indexed.rs', lines 40:4-44:5
+    Source: 'kernel/src/indexed.rs', lines 40:4-44:5
     Visibility: public -/
 @[rust_loop_body]
 def indexed.reachable_loop.body
@@ -1186,7 +1257,7 @@ def indexed.reachable_loop.body
   else ok (done (state.marks, state.queue))
 
 /-- [o5s_kernel::indexed::reachable]: loop 0:
-    Source: 'o5s/kernel/src/indexed.rs', lines 40:4-44:5
+    Source: 'kernel/src/indexed.rs', lines 40:4-44:5
     Visibility: public -/
 @[rust_loop]
 def indexed.reachable_loop
@@ -1199,7 +1270,7 @@ def indexed.reachable_loop
     (state, i)
 
 /-- [o5s_kernel::indexed::reachable]:
-    Source: 'o5s/kernel/src/indexed.rs', lines 31:0-46:1
+    Source: 'kernel/src/indexed.rs', lines 31:0-46:1
     Visibility: public -/
 def indexed.reachable
   (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
@@ -1212,7 +1283,7 @@ def indexed.reachable
   indexed.clear { marks := v, queue := v1 }
 
 /-- [o5s_kernel::indexed::keep_live]: loop body 0:
-    Source: 'o5s/kernel/src/indexed.rs', lines 52:4-58:5
+    Source: 'kernel/src/indexed.rs', lines 52:4-58:5
     Visibility: public -/
 @[rust_loop_body]
 def indexed.keep_live_loop.body
@@ -1238,7 +1309,7 @@ def indexed.keep_live_loop.body
   else ok (done out)
 
 /-- [o5s_kernel::indexed::keep_live]: loop 0:
-    Source: 'o5s/kernel/src/indexed.rs', lines 52:4-58:5
+    Source: 'kernel/src/indexed.rs', lines 52:4-58:5
     Visibility: public -/
 @[rust_loop]
 def indexed.keep_live_loop
@@ -1251,7 +1322,7 @@ def indexed.keep_live_loop
     (out, i)
 
 /-- [o5s_kernel::indexed::keep_live]:
-    Source: 'o5s/kernel/src/indexed.rs', lines 49:0-60:1
+    Source: 'kernel/src/indexed.rs', lines 49:0-60:1
     Visibility: public -/
 @[reducible]
 def indexed.keep_live
@@ -1261,7 +1332,7 @@ def indexed.keep_live
   indexed.keep_live_loop nodes live (alloc.vec.Vec.new Std.Usize) 0#usize
 
 /-- [o5s_kernel::indexed::boundary]:
-    Source: 'o5s/kernel/src/indexed.rs', lines 64:0-73:1
+    Source: 'kernel/src/indexed.rs', lines 64:0-73:1
     Visibility: public -/
 def indexed.boundary
   (dead_rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
@@ -1274,7 +1345,7 @@ def indexed.boundary
   ok { state with queue := v }
 
 /-- [o5s_kernel::interval::conflict]:
-    Source: 'o5s/kernel/src/interval.rs', lines 4:0-12:1
+    Source: 'kernel/src/interval.rs', lines 4:0-12:1
     Visibility: public -/
 def interval.conflict
   (a_start : Std.U64) (a_end : Std.U64) (b_start : Std.U64) (b_end : Std.U64) :
@@ -1294,7 +1365,7 @@ def interval.conflict
          else ok false
 
 /-- [o5s_kernel::interval::splice]:
-    Source: 'o5s/kernel/src/interval.rs', lines 16:0-21:1
+    Source: 'kernel/src/interval.rs', lines 16:0-21:1
     Visibility: public -/
 def interval.splice
   (bytes : alloc.vec.Vec Std.U8) (start : Std.Usize) («end» : Std.Usize)
@@ -1308,7 +1379,7 @@ def interval.splice
   h5i_app_std.bytes.concat «prefix» after
 
 /-- [o5s_kernel::interval::append_range]: loop body 0:
-    Source: 'o5s/kernel/src/interval.rs', lines 27:4-30:5
+    Source: 'kernel/src/interval.rs', lines 27:4-30:5
     Visibility: public -/
 @[rust_loop_body]
 def interval.append_range_loop.body
@@ -1328,7 +1399,7 @@ def interval.append_range_loop.body
   else ok (done out)
 
 /-- [o5s_kernel::interval::append_range]: loop 0:
-    Source: 'o5s/kernel/src/interval.rs', lines 27:4-30:5
+    Source: 'kernel/src/interval.rs', lines 27:4-30:5
     Visibility: public -/
 @[rust_loop]
 def interval.append_range_loop
@@ -1341,7 +1412,7 @@ def interval.append_range_loop
     (out, i)
 
 /-- [o5s_kernel::interval::append_range]:
-    Source: 'o5s/kernel/src/interval.rs', lines 25:0-32:1
+    Source: 'kernel/src/interval.rs', lines 25:0-32:1
     Visibility: public -/
 @[reducible]
 def interval.append_range
@@ -1352,7 +1423,7 @@ def interval.append_range
   interval.append_range_loop out bytes «end» start
 
 /-- [o5s_kernel::interval::render_chunks]: loop body 0:
-    Source: 'o5s/kernel/src/interval.rs', lines 40:4-46:5
+    Source: 'kernel/src/interval.rs', lines 40:4-46:5
     Visibility: public -/
 @[rust_loop_body]
 def interval.render_chunks_loop.body
@@ -1376,7 +1447,7 @@ def interval.render_chunks_loop.body
   else ok (done (out, cursor))
 
 /-- [o5s_kernel::interval::render_chunks]: loop 0:
-    Source: 'o5s/kernel/src/interval.rs', lines 40:4-46:5
+    Source: 'kernel/src/interval.rs', lines 40:4-46:5
     Visibility: public -/
 @[rust_loop]
 def interval.render_chunks_loop
@@ -1391,7 +1462,7 @@ def interval.render_chunks_loop
     (out, cursor, i)
 
 /-- [o5s_kernel::interval::render_chunks]:
-    Source: 'o5s/kernel/src/interval.rs', lines 36:0-48:1
+    Source: 'kernel/src/interval.rs', lines 36:0-48:1
     Visibility: public -/
 def interval.render_chunks
   (bytes : alloc.vec.Vec Std.U8)
@@ -1405,14 +1476,14 @@ def interval.render_chunks
   interval.append_range out bytes cursor i
 
 /-- [o5s_kernel::interval::Validation]
-    Source: 'o5s/kernel/src/interval.rs', lines 50:0-54:1 -/
+    Source: 'kernel/src/interval.rs', lines 50:0-54:1 -/
 structure interval.Validation where
   valid : Bool
   cursor : Std.Usize
   capacity : Std.Usize
 
 /-- [o5s_kernel::interval::validation_step]:
-    Source: 'o5s/kernel/src/interval.rs', lines 55:0-76:1 -/
+    Source: 'kernel/src/interval.rs', lines 55:0-76:1 -/
 def interval.validation_step
   (state : interval.Validation) (bytes_len : Std.Usize) (start : Std.Usize)
   («end» : Std.Usize) (replacement_len : Std.Usize) :
@@ -1435,7 +1506,7 @@ def interval.validation_step
   else ok { state with valid := false, cursor := «end» }
 
 /-- [o5s_kernel::interval::valid_chunks]: loop body 0:
-    Source: 'o5s/kernel/src/interval.rs', lines 87:4-91:5
+    Source: 'kernel/src/interval.rs', lines 87:4-91:5
     Visibility: public -/
 @[rust_loop_body]
 def interval.valid_chunks_loop.body
@@ -1457,7 +1528,7 @@ def interval.valid_chunks_loop.body
   else ok (done state)
 
 /-- [o5s_kernel::interval::valid_chunks]: loop 0:
-    Source: 'o5s/kernel/src/interval.rs', lines 87:4-91:5
+    Source: 'kernel/src/interval.rs', lines 87:4-91:5
     Visibility: public -/
 @[rust_loop]
 def interval.valid_chunks_loop
@@ -1472,7 +1543,7 @@ def interval.valid_chunks_loop
     (state, i)
 
 /-- [o5s_kernel::interval::valid_chunks]:
-    Source: 'o5s/kernel/src/interval.rs', lines 80:0-93:1
+    Source: 'kernel/src/interval.rs', lines 80:0-93:1
     Visibility: public -/
 def interval.valid_chunks
   (bytes_len : Std.Usize)
@@ -1485,7 +1556,7 @@ def interval.valid_chunks
   ok state.valid
 
 /-- [o5s_kernel::interval::checked_render]:
-    Source: 'o5s/kernel/src/interval.rs', lines 95:0-101:1
+    Source: 'kernel/src/interval.rs', lines 95:0-101:1
     Visibility: public -/
 def interval.checked_render
   (bytes : alloc.vec.Vec Std.U8)
@@ -1500,21 +1571,21 @@ def interval.checked_render
   else ok none
 
 /-- [o5s_kernel::Principal]
-    Source: 'o5s/kernel/src/lib.rs', lines 11:0-14:1
+    Source: 'kernel/src/lib.rs', lines 13:0-16:1
     Visibility: public -/
 structure Principal where
   org : Std.U64
   user : Std.U64
 
 /-- Trait implementation: [o5s_kernel::{impl core::clone::Clone for o5s_kernel::Memory}]
-    Source: 'o5s/kernel/src/lib.rs', lines 27:13-27:18 -/
+    Source: 'kernel/src/lib.rs', lines 29:13-29:18 -/
 @[reducible]
 def Memory.Insts.CoreCloneClone : core.clone.Clone Memory := {
   clone := Memory.Insts.CoreCloneClone.clone
 }
 
 /-- [o5s_kernel::{impl core::clone::Clone for o5s_kernel::Snapshot}::clone]:
-    Source: 'o5s/kernel/src/lib.rs', lines 22:13-22:18
+    Source: 'kernel/src/lib.rs', lines 24:13-24:18
     Visibility: public -/
 def Snapshot.Insts.CoreCloneClone.clone
   (self : Snapshot) : Result Snapshot := do
@@ -1522,7 +1593,7 @@ def Snapshot.Insts.CoreCloneClone.clone
   ok { memories := v }
 
 /-- [o5s_kernel::Op]
-    Source: 'o5s/kernel/src/lib.rs', lines 35:0-40:1
+    Source: 'kernel/src/lib.rs', lines 37:0-42:1
     Visibility: public -/
 @[discriminant isize]
 inductive Op where
@@ -1532,7 +1603,7 @@ inductive Op where
 | Div : Op
 
 /-- [o5s_kernel::Command]
-    Source: 'o5s/kernel/src/lib.rs', lines 43:0-50:1
+    Source: 'kernel/src/lib.rs', lines 45:0-52:1
     Visibility: public -/
 @[discriminant isize]
 inductive Command where
@@ -1541,14 +1612,14 @@ inductive Command where
 | Get : Command
 
 /-- [o5s_kernel::Reply]
-    Source: 'o5s/kernel/src/lib.rs', lines 53:0-55:1
+    Source: 'kernel/src/lib.rs', lines 55:0-57:1
     Visibility: public -/
 @[discriminant isize]
 inductive Reply where
 | Value : Std.U64 → Reply
 
 /-- [o5s_kernel::Error]
-    Source: 'o5s/kernel/src/lib.rs', lines 58:0-62:1
+    Source: 'kernel/src/lib.rs', lines 60:0-64:1
     Visibility: public -/
 @[discriminant isize]
 inductive Error where
@@ -1557,7 +1628,7 @@ inductive Error where
 | DivByZero : Error
 
 /-- [o5s_kernel::memory_of]: loop body 0:
-    Source: 'o5s/kernel/src/lib.rs', lines 67:4-74:1
+    Source: 'kernel/src/lib.rs', lines 69:4-76:1
     Visibility: public -/
 @[rust_loop_body]
 def memory_of_loop.body
@@ -1576,7 +1647,7 @@ def memory_of_loop.body
   else ok (done 0#u64)
 
 /-- [o5s_kernel::memory_of]: loop 0:
-    Source: 'o5s/kernel/src/lib.rs', lines 67:4-74:1
+    Source: 'kernel/src/lib.rs', lines 69:4-76:1
     Visibility: public -/
 @[rust_loop]
 def memory_of_loop
@@ -1588,7 +1659,7 @@ def memory_of_loop
     i
 
 /-- [o5s_kernel::memory_of]:
-    Source: 'o5s/kernel/src/lib.rs', lines 65:0-74:1
+    Source: 'kernel/src/lib.rs', lines 67:0-76:1
     Visibility: public -/
 @[reducible]
 def memory_of
@@ -1596,7 +1667,7 @@ def memory_of
   memory_of_loop ms user 0#usize
 
 /-- [o5s_kernel::compute]:
-    Source: 'o5s/kernel/src/lib.rs', lines 77:0-108:1
+    Source: 'kernel/src/lib.rs', lines 79:0-110:1
     Visibility: public -/
 def compute
   (op : Op) (a : Std.U64) (b : Std.U64) :
@@ -1631,7 +1702,7 @@ def compute
          ok (core.result.Result.Ok i)
 
 /-- [o5s_kernel::transition]:
-    Source: 'o5s/kernel/src/lib.rs', lines 112:0-140:1
+    Source: 'kernel/src/lib.rs', lines 114:0-142:1
     Visibility: public -/
 def transition
   (actor : Principal) (snap : Snapshot) (cmd : Command) :
@@ -1654,7 +1725,7 @@ def transition
     ok (core.result.Result.Ok (none, Reply.Value i))
 
 /-- [o5s_kernel::apply]:
-    Source: 'o5s/kernel/src/lib.rs', lines 144:0-151:1
+    Source: 'kernel/src/lib.rs', lines 146:0-153:1
     Visibility: public -/
 def apply (snap : Snapshot) (w : Option Memory) : Result Snapshot := do
   let s ← Snapshot.Insts.CoreCloneClone.clone snap
@@ -1664,7 +1735,7 @@ def apply (snap : Snapshot) (w : Option Memory) : Result Snapshot := do
               ok { memories := v }
 
 /-- [o5s_kernel::sql_writes]:
-    Source: 'o5s/kernel/src/lib.rs', lines 154:0-161:1
+    Source: 'kernel/src/lib.rs', lines 156:0-163:1
     Visibility: public -/
 def sql_writes
   (w : Option Memory) : Result (alloc.vec.Vec h5i_app_sql.Write) := do
@@ -1675,7 +1746,7 @@ def sql_writes
     alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Write) w1
 
 /-- [o5s_kernel::patch::MergeError]
-    Source: 'o5s/kernel/src/patch.rs', lines 8:0-12:1
+    Source: 'kernel/src/patch.rs', lines 8:0-12:1
     Visibility: public -/
 @[discriminant isize]
 inductive patch.MergeError where
@@ -1684,7 +1755,7 @@ inductive patch.MergeError where
 | MissingDependency : patch.MergeError
 
 /-- [o5s_kernel::patch::merge]:
-    Source: 'o5s/kernel/src/patch.rs', lines 17:0-34:1
+    Source: 'kernel/src/patch.rs', lines 17:0-34:1
     Visibility: public -/
 def patch.merge
   (channel : alloc.vec.Vec Std.U64) (dependencies : alloc.vec.Vec Std.U64)

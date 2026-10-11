@@ -1,8 +1,10 @@
-//! Tutorial 1: a calculator with one memory per user.
+//! o5s admission, graph projection, line coordinates and byte rendering.
+//! Arithmetic/storage sample retained for h5i-app regression coverage.
 //!
 //! The kernel: Rust in the subset Aeneas translates to Lean (no `?`, no
 //! `String`, `while` loops over indices). The proofs are about this code.
 
+pub mod coordinates;
 pub mod interval;
 pub mod patch;
 

@@ -3,7 +3,7 @@
 This retained arithmetic regression example uses axum on Cloudflare Workers
 and PostgreSQL through Hyperdrive. Its kernel/proofs share the workspace
 with the new patch platform, but its `/rpc` arithmetic API and database are
-separate from `o5s/server`. For the patch platform's edge adapter, use
+separate from `src`. For the patch platform's edge adapter, use
 [`../cloudflare`](../cloudflare/README.md).
 
 `h5i-app-pg` and `h5i-app-http` do not build for `wasm32-unknown-unknown`
@@ -47,7 +47,7 @@ curl -X POST localhost:8787/rpc -H "Authorization: Bearer $TOKEN" -d '{"cmd":"ap
 `build.sh` is wrangler's build command: it installs rustup, the wasm target
 and worker-build when they are missing (Workers Builds' image has no Rust),
 then runs `worker-build --release`. With Workers Builds (Git integration),
-set the root directory to `o5s/worker` and keep the deploy command
+set the root directory to `worker` and keep the deploy command
 `npx wrangler deploy`; the Worker's name must be `name` in `wrangler.toml`.
 Builds are cut off after 20 minutes.
 

@@ -24,13 +24,13 @@ rustc-ice-*.txt
 #.idea/
 
 # Cloudflare Workers
-o5s/worker/build/
+worker/build/
 .wrangler/
 .dev.vars
 node_modules/
 
 # Lean
-o5s/proofs/.lake/
+proofs/.lake/
 
 # h5i run records
 .h5i/
