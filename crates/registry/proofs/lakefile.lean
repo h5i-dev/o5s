@@ -18,9 +18,9 @@ lean_lib Generated where
 
 -- Hand-written specification and proofs.
 @[default_target] lean_lib Proofs where
-  roots := #[`Spec, `Apply, `Storage, `Helpers]
+  roots := #[`Spec, `Apply, `Storage, `Helpers, `Commands, `Exact, `Model, `Refine]
 
 -- Stated guarantees whose proofs are pending (`sorry`); outside the gated target.
 lean_lib Pending where
   srcDir := "../pending"
-  roots := #[`Theorems, `Commands]
+  roots := #[`Theorems]
