@@ -128,4 +128,71 @@ theorem merge_gate (a : Principal) (s : Snapshot) (r ch : alloc.vec.Vec U8) (ids
     · cases he'
   · simp at hm
 
+/-! ## Directory and repository scopes -/
+
+def NoListing (ws : List Write) : Prop := ∀ l, Write.PutListing l ∉ ws
+
+theorem admWrites_noListing {s : St} {ws : List Write} (h : AdmWrites s ws) : NoListing ws := by
+  intro l hl
+  rcases h _ hl with ⟨m, hm, -⟩ | ⟨e, he⟩
+  · exact Write.noConfusion hm
+  · exact Write.noConfusion he
+
+/-- Repository commands write no directory listing. -/
+theorem repo_noListing (a : Principal) (s : St) (c : Command) (hc : ∀ n r, c ≠ .Register n r) {ws r}
+    (h : Model.step a s c = .Ok (ws, r)) : NoListing ws := by
+  cases c <;> simp only [Model.step] at h
+  case Register n r' => exact absurd rfl (hc n r')
+  case Create n =>
+    unfold Model.create at h
+    split_ifs at h <;> simp only [core.result.Result.Ok.injEq, Prod.mk.injEq, reduceCtorEq] at h
+    obtain ⟨rfl, -⟩ := h
+    intro l hl; simp at hl
+  all_goals first
+    | (simp at h; done)
+    | (split at h
+       swap
+       · simp at h)
+  case Fork | Propose | Approve | Check =>
+    first | unfold Model.fork at h | unfold Model.propose at h | unfold Model.approve at h | unfold Model.check at h
+    repeat' split at h
+    all_goals simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h
+    all_goals obtain ⟨rfl, -⟩ := h
+    all_goals (intro l hl; simp at hl)
+  case Merge =>
+    obtain ⟨c, st, hw, rfl⟩ := merge_shape h
+    intro l hl
+    simp only [List.mem_append, List.mem_cons, List.not_mem_nil, or_false, reduceCtorEq] at hl
+    exact admWrites_noListing hw l hl
+
+/-- Directory and repository rows never share a tenant scope. -/
+theorem scopes_separate (a : Principal) (s : Snapshot) (c : Command) (ws : alloc.vec.Vec Write)
+    (h : Succeeds a s c ws) :
+    (a.scope.val < REPOSITORY_SCOPE.val → ∀ w ∈ ws.val, ∃ l, w = .PutListing l) ∧
+      (REPOSITORY_SCOPE.val ≤ a.scope.val → ∀ w ∈ ws.val, ∀ l, w ≠ .PutListing l) := by
+  obtain ⟨r, hm⟩ := model_of h
+  by_cases hreg : ∃ n repo, c = .Register n repo
+  · obtain ⟨n, repo, rfl⟩ := hreg
+    simp only [Model.step, Model.register] at hm
+    repeat' split at hm
+    all_goals simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at hm
+    all_goals obtain ⟨hw, -⟩ := hm
+    all_goals refine ⟨fun _ w hmem => ?_, fun hs => ?_⟩
+    all_goals first
+      | (rw [← hw] at hmem; simp at hmem; done)
+      | (rw [← hw] at hmem; simp at hmem; exact ⟨_, hmem⟩)
+      | (exfalso; simp_all; omega)
+  · push_neg at hreg
+    refine ⟨fun hs => ?_, fun _ w hw l e => repo_noListing a _ c hreg hm l (e ▸ hw)⟩
+    -- Every other command needs a repository scope.
+    exfalso
+    cases c <;> simp only [Model.step] at hm
+    case Register n repo => exact hreg n repo rfl
+    case Create n => unfold Model.create at hm; split_ifs at hm <;> simp_all
+    all_goals first
+      | simp at hm
+      | (split at hm
+         · rename_i hv; simp only [Model.visible, Bool.and_eq_true, decide_eq_true_eq] at hv; omega
+         · simp at hm)
+
 end o5s_registry.Guarantees
