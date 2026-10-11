@@ -1,0 +1,110 @@
+{
+  "build_profile": "release, opt-level=3, thin LTO",
+  "host_contention": "An older debug load and development work ran concurrently.",
+  "measurement_date": "2026-10-11",
+  "report": {
+    "admission_batch_size": 100,
+    "admission_seconds": 185.65774495527148,
+    "admitted_proposals_per_second": 5.386255231317817,
+    "agents": 1000,
+    "checks": {
+      "acknowledged_membership": true,
+      "arrival_order_convergence": true,
+      "graceful_restart": true,
+      "materialized_bytes_or_conflict_alternatives": true,
+      "self_approval_and_unreviewed_admission_rejected": true
+    },
+    "concurrency": 64,
+    "edit_payload_bytes": 1024,
+    "historical_patches_per_repo": 1,
+    "limitations": [
+      "Closed-loop client concurrency, not fixed offered load.",
+      "Review/check results are API reports, not executed CI.",
+      "Graceful restart is not crash-injection or multi-process durability.",
+      "Current JSON store and one-process mutex are the measured backend."
+    ],
+    "local_backend_sample": {
+      "peak_server_rss_kib": 1623692,
+      "retained_state_json_bytes": 12598113,
+      "sampled_server_cpu_seconds": 162.8,
+      "sampling": "Linux /proc, 100 ms; includes setup and restart",
+      "server_binary_sha256": "700afbc5356b0d5f57df40e0e5ba0efa73776f6c6a54b8d12376d0d133dd580b"
+    },
+    "machine": {
+      "cpu_count": 128,
+      "platform": "Linux-6.8.0-137-generic-x86_64-with-glibc2.39",
+      "python": "3.12.3"
+    },
+    "proposal_seconds": 37.32669155485928,
+    "proposals_per_second": 26.790480440257973,
+    "requests": {
+      "approve": {
+        "failed": 0,
+        "max_ms": 4969.764792360365,
+        "p50_ms": 4644.248650409281,
+        "p95_ms": 4833.391834050417,
+        "p99_ms": 4901.865143328905,
+        "received_bytes": 28896,
+        "requests": 1000
+      },
+      "check": {
+        "failed": 0,
+        "max_ms": 5148.81298225373,
+        "p50_ms": 4621.7042077332735,
+        "p95_ms": 4858.863524161279,
+        "p99_ms": 4924.224153161049,
+        "received_bytes": 33896,
+        "requests": 1000
+      },
+      "expected_refusal_approve": {
+        "failed": 1,
+        "max_ms": 26.923317462205887,
+        "p50_ms": 26.923317462205887,
+        "p95_ms": 26.923317462205887,
+        "p99_ms": 26.923317462205887,
+        "received_bytes": 0,
+        "requests": 1
+      },
+      "expected_refusal_merge_batch": {
+        "failed": 1,
+        "max_ms": 26.05575416237116,
+        "p50_ms": 26.05575416237116,
+        "p95_ms": 26.05575416237116,
+        "p99_ms": 26.05575416237116,
+        "received_bytes": 0,
+        "requests": 1
+      },
+      "merge_batch": {
+        "failed": 0,
+        "max_ms": 141.13432727754116,
+        "p50_ms": 109.38725154846907,
+        "p95_ms": 132.48043972998857,
+        "p99_ms": 132.48043972998857,
+        "received_bytes": 8422,
+        "requests": 20
+      },
+      "propose_lines": {
+        "failed": 0,
+        "max_ms": 4460.323510691524,
+        "p50_ms": 2218.378836289048,
+        "p95_ms": 4188.921080902219,
+        "p99_ms": 4407.595108263195,
+        "received_bytes": 86896,
+        "requests": 1000
+      },
+      "read": {
+        "failed": 0,
+        "max_ms": 482.7585471794009,
+        "p50_ms": 342.33440551906824,
+        "p95_ms": 374.7250400483608,
+        "p99_ms": 374.7250400483608,
+        "received_bytes": 85679583,
+        "requests": 5
+      }
+    },
+    "restart_seconds": 0.7171438587829471,
+    "run_id": "load-1791724409894672451",
+    "workload": "disjoint"
+  },
+  "storage_implementation": "Whole Database clone and whole JSON buffer before snapshot replacement."
+}

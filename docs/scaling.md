@@ -25,7 +25,7 @@ The fixtures use 10,000 patches/vertices. Counters are asserted in tests:
 | 10,000 independent agents editing one path | Concurrent values retained; no dependency searches |
 | Dead graph chain with only its endpoints live | One summary edge; two live vertices in subsequent reachability |
 
-These counters exclude authentication, hashing, database cloning, snapshot I/O, serialization and output rendering. Printing 10,000 conflicting alternatives necessarily costs at least the output size. Shared ancestry and many heads can still make searches expensive. This is not a benchmark of 10,000 concurrent HTTP clients. Timings printed by the example describe the local run, not a portable throughput guarantee.
+These counters exclude authentication, hashing, command rollback, snapshot I/O, serialization and output rendering. Printing 10,000 conflicting alternatives necessarily costs at least the output size. Shared ancestry and many heads can still make searches expensive. This is not a benchmark of 10,000 concurrent HTTP clients. Timings printed by the example describe the local run, not a portable throughput guarantee.
 
 ## Line-range merge
 

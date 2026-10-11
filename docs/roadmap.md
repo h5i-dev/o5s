@@ -73,7 +73,7 @@ Completion requires counters for visited vertices/edges, rebuilt rows, rendered 
 
 ## M5: Durable concurrent transactions
 
-Replace whole-database cloning and JSON serialization with indexed PostgreSQL transactions. Store immutable patches/blobs, dependencies, review facts, channel membership, audit records and an outbox with tenant/repository keys. State the serializable transition the native transaction must implement; h5i-app admission by itself does not prove the database layer.
+Replace serialized whole-database JSON snapshots with indexed PostgreSQL transactions. Command-specific rollback now avoids cloning patch bodies, but writes still serialize the complete database. Store immutable patches/blobs, dependencies, review facts, channel membership, audit records and an outbox with tenant/repository keys. State the serializable transition the native transaction must implement; h5i-app admission by itself does not prove the database layer.
 
 Add constraints for duplicate identities and dangling dependencies. A merge batch must read the guarded review/check facts and publish all of its membership changes atomically. Record request idempotency keys in the same transaction as their effects. After a lost HTTP response, a client must be able to retrieve the original result rather than accidentally create a second operation.
 
