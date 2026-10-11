@@ -56,7 +56,11 @@ pub enum DbError {
 impl std::fmt::Display for DbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DbError::Postgres(e) => write!(f, "postgres: {e}"),
+            // The driver's Display omits the server's message; show its code and text.
+            DbError::Postgres(e) => match e.as_db_error() {
+                Some(d) => write!(f, "postgres {}: {}", d.code().code(), d.message()),
+                None => write!(f, "postgres: {e}"),
+            },
             DbError::Connect(e) => write!(f, "connect: {e}"),
             DbError::Decode(e) => write!(f, "decode: {e}"),
             DbError::IdempotencyConflict => {
