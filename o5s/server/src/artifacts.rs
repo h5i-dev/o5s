@@ -117,7 +117,11 @@ pub fn export(
                 .iter()
                 .map(|id| repo.patches[id].hash.as_str())
                 .collect();
-            if old.ends_with(&hashes.join("\n")) {
+            let expected = format!(
+                "o5s verified-admission projection\n\nPatch hashes:\n{}",
+                hashes.join("\n")
+            );
+            if old == expected.trim_end() {
                 return Ok(
                     serde_json::json!({"path":path,"commit":p,"tree":tree,"unchanged":true}),
                 );

@@ -152,3 +152,49 @@ async fn authentication_and_body_identity_are_enforced() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn compact_view_cache_and_batch_rollback() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = state(dir.path());
+    command(&s, 1, serde_json::json!({"cmd":"create","repo":"cache"})).await;
+    let p = command(&s,1,serde_json::json!({"cmd":"propose","repo":"cache","intent":"base","dependencies":[],"edits":[{"path":"a","content":"base"}]})).await["patch"].as_u64().unwrap();
+    command(
+        &s,
+        2,
+        serde_json::json!({"cmd":"approve","repo":"cache","patch":p}),
+    )
+    .await;
+    command(
+        &s,
+        3,
+        serde_json::json!({"cmd":"check","repo":"cache","patch":p,"passed":true}),
+    )
+    .await;
+    let before = std::fs::read(dir.path().join("state.json")).unwrap();
+    let (status,_) = request(&s,1,1,"/api/command",Some(serde_json::json!({"cmd":"merge_batch","repo":"cache","channel":"main","patches":[p,999]}))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        std::fs::read(dir.path().join("state.json")).unwrap(),
+        before
+    );
+    command(
+        &s,
+        1,
+        serde_json::json!({"cmd":"merge_batch","repo":"cache","channel":"main","patches":[p]}),
+    )
+    .await;
+    let (status, first) = request(&s, 1, 1, "/api/view?repo=cache", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first["work"]["processed_patches"], 1);
+    let (_, next) = request(&s, 1, 1, "/api/view?repo=cache", None).await;
+    assert_eq!(next["work"]["processed_patches"], 0);
+    assert_eq!(next["files"]["a"], "base");
+    assert_eq!(next["patch_count"], 1);
+    assert!(next.get("repository").is_none());
+    assert!(next.get("patches").is_none());
+    assert_eq!(
+        request(&s, 1, 2, "/api/view?repo=cache", None).await.0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+}

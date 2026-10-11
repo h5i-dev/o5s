@@ -73,6 +73,11 @@ pub enum Command {
         patch: u64,
         passed: bool,
     },
+    MergeBatch {
+        repo: String,
+        channel: String,
+        patches: Vec<u64>,
+    },
     Merge {
         repo: String,
         channel: String,
@@ -87,7 +92,8 @@ impl Command {
             | Self::Propose { repo, .. }
             | Self::Approve { repo, .. }
             | Self::Check { repo, .. }
-            | Self::Merge { repo, .. } => repo,
+            | Self::Merge { repo, .. }
+            | Self::MergeBatch { repo, .. } => repo,
         }
     }
 }
@@ -296,29 +302,41 @@ impl Database {
                     None,
                 )
             }
+            Command::MergeBatch {
+                channel,
+                mut patches,
+                ..
+            } => {
+                if patches.is_empty() || patches.len() > 10_000 {
+                    return Err(refuse("1..10000 patches required"));
+                }
+                patches.sort_unstable();
+                patches.dedup();
+                let mut out = repo
+                    .channels
+                    .get(&channel)
+                    .ok_or_else(|| refuse("channel not found"))?
+                    .clone();
+                for id in &patches {
+                    out = admit(repo, actor, &out, *id)?;
+                }
+                repo.channels.insert(channel.clone(), out);
+                for id in &patches {
+                    repo.events.push(Event {
+                        actor: actor.user,
+                        action: "merge".into(),
+                        patch: Some(*id),
+                        channel: Some(channel.clone()),
+                    });
+                }
+                return Ok(serde_json::json!({"patches":patches,"channel":channel}));
+            }
             Command::Merge { channel, patch, .. } => {
                 let s = repo
                     .channels
                     .get(&channel)
                     .ok_or_else(|| refuse("channel not found"))?;
-                let p = repo
-                    .patches
-                    .get(&patch)
-                    .ok_or_else(|| refuse("patch not found"))?;
-                let cmd = AdmissionCommand {
-                    dependencies: p.dependencies.clone(),
-                    approved: !p.approvals.is_empty(),
-                    checks_passed: p.checks_passed,
-                    patch,
-                };
-                let (w, _) = Admission::transition(actor, s, &cmd).map_err(|e| {
-                    refuse(match e {
-                        patch::MergeError::Unapproved => "patch unapproved",
-                        patch::MergeError::ChecksFailed => "checks failed",
-                        patch::MergeError::MissingDependency => "dependency not integrated",
-                    })
-                })?;
-                let out = Admission::apply(s, &w);
+                let out = admit(repo, actor, s, patch)?;
                 repo.channels.insert(channel.clone(), out);
                 (
                     serde_json::json!({"patch":patch,"channel":channel}),
@@ -336,6 +354,27 @@ impl Database {
         });
         Ok(reply)
     }
+}
+
+fn admit(repo: &Repository, actor: &Actor, s: &Vec<u64>, patch: u64) -> Result<Vec<u64>, Refusal> {
+    let p = repo
+        .patches
+        .get(&patch)
+        .ok_or_else(|| refuse("patch not found"))?;
+    let cmd = AdmissionCommand {
+        dependencies: p.dependencies.clone(),
+        approved: !p.approvals.is_empty(),
+        checks_passed: p.checks_passed,
+        patch,
+    };
+    let (w, _) = Admission::transition(actor, s, &cmd).map_err(|e| {
+        refuse(match e {
+            patch::MergeError::Unapproved => "patch unapproved",
+            patch::MergeError::ChecksFailed => "checks failed",
+            patch::MergeError::MissingDependency => "dependency not integrated",
+        })
+    })?;
+    Ok(Admission::apply(s, &w))
 }
 
 /// Full hashes include dependency *hashes*, rather than local numeric handles.
@@ -374,7 +413,7 @@ pub struct View {
 impl Repository {
     /// Compute causal ancestry once, in registry order (dependencies always
     /// precede their child), without recursion or synthetic pseudo-edges.
-    pub fn materialize(&self, channel: &str) -> Result<View, Refusal> {
+    pub fn materialize_reference(&self, channel: &str) -> Result<View, Refusal> {
         let active: BTreeSet<u64> = self
             .channels
             .get(channel)
@@ -404,43 +443,187 @@ impl Repository {
             }
             ancestors.insert(*id, ancestry);
         }
-        // Structural conflicts count too: Git cannot represent both `a`
-        // and `a/b`. Preserve real patch provenance for every alternative.
-        let live: BTreeSet<String> = heads
-            .iter()
-            .filter(|(_, h)| h.values().any(Option::is_some))
-            .map(|(path, _)| path.clone())
-            .collect();
-        let mut collisions = BTreeSet::new();
-        for path in &live {
-            for (i, c) in path.char_indices() {
-                if c == '/' && live.contains(&path[..i]) {
-                    collisions.insert(path.clone());
-                    collisions.insert(path[..i].to_string());
-                }
-            }
-        }
-        let mut files = BTreeMap::new();
-        let mut conflicts = BTreeMap::new();
-        for (path, h) in heads {
-            let first = h.first_key_value().unwrap().1;
-            if !collisions.contains(&path) && h.values().all(|v| v == first) {
-                if let Some(content) = first {
-                    files.insert(path, content.clone());
-                }
-            } else {
-                conflicts.insert(
-                    path,
-                    h.into_iter()
-                        .map(|(patch, content)| Alternative { patch, content })
-                        .collect(),
-                );
-            }
-        }
-        Ok(View {
-            files,
-            conflicts,
-            patches: active.into_iter().collect(),
-        })
+        render_heads(&heads, &active)
+    }
+
+    /// Fresh replay uses the same incremental engine as the native cache.
+    pub fn materialize(&self, channel: &str) -> Result<View, Refusal> {
+        let mut cache = IncrementalView::default();
+        cache.sync(self, channel)?;
+        cache.view()
     }
 }
+
+fn render_heads(
+    heads: &BTreeMap<String, BTreeMap<u64, Option<String>>>,
+    active: &BTreeSet<u64>,
+) -> Result<View, Refusal> {
+    // Structural conflicts count too: Git cannot represent both `a`
+    // and `a/b`. Preserve real patch provenance for every alternative.
+    let live: BTreeSet<String> = heads
+        .iter()
+        .filter(|(_, h)| h.values().any(Option::is_some))
+        .map(|(path, _)| path.clone())
+        .collect();
+    let mut collisions = BTreeSet::new();
+    for path in &live {
+        for (i, c) in path.char_indices() {
+            if c == '/' && live.contains(&path[..i]) {
+                collisions.insert(path.clone());
+                collisions.insert(path[..i].to_string());
+            }
+        }
+    }
+    let mut files = BTreeMap::new();
+    let mut conflicts = BTreeMap::new();
+    for (path, h) in heads {
+        let first = h.first_key_value().unwrap().1;
+        if !collisions.contains(path) && h.values().all(|v| v == first) {
+            if let Some(content) = first {
+                files.insert(path.clone(), content.clone());
+            }
+        } else {
+            conflicts.insert(
+                path.clone(),
+                h.iter()
+                    .map(|(patch, content)| Alternative {
+                        patch: *patch,
+                        content: content.clone(),
+                    })
+                    .collect(),
+            );
+        }
+    }
+    Ok(View {
+        files,
+        conflicts,
+        patches: active.iter().copied().collect(),
+    })
+}
+
+/// Work counters describe dependency search and changed registers, not wall time.
+#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq)]
+pub struct ViewWork {
+    pub processed_patches: usize,
+    pub dependency_edges: usize,
+    pub updated_paths: usize,
+}
+
+/// Append-only channel cache. No transitive-closure table: look backwards only
+/// for current heads of touched paths, stopping as soon as all are found.
+/// Registry handles are monotone and every dependency precedes its child.
+#[derive(Default)]
+pub struct IncrementalView {
+    applied: BTreeSet<u64>,
+    cursor: usize,
+    heads: BTreeMap<String, BTreeMap<u64, Option<String>>>,
+}
+impl IncrementalView {
+    pub fn sync(&mut self, repo: &Repository, channel: &str) -> Result<ViewWork, Refusal> {
+        let active: BTreeSet<u64> = repo
+            .channels
+            .get(channel)
+            .ok_or_else(|| refuse("channel not found"))?
+            .iter()
+            .copied()
+            .collect();
+        if !self.applied.is_subset(&active) {
+            *self = Self::default();
+        }
+        let pending: Vec<u64> = active.difference(&self.applied).copied().collect();
+        let work = self.integrate(repo, pending)?;
+        self.cursor = repo.channels[channel].len();
+        Ok(work)
+    }
+    /// For channels maintained by admission only: existing membership is never
+    /// removed or rewritten. Reads inspect just the appended suffix. Call `sync`
+    /// instead for arbitrary externally mutated vectors, or discard the cache.
+    pub fn sync_append_only(
+        &mut self,
+        repo: &Repository,
+        channel: &str,
+    ) -> Result<ViewWork, Refusal> {
+        let ids = repo
+            .channels
+            .get(channel)
+            .ok_or_else(|| refuse("channel not found"))?;
+        if ids.len() < self.cursor {
+            *self = Self::default();
+        }
+        let mut pending: Vec<_> = ids[self.cursor..]
+            .iter()
+            .copied()
+            .filter(|id| !self.applied.contains(id))
+            .collect();
+        pending.sort_unstable();
+        pending.dedup();
+        let work = self.integrate(repo, pending)?;
+        self.cursor = ids.len();
+        Ok(work)
+    }
+    fn integrate(&mut self, repo: &Repository, pending: Vec<u64>) -> Result<ViewWork, Refusal> {
+        let mut work = ViewWork::default();
+        for id in pending {
+            let p = repo
+                .patches
+                .get(&id)
+                .ok_or_else(|| refuse("corrupt patch registry"))?;
+            if p.dependencies
+                .iter()
+                .any(|d| *d >= id || !self.applied.contains(d))
+            {
+                return Err(refuse("channel is not dependency closed"));
+            }
+            let mut targets = BTreeSet::new();
+            for e in p.edits.iter().filter(|_| !p.dependencies.is_empty()) {
+                if let Some(heads) = self.heads.get(&e.path) {
+                    targets.extend(heads.keys().copied());
+                }
+            }
+            let min = targets.first().copied().unwrap_or(u64::MAX);
+            let mut found = BTreeSet::new();
+            let mut seen = BTreeSet::new();
+            let mut stack = p.dependencies.clone();
+            while !targets.is_empty() {
+                let Some(d) = stack.pop() else { break };
+                work.dependency_edges += 1;
+                if d < min || !seen.insert(d) {
+                    continue;
+                }
+                if targets.remove(&d) {
+                    found.insert(d);
+                }
+                if !targets.is_empty() {
+                    let parent = repo
+                        .patches
+                        .get(&d)
+                        .ok_or_else(|| refuse("corrupt dependency"))?;
+                    stack.extend(parent.dependencies.iter().copied());
+                }
+            }
+            for e in &p.edits {
+                let heads = self.heads.entry(e.path.clone()).or_default();
+                for d in &found {
+                    heads.remove(d);
+                }
+                heads.insert(id, e.content.clone());
+                work.updated_paths += 1;
+            }
+            self.applied.insert(id);
+            work.processed_patches += 1;
+        }
+        Ok(work)
+    }
+    /// Render content without copying the full channel membership history.
+    pub fn content(&self) -> Result<View, Refusal> {
+        render_heads(&self.heads, &BTreeSet::new())
+    }
+    pub fn patch_count(&self) -> usize {
+        self.applied.len()
+    }
+    pub fn view(&self) -> Result<View, Refusal> {
+        render_heads(&self.heads, &self.applied)
+    }
+}
+
+pub mod projection;

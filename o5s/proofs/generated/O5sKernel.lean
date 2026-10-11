@@ -184,6 +184,154 @@ def h5i_app_std.set.contains
   := do
   h5i_app_std.set.contains_loop corecmpPartialEqInst s x 0#usize
 
+/-- [h5i_app_std::graph::reachable]: loop body 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/graph.rs', lines 15:4-20:5
+    Name pattern: [h5i_app_std::graph::reachable]
+    Visibility: public -/
+@[rust_loop_body, rust_fun "h5i_app_std::graph::reachable"]
+def h5i_app_std.graph.reachable_loop0.body
+  {T : Type} (corecmpPartialEqInst : core.cmp.PartialEq T T)
+  (corecloneCloneInst : core.clone.Clone T) (start : alloc.vec.Vec T)
+  (out : alloc.vec.Vec T) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec T) × Std.Usize) (alloc.vec.Vec T))
+  := do
+  let i1 := alloc.vec.Vec.len start
+  if i < i1
+  then
+    let t ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice T) start i
+    let b ← h5i_app_std.set.contains corecmpPartialEqInst out t
+    let out1 ←
+      if b
+      then ok out
+      else do
+           let t1 ← corecloneCloneInst.clone t
+           alloc.vec.Vec.push out t1
+    let i2 ← i + 1#usize
+    ok (cont (out1, i2))
+  else ok (done out)
+
+/-- [h5i_app_std::graph::reachable]: loop 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/graph.rs', lines 15:4-20:5
+    Name pattern: [h5i_app_std::graph::reachable]
+    Visibility: public -/
+@[rust_loop, rust_fun "h5i_app_std::graph::reachable"]
+def h5i_app_std.graph.reachable_loop0
+  {T : Type} (corecmpPartialEqInst : core.cmp.PartialEq T T)
+  (corecloneCloneInst : core.clone.Clone T) (start : alloc.vec.Vec T)
+  (out : alloc.vec.Vec T) (i : Std.Usize) :
+  Result (alloc.vec.Vec T)
+  := do
+  loop
+    (fun (out1, i1) => h5i_app_std.graph.reachable_loop0.body
+      corecmpPartialEqInst corecloneCloneInst start out1 i1)
+    (out, i)
+
+/-- [h5i_app_std::graph::reachable]: loop body 2:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/graph.rs', lines 25:8-30:9
+    Name pattern: [h5i_app_std::graph::reachable]
+    Visibility: public -/
+@[rust_loop_body, rust_fun "h5i_app_std::graph::reachable"]
+def h5i_app_std.graph.reachable_loop1_loop0.body
+  {T : Type} (corecmpPartialEqInst : core.cmp.PartialEq T T)
+  (corecloneCloneInst : core.clone.Clone T) (edges : alloc.vec.Vec (T × T))
+  (x : T) (out : alloc.vec.Vec T) (j : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec T) × Std.Usize) (alloc.vec.Vec T))
+  := do
+  let i := alloc.vec.Vec.len edges
+  if j < i
+  then
+    let (t, t1) ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (T × T))
+        edges j
+    let b ← corecmpPartialEqInst.eq t x
+    let out1 ←
+      if b
+      then
+        do
+        let b1 ← h5i_app_std.set.contains corecmpPartialEqInst out t1
+        if b1
+        then ok out
+        else let t2 ← corecloneCloneInst.clone t1
+             alloc.vec.Vec.push out t2
+      else ok out
+    let j1 ← j + 1#usize
+    ok (cont (out1, j1))
+  else ok (done out)
+
+/-- [h5i_app_std::graph::reachable]: loop 2:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/graph.rs', lines 25:8-30:9
+    Name pattern: [h5i_app_std::graph::reachable]
+    Visibility: public -/
+@[rust_loop, rust_fun "h5i_app_std::graph::reachable"]
+def h5i_app_std.graph.reachable_loop1_loop0
+  {T : Type} (corecmpPartialEqInst : core.cmp.PartialEq T T)
+  (corecloneCloneInst : core.clone.Clone T) (edges : alloc.vec.Vec (T × T))
+  (out : alloc.vec.Vec T) (x : T) (j : Std.Usize) :
+  Result (alloc.vec.Vec T)
+  := do
+  loop
+    (fun (out1, j1) => h5i_app_std.graph.reachable_loop1_loop0.body
+      corecmpPartialEqInst corecloneCloneInst edges x out1 j1)
+    (out, j)
+
+/-- [h5i_app_std::graph::reachable]: loop body 1:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/graph.rs', lines 22:4-32:5
+    Name pattern: [h5i_app_std::graph::reachable]
+    Visibility: public -/
+@[rust_loop_body, rust_fun "h5i_app_std::graph::reachable"]
+def h5i_app_std.graph.reachable_loop1.body
+  {T : Type} (corecmpPartialEqInst : core.cmp.PartialEq T T)
+  (corecloneCloneInst : core.clone.Clone T) (edges : alloc.vec.Vec (T × T))
+  (out : alloc.vec.Vec T) (k : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec T) × Std.Usize) (alloc.vec.Vec T))
+  := do
+  let i := alloc.vec.Vec.len out
+  if k < i
+  then
+    let t ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice T) out k
+    let x ← corecloneCloneInst.clone t
+    let out1 ←
+      h5i_app_std.graph.reachable_loop1_loop0 corecmpPartialEqInst
+        corecloneCloneInst edges out x 0#usize
+    let k1 ← k + 1#usize
+    ok (cont (out1, k1))
+  else ok (done out)
+
+/-- [h5i_app_std::graph::reachable]: loop 1:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/graph.rs', lines 22:4-32:5
+    Name pattern: [h5i_app_std::graph::reachable]
+    Visibility: public -/
+@[rust_loop, rust_fun "h5i_app_std::graph::reachable"]
+def h5i_app_std.graph.reachable_loop1
+  {T : Type} (corecmpPartialEqInst : core.cmp.PartialEq T T)
+  (corecloneCloneInst : core.clone.Clone T) (edges : alloc.vec.Vec (T × T))
+  (out : alloc.vec.Vec T) (k : Std.Usize) :
+  Result (alloc.vec.Vec T)
+  := do
+  loop
+    (fun (out1, k1) => h5i_app_std.graph.reachable_loop1.body
+      corecmpPartialEqInst corecloneCloneInst edges out1 k1)
+    (out, k)
+
+/-- [h5i_app_std::graph::reachable]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/graph.rs', lines 12:0-12:85
+    Name pattern: [h5i_app_std::graph::reachable]
+    Visibility: public -/
+@[rust_fun "h5i_app_std::graph::reachable"]
+def h5i_app_std.graph.reachable
+  {T : Type} (corecmpPartialEqInst : core.cmp.PartialEq T T)
+  (corecloneCloneInst : core.clone.Clone T) (edges : alloc.vec.Vec (T × T))
+  (start : alloc.vec.Vec T) :
+  Result (alloc.vec.Vec T)
+  := do
+  let out ←
+    h5i_app_std.graph.reachable_loop0 corecmpPartialEqInst corecloneCloneInst
+      start (alloc.vec.Vec.new T) 0#usize
+  h5i_app_std.graph.reachable_loop1 corecmpPartialEqInst corecloneCloneInst
+    edges out 0#usize
+
 /-- [h5i_app_std::set::subset]: loop body 0:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/set.rs', lines 22:4-29:1
     Name pattern: [h5i_app_std::set::subset]
@@ -549,6 +697,17 @@ def decode (r : Rows) : Result (Option Snapshot) := do
   | none => ok none
   | some x => ok (some { memories := x })
 
+/-- [o5s_kernel::graph::reachable]:
+    Source: 'o5s/kernel/src/graph.rs', lines 3:0-5:1
+    Visibility: public -/
+def graph.reachable
+  (edges : alloc.vec.Vec (Std.U64 × Std.U64)) (start : alloc.vec.Vec Std.U64)
+  :
+  Result (alloc.vec.Vec Std.U64)
+  := do
+  h5i_app_std.graph.reachable core.cmp.PartialEqU64 core.clone.CloneU64 edges
+    start
+
 /-- [o5s_kernel::Principal]
     Source: 'o5s/kernel/src/lib.rs', lines 10:0-13:1
     Visibility: public -/
@@ -681,7 +840,7 @@ def compute
          ok (core.result.Result.Ok i)
 
 /-- [o5s_kernel::transition]:
-    Source: 'o5s/kernel/src/lib.rs', lines 111:0-123:1
+    Source: 'o5s/kernel/src/lib.rs', lines 111:0-139:1
     Visibility: public -/
 def transition
   (actor : Principal) (snap : Snapshot) (cmd : Command) :
@@ -704,7 +863,7 @@ def transition
     ok (core.result.Result.Ok (none, Reply.Value i))
 
 /-- [o5s_kernel::apply]:
-    Source: 'o5s/kernel/src/lib.rs', lines 127:0-134:1
+    Source: 'o5s/kernel/src/lib.rs', lines 143:0-150:1
     Visibility: public -/
 def apply (snap : Snapshot) (w : Option Memory) : Result Snapshot := do
   let s ← Snapshot.Insts.CoreCloneClone.clone snap
@@ -714,7 +873,7 @@ def apply (snap : Snapshot) (w : Option Memory) : Result Snapshot := do
               ok { memories := v }
 
 /-- [o5s_kernel::sql_writes]:
-    Source: 'o5s/kernel/src/lib.rs', lines 137:0-144:1
+    Source: 'o5s/kernel/src/lib.rs', lines 153:0-160:1
     Visibility: public -/
 def sql_writes
   (w : Option Memory) : Result (alloc.vec.Vec h5i_app_sql.Write) := do

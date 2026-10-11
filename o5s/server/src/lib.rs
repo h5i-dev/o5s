@@ -11,7 +11,7 @@ use axum::{
 };
 use fs2::FileExt;
 use h5i_app_json::Value;
-use o5s_platform::{Actor, Command, Database, Refusal};
+use o5s_platform::{Actor, Command, Database, IncrementalView, Refusal};
 use serde::Deserialize;
 use std::{
     fs::{self, File, OpenOptions},
@@ -23,6 +23,7 @@ use std::{
 pub struct Store {
     pub db: Database,
     path: PathBuf,
+    views: std::collections::BTreeMap<(u64, String, String), IncrementalView>,
     // Held for the process lifetime: no second writer can open the same store.
     _lock: File,
 }
@@ -46,6 +47,7 @@ impl Store {
             db,
             path,
             _lock: lock,
+            views: Default::default(),
         })
     }
     pub fn execute(
@@ -57,16 +59,20 @@ impl Store {
         let reply = candidate.execute(actor, command)?;
         let bytes = serde_json::to_vec(&candidate).map_err(|e| Refusal(e.to_string()))?;
         let tmp = self.path.with_extension("json.tmp");
+        let parent = File::open(self.path.parent().unwrap()).map_err(|e| Refusal(e.to_string()))?;
         let persist = || -> std::io::Result<()> {
             let mut file = File::create(&tmp)?;
             file.write_all(&bytes)?;
             file.sync_all()?;
             fs::rename(&tmp, &self.path)?;
-            File::open(self.path.parent().unwrap())?.sync_all()?;
+
             Ok(())
         };
         persist().map_err(|e| Refusal(format!("storage unavailable: {e}")))?;
         self.db = candidate;
+        parent
+            .sync_all()
+            .map_err(|e| Refusal(format!("committed; directory sync failed: {e}")))?;
         Ok(reply)
     }
 }
@@ -82,6 +88,7 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(|| async { "ok" }))
         .route("/api/repositories", get(repositories))
         .route("/api/state", get(repo_state))
+        .route("/api/view", get(compact_view))
         .route("/api/command", post(command))
         .route("/api/export", post(export))
         .layer(DefaultBodyLimit::max(4 * 1024 * 1024))
@@ -183,11 +190,16 @@ async fn repo_state(
         Ok(a) => a,
         Err(e) => return e,
     };
-    let snapshot = { s.store.lock().unwrap().db.repo(&a, &q.repo).cloned() };
     match tokio::task::spawn_blocking(move || {
-        let repo = snapshot?;
-        let view = repo.materialize(&q.channel)?;
-        Ok(serde_json::json!({"repository":repo,"view":view}))
+        let mut store = s.store.lock().unwrap();
+        let Store { db, views, .. } = &mut *store;
+        let repo = db.repo(&a, &q.repo)?;
+        let cache = views
+            .entry((a.tenant, q.repo, q.channel.clone()))
+            .or_default();
+        let work = cache.sync_append_only(repo, &q.channel)?;
+        let view = cache.view()?;
+        Ok(serde_json::json!({"repository":repo,"view":view,"work":work}))
     })
     .await
     {
@@ -196,6 +208,28 @@ async fn repo_state(
             StatusCode::SERVICE_UNAVAILABLE,
             serde_json::json!({"error":"view failed"}),
         ),
+    }
+}
+async fn compact_view(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<RepoQuery>,
+) -> Response {
+    let a = match actor(&s, &headers) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    match tokio::task::spawn_blocking(move || {
+        let mut store = s.store.lock().unwrap();
+        let Store { db, views, .. } = &mut *store;
+        let repo = db.repo(&a, &q.repo)?;
+        let cache = views.entry((a.tenant, q.repo, q.channel.clone())).or_default();
+        let work = cache.sync_append_only(repo, &q.channel)?;
+        let view = cache.content()?;
+        Ok(serde_json::json!({"files":view.files,"conflicts":view.conflicts,"patch_count":cache.patch_count(),"work":work}))
+    }).await {
+        Ok(r) => result(r),
+        Err(_) => json(StatusCode::SERVICE_UNAVAILABLE,serde_json::json!({"error":"view failed"})),
     }
 }
 async fn export(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {

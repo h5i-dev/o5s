@@ -1,7 +1,7 @@
 # Read by `h5i app` (extract, check, prove, mutate, doctor).
 
 [extract]
-start-from = ["transition", "apply", "sql_writes", "patch::merge"]
+start-from = ["transition", "apply", "sql_writes", "patch::merge", "graph::reachable"]
 schema = true
 include = ["h5i_app_sql", "h5i_app_std"]
 std-specs = true
@@ -17,6 +17,9 @@ theorems = [
   "o5s_kernel.Patch.dependency_closed",
   "o5s_kernel.Patch.successful_orders_converge",
   "o5s_kernel.Patch.delivery_converges",
+  "o5s_kernel.Projection.live_reachability",
+  "o5s_kernel.Projection.incremental_summary",
+  "o5s_kernel.Projection.extracted_projection",
 ]
 
 [[mutant]]

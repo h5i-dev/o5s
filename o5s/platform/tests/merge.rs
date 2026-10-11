@@ -171,7 +171,7 @@ fn deletes_and_prefix_collisions_never_silently_overwrite() {
 }
 #[test]
 fn tenant_isolation_and_path_validation() {
-    let mut d = create();
+    let d = create();
     assert!(d.repo(&Actor { tenant: 2, user: 1 }, "project").is_err());
     for path in [
         "../x",
@@ -210,4 +210,36 @@ fn ten_thousand_agent_patches_materialize_without_losing_conflicts() {
         "10,000 proposal/review/check/merge + materialization: {:?}",
         start.elapsed()
     );
+}
+
+#[test]
+fn batch_admission_is_atomic_and_topologically_orders_dependencies() {
+    let mut d = create();
+    let a = propose(&mut d, 1, vec![], "a", Some("base"));
+    let b = propose(&mut d, 2, vec![a], "b", Some("dependent"));
+    ready(&mut d, a);
+    let before = serde_json::to_value(&d).unwrap();
+    assert!(
+        d.execute(
+            &actor(1),
+            Command::MergeBatch {
+                repo: "project".into(),
+                channel: "main".into(),
+                patches: vec![b, a]
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(serde_json::to_value(&d).unwrap(), before);
+    ready(&mut d, b);
+    d.execute(
+        &actor(1),
+        Command::MergeBatch {
+            repo: "project".into(),
+            channel: "main".into(),
+            patches: vec![b, a, a],
+        },
+    )
+    .unwrap();
+    assert_eq!(view(&d, "main").patches, vec![a, b]);
 }
