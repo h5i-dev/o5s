@@ -195,4 +195,24 @@ theorem scopes_separate (a : Principal) (s : Snapshot) (c : Command) (ws : alloc
          · rename_i hv; simp only [Model.visible, Bool.and_eq_true, decide_eq_true_eq] at hv; omega
          · simp at hm)
 
+/-! ## Loading less than a tenant -/
+
+/-- Repository commands read no events, bodies or listings: the model gives
+the same result whatever those tables hold. -/
+theorem frame_model (a : Principal) (s : St) (c : Command) (e : List Event) (b : List Body) (l : List Listing)
+    (hc : ∀ n r, c ≠ .Register n r) :
+    Model.step a { s with events := e, bodies := b, listings := l } c = Model.step a s c := by
+  cases c
+  case Register n r => exact absurd rfl (hc n r)
+  all_goals rfl
+
+/-- So a run of `transition` on rows with any events, bodies and listings
+computes what the whole tenant specifies. -/
+theorem frame (a : Principal) (s : Snapshot) (c : Command) (e : alloc.vec.Vec Event)
+    (b : alloc.vec.Vec Body) (l : alloc.vec.Vec Listing) (hc : ∀ n r, c ≠ .Register n r) (r)
+    (h : transition a { s with events := e, bodies := b, listings := l } c = ok r) :
+    Refine.lift r = Model.step a (Snapshot.toSt s) c := by
+  rw [Refine.transition_refines _ _ _ _ h]
+  exact frame_model a (Snapshot.toSt s) c e.val b.val l.val hc
+
 end o5s_registry.Guarantees
