@@ -121,4 +121,80 @@ theorem inv_approve {s : St} (hi : Inv s) {u patch : U64} {ws r}
       have := (hi.unborn hc).1
       rw [this] at hpm; simp at hpm
 
+theorem inv_check {s : St} (hi : Inv s) {u patch : U64} {passed : Bool} {ws r}
+    (h : Model.check u s patch passed = .Ok (ws, r)) : Inv (applyAll s ws) := by
+  unfold Model.check at h
+  split at h
+  · simp at h
+  · rename_i p hp
+    split_ifs at h with ha hm
+    simp only [core.result.Result.Ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, -⟩ := h
+    have hpm : p ∈ s.patches := List.mem_of_find?_eq_some hp
+    have hpid : p.id = patch := by simpa using List.find?_some hp
+    have hinc := Refine.inc_val hm
+    rw [applyAll_eq]
+    simp only [List.filterMap_cons, List.filterMap_nil, repoOf, patchOf, depOf, approvalOf, checkOf, channelOf,
+      memberOf, pathOf, eventOf, bodyOf, listingOf, puts_nil, puts_single, List.getLast?_singleton,
+      Option.getD_some]
+    constructor
+    all_goals simp only [hasPatch, isMember]
+    · exact hi.patch_keys
+    · exact hi.patch_fresh
+    · exact hi.hashes
+    · exact hi.deps_known
+    · exact hi.approvals_independent
+    · intro c hc'
+      rcases mem_upsert_of hc' with rfl | hc'
+      · exact ⟨p, hpm, hpid, ha⟩
+      · exact hi.checks_independent c hc'
+    · exact hi.channel_keys
+    · exact hi.channel_fresh
+    · exact hi.channel_labels
+    · exact hi.members_placed
+    · exact hi.members_known
+    · exact hi.closed
+    · exact hi.reviewed
+    · intro e he
+      rcases mem_upsert_of he with rfl | he
+      · exact le_refl _
+      · have := hi.event_fresh e he; rw [hinc]; omega
+    · exact hi.bodies_known
+    · exact hi.path_keys
+    · exact hi.path_fresh
+    · exact hi.path_labels
+    · intro hc
+      have := (hi.unborn hc).1
+      rw [this] at hpm; simp at hpm
+
+theorem inv_register {s : St} (hi : Inv s) {a : Principal} {n : alloc.vec.Vec U8} {repo : U64} {ws r}
+    (h : Model.register a s.listings n repo = .Ok (ws, r)) : Inv (applyAll s ws) := by
+  have hws : ws = [] ∨ ∃ l, ws = [.PutListing l] := by
+    unfold Model.register at h
+    repeat' split at h
+    all_goals simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h
+    all_goals obtain ⟨rfl, -⟩ := h
+    all_goals simp
+  rcases hws with rfl | ⟨l, rfl⟩
+  · exact hi
+  · rw [applyAll_eq]
+    simp only [List.filterMap_cons, List.filterMap_nil, repoOf, patchOf, depOf, approvalOf, checkOf, channelOf,
+      memberOf, pathOf, eventOf, bodyOf, listingOf, puts_nil, puts_single, List.getLast?_nil, Option.getD_none]
+    exact ⟨hi.1, hi.2, hi.3, hi.4, hi.5, hi.6, hi.7, hi.8, hi.9, hi.10, hi.11, hi.12, hi.13, hi.14, hi.15, hi.16,
+      hi.17, hi.18, hi.19⟩
+
+theorem inv_create {s : St} (hi : Inv s) {a : Principal} {n : alloc.vec.Vec U8} {ws r}
+    (h : Model.create a s.repo n = .Ok (ws, r)) : Inv (applyAll s ws) := by
+  unfold Model.create at h
+  split_ifs at h with h1 h2 h3
+  simp only [core.result.Result.Ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨rfl, -⟩ := h
+  have hu := hi.unborn (by simpa using h3)
+  obtain ⟨hp, hd, ha, hc, hch, hm, hpa, he, hb⟩ := hu
+  rw [applyAll_eq]
+  simp only [List.filterMap_cons, List.filterMap_nil, repoOf, patchOf, depOf, approvalOf, checkOf, channelOf,
+    memberOf, pathOf, eventOf, bodyOf, listingOf, puts_nil, puts_single, List.getLast?_singleton, Option.getD_some,
+    hp, hd, ha, hc, hch, hm, hpa, he, hb]
+  constructor <;> simp [upsert, hasPatch, isMember]
+
 end o5s_registry.Invariant
