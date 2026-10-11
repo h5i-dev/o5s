@@ -118,7 +118,8 @@ pub async fn connect(hd: &Hyperdrive) -> Result<Client, DbError> {
         .connect(hd.host(), hd.port())
         .map_err(|e| DbError::Connect(e.to_string()))?;
     let config = hd.connection_string().parse::<tokio_postgres::Config>()?;
-    let (client, connection) = config.connect_raw(socket, PassthroughTls).await?;
+    let (client, connection) =
+        config.connect_raw(socket, PassthroughTls).await.map_err(|e| DbError::Connect(format!("startup: {e}")))?;
     wasm_bindgen_futures::spawn_local(async move {
         if let Err(e) = connection.await {
             worker::console_error!("postgres connection: {e}");
@@ -247,12 +248,13 @@ impl<K: Kernel, S: Store<K>> Engine<K, S> {
     ) -> Result<Attempt<K>, DbError> {
         let tid = tenant_param(tenant)?;
         let tables = S::tables();
-        let tx = self.client.build_transaction().isolation_level(IsolationLevel::Serializable).start().await?;
-        tx.batch_execute(&self.set_schema).await?;
+        let tx = self.client.build_transaction().isolation_level(IsolationLevel::Serializable).start().await.inspect_err(|e| failed("begin", e))?;
+        tx.batch_execute(&self.set_schema).await.inspect_err(|e| failed("set schema", e))?;
         if let Some(idem) = idem {
             let stored = tx
                 .query_opt("SELECT fingerprint, reply FROM h5i_idempotency WHERE tenant_id = $1 AND key = $2", &[&tid, &idem.key])
-                .await?;
+                .await
+                .inspect_err(|e| failed("read idempotency key", e))?;
             if let Some(row) = stored {
                 let fp: Vec<u8> = row.try_get(0)?;
                 if fp != idem.fingerprint {
@@ -264,7 +266,7 @@ impl<K: Kernel, S: Store<K>> Engine<K, S> {
                 return Ok(Attempt::Replayed(reply));
             }
         }
-        let snap = load::<K, S>(&tx, &tables, tid).await?;
+        let snap = load::<K, S>(&tx, &tables, tid).await.inspect_err(|e| failed("load", e))?;
         let mut actor = actor.clone();
         K::stamp(&mut actor, now());
         let decision = K::transition(&actor, &snap, cmd);
@@ -279,19 +281,25 @@ impl<K: Kernel, S: Store<K>> Engine<K, S> {
                 Ok(Attempt::Done(Err(refusal)))
             }
             Ok((ws, reply)) => {
-                store(&tx, &tables, tid, &S::writes(&ws)).await?;
+                store(&tx, &tables, tid, &S::writes(&ws)).await.inspect_err(|e| failed("store", e))?;
                 if let (Some(idem), Some(bytes)) = (idem, &encoded) {
                     tx.execute(
                         "INSERT INTO h5i_idempotency (tenant_id, key, fingerprint, reply) VALUES ($1, $2, $3, $4)",
                         &[&tid, &idem.key, &idem.fingerprint, bytes],
                     )
-                    .await?;
+                    .await
+                    .inspect_err(|e| failed("store idempotency key", e))?;
                 }
-                tx.commit().await.map_err(commit_error)?;
+                tx.commit().await.map_err(commit_error).inspect_err(|e| failed("commit", e))?;
                 Ok(Attempt::Done(Ok(reply)))
             }
         }
     }
+}
+
+/// Logs which step of an attempt failed; the error alone does not say.
+fn failed(step: &str, e: &dyn std::fmt::Display) {
+    worker::console_error!("transaction step {step} failed: {e}");
 }
 
 /// Every table of the tenant, decoded.
