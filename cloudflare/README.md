@@ -1,5 +1,7 @@
 # Cloudflare edge and Artifacts adapter
 
+The o5s API itself runs on Workers as the Rust Worker in [`crates/worker`](../crates/worker/README.md), with PostgreSQL through Hyperdrive. Set `O5S_ORIGIN` here to that Worker's URL; this adapter adds Artifacts.
+
 This ESM Worker proxies the local platform API/UI to an axum origin. `/api/artifacts` resolves the bearer token through `/api/repositories` before touching Artifacts. Repository names are prefixed with the authenticated tenant ID; fork names stay under that repository scope. Credentials are returned only to the authenticated caller with `Cache-Control: no-store`. They are never inserted into patch history.
 
 ```sh

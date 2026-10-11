@@ -1,0 +1,411 @@
+//! The o5s API on Cloudflare Workers. The registry kernel, command planning,
+//! narrow loads and repository views are the same crates the native server
+//! runs (`o5s_pgwire::service`); this crate only binds them to Hyperdrive and
+//! to the Workers fetch handler. Git projections and Artifacts stay in the
+//! JavaScript edge adapter (`cloudflare/`), which forwards here.
+
+#[path = "../../server/src/auth.rs"]
+pub mod auth;
+
+use axum::{
+    Router,
+    body::Bytes,
+    extract::{Query, State},
+    http::{HeaderMap, StatusCode, header},
+    response::{Html, IntoResponse, Response},
+    routing::{get, post},
+};
+use o5s_pgwire::{
+    Connector, DbError, Engine, Runtime,
+    service::{Failure, Service},
+};
+use o5s_platform::{Actor, Command, IncrementalView, Refusal, Repository};
+use serde::Deserialize;
+use std::{sync::Arc, time::Duration};
+use tower_service::Service as _;
+use worker::{
+    Context, Env, HttpRequest, Hyperdrive, SecureTransport, Socket, event,
+    postgres_tls::PassthroughTls,
+};
+
+/// PostgreSQL schema of the registry tables, as the native server uses.
+pub const SCHEMA: &str = "o5s";
+
+/// A new connection through Hyperdrive, which pools the real ones.
+pub struct Hyper(Hyperdrive);
+
+impl Connector for Hyper {
+    async fn connect(&self) -> Result<tokio_postgres::Client, DbError> {
+        let socket = Socket::builder()
+            .secure_transport(SecureTransport::StartTls)
+            .connect(self.0.host(), self.0.port())
+            .map_err(|e| DbError::Connect(e.to_string()))?;
+        let config = self
+            .0
+            .connection_string()
+            .parse::<tokio_postgres::Config>()
+            .map_err(|e| DbError::Connect(e.to_string()))?;
+        let (client, connection) = config
+            .connect_raw(socket, PassthroughTls)
+            .await
+            .map_err(|e| DbError::Connect(format!("startup: {e}")))?;
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Err(e) = connection.await {
+                worker::console_error!("postgres connection: {e}");
+            }
+        });
+        Ok(client)
+    }
+}
+
+pub struct Delay;
+
+impl Runtime for Delay {
+    async fn sleep(&self, d: Duration) {
+        worker::Delay::from(d).await
+    }
+}
+
+type Registry = Service<Hyper, Delay>;
+
+#[derive(Clone)]
+struct AppState {
+    env: Arc<Env>,
+}
+
+impl AppState {
+    fn registry(&self) -> Result<Registry, Failure> {
+        let hyperdrive = self
+            .env
+            .hyperdrive("HYPERDRIVE")
+            .map_err(|e| Failure::Unavailable(e.to_string()))?;
+        // One Worker request runs its transactions one after another.
+        let engine = Engine::new(Hyper(hyperdrive), Delay, SCHEMA, 1)
+            .map_err(|e| Failure::Unavailable(e.to_string()))?;
+        Ok(Service::new(engine))
+    }
+
+    fn actor(&self, headers: &HeaderMap) -> Result<Actor, Response> {
+        let secret = self.env.secret("H5I_APP_SECRET").map_err(|_| {
+            json(
+                StatusCode::SERVICE_UNAVAILABLE,
+                serde_json::json!({"error":"secret not configured"}),
+            )
+        })?;
+        let auth = auth::HmacAuth::new(secret.to_string());
+        let now = (worker::Date::now().as_millis() / 1000) as u64;
+        auth.authenticate(headers, now)
+            .map(|(tenant, user)| Actor { tenant, user })
+            .map_err(|e| json(StatusCode::UNAUTHORIZED, serde_json::json!({"error":e.0})))
+    }
+}
+
+fn router(env: Env) -> Router {
+    Router::new()
+        .route(
+            "/",
+            get(|| async { Html(include_str!("../../server/src/index.html")) }),
+        )
+        .route("/healthz", get(|| async { "ok" }))
+        .route("/readyz", get(ready))
+        .route("/api/repositories", get(repositories))
+        .route("/api/state", get(repo_state))
+        .route("/api/view", get(compact_view))
+        .route("/api/document", get(document_view))
+        .route("/api/patches", get(patches))
+        .route("/api/patch", get(patch))
+        .route("/api/command", post(command))
+        .route("/api/export", post(no_filesystem))
+        .route("/api/worktree", post(no_filesystem))
+        .route("/api/worktree/propose", post(no_filesystem))
+        .with_state(AppState { env: Arc::new(env) })
+}
+
+#[event(fetch)]
+async fn fetch(
+    req: HttpRequest,
+    env: Env,
+    _ctx: Context,
+) -> worker::Result<axum::http::Response<axum::body::Body>> {
+    Ok(router(env).call(req).await?)
+}
+
+fn out(v: serde_json::Value) -> h5i_app_json::Value {
+    use h5i_app_json::Value;
+    match v {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Bool(b),
+        serde_json::Value::Number(n) => n.as_u64().unwrap_or(0).into(),
+        serde_json::Value::String(s) => Value::str(&s),
+        serde_json::Value::Array(a) => Value::Arr(a.into_iter().map(out).collect()),
+        serde_json::Value::Object(m) => Value::Obj(
+            m.into_iter()
+                .map(|(k, v)| (k.into_bytes(), out(v)))
+                .collect(),
+        ),
+    }
+}
+
+/// Every body goes through the verified writer (`h5i-app-json`).
+fn json(status: StatusCode, value: serde_json::Value) -> Response {
+    (
+        status,
+        [(header::CONTENT_TYPE, "application/json")],
+        out(value).to_bytes(),
+    )
+        .into_response()
+}
+
+fn reply(r: Result<serde_json::Value, Failure>) -> Response {
+    match r {
+        Ok(v) => json(StatusCode::OK, v),
+        Err(Failure::Refused(e)) => json(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            serde_json::json!({"error":e.0}),
+        ),
+        Err(Failure::Conflict(m)) => json(StatusCode::CONFLICT, serde_json::json!({"error":m})),
+        Err(Failure::Unavailable(m)) => {
+            worker::console_error!("request failed: {m}");
+            json(
+                StatusCode::SERVICE_UNAVAILABLE,
+                serde_json::json!({"error":m}),
+            )
+        }
+    }
+}
+
+#[worker::send]
+async fn ready(State(s): State<AppState>) -> Response {
+    let r = async { s.registry()?.ready().await }.await;
+    reply(r.map(|()| serde_json::json!({"ready":true})))
+}
+
+fn idempotency_key(headers: &HeaderMap) -> Result<Option<String>, Response> {
+    match headers.get("idempotency-key") {
+        None => Ok(None),
+        Some(v) => match v.to_str() {
+            Ok(k) if !k.is_empty() && k.len() <= 128 && k.bytes().all(|b| b.is_ascii_graphic()) => {
+                Ok(Some(k.into()))
+            }
+            _ => Err(json(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({"error":"invalid Idempotency-Key"}),
+            )),
+        },
+    }
+}
+
+#[worker::send]
+async fn command(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    let a = match s.actor(&headers) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let key = match idempotency_key(&headers) {
+        Ok(k) => k,
+        Err(e) => return e,
+    };
+    let c = match serde_json::from_slice::<Command>(&body) {
+        Ok(c) => c,
+        Err(e) => {
+            return json(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({"error":e.to_string()}),
+            );
+        }
+    };
+    let r = async { s.registry()?.execute(&a, c, key.as_deref()).await }.await;
+    reply(r)
+}
+
+#[worker::send]
+async fn repositories(State(s): State<AppState>, headers: HeaderMap) -> Response {
+    let a = match s.actor(&headers) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let r = async { s.registry()?.repositories(&a).await }.await;
+    reply(r.map(
+        |names| serde_json::json!({"repositories":names,"actor":{"tenant":a.tenant,"user":a.user}}),
+    ))
+}
+
+#[derive(Deserialize)]
+struct RepoQuery {
+    repo: String,
+    #[serde(default = "main_channel")]
+    channel: String,
+}
+
+fn main_channel() -> String {
+    "main".into()
+}
+
+async fn load(s: &AppState, headers: &HeaderMap, name: &str) -> Result<Arc<Repository>, Response> {
+    let a = s.actor(headers)?;
+    let r = async { s.registry()?.repository(&a, name).await }.await;
+    r.map_err(|f| reply(Err(f)))
+}
+
+#[worker::send]
+async fn repo_state(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<RepoQuery>,
+) -> Response {
+    let repo = match load(&s, &headers, &q.repo).await {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    let mut cache = IncrementalView::default();
+    reply(
+        (|| {
+            let work = cache.sync_append_only(&repo, &q.channel)?;
+            let view = cache.view()?;
+            Ok::<_, Refusal>(serde_json::json!({"repository":*repo,"view":view,"work":work}))
+        })()
+        .map_err(Failure::Refused),
+    )
+}
+
+#[worker::send]
+async fn compact_view(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<RepoQuery>,
+) -> Response {
+    let repo = match load(&s, &headers, &q.repo).await {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    let mut cache = IncrementalView::default();
+    reply((|| {
+        let work = cache.sync_append_only(&repo, &q.channel)?;
+        let view = cache.content()?;
+        Ok::<_, Refusal>(serde_json::json!({"files":view.files,"conflicts":view.conflicts,"executable":view.executable,
+            "binary":view.binary,"patch_count":cache.patch_count(),"work":work,"generation":repo.generation}))
+    })()
+    .map_err(Failure::Refused))
+}
+
+#[derive(Deserialize)]
+struct DocumentQuery {
+    repo: String,
+    #[serde(default)]
+    patches: Option<String>,
+    #[serde(default = "main_channel")]
+    channel: String,
+    path: String,
+}
+
+#[worker::send]
+async fn document_view(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<DocumentQuery>,
+) -> Response {
+    let repo = match load(&s, &headers, &q.repo).await {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    reply((|| {
+        if !o5s_platform::valid_path(&q.path) {
+            return Err(Refusal("invalid document path".into()));
+        }
+        let selected: Vec<u64> = match &q.patches {
+            Some(v) if v.is_empty() => Vec::new(),
+            Some(v) => {
+                if v.len() > 128 * 1024 {
+                    return Err(Refusal("snapshot selection too large".into()));
+                }
+                v.split(',').map(str::parse).collect::<Result<_, _>>().map_err(|_| Refusal("invalid snapshot patch identifiers".into()))?
+            }
+            None => repo.channels.get(&q.channel).ok_or_else(|| Refusal("channel not found".into()))?.clone(),
+        };
+        let graph = repo.document_at(&q.path, &selected)?;
+        let view = graph.materialize();
+        let nodes: Vec<_> =
+            view.layers.iter().flatten().map(|id| serde_json::json!({"id":id,"bytes":graph.atom(*id)})).collect();
+        Ok(serde_json::json!({"path":q.path,"patches":selected,"graph_backed":graph.patch_count() > 0,"layers":view.layers,
+            "nodes":nodes,"conflicts":view.conflicts,"bytes":view.bytes}))
+    })()
+    .map_err(Failure::Refused))
+}
+
+#[derive(Deserialize)]
+struct PatchPage {
+    repo: String,
+    #[serde(default)]
+    after: u64,
+    #[serde(default = "page_size")]
+    limit: usize,
+}
+
+fn page_size() -> usize {
+    50
+}
+
+#[worker::send]
+async fn patches(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<PatchPage>,
+) -> Response {
+    if !(1..=100).contains(&q.limit) {
+        return reply(Err(Failure::Refused(Refusal(
+            "limit must be between 1 and 100".into(),
+        ))));
+    }
+    let repo = match load(&s, &headers, &q.repo).await {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    let mut registry = repo.patches.range(q.after + 1..);
+    let page: Vec<_> = registry
+        .by_ref()
+        .take(q.limit)
+        .map(|(id, p)| {
+            serde_json::json!({"id":id,"hash":p.hash,"author":p.author,"intent":p.intent,
+                "dependency_count":p.dependencies.len(),"edit_count":p.edits.len(),
+                "line_edit_count":p.line_edits.len(),"graph_edit_count":p.graph_edits.len(),
+                "approval_count":p.approvals.len(),"checks_passed":p.checks_passed})
+        })
+        .collect();
+    let next = if registry.next().is_some() {
+        page.last().map(|p| p["id"].clone())
+    } else {
+        None
+    };
+    reply(Ok(serde_json::json!({"patches":page,"next_after":next})))
+}
+
+#[derive(Deserialize)]
+struct PatchQuery {
+    repo: String,
+    id: u64,
+}
+
+#[worker::send]
+async fn patch(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<PatchQuery>,
+) -> Response {
+    let repo = match load(&s, &headers, &q.repo).await {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    reply(
+        repo.patches
+            .get(&q.id)
+            .map(|p| serde_json::json!({"patch":p}))
+            .ok_or_else(|| Failure::Refused(Refusal("patch not found".into()))),
+    )
+}
+
+async fn no_filesystem() -> Response {
+    json(
+        StatusCode::NOT_IMPLEMENTED,
+        serde_json::json!({"error":"Git projections are served by the Artifacts edge adapter, not this Worker"}),
+    )
+}

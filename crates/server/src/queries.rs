@@ -1,4 +1,4 @@
-use crate::{AppState, actor, result};
+use crate::{AppState, load, result};
 use axum::{
     extract::{Query, State},
     http::HeaderMap,
@@ -28,16 +28,14 @@ pub(super) async fn patches(
     headers: HeaderMap,
     Query(q): Query<PatchPage>,
 ) -> Response {
-    let a = match actor(&s, &headers) {
-        Ok(a) => a,
-        Err(e) => return e,
-    };
     if !(1..=100).contains(&q.limit) {
         return result(Err(Refusal("limit must be between 1 and 100".into())));
     }
-    let store = s.store.lock().unwrap();
+    let (_, repo) = match load(&s, &headers, &q.repo).await {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
     result((|| {
-        let repo = store.db.repo(&a, &q.repo)?;
         let mut registry = repo.patches.range((Excluded(q.after), Unbounded));
         let page: Vec<_> = registry
             .by_ref()
@@ -71,13 +69,11 @@ pub(super) async fn patch(
     headers: HeaderMap,
     Query(q): Query<PatchQuery>,
 ) -> Response {
-    let a = match actor(&s, &headers) {
-        Ok(a) => a,
+    let (_, repo) = match load(&s, &headers, &q.repo).await {
+        Ok(x) => x,
         Err(e) => return e,
     };
-    let store = s.store.lock().unwrap();
     result((|| {
-        let repo = store.db.repo(&a, &q.repo)?;
         let patch = repo
             .patches
             .get(&q.id)

@@ -24,7 +24,9 @@ fn propose(db: &mut Database, deps: Vec<u64>, operations: Vec<Operation>) -> Val
             edits: vec![GraphEdit {
                 path: "file".into(),
                 operations,
+                ..Default::default()
             }],
+            files: vec![],
         },
     )
     .unwrap()
@@ -191,7 +193,9 @@ fn unobserved_anchors_and_legacy_mix_are_refused_without_mutation() {
             edits: vec![GraphEdit {
                 path: "file".into(),
                 operations: vec![insert(Anchor::Node(node(&base, 0)), Anchor::End, &["x"])],
+                ..Default::default()
             }],
+            files: vec![],
         },
     );
     assert!(result.is_err());
@@ -205,7 +209,8 @@ fn unobserved_anchors_and_legacy_mix_are_refused_without_mutation() {
                 dependencies: vec![1],
                 edits: vec![o5s_platform::Edit {
                     path: "file".into(),
-                    content: Some("replacement".into())
+                    content: Some("replacement".into()),
+                    ..Default::default()
                 }]
             }
         )

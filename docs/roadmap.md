@@ -9,14 +9,14 @@ This plan orders the missing work by dependency. Every milestone needs executabl
 | Area | Existing code | Missing work |
 |---|---|---|
 | Patch identity | SHA-256 records, dependencies, local numeric handles in `crates/platform/src/lib.rs` | Canonical wire format, cross-replica identity, versioning and malformed-record rejection |
-| Text merge | Causal whole-file registers and immutable-base line edits in `crates/platform/src/lines.rs` | One graph model across repeated concurrent edits, deletion/restoration, file operations and resolutions |
-| Graph projection | Derived live-boundary summaries in `crates/platform/src/projection.rs` | Connection to actual text edits; correctness of persistent adjacency maintenance and rendering |
-| Extracted kernels | Five implementation modules under `crates/kernel/src/` | Patch application and incremental updates over the complete edit model |
+| Text merge | Persisted insertion/deletion/restoration/order graphs and legacy line edits | Empty-file creation, graph path deletion/rename, legacy migration and complete merge semantics |
+| Graph projection | Derived live-boundary summaries in `crates/platform/src/projection.rs` | Component-local projection cache for document edits; proof of native adjacency/count maintenance |
+| Extracted kernels | Actual admission, graph, interval, indexed traversal, coordinates, frontier and deletion-tag functions | Patch application and incremental updates over the complete edit model |
 | Lean | Admission and projection/rendering refinements with explicit assumptions | End-to-end materialization equivalence, preservation by graph updates, transaction refinement |
-| Persistence | One process mutex and whole-database JSON replacement in `crates/server/src/lib.rs` | Indexed durable transactions, concurrent repositories, migrations, recovery and backups |
-| Clients | Admin UI and Git-connected CLI under development | Versioned protocol, retries, pagination, streaming updates and complete client workflows |
+| Persistence | Local write-ahead log and PostgreSQL transactions running the extracted registry kernel (`docs/storage.md`) | Schema migrations beyond table creation, cross-region replication, proofs of narrow loads |
+| Clients | Admin graph inspector and Git-connected CLI with bounded history and automatic graph proposals | Versioned protocol, retry/idempotency, streaming updates and remaining file operations |
 | Cloudflare | Worker adapter and mocked Artifacts operations | Deployed integration, synchronization jobs, durable delivery and failure recovery |
-| Scale | In-memory fixtures with 10,000 patches/ranges | Network load, long-history memory, database throughput, overload behavior and recovery measurements |
+| Scale | Authenticated 1,000-author HTTP runs and actual 2,000/8,000-patch graph measurements | Network load, long-history memory, database throughput, overload behavior and recovery measurements |
 
 `crates/kernel/src/lib.rs` is a module index. Its length is not an implementation metric. The small admission kernel deliberately takes identity and approval facts from native code; proving it does not prove those facts or the complete platform.
 
@@ -133,9 +133,21 @@ Keep the h5i UI theme while completing keyboard navigation, focus handling, acce
 
 Completion requires an installation/upgrade guide, tested recovery commands, accessibility checks and an end-to-end workflow usable without manually constructing API requests.
 
+## Next session
+
+Done in this round: the registry kernel (`crates/registry`) decides every committed registry change and is extracted to Lean. The local write-ahead log and PostgreSQL (`h5i_app_pg::Engine`, one SERIALIZABLE transaction per repository, narrow per-command loads, idempotency keys) both run it. Also done: storage parity, concurrency, replica, restart, backup, torn-tail and legacy-import tests; binary, executable, empty and removed files with mixed proposals; the generation-guarded Git export; metrics, request IDs and secret rotation; the Rust load driver and a measured Git baseline.
+
+1. Proved so far for the registry: `apply`/`commit` refinement, the storage round trip, specs of every lookup and validation helper (`Helpers.lean`), and the `register` command spec. In `crates/registry/pending/`, `Commands.lean` holds the remaining command specs (`create` and `approve` are stated; `fork`, `propose`, `check` and `merge` are not yet written). Prove the pending registry statements in `crates/registry/pending/Theorems.lean`: `inv_preserved`, `frame`, `narrow_load` (which justifies the server's `load_for`), `isolation`, `scopes_separate`, `patches_immutable`, `members_append_only` and `merge_gate`. Then add a `PgServedFor` relation that models partial loads, and prove that the invariant holds on PostgreSQL. Move each proved statement into the gated `Proofs` library.
+2. Cloudflare: port the PostgreSQL engine to Workers and Hyperdrive, as the earlier calculator Worker did, with Artifacts projections fed by an outbox. Then deploy and run the two-agent demonstration.
+3. Raise single-repository PostgreSQL throughput: fewer roundtrips per transaction, group commit of independent commands, and incremental reads of events.
+4. Remaining file semantics: identity-preserving renames, symlinks and submodules. Cycle recovery for order edges.
+5. Repository roles, quotas and token revocation; open-loop overload tests; and checks executed as snapshot-bound CI rather than reports.
+
+The local PostgreSQL 17 development container is `o5s-platform-pg`, bound to `127.0.0.1:15438`; `scripts/postgres.sh` starts an equivalent one.
+
 ## Development and evidence
 
-Implement M1 and the reference half of M2 first. CLI workflow tests and documentation can progress while compilation or extraction runs. M3 starts when those executable semantics exist; M4 optimization must be compared to them. Storage and protocol work can proceed against the specified model, but production readiness requires all milestones.
+Complete the production graph semantics in M1 and M2 first. CLI workflow tests and documentation can progress while compilation or extraction runs. M3 starts when those executable semantics exist; M4 optimization must be compared to them. Storage and protocol work can proceed against the specified model, but production readiness requires all milestones.
 
 Run compilation, extraction and `h5i app mutate` in background jobs with preserved logs. Continue independent implementation while those jobs run. Run semantic mutants when a relevant proof or kernel changes; a previously caught mutant is not a reason to spend another development cycle waiting for the same result. Keep full proof gates for commits that change extraction or theorem scope.
 

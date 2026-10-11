@@ -1,0 +1,27 @@
+# The o5s API on Workers (`crates/worker`), configured at the repository root,
+# which Workers Builds uses unless a root directory is set. The JavaScript
+# edge adapter in `cloudflare/` serves
+# Artifacts and forwards everything else here (set its O5S_ORIGIN to this
+# Worker's URL, or bind it as a service).
+# Same name as the Worker deployed from the dashboard (Workers Builds).
+name = "o5s"
+main = "crates/worker/build/index.js"
+compatibility_date = "2026-10-01"
+
+[build]
+command = "cd crates/worker && sh build.sh"
+
+# Required by `wrangler preview` (non-production branch builds). Empty: previews
+# use the top-level settings.
+[previews]
+
+# Run next to the database: each request is several round trips.
+[placement]
+region = "aws:us-east-1"
+
+# PostgreSQL through Hyperdrive. Create the tables once with the database
+# owner: `o5s-server ddl | psql "$OWNER_URL"`. For `wrangler dev`, set
+# CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE to a local database.
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "09738769027849ffb2cd540155d430c9"

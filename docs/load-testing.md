@@ -1,5 +1,29 @@
 # Authenticated agent load tests
 
+## Rust driver
+
+`o5s-load` (`crates/loadgen`) drives a running server over the authenticated API with persistent connections and checks the final bytes. Its `git` and `compare` modes measure the plain-Git baseline on the same workloads; see the [comparison with Git](git-comparison.md). The Python driver below is limited by its own threads and per-request connections. With 64 requests in flight it reported about 1.3 s per command, while the server's `/metrics` showed 2.3 ms per command including lock waits.
+
+```sh
+cargo build --release -p o5s-server -p o5s-load
+H5I_APP_SECRET=... target/release/o5s-load o5s --url http://127.0.0.1:3000 --agents 1000 --concurrency 64 --workload disjoint
+```
+
+The results below are for 1,000 authors with 64 requests in flight, on the host described in the Git comparison, on October 11, 2026, with release builds. *Propose* rows count proposals; the review row counts approve-plus-check pairs.
+
+| Storage | Workload | Proposals/s (p95) | Review pairs/s (p95) |
+|---|---|---:|---:|
+| Local log | Adjacent lines, one file | 816 (96 ms) | 1,861 (84 ms) |
+| Local log | One file each | 2,457 (47 ms) | 1,801 (86 ms) |
+| Local log | One repository each | 2,650 (45 ms) | 1,849 (86 ms) |
+| PostgreSQL 17 | Adjacent lines, one file | 208 (324 ms) | 176 (384 ms) |
+| PostgreSQL 17 | One file each | 275 (265 ms) | 180 (370 ms) |
+| PostgreSQL 17 | One repository each | 2,029 (60 ms) | 4,080 (25 ms) |
+
+PostgreSQL ran in a local Docker container reached through Docker's port proxy, with a 32-connection pool. An uncontended approval takes 2.8 ms and a proposal 3.2 ms (`cargo run --release -p o5s-server --example pg_latency`): one simple-query roundtrip for `BEGIN`, the search path and the lock, two typed `SELECT`s, pipelined upserts, and `COMMIT`. A single hot repository is limited by those roundtrips under its lock, to about 350 transactions per second here. Unrelated repositories proceed in parallel. All runs completed with zero failed requests, zero retries and checked contents. The earlier SERIALIZABLE engine reached 95, 106 and 396 proposals/s on these workloads and retried 23% of attempts.
+
+## Python driver
+
 `scripts/load.py` drives the same HTTP commands as clients. It creates one identity per author and separate identities for review and check reports. Proposals run concurrently, followed by concurrent review/check reports and admission batches. Each run compares forward and reverse admission orders, checks every admitted patch's membership, and checks output bytes or retained conflict alternatives. It also checks that self-approval and unreviewed admission are refused without changing the channel view. A failed check gives a nonzero exit status.
 
 The driver uses Python's standard library. It starts an isolated server with temporary storage and fresh test credentials when `--local-server` is given. It never reads a production signing secret. The server binary must already exist:

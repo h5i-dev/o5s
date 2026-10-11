@@ -29,7 +29,7 @@ rustc-ice-*.txt
 node_modules/
 
 # Lean
-proofs/.lake/
+**/.lake/
 
 # h5i run records
 .h5i/
@@ -39,3 +39,4 @@ proofs/.lake/
 
 # Python demo artifacts
 __pycache__/
+crates/worker/build/

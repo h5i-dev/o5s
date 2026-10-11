@@ -1,0 +1,19 @@
+[package]
+name = "o5s-registry"
+description = "Verified transactional patch registry kernel for o5s"
+edition = "2024"
+license = "Apache-2.0"
+version = "0.1.0"
+publish = false
+
+# Extracted to Lean by Charon + Aeneas (`h5i app extract crates/registry`).
+[dependencies]
+h5i-app-schema = "0.1.1"
+h5i-app-sql = "0.1.1"
+h5i-app-std = "0.1.1"
+o5s-kernel = { path = "../kernel" }
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+# Write-ahead-log encoding for the local store. Extraction builds without it.
+serde = ["dep:serde"]

@@ -23,6 +23,7 @@ fn propose(d: &mut Database, user: u64, deps: Vec<u64>, path: &str, content: Opt
             edits: vec![Edit {
                 path: path.into(),
                 content: content.map(str::to_owned),
+                ..Default::default()
             }],
         },
     )

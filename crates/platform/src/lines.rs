@@ -150,10 +150,23 @@ impl Repository {
                 return Err(refuse("overlapping line edits"));
             }
             let version = self.line_version(&group[0].path, group)?;
+            let base = self
+                .patches
+                .get(&version.base)
+                .and_then(|p| p.edits.iter().find(|e| e.path == group[0].path))
+                .ok_or_else(|| refuse("line base file not found"))?;
+            if base.base64 {
+                return Err(refuse(
+                    "line edits need a text file; replace binary files whole",
+                ));
+            }
+            let executable = base.executable;
             deps.push(version.base);
             out.push(Edit {
                 path: group[0].path.clone(),
                 content: Some(version.render()?),
+                executable,
+                base64: false,
             });
             i = end;
         }

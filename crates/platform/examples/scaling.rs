@@ -13,6 +13,7 @@ fn append(repo: &mut Repository, id: u64, dependencies: Vec<u64>) {
             edits: vec![Edit {
                 path: "file".into(),
                 content: Some(id.to_string()),
+                ..Default::default()
             }],
             line_edits: vec![],
             graph_edits: vec![],

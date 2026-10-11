@@ -6,9 +6,10 @@ flowchart LR
     A --> L[Local axum API]
     W --> L
     W --> G[Cloudflare Artifacts Git projections]
-    L --> K[h5i-app Kernel admission]
-    K --> P[Extracted Lean 4 refinement proofs]
-    L --> S[Local atomic snapshot store]
+    L --> K[Verified registry kernel: o5s_registry::transition]
+    K --> P[Extracted Lean 4 proofs]
+    K --> S[Local write-ahead log]
+    K --> Q[PostgreSQL via h5i_app_pg::Engine]
     L --> V[Causal file view and explicit conflicts]
     V --> E[Local bare Git export]
 ```
@@ -24,7 +25,7 @@ The local UI and API work without Cloudflare. The edge adapter forwards ordinary
 - Resolution: a patch depending on all competing heads. Existing conflicts can be integrated as data; export requires a conflict-free view.
 - Worktree: detached Git worktree of an exported bare projection. Each authenticated agent has a separate server-side snapshot workspace. Client worktrees use ordinary Git commands. Repeated requests reuse that agent’s workspace and preserve local changes. Workspace import records staged/unstaged text changes, additions and deletions as an immutable proposal depending on the exact exported snapshot. The index and working files stay intact. Sandbox execution remains future work.
 
-Local transactions are serialized. A successful response follows snapshot replacement and parent-directory sync. A directory-sync failure after replacement is reported explicitly as an already committed operation; retrying must account for that outcome. The single process lock prevents two native writers sharing one data directory. However, cloning/serializing a whole database on every command and vector set operations limit production throughput. Materialization caches per-path causal heads and inspects newly appended channel membership. Dependency searches stop when the relevant existing heads are found; the former quadratic ancestry implementation remains only as a differential-test oracle. A compact `/api/view` endpoint omits the patch registry. The admin `/api/state` response still includes it, so UI payload size remains proportional to history. See [scaling](scaling.md) for measured work and worst cases. Channel forks copy their vector today; they are not constant-cost distributed forks.
+Every committed registry decision comes from the extracted `o5s_registry::transition`, on either backend: the local write-ahead log or SERIALIZABLE PostgreSQL transactions, one repository per transaction. See [storage and transactions](storage.md). Materialization caches per-path causal heads and inspects newly appended channel membership. Dependency searches stop when the relevant existing heads are found. A compact `/api/view` endpoint omits the patch registry. The admin `/api/state` response still includes it, so UI payload size remains proportional to history. See [scaling](scaling.md) for measured work and worst cases. Channel forks copy their membership rows; they are not constant-cost forks.
 
 ## References and interpretation
 

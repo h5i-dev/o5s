@@ -7,17 +7,23 @@ publish = false
 
 [dependencies]
 o5s-platform = { path = "../platform" }
+o5s-registry = { path = "../registry", features = ["serde"] }
+o5s-pgwire = { path = "../pgwire", features = ["native"] }
+sha2 = "0.11"
 h5i-app-core = "0.1.1"
 h5i-app-json = "0.1.1"
 h5i-app-token = "0.1.1"
 libcrux-hmac = "0.0.8"
 axum = { version = "0.8", features = ["json"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "signal"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 fs2 = "0.4"
 
 [dev-dependencies]
+h5i-app-pg = "0.1.1"
+h5i-app-sql = "0.1.1"
+tokio-postgres = "0.7"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 tempfile = "3"
