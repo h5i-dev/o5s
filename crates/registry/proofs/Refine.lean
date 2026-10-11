@@ -447,4 +447,42 @@ theorem propose_refines (u : U64) (s : Snapshot) (h : alloc.vec.Vec U8) (deps : 
   · rw [← hb', ← hb1']; simp [hc, hc_1]
   · rw [← hb']; simp [hc]
 
+/-! ## Admission -/
+
+theorem insert_ok (v w : alloc.vec.Vec U64) (x : U64)
+    (h : h5i_app_std.set.insert core.cmp.PartialEqU64 core.clone.CloneU64 v x = ok w) :
+    w.val = if x ∈ v.val then v.val else v.val ++ [x] := by
+  unfold h5i_app_std.set.insert at h
+  obtain ⟨out, hout, h⟩ := bind_eq_ok.1 h
+  obtain ⟨b, hb, h⟩ := bind_eq_ok.1 h
+  have ho : out = v := by
+    rw [vec_clone_eq core.clone.CloneU64 v (fun _ => rfl)] at hout; simpa using hout.symm
+  have hb' := post_of_ok (h5i_app_std.Specs.set.contains_spec core.cmp.PartialEqU64 _ _) hb
+  split at h
+  · simp only [ok.injEq] at h; subst h ho; simp_all
+  · obtain ⟨t, ht, h⟩ := bind_eq_ok.1 h
+    simp only [core.clone.CloneU64, ok.injEq] at ht
+    rw [push_ok_val h, ← ht, ho]; subst ho; simp_all
+
+def liftK : core.result.Result (alloc.vec.Vec U64) o5s_kernel.patch.MergeError →
+    core.result.Result (List U64) o5s_kernel.patch.MergeError
+  | .Ok v => .Ok v.val
+  | .Err e => .Err e
+
+theorem patch_merge_ok (ch deps : alloc.vec.Vec U64) (a c : Bool) (id : U64) (r)
+    (h : o5s_kernel.patch.merge ch deps a c id = ok r) : liftK r = Model.admitK ch.val deps.val a c id := by
+  unfold o5s_kernel.patch.merge at h
+  h5i_invert h
+  all_goals (try have hb' := post_of_ok (h5i_app_std.Specs.set.subset_spec core.cmp.PartialEqU64 _ _) hb)
+  · have hsub : (deps.val.all fun d => decide (d ∈ ch.val)) = true := by
+      simp only [List.all_eq_true, decide_eq_true_eq]; intro d hd; subst hc_2; simp at hb'; exact hb' hd
+    simp [Model.admitK, liftK, hc, hc_1, hsub, insert_ok _ _ _ hv]
+  · have hsub : (deps.val.all fun d => decide (d ∈ ch.val)) = false := by
+      rw [hb'] at hc_2; simp only [List.all_eq_false, decide_eq_false_iff_not]
+      simp only [decide_eq_true_eq, List.subset_def, not_forall] at hc_2
+      obtain ⟨d, hd, hn⟩ := hc_2; exact ⟨d, hd, by simpa using hn⟩
+    simp [Model.admitK, liftK, hc, hc_1, hsub]
+  · simp [Model.admitK, liftK, hc, hc_1]
+  · simp [Model.admitK, liftK, hc]
+
 end o5s_registry.Refine
