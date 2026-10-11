@@ -200,4 +200,144 @@ theorem inv_create {s : St} (hi : Inv s) {a : Principal} {n : alloc.vec.Vec U8} 
     hp, hd, ha, hc, hch, hm, hpa, he, hb]
   constructor <;> simp [upsert, hasPatch, isMember]
 
+@[simp] theorem filterMap_none {α β} (l : List α) : l.filterMap (fun _ => (none : Option β)) = [] := by
+  induction l <;> simp_all
+
+@[simp] theorem filterMap_some_eq_map {α β} (g : α → β) (l : List α) :
+    l.filterMap (fun x => some (g x)) = l.map g := by
+  induction l <;> simp_all
+
+theorem channel_of_member {s : St} (hi : Inv s) {m : Member} (hm : m ∈ s.members) :
+    m.channel.val ≤ s.repo.channels.val := by
+  obtain ⟨c, hc, hid, -⟩ := hi.members_placed m hm
+  rw [← hid]; exact hi.channel_fresh c hc
+
+theorem inv_fork {s : St} (hi : Inv s) {u : U64} {src n : alloc.vec.Vec U8} {ws r}
+    (h : Model.fork u s src n = .Ok (ws, r)) : Inv (applyAll s ws) := by
+  unfold Model.fork at h
+  split at h
+  · simp at h
+  split at h
+  · simp at h
+  rename_i hnone
+  split at h
+  · simp at h
+  rename_i c hc
+  split at h
+  · simp at h
+  rename_i hm1
+  split at h
+  · simp at h
+  rename_i hm2
+  simp only [core.result.Result.Ok.injEq, Prod.mk.injEq] at h
+  obtain ⟨rfl, -⟩ := h
+  have hcm : c ∈ s.channels := List.mem_of_find?_eq_some hc
+  have hlabel : ∀ c' ∈ s.channels, c'.label.val ≠ n.val := by
+    intro c' hc' e
+    have := List.find?_eq_none.1 hnone c' hc'
+    simp [e] at this
+  have hid := Refine.inc_val hm1
+  have hinc := Refine.inc_val hm2
+  set id := Model.inc s.repo.channels
+  set copies := (s.members.filter (fun m => decide (m.channel = c.id))).map (fun m => { m with channel := id })
+  have hfresh : ∀ c' ∈ s.channels, c'.id ≠ id := by
+    intro c' hc' e; have := hi.channel_fresh c' hc'; rw [e, hid] at this; omega
+  have hch : upsert (·.id) { c with id, label := n } s.channels = s.channels ++ [{ c with id, label := n }] :=
+    upsert_fresh _ _ _ (fun y hy => hfresh y hy)
+  -- Members of the source channel, and their copies.
+  have hsrc : ∀ m ∈ s.members, m.channel = c.id → m.position.val < c.size.val := by
+    intro m hm e
+    obtain ⟨c', hc', hid', hpos⟩ := hi.members_placed m hm
+    have : c' = c := List.inj_on_of_nodup_map hi.channel_keys hc' hcm (by rw [hid', e])
+    subst this; exact hpos
+  have hcopy_keys : (copies.map (fun y => (y.channel, y.position))).Nodup := by
+    have hf : ((s.members.filter (fun m => decide (m.channel = c.id))).map (fun m => (m.channel, m.position))).Nodup :=
+      (List.filter_sublist.map _).nodup hi.member_keys
+    simp only [copies, List.map_map]
+    refine List.Nodup.map_on ?_ (List.Nodup.of_map _ hf)
+    intro x hx y hy e
+    simp only [Function.comp, Prod.mk.injEq] at e
+    simp only [List.mem_filter, decide_eq_true_eq] at hx hy
+    exact List.inj_on_of_nodup_map (List.Nodup.of_map _ hf |>.map_on (fun a _ b _ h => h) |> fun _ => hf)
+      (List.mem_filter.2 ⟨hx.1, by simp [hx.2]⟩) (List.mem_filter.2 ⟨hy.1, by simp [hy.2]⟩)
+      (by simp [hx.2, hy.2, e.2])
+  have hkeep : ∀ m ∈ s.members, m ∈ puts (fun y => (y.channel, y.position)) copies s.members := by
+    intro m hm
+    apply puts_keep _ hm
+    intro x hx e
+    simp only [copies, List.mem_map] at hx
+    obtain ⟨m', -, rfl⟩ := hx
+    simp only [Prod.mk.injEq] at e
+    have := channel_of_member hi hm; rw [← e.1, hid] at this; omega
+  have hnew : ∀ m ∈ s.members, m.channel = c.id →
+      { m with channel := id } ∈ puts (fun y => (y.channel, y.position)) copies s.members := by
+    intro m hm e
+    exact puts_new _ (List.mem_map.2 ⟨m, List.mem_filter.2 ⟨hm, by simp [e]⟩, rfl⟩) hcopy_keys
+  rw [applyAll_eq]
+  simp only [List.filterMap_cons, List.filterMap_nil, List.filterMap_append, List.filterMap_map, repoOf, patchOf,
+    depOf, approvalOf, checkOf, channelOf, memberOf, pathOf, eventOf, bodyOf, listingOf, puts_nil, puts_single,
+    Function.comp_def, filterMap_none, filterMap_some_eq_map, List.nil_append, List.append_nil, List.cons_append,
+    List.getLast?_singleton, Option.getD_some, hch]
+  have hcopies : (s.members.filter (fun m => decide (m.channel = c.id))).map
+      (fun x => ({ channel := id, position := x.position, patch := x.patch } : Member)) = copies := rfl
+  rw [hcopies]
+  set M := puts (fun y => (y.channel, y.position)) copies s.members
+  have hmemM : ∀ z ∈ M, z ∈ s.members ∨ ∃ m ∈ s.members, m.channel = c.id ∧ z = { m with channel := id } := by
+    intro z hz
+    rcases mem_puts _ hz with hz | hz
+    · exact .inl hz
+    · simp only [copies, List.mem_map, List.mem_filter, decide_eq_true_eq] at hz
+      obtain ⟨m, ⟨hm, he⟩, rfl⟩ := hz
+      exact .inr ⟨m, hm, he, rfl⟩
+  constructor
+  all_goals simp only [hasPatch, isMember, List.mem_append, List.mem_singleton]
+  · exact hi.patch_keys
+  · exact hi.patch_fresh
+  · exact hi.hashes
+  · exact hi.deps_known
+  · exact hi.approvals_independent
+  · exact hi.checks_independent
+  · rw [List.map_append, List.nodup_append]
+    refine ⟨hi.channel_keys, by simp, ?_⟩
+    simp only [List.mem_map, List.mem_singleton]
+    rintro _ ⟨c', hc', rfl⟩ _ ⟨_, rfl, rfl⟩; exact hfresh c' hc'
+  · rintro c' (hc' | rfl)
+    · have := hi.channel_fresh c' hc'; rw [hid]; omega
+    · exact le_refl _
+  · rw [List.map_append, List.nodup_append]
+    refine ⟨hi.channel_labels, by simp, ?_⟩
+    simp only [List.mem_map, List.mem_singleton]
+    rintro _ ⟨c', hc', rfl⟩ _ ⟨_, rfl, rfl⟩; exact hlabel c' hc'
+  · exact puts_nodup _ hi.member_keys
+  · intro z hz
+    rcases hmemM z hz with hz | ⟨m, hm, he, rfl⟩
+    · obtain ⟨c', hc', h1, h2⟩ := hi.members_placed z hz
+      exact ⟨c', .inl hc', h1, h2⟩
+    · exact ⟨_, .inr rfl, rfl, hsrc m hm he⟩
+  · intro z hz
+    rcases hmemM z hz with hz | ⟨m, hm, -, rfl⟩
+    · exact hi.members_known z hz
+    · exact hi.members_known m hm
+  · intro z hz d hd hdp
+    rcases hmemM z hz with hz | ⟨m, hm, he, rfl⟩
+    · obtain ⟨m2, hm2, h1, h2⟩ := hi.closed z hz d hd hdp
+      exact ⟨m2, hkeep m2 hm2, h1, h2⟩
+    · obtain ⟨m2, hm2, h1, h2⟩ := hi.closed m hm d hd hdp
+      exact ⟨_, hnew m2 hm2 (h1.trans he), rfl, h2⟩
+  · intro z hz
+    rcases hmemM z hz with hz | ⟨m, hm, -, rfl⟩
+    · exact hi.reviewed z hz
+    · exact hi.reviewed m hm
+  · intro e he
+    rcases mem_upsert_of he with rfl | he
+    · exact le_refl _
+    · have := hi.event_fresh e he; rw [hinc]; omega
+  · exact hi.bodies_known
+  · exact hi.path_keys
+  · exact hi.path_fresh
+  · exact hi.path_labels
+  · intro hcr
+    have := (hi.unborn hcr).2.2.2.2.1
+    rw [this] at hcm; simp at hcm
+
 end o5s_registry.Invariant
