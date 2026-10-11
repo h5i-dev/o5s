@@ -519,4 +519,59 @@ theorem admit_one_ok (u : U64) (s : Snapshot) (ch id : U64) (st : Admission) (r)
        subst_vars
        simp_all [Model.MAX])
 
+theorem merge_loop_ok (user : U64) (r : Repository) (v : alloc.vec.Vec PatchRow) (v1 : alloc.vec.Vec Dependency)
+    (v2 : alloc.vec.Vec Approval) (v3 : alloc.vec.Vec CheckReport) (v4 : alloc.vec.Vec Channel)
+    (v5 : alloc.vec.Vec Member) (v6 : alloc.vec.Vec PathKind) (v7 : alloc.vec.Vec Event) (v8 : alloc.vec.Vec Body)
+    (v9 : alloc.vec.Vec Listing) (ids : alloc.vec.Vec U64) (ch : U64) (st : Admission) (failure : Option Error)
+    (k : Usize) (res) (h : merge_loop user r v v1 v2 v3 v4 v5 v6 v7 v8 v9 ids ch st failure k = ok res)
+    (hk : k.val ≤ ids.val.length) :
+    (liftAdm res.1, res.2) = (ids.val.drop k.val).foldl
+      (Model.admitStep user (Snapshot.toSt ⟨r, v, v1, v2, v3, v4, v5, v6, v7, v8, v9⟩) ch) (liftAdm st, failure) := by
+  unfold merge_loop at h
+  refine H5iAppLib.loop_ok _ (fun x => x.2.2.val ≤ ids.val.length ∧
+      (ids.val.drop k.val).foldl (Model.admitStep user (Snapshot.toSt ⟨r, v, v1, v2, v3, v4, v5, v6, v7, v8, v9⟩) ch)
+          (liftAdm st, failure) =
+        (ids.val.drop x.2.2.val).foldl (Model.admitStep user (Snapshot.toSt ⟨r, v, v1, v2, v3, v4, v5, v6, v7, v8, v9⟩) ch)
+          (liftAdm x.1, x.2.1))
+    (fun res' => (liftAdm res'.1, res'.2) = (ids.val.drop k.val).foldl
+      (Model.admitStep user (Snapshot.toSt ⟨r, v, v1, v2, v3, v4, v5, v6, v7, v8, v9⟩) ch) (liftAdm st, failure))
+    (fun x => ids.val.length - x.2.2.val) ?_ (st, failure, k) res ⟨hk, rfl⟩ h
+  rintro ⟨a, f, j⟩ c ⟨hj, heq⟩ hc
+  simp only at hj heq
+  unfold merge_loop.body at hc
+  h5i_invert hc
+  · obtain ⟨st1, f1⟩ := x
+    simp at hc
+    obtain ⟨i3, hi3, hc⟩ := bind_eq_ok.1 hc
+    simp only [ok.injEq] at hc
+    subst hc
+    simp only
+    have hj' : j.val < ids.val.length := by scalar_tac
+    have hi : i3.val = j.val + 1 := by simpa using H5iAppLib.add_ok_val hi3
+    refine ⟨⟨by omega, ?_⟩, by omega⟩
+    rw [heq, List.drop_eq_getElem_cons hj', List.foldl_cons, hi]
+    congr 1
+    cases f with
+    | none =>
+      simp only [core.option.Option.is_none, Option.isNone_none, ↓reduceIte] at hx
+      obtain ⟨id, hid, hx⟩ := bind_eq_ok.1 hx
+      obtain ⟨p, hp, hx⟩ := bind_eq_ok.1 hx
+      obtain ⟨f2, st2⟩ := p
+      simp at hx
+      obtain ⟨rfl, rfl⟩ := hx
+      have hidv : id = ids.val[j.val] := by
+        have := H5iAppLib.vec_index_ok_get? hid; simpa [List.getElem?_eq_getElem hj'] using this.symm
+      have ha := admit_one_ok _ _ _ _ _ _ hp
+      subst hidv
+      simp only [Model.admitStep]
+      rw [← ha]
+    | some e =>
+      simp only [core.option.Option.is_none, Option.isNone_some, Bool.false_eq_true, ↓reduceIte, Result.ok.injEq,
+        Prod.mk.injEq] at hx
+      obtain ⟨rfl, rfl⟩ := hx
+      simp [Model.admitStep]
+  · simp only
+    have : ids.val.length ≤ j.val := by scalar_tac
+    rw [heq, List.drop_eq_nil_of_le this]; rfl
+
 end o5s_registry.Refine
