@@ -656,4 +656,92 @@ theorem admitOne_FI {s : St} {c : Channel} {u id : U64} {st : Model.Adm} (hf : F
         · exact .inl (.inr ⟨m, hm, hmx⟩)
         · exact .inr hmx.symm
 
+theorem fold_FI {s : St} {c : Channel} {u : U64} (ids : List U64) (x : Model.Adm × Option Error)
+    (hx : x.2 = none → FI s c x.1) :
+    (ids.foldl (Model.admitStep u s c.id) x).2 = none → FI s c (ids.foldl (Model.admitStep u s c.id) x).1 := by
+  induction ids generalizing x with
+  | nil => exact hx
+  | cons id ids ih =>
+    apply ih
+    unfold Model.admitStep
+    cases h2 : x.2 with
+    | none =>
+      simp only
+      intro hf
+      exact admitOne_FI (hx h2) hf
+    | some e => simp
+
+theorem filterMap_nil_of {α β} (f : α → Option β) (l : List α) (h : ∀ a ∈ l, f a = none) : l.filterMap f = [] :=
+  List.filterMap_eq_nil_iff.2 h
+
+theorem inv_merge {s : St} (hi : Inv s) {u : U64} {n : alloc.vec.Vec U8} {ids : List U64} {ws r}
+    (hm : Model.merge u s n ids = .Ok (ws, r)) : Inv (applyAll s ws) := by
+  unfold Model.merge at hm
+  split at hm
+  · simp at hm
+  split at hm
+  · simp at hm
+  rename_i c hc
+  dsimp only at hm
+  split at hm
+  · rename_i st hfold
+    simp only [core.result.Result.Ok.injEq, Prod.mk.injEq] at hm
+    obtain ⟨rfl, -⟩ := hm
+    set M0 := (s.members.filter (fun m => decide (m.channel = c.id))).map (·.patch)
+    have hf : FI s c st := by
+      have := fold_FI (u := u) ids (⟨M0, c.size, s.repo.events, 0#u64, []⟩, none) (fun _ => ⟨le_refl _, le_refl _,
+        by simp, by simp, by simp, by simp, by intro x; simp [M0]⟩)
+      rw [hfold] at this; exact this rfl
+    have hcm : c ∈ s.channels := List.mem_of_find?_eq_some hc
+    have hsrc : ∀ m ∈ s.members, m.channel = c.id → m.position.val < c.size.val := by
+      intro m hm e
+      obtain ⟨c', hc', hid', hpos⟩ := hi.members_placed m hm
+      have : c' = c := List.inj_on_of_nodup_map hi.channel_keys hc' hcm (by rw [hid', e])
+      subst this; exact hpos
+    have hnone : ∀ {β : Type} (f : Write → Option β), (∀ m, f (.PutMember m) = none) → (∀ e, f (.PutEvent e) = none) →
+        st.writes.filterMap f = [] := by
+      intro β f h1 h2
+      apply filterMap_nil_of; intro w hw
+      rcases hf.kinds w hw with ⟨m, rfl⟩ | ⟨e, rfl⟩ <;> simp [h1, h2]
+    have hwr : ∀ w ∈ st.writes, (∃ m, w = .PutMember m) ∨ (∃ e, w = .PutEvent e) := hf.kinds
+    set W := st.writes.filterMap memberOf
+    have hWkeys : (W.map (fun m => (m.channel, m.position))).Nodup := by
+      have hp := hf.positions
+      have : W.map (·.position) = (W.map (fun m => (m.channel, m.position))).map Prod.snd := by simp
+      rw [this] at hp; exact hp.of_map _
+    set M := puts (fun y => (y.channel, y.position)) W s.members
+    have hkeep : ∀ m ∈ s.members, m ∈ M := by
+      intro m hm
+      apply puts_keep _ hm
+      intro x hx e
+      obtain ⟨h1, h2, -⟩ := hf.members x hx
+      simp only [Prod.mk.injEq] at e
+      have := hsrc m hm (e.1.symm.trans h1); rw [← e.2] at this; omega
+    have hnew : ∀ x ∈ W, x ∈ M := fun x hx => puts_new _ hx hWkeys
+    set cc : Channel := { c with size := st.size }
+    set rr : Repository := { s.repo with events := st.seq }
+    have tail : ∀ {β : Type} (f : Write → Option β), (∀ m, f (.PutMember m) = none) → (∀ e, f (.PutEvent e) = none) →
+        f (.PutChannel cc) = none → f (.SetRepository rr) = none →
+        (st.writes ++ [Write.PutChannel cc, Write.SetRepository rr]).filterMap f = [] := by
+      intro β f h1 h2 h3 h4
+      rw [List.filterMap_append, hnone f h1 h2]; simp [h3, h4]
+    rw [applyAll_eq, tail patchOf (fun _ => rfl) (fun _ => rfl) rfl rfl, tail depOf (fun _ => rfl) (fun _ => rfl) rfl rfl,
+      tail approvalOf (fun _ => rfl) (fun _ => rfl) rfl rfl, tail checkOf (fun _ => rfl) (fun _ => rfl) rfl rfl,
+      tail pathOf (fun _ => rfl) (fun _ => rfl) rfl rfl, tail bodyOf (fun _ => rfl) (fun _ => rfl) rfl rfl,
+      tail listingOf (fun _ => rfl) (fun _ => rfl) rfl rfl]
+    have ech : (st.writes ++ [Write.PutChannel cc, Write.SetRepository rr]).filterMap channelOf = [cc] := by
+      rw [List.filterMap_append, hnone channelOf (fun _ => rfl) (fun _ => rfl)]; rfl
+    have emb : (st.writes ++ [Write.PutChannel cc, Write.SetRepository rr]).filterMap memberOf = W := by
+      rw [List.filterMap_append]; simp [memberOf, W]
+    have eev : (st.writes ++ [Write.PutChannel cc, Write.SetRepository rr]).filterMap eventOf =
+        st.writes.filterMap eventOf := by
+      rw [List.filterMap_append]; simp [eventOf]
+    have erp : ((st.writes ++ [Write.PutChannel cc, Write.SetRepository rr]).filterMap repoOf).getLast?.getD s.repo = rr := by
+      rw [List.filterMap_append, hnone repoOf (fun _ => rfl) (fun _ => rfl)]; rfl
+    rw [ech, emb, eev, erp]
+    simp only [puts_nil, puts_single]
+    trace_state
+    sorry
+  · simp at hm
+
 end o5s_registry.Invariant
