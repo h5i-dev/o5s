@@ -5,9 +5,12 @@ compatibility_date = "2026-10-01"
 [build]
 command = "sh build.sh"
 
-# `npx wrangler hyperdrive create o5s-calculator --connection-string=postgres://...`
-# prints the id. For `wrangler dev`, set
+# Run next to the database: each request is several round trips.
+[placement]
+region = "aws:us-east-1"
+
+# PlanetScale Postgres (planetscale-o5s-main-7r8e). For `wrangler dev`, set
 # CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE to a local database.
 [[hyperdrive]]
 binding = "HYPERDRIVE"
-id = "00000000000000000000000000000000"
+id = "09738769027849ffb2cd540155d430c9"
