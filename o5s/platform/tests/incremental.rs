@@ -13,6 +13,7 @@ fn add(r: &mut Repository, id: u64, dependencies: Vec<u64>, path: &str, content:
                 path: path.into(),
                 content,
             }],
+            line_edits: vec![],
             approvals: BTreeSet::new(),
             checks_passed: true,
         },

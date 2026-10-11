@@ -91,6 +91,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/view", get(compact_view))
         .route("/api/command", post(command))
         .route("/api/export", post(export))
+        .route("/api/worktree", post(worktree))
         .layer(DefaultBodyLimit::max(4 * 1024 * 1024))
         .with_state(state)
 }
@@ -259,6 +260,37 @@ async fn export(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> R
         Err(_) => json(
             StatusCode::SERVICE_UNAVAILABLE,
             serde_json::json!({"error":"export failed"}),
+        ),
+    }
+}
+
+async fn worktree(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    let a = match actor(&s, &headers) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let q: RepoQuery = match serde_json::from_slice(&body) {
+        Ok(q) => q,
+        Err(e) => {
+            return json(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({"error":e.to_string()}),
+            );
+        }
+    };
+    match tokio::task::spawn_blocking(move || {
+        // Keep the transaction lock until ref update: exports have a single
+        // consistent patch registry/channel and cannot race each other.
+        let store = s.store.lock().unwrap();
+        let repo = store.db.repo(&a, &q.repo)?;
+        artifacts::worktree(&s.root, a.tenant, &q.repo, &q.channel, repo)
+    })
+    .await
+    {
+        Ok(r) => result(r),
+        Err(_) => json(
+            StatusCode::SERVICE_UNAVAILABLE,
+            serde_json::json!({"error":"workspace failed"}),
         ),
     }
 }

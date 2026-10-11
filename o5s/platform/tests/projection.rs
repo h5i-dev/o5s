@@ -11,6 +11,21 @@ fn every_three_vertex_graph_and_liveness_preserves_reachability() {
             let vertices: Vec<_> = (0..3).map(|i| (i, live & (1 << i) != 0)).collect();
             let mut p = Projection::default();
             p.apply(&vertices, &edges);
+            let alive: Vec<_> = vertices
+                .iter()
+                .filter(|(_, yes)| *yes)
+                .map(|(v, _)| *v)
+                .collect();
+            let rows = o5s_kernel::graph::summary_rows(&edges, &alive);
+            let certified: BTreeSet<_> = alive
+                .iter()
+                .zip(rows)
+                .flat_map(|(u, row)| row.into_iter().map(move |v| (*u, v)))
+                .collect();
+            assert_eq!(
+                p.summary_edges().into_iter().collect::<BTreeSet<_>>(),
+                certified
+            );
             for &(u, alive) in &vertices {
                 if !alive {
                     continue;

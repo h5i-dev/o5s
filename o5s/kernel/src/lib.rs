@@ -3,6 +3,7 @@
 //! The kernel: Rust in the subset Aeneas translates to Lean (no `?`, no
 //! `String`, `while` loops over indices). The proofs are about this code.
 
+pub mod interval;
 pub mod patch;
 
 /// Who is calling: an organization (the tenant) and a user in it.

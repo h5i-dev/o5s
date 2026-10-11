@@ -1,4 +1,4 @@
-//! Local Git object adapter. No network commands, worktree checkout or remote
+//! Local Git objects and detached workspaces. No network commands or remote
 //! push. Export refuses unresolved conflicts and records immutable patch hashes
 //! in the commit message. Cloudflare Artifacts stores the same Git projection.
 use o5s_platform::{Refusal, Repository, valid_name};
@@ -141,4 +141,69 @@ pub fn export(
     let commit = git(&path, &args, message.as_bytes())?;
     git(&path, &["update-ref", &reference, &commit], &[])?;
     Ok(serde_json::json!({"path":path,"commit":commit,"tree":tree,"ref":reference}))
+}
+
+/// Detached local workspaces are snapshots of admitted patch sets. Repeated
+/// checkout of the same snapshot preserves any agent's existing local edits.
+pub fn worktree(
+    root: &Path,
+    tenant: u64,
+    name: &str,
+    channel: &str,
+    repo: &Repository,
+) -> Result<serde_json::Value, Refusal> {
+    let exported = export(root, tenant, name, channel, repo)?;
+    let commit = exported["commit"]
+        .as_str()
+        .ok_or_else(|| Refusal("missing Git projection".into()))?;
+    let bare = std::fs::canonicalize(exported["path"].as_str().unwrap())
+        .map_err(|e| Refusal(e.to_string()))?;
+    let root = std::fs::canonicalize(root).map_err(|e| Refusal(e.to_string()))?;
+    let path = root
+        .join("workspaces")
+        .join(tenant.to_string())
+        .join(name)
+        .join(channel)
+        .join(commit);
+    let reused = path.exists();
+    if !reused {
+        std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| Refusal(e.to_string()))?;
+        git(
+            &bare,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                path.to_str()
+                    .ok_or_else(|| Refusal("invalid workspace path".into()))?,
+                commit,
+            ],
+            &[],
+        )?;
+    }
+    let inspect = |args: &[&str]| -> Result<String, Refusal> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&path)
+            .args(args)
+            .output()
+            .map_err(|e| Refusal(e.to_string()))?;
+        if !output.status.success() {
+            return Err(Refusal("workspace inspection failed".into()));
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    };
+    if inspect(&["rev-parse", "HEAD"])? != commit {
+        return Err(Refusal(
+            "existing workspace HEAD changed; refusing to overwrite".into(),
+        ));
+    }
+    let common = inspect(&["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+    if std::fs::canonicalize(&common).map_err(|e| Refusal(e.to_string()))? != bare {
+        return Err(Refusal(
+            "workspace belongs to a different repository".into(),
+        ));
+    }
+    let dirty = !inspect(&["status", "--porcelain"])?.is_empty();
+    Ok(serde_json::json!({"path":path,"commit":commit,"reused":reused,"dirty":dirty}))
 }

@@ -1,7 +1,7 @@
 # Read by `h5i app` (extract, check, prove, mutate, doctor).
 
 [extract]
-start-from = ["transition", "apply", "sql_writes", "patch::merge", "graph::reachable"]
+start-from = ["transition", "apply", "sql_writes", "patch::merge", "graph::reachable", "graph::boundary", "graph::summary_rows", "interval::conflict", "interval::splice", "interval::append_range"]
 schema = true
 include = ["h5i_app_sql", "h5i_app_std"]
 std-specs = true
@@ -20,6 +20,13 @@ theorems = [
   "o5s_kernel.Projection.live_reachability",
   "o5s_kernel.Projection.incremental_summary",
   "o5s_kernel.Projection.extracted_projection",
+  "o5s_kernel.Constructor.boundary_spec",
+  "o5s_kernel.Constructor.summary_rows_spec",
+  "o5s_kernel.Interval.conflict_spec",
+  "o5s_kernel.Interval.conflict_symmetric",
+  "o5s_kernel.Interval.strict_gap_safe",
+  "o5s_kernel.Interval.splice_spec",
+  "o5s_kernel.Interval.append_range_spec",
 ]
 
 [[mutant]]
@@ -44,3 +51,15 @@ name = "merge_dependency_gate"
 file = "kernel/src/patch.rs"
 old = "if !h5i_app_std::set::subset(dependencies, channel) {"
 new = "if h5i_app_std::set::subset(dependencies, channel) {"
+
+[[mutant]]
+name = "line_conflict_boundary"
+file = "kernel/src/interval.rs"
+old = "b_start <= a_start && a_start <= b_end"
+new = "b_start < a_start && a_start < b_end"
+
+[[mutant]]
+name = "splice_suffix_boundary"
+file = "kernel/src/interval.rs"
+old = "slice(bytes, end, bytes.len())"
+new = "slice(bytes, start, bytes.len())"

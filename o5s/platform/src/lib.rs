@@ -21,6 +21,8 @@ pub struct Patch {
     pub intent: String,
     pub dependencies: Vec<u64>,
     pub edits: Vec<Edit>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub line_edits: Vec<lines::LineEdit>,
     pub approvals: BTreeSet<u64>,
     pub checks_passed: bool,
 }
@@ -64,6 +66,12 @@ pub enum Command {
         dependencies: Vec<u64>,
         edits: Vec<Edit>,
     },
+    ProposeLines {
+        repo: String,
+        intent: String,
+        dependencies: Vec<u64>,
+        edits: Vec<lines::LineEdit>,
+    },
     Approve {
         repo: String,
         patch: u64,
@@ -90,6 +98,7 @@ impl Command {
             Self::Create { repo }
             | Self::Fork { repo, .. }
             | Self::Propose { repo, .. }
+            | Self::ProposeLines { repo, .. }
             | Self::Approve { repo, .. }
             | Self::Check { repo, .. }
             | Self::Merge { repo, .. }
@@ -194,8 +203,28 @@ impl Database {
             .get_mut(&actor.tenant)
             .and_then(|t| t.get_mut(command.repo()))
             .ok_or_else(|| refuse("repository not found"))?;
+        let (command, line_edits) = match command {
+            Command::ProposeLines {
+                repo: name,
+                intent,
+                mut dependencies,
+                mut edits,
+            } => {
+                let previews = repo.prepare_lines(&mut edits, &mut dependencies)?;
+                (
+                    Command::Propose {
+                        repo: name,
+                        intent,
+                        dependencies,
+                        edits: previews,
+                    },
+                    edits,
+                )
+            }
+            other => (other, Vec::new()),
+        };
         let (reply, action, patch_id, channel) = match command {
-            Command::Create { .. } => unreachable!(),
+            Command::Create { .. } | Command::ProposeLines { .. } => unreachable!(),
             Command::Fork {
                 source, channel, ..
             } => {
@@ -241,7 +270,14 @@ impl Database {
                 {
                     return Err(refuse("invalid or duplicate edit path"));
                 }
-                let hash = hash_patch(actor.user, &intent, &dependencies, &edits, repo)?;
+                let hash = hash_patch(
+                    actor.user,
+                    &intent,
+                    &dependencies,
+                    &edits,
+                    &line_edits,
+                    repo,
+                )?;
                 if let Some(p) = repo.patches.values().find(|p| p.hash == hash) {
                     return Ok(serde_json::json!({"patch":p.id,"hash":p.hash,"duplicate":true}));
                 }
@@ -259,6 +295,7 @@ impl Database {
                         intent,
                         dependencies,
                         edits,
+                        line_edits,
                         approvals: BTreeSet::new(),
                         checks_passed: false,
                     },
@@ -384,6 +421,7 @@ fn hash_patch(
     intent: &str,
     deps: &[u64],
     edits: &[Edit],
+    line_edits: &[lines::LineEdit],
     repo: &Repository,
 ) -> Result<String, Refusal> {
     let mut deps: Vec<&str> = deps
@@ -391,8 +429,24 @@ fn hash_patch(
         .map(|id| repo.patches[id].hash.as_str())
         .collect();
     deps.sort_unstable();
-    let encoded = serde_json::to_vec(&("o5s-patch-v1", author, intent, deps, edits))
-        .map_err(|e| Refusal(e.to_string()))?;
+    let encoded = if line_edits.is_empty() {
+        serde_json::to_vec(&("o5s-patch-v1", author, intent, deps, edits))
+    } else {
+        let ranges: Vec<_> = line_edits
+            .iter()
+            .map(|e| {
+                (
+                    &e.path,
+                    &repo.patches[&e.base].hash,
+                    e.start,
+                    e.end,
+                    &e.content,
+                )
+            })
+            .collect();
+        serde_json::to_vec(&("o5s-line-patch-v1", author, intent, deps, edits, ranges))
+    }
+    .map_err(|e| Refusal(e.to_string()))?;
     Ok(Sha256::digest(encoded)
         .iter()
         .map(|b| format!("{b:02x}"))
@@ -423,6 +477,7 @@ impl Repository {
             .collect();
         let mut ancestors: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new();
         let mut heads: BTreeMap<String, BTreeMap<u64, Option<String>>> = BTreeMap::new();
+        let mut versions = BTreeMap::new();
         for id in &active {
             let p = self
                 .patches
@@ -441,9 +496,20 @@ impl Repository {
                 h.retain(|id, _| !ancestry.contains(id));
                 h.insert(*id, e.content.clone());
             }
+            for e in &p.edits {
+                let changes: Vec<_> = p
+                    .line_edits
+                    .iter()
+                    .filter(|line| line.path == e.path)
+                    .cloned()
+                    .collect();
+                if !changes.is_empty() {
+                    versions.insert((e.path.clone(), *id), self.line_version(&e.path, &changes)?);
+                }
+            }
             ancestors.insert(*id, ancestry);
         }
-        render_heads(&heads, &active)
+        render_heads(&heads, &versions, &active)
     }
 
     /// Fresh replay uses the same incremental engine as the native cache.
@@ -456,6 +522,7 @@ impl Repository {
 
 fn render_heads(
     heads: &BTreeMap<String, BTreeMap<u64, Option<String>>>,
+    versions: &BTreeMap<(String, u64), lines::LineVersion>,
     active: &BTreeSet<u64>,
 ) -> Result<View, Refusal> {
     // Structural conflicts count too: Git cannot represent both `a`
@@ -477,6 +544,17 @@ fn render_heads(
     let mut files = BTreeMap::new();
     let mut conflicts = BTreeMap::new();
     for (path, h) in heads {
+        let mut merged = None;
+        if h.len() > 1 && !collisions.contains(path) {
+            merged = lines::LineVersion::merge_all(
+                h.keys().map(|id| versions.get(&(path.clone(), *id))),
+            )
+            .and_then(|v| v.render().ok());
+        }
+        if let Some(content) = merged {
+            files.insert(path.clone(), content);
+            continue;
+        }
         let first = h.first_key_value().unwrap().1;
         if !collisions.contains(path) && h.values().all(|v| v == first) {
             if let Some(content) = first {
@@ -517,6 +595,7 @@ pub struct IncrementalView {
     applied: BTreeSet<u64>,
     cursor: usize,
     heads: BTreeMap<String, BTreeMap<u64, Option<String>>>,
+    versions: BTreeMap<(String, u64), lines::LineVersion>,
 }
 impl IncrementalView {
     pub fn sync(&mut self, repo: &Repository, channel: &str) -> Result<ViewWork, Refusal> {
@@ -605,8 +684,19 @@ impl IncrementalView {
                 let heads = self.heads.entry(e.path.clone()).or_default();
                 for d in &found {
                     heads.remove(d);
+                    self.versions.remove(&(e.path.clone(), *d));
                 }
                 heads.insert(id, e.content.clone());
+                let changes: Vec<_> = p
+                    .line_edits
+                    .iter()
+                    .filter(|line| line.path == e.path)
+                    .cloned()
+                    .collect();
+                if !changes.is_empty() {
+                    self.versions
+                        .insert((e.path.clone(), id), repo.line_version(&e.path, &changes)?);
+                }
                 work.updated_paths += 1;
             }
             self.applied.insert(id);
@@ -616,14 +706,16 @@ impl IncrementalView {
     }
     /// Render content without copying the full channel membership history.
     pub fn content(&self) -> Result<View, Refusal> {
-        render_heads(&self.heads, &BTreeSet::new())
+        render_heads(&self.heads, &self.versions, &BTreeSet::new())
     }
     pub fn patch_count(&self) -> usize {
         self.applied.len()
     }
     pub fn view(&self) -> Result<View, Refusal> {
-        render_heads(&self.heads, &self.applied)
+        render_heads(&self.heads, &self.versions, &self.applied)
     }
 }
 
 pub mod projection;
+
+pub mod lines;

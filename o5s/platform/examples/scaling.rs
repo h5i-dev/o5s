@@ -14,6 +14,7 @@ fn append(repo: &mut Repository, id: u64, dependencies: Vec<u64>) {
                 path: "file".into(),
                 content: Some(id.to_string()),
             }],
+            line_edits: vec![],
             approvals: BTreeSet::new(),
             checks_passed: true,
         },

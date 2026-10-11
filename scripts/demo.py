@@ -40,4 +40,21 @@ export=api(1,'/api/export',{'repo':repo,'channel':'main'})
 text=subprocess.check_output(['git','--git-dir',export['path'],'show','main:src/message.txt'],text=True)
 assert text=='hello from Alice and Bob\n'
 assert api(1,'/api/export',{'repo':repo,'channel':'main'})['commit']==export['commit']
+workspace=api(1,'/api/worktree',{'repo':repo,'channel':'main'})
+assert pathlib.Path(workspace['path'],'src/message.txt').read_text()==text
+assert not subprocess.run(['git','-C',workspace['path'],'symbolic-ref','-q','HEAD'],capture_output=True).returncode==0
+linebase=propose(1,'Three lines for parallel range editing',[resolution],'one\ntwo\nthree\n')
+ready(linebase);merge('main',linebase)
+line_ids=[]
+for user,start,end,replacement in [(1,0,1,'ONE\n'),(2,2,3,'THREE\n')]:
+    p=cmd(user,cmd='propose_lines',intent='Parallel line edit',dependencies=[],edits=[{'path':'src/message.txt','base':linebase,'start':start,'end':end,'content':replacement}])['patch']
+    ready(p);line_ids.append(p)
+cmd(3,cmd='merge_batch',channel='main',patches=line_ids)
+assert view('main')['files']['src/message.txt']=='ONE\ntwo\nTHREE\n'
+assert not view('main')['conflicts']
+print('Disjoint line edits merge automatically on their immutable shared base.')
+newworkspace=api(1,'/api/worktree',{'repo':repo,'channel':'main'})
+assert newworkspace['path']!=workspace['path']
+assert pathlib.Path(workspace['path'],'src/message.txt').read_text()==text
+print('Detached workspaces retain their own snapshot as the channel advances.')
 print(json.dumps({'repository':repo,'git_export':export,'ui':ORIGIN},indent=2))

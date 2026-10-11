@@ -1,6 +1,6 @@
 # Scaling: implemented work and remaining limits
 
-The local platform uses immutable whole-file edits. It retains concurrent values rather than guessing a semantic resolution. Performance work must preserve those values and stable patch identities.
+The local platform supports immutable whole-file edits and line ranges anchored to immutable base patches. Disjoint line ranges on a shared base merge automatically; overlapping ranges and incompatible bases retain concurrent values for review. Performance work must preserve those values and stable patch identities.
 
 ## Implemented in the file view
 
@@ -27,11 +27,17 @@ The fixtures use 10,000 patches/vertices. Counters are asserted in tests:
 
 These counters exclude authentication, hashing, database cloning, snapshot I/O, serialization and output rendering. Printing 10,000 conflicting alternatives necessarily costs at least the output size. Shared ancestry and many heads can still make searches expensive. This is not a benchmark of 10,000 concurrent HTTP clients. Timings printed by the example describe the local run, not a portable throughput guarantee.
 
+## Line-range merge
+
+The range index checks immediate predecessor and successor intervals in a `BTreeMap`, avoiding a quadratic all-pairs overlap pass. Equal edits deduplicate. For k ranges, collecting ranges costs O(k log k); the renderer appends original gaps and replacements once, with work proportional to original and emitted bytes. The actual Rust overlap predicate and append loop have Lean proofs. Exhaustive triples of ranges on four lines, in all six arrival orders, check the index against a separate pairwise specification. A 10,000-agent range fixture merges into one file with exact expected bytes. These are in-memory fixtures, not HTTP throughput measurements.
+
+Proposal preparation walks dependency closure to validate the chosen immutable base. It searches only for current causal heads while scanning that closure, avoiding a retained transitive-closure table. The registry still retains complete per-patch previews, so large common bases incur substantial memory and snapshot costs. No compressed history claim is made.
+
 ## Experimental graph summaries
 
 `platform/src/projection.rs` retains original edges and derives shortcut edges from live vertices through dead interiors to the first live boundary. A batch finds affected weak components and rebuilds summaries only there. It supports edge insertion, deletion/restoration of vertex liveness, cycles and disconnected graphs; it does not invent an order between concurrent vertices. Unaffected components reuse their summaries.
 
-The Lean invariant and conditional extracted-search equivalence are described in [proofs](proofs.md). The concrete constructor is tested rather than universally proved. This experiment is not connected to the application's whole-file edit format. A future line/block engine also needs stable interval identities, edit/context semantics, conflict detection and a rendering-equivalence proof; reachability alone does not establish any of those.
+The Lean invariant, conditional extracted-search equivalence and universally proved Rust reference constructor are described in [proofs](proofs.md). The indexed native constructor is checked against that reference on every three-vertex graph and liveness assignment; its indexing and component discovery are not universally proved. The summary experiment remains separate from the application's line-range format. Reachability alone does not establish edit semantics or rendering equivalence.
 
 Rebuilding a large affected component can remain expensive. The constructor may traverse its dead subgraph once for each live boundary source, and dense boundary relations can need quadratic shortcut storage. Subsequent indexed reachability costs visited live vertices plus summary edges, not just the number of live lines. The original history remains stored so restoration and later edges remain meaningful. No history garbage collection is claimed.
 

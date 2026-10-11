@@ -198,3 +198,175 @@ async fn compact_view_cache_and_batch_rollback() {
         StatusCode::UNPROCESSABLE_ENTITY
     );
 }
+
+#[tokio::test]
+async fn concurrent_line_proposals_survive_restart_and_export_merged_git_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = state(dir.path());
+    command(&s, 1, serde_json::json!({"cmd":"create","repo":"lines"})).await;
+    command(&s,1,serde_json::json!({"cmd":"propose","repo":"lines","intent":"base","dependencies":[],"edits":[{"path":"src/a.txt","content":"一\n二\n三\n"}]})).await;
+    let left = command(
+        &s,
+        1,
+        serde_json::json!({"cmd":"propose_lines","repo":"lines","intent":"left","dependencies":[],"edits":[{"path":"src/a.txt","base":1,"start":0,"end":1,"content":"ONE\n"}]}),
+    );
+    let right = command(
+        &s,
+        2,
+        serde_json::json!({"cmd":"propose_lines","repo":"lines","intent":"right","dependencies":[],"edits":[{"path":"src/a.txt","base":1,"start":2,"end":3,"content":"THREE\n"}]}),
+    );
+    let (a, b) = tokio::join!(left, right);
+    let ids = vec![
+        1,
+        a["patch"].as_u64().unwrap(),
+        b["patch"].as_u64().unwrap(),
+    ];
+    for id in &ids {
+        command(
+            &s,
+            10,
+            serde_json::json!({"cmd":"approve","repo":"lines","patch":id}),
+        )
+        .await;
+        command(
+            &s,
+            11,
+            serde_json::json!({"cmd":"check","repo":"lines","patch":id,"passed":true}),
+        )
+        .await;
+    }
+    command(
+        &s,
+        10,
+        serde_json::json!({"cmd":"merge_batch","repo":"lines","channel":"main","patches":ids}),
+    )
+    .await;
+    let (_, v) = request(&s, 1, 1, "/api/view?repo=lines", None).await;
+    assert_eq!(v["files"]["src/a.txt"], "ONE\n二\nTHREE\n");
+    drop(s);
+    // JoinHandle completion can precede the blocking worker dropping its captured
+    // Arc. Wait for that final owner before simulating a process restart.
+    let reopened = {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            match Store::open(dir.path()) {
+                Ok(store) => {
+                    break AppState {
+                        store: Arc::new(Mutex::new(store)),
+                        auth: Arc::new(HmacAuth::new("test")),
+                        root: dir.path().into(),
+                    };
+                }
+                Err(e)
+                    if e.downcast_ref::<std::io::Error>()
+                        .is_some_and(|e| e.kind() == std::io::ErrorKind::WouldBlock)
+                        && std::time::Instant::now() < deadline =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                }
+                Err(e) => panic!("restart failed: {e}"),
+            }
+        }
+    };
+    let (_, v) = request(&reopened, 1, 1, "/api/state?repo=lines", None).await;
+    assert_eq!(v["view"]["files"]["src/a.txt"], "ONE\n二\nTHREE\n");
+    let (status, export) = request(
+        &reopened,
+        1,
+        1,
+        "/api/export",
+        Some(serde_json::json!({"repo":"lines"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{export}");
+    let git = Command::new("git")
+        .args([
+            "--git-dir",
+            export["path"].as_str().unwrap(),
+            "show",
+            "main:src/a.txt",
+        ])
+        .output()
+        .unwrap();
+    assert!(git.status.success());
+    assert_eq!(git.stdout, "ONE\n二\nTHREE\n".as_bytes());
+}
+
+#[tokio::test]
+async fn detached_workspace_reuse_preserves_edits_and_is_tenant_scoped() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = state(dir.path());
+    command(
+        &s,
+        1,
+        serde_json::json!({"cmd":"create","repo":"workspace"}),
+    )
+    .await;
+    command(&s,1,serde_json::json!({"cmd":"propose","repo":"workspace","intent":"base","dependencies":[],"edits":[{"path":"a.txt","content":"base\n"}]})).await;
+    command(
+        &s,
+        2,
+        serde_json::json!({"cmd":"approve","repo":"workspace","patch":1}),
+    )
+    .await;
+    command(
+        &s,
+        3,
+        serde_json::json!({"cmd":"check","repo":"workspace","patch":1,"passed":true}),
+    )
+    .await;
+    command(
+        &s,
+        1,
+        serde_json::json!({"cmd":"merge","repo":"workspace","channel":"main","patch":1}),
+    )
+    .await;
+    let (status, v) = request(
+        &s,
+        1,
+        1,
+        "/api/worktree",
+        Some(serde_json::json!({"repo":"workspace"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["reused"], false);
+    assert_eq!(v["dirty"], false);
+    let path = std::path::Path::new(v["path"].as_str().unwrap());
+    let branch = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["symbolic-ref", "-q", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(!branch.status.success());
+    assert_eq!(
+        std::fs::read_to_string(path.join("a.txt")).unwrap(),
+        "base\n"
+    );
+    std::fs::write(path.join("a.txt"), "agent changes\n").unwrap();
+    let (status, next) = request(
+        &s,
+        1,
+        1,
+        "/api/worktree",
+        Some(serde_json::json!({"repo":"workspace"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{next}");
+    assert_eq!(next["reused"], true);
+    assert_eq!(next["dirty"], true);
+    assert_eq!(
+        std::fs::read_to_string(path.join("a.txt")).unwrap(),
+        "agent changes\n"
+    );
+    let (status, _) = request(
+        &s,
+        1,
+        2,
+        "/api/worktree",
+        Some(serde_json::json!({"repo":"workspace"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
