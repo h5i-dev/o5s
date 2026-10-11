@@ -10,6 +10,10 @@
 //! `h5i_app_pg` there is no tenant lock (SERIALIZABLE alone gives correctness)
 //! and the schema is chosen per transaction with `SET LOCAL search_path`.
 //!
+//! Every parameterized statement is sent unnamed with its parameter types
+//! (`query_typed`): tokio-postgres closes a named statement when it drops it,
+//! and Hyperdrive drops the connection on that `Close`.
+//!
 //! All SQL on tenant tables comes from `h5i_app_pgsql` (extracted to Lean);
 //! this file builds none.
 
@@ -69,7 +73,7 @@ impl std::fmt::Display for DbError {
             DbError::Connect(e) => write!(f, "connect: {e}"),
             DbError::Decode(e) => write!(f, "decode: {e}"),
             DbError::IdempotencyConflict => write!(f, "idempotency key reused for a different command"),
-            DbError::RetriesExhausted => write!(f, "too many serialization failures"),
+            DbError::RetriesExhausted => write!(f, "gave up after too many retryable failures"),
             DbError::CommitUnknown(e) => write!(f, "commit outcome unknown: {e}"),
         }
     }
@@ -252,7 +256,10 @@ impl<K: Kernel, S: Store<K>> Engine<K, S> {
         tx.batch_execute(&self.set_schema).await.inspect_err(|e| failed("set schema", e))?;
         if let Some(idem) = idem {
             let stored = tx
-                .query_opt("SELECT fingerprint, reply FROM h5i_idempotency WHERE tenant_id = $1 AND key = $2", &[&tid, &idem.key])
+                .query_typed_opt(
+                    "SELECT fingerprint, reply FROM h5i_idempotency WHERE tenant_id = $1 AND key = $2",
+                    &[(&tid, Type::INT8), (&idem.key, Type::TEXT)],
+                )
                 .await
                 .inspect_err(|e| failed("read idempotency key", e))?;
             if let Some(row) = stored {
@@ -283,9 +290,9 @@ impl<K: Kernel, S: Store<K>> Engine<K, S> {
             Ok((ws, reply)) => {
                 store(&tx, &tables, tid, &S::writes(&ws)).await.inspect_err(|e| failed("store", e))?;
                 if let (Some(idem), Some(bytes)) = (idem, &encoded) {
-                    tx.execute(
+                    tx.query_typed(
                         "INSERT INTO h5i_idempotency (tenant_id, key, fingerprint, reply) VALUES ($1, $2, $3, $4)",
-                        &[&tid, &idem.key, &idem.fingerprint, bytes],
+                        &[(&tid, Type::INT8), (&idem.key, Type::TEXT), (&idem.fingerprint, Type::BYTEA), (bytes, Type::BYTEA)],
                     )
                     .await
                     .inspect_err(|e| failed("store idempotency key", e))?;
@@ -318,7 +325,7 @@ async fn load_table(tx: &Transaction<'_>, tables: &Vec<Table>, tid: i64, table: 
     };
     let (sql, vals) = bind(&q)?;
     let kinds: Vec<Kind> = tables[table as usize].columns.iter().map(|c| c.kind).collect();
-    let rows = tx.query(&sql, &refs(&vals)).await?;
+    let rows = tx.query_typed(&sql, &typed(&vals)).await?;
     rows.iter().map(|r| read_row(&kinds, r)).collect()
 }
 
@@ -330,7 +337,7 @@ async fn store(tx: &Transaction<'_>, tables: &Vec<Table>, tid: i64, ws: &Vec<Wri
             return Err(DbError::Decode(format!("statement does not fit the schema: {stmt:?}")));
         };
         let (sql, vals) = bind(&q)?;
-        tx.execute(&sql, &refs(&vals)).await?;
+        tx.query_typed(&sql, &typed(&vals)).await?;
     }
     Ok(())
 }
@@ -357,7 +364,7 @@ impl ToSql for Value {
     }
 
     fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::INT8 | Type::BOOL | Type::TEXT | Type::BYTEA)
+        matches!(*ty, Type::INT8 | Type::BOOL | Type::TEXT | Type::BYTEA | Type::UNKNOWN)
     }
 
     to_sql_checked!();
@@ -372,8 +379,21 @@ fn bind(q: &Query) -> Result<(String, Vec<Value>), DbError> {
     Ok((text(&q.sql)?, q.params.iter().map(from_val).collect::<Result<Vec<_>, _>>()?))
 }
 
-fn refs(vals: &[Value]) -> Vec<&(dyn ToSql + Sync)> {
-    vals.iter().map(|v| v as &(dyn ToSql + Sync)).collect()
+/// Each parameter with the type it is sent as. `NULL` is sent as `unknown`,
+/// for the server to infer, since a `Val::Null` does not say its column.
+fn typed(vals: &[Value]) -> Vec<(&(dyn ToSql + Sync), Type)> {
+    vals.iter()
+        .map(|v| {
+            let ty = match v {
+                Value::Int(_) => Type::INT8,
+                Value::Bool(_) => Type::BOOL,
+                Value::Text(_) => Type::TEXT,
+                Value::Bytes(_) => Type::BYTEA,
+                Value::Null => Type::UNKNOWN,
+            };
+            (v as &(dyn ToSql + Sync), ty)
+        })
+        .collect()
 }
 
 fn read_row(kinds: &[Kind], row: &Row) -> Result<Vec<Val>, DbError> {
