@@ -1,7 +1,7 @@
 # Read by `h5i app` (extract, check, prove, mutate, doctor).
 
 [extract]
-start-from = ["transition", "apply", "sql_writes", "patch::merge", "graph::reachable", "graph::boundary", "graph::summary_rows", "interval::conflict", "interval::splice", "interval::append_range", "interval::render_chunks"]
+start-from = ["transition", "apply", "sql_writes", "patch::merge", "graph::reachable", "graph::boundary", "graph::summary_rows", "interval::conflict", "interval::splice", "interval::append_range", "interval::render_chunks", "interval::checked_render"]
 schema = true
 include = ["h5i_app_sql", "h5i_app_std"]
 std-specs = true
@@ -29,6 +29,8 @@ theorems = [
   "o5s_kernel.Interval.append_range_spec",
   "o5s_kernel.Splice.extracted_disjoint_commutes",
   "o5s_kernel.Rendering.render_chunks_spec",
+  "o5s_kernel.Checked.valid_chunks_safe",
+  "o5s_kernel.Checked.checked_render_spec",
 ]
 
 [[mutant]]
@@ -71,3 +73,15 @@ name = "render_cursor_boundary"
 file = "kernel/src/interval.rs"
 old = "cursor = chunk.1;"
 new = "cursor = chunk.0;"
+
+[[mutant]]
+name = "validation_order_boundary"
+file = "kernel/src/interval.rs"
+old = "state.cursor <= start"
+new = "state.cursor >= start"
+
+[[mutant]]
+name = "validation_capacity_boundary"
+file = "kernel/src/interval.rs"
+old = "replacement_len <= usize::MAX - state.capacity"
+new = "replacement_len <= usize::MAX"

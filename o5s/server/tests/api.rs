@@ -483,9 +483,15 @@ async fn workspace_import_records_snapshot_dependencies_without_altering_files()
     let outside = dir.path().join("outside.txt");
     std::fs::write(&outside, "must not import\n").unwrap();
     std::os::unix::fs::symlink(&outside, path.join("link.txt")).unwrap();
-    let (status, refusal) = request(&s, 1, 1, "/api/worktree/propose", Some(body)).await;
+    let (status, refusal) = request(&s, 1, 1, "/api/worktree/propose", Some(body.clone())).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refusal}");
     assert!(refusal["error"].as_str().unwrap().contains("symlinks"));
+    std::fs::remove_file(path.join("link.txt")).unwrap();
+    std::fs::remove_file(path.join("a.txt")).unwrap();
+    std::fs::create_dir(path.join("a.txt")).unwrap();
+    let (status, refusal) = request(&s, 1, 1, "/api/worktree/propose", Some(body)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refusal}");
+    assert!(refusal["error"].as_str().unwrap().contains("regular file"));
     assert_eq!(
         before,
         std::fs::read(dir.path().join("state.json")).unwrap()

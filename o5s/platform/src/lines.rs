@@ -91,11 +91,8 @@ fn render(original: &str, changes: &[LineEdit]) -> Result<String, Refusal> {
             )
         })
         .collect();
-    let _capacity = chunks
-        .iter()
-        .try_fold(original.len(), |n, (_, _, text)| n.checked_add(text.len()))
-        .ok_or_else(|| refuse("materialization capacity exceeded"))?;
-    let bytes = o5s_kernel::interval::render_chunks(&original, &chunks);
+    let bytes = o5s_kernel::interval::checked_render(&original, &chunks)
+        .ok_or_else(|| refuse("invalid byte intervals or materialization capacity exceeded"))?;
     String::from_utf8(bytes).map_err(|_| refuse("invalid UTF-8 materialization"))
 }
 impl Repository {

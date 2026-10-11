@@ -339,9 +339,11 @@ pub fn workspace_proposal(
         let content = if absent {
             None
         } else {
-            let size = std::fs::metadata(&target)
-                .map_err(|e| Refusal(e.to_string()))?
-                .len();
+            let metadata = std::fs::metadata(&target).map_err(|e| Refusal(e.to_string()))?;
+            if !metadata.is_file() {
+                return Err(refusal("workspace patch content must be a regular file"));
+            }
+            let size = metadata.len();
             if size > 4 * 1024 * 1024 {
                 return Err(refusal("workspace file exceeds proposal limit"));
             }

@@ -1131,6 +1131,101 @@ def interval.render_chunks
   let i := alloc.vec.Vec.len bytes
   interval.append_range out bytes cursor i
 
+/-- [o5s_kernel::interval::Validation]
+    Source: 'o5s/kernel/src/interval.rs', lines 50:0-54:1 -/
+structure interval.Validation where
+  valid : Bool
+  cursor : Std.Usize
+  capacity : Std.Usize
+
+/-- [o5s_kernel::interval::validation_step]:
+    Source: 'o5s/kernel/src/interval.rs', lines 55:0-76:1 -/
+def interval.validation_step
+  (state : interval.Validation) (bytes_len : Std.Usize) (start : Std.Usize)
+  («end» : Std.Usize) (replacement_len : Std.Usize) :
+  Result interval.Validation
+  := do
+  let ordered ←
+    if state.valid
+    then
+      if state.cursor <= start
+      then if start <= «end»
+           then ok («end» <= bytes_len)
+           else ok false
+      else ok false
+    else ok false
+  let i ← core.num.Usize.MAX - state.capacity
+  if replacement_len <= i
+  then
+    let i1 ← state.capacity + replacement_len
+    ok { valid := ordered, cursor := «end», capacity := i1 }
+  else ok { state with valid := false, cursor := «end» }
+
+/-- [o5s_kernel::interval::valid_chunks]: loop body 0:
+    Source: 'o5s/kernel/src/interval.rs', lines 87:4-91:5
+    Visibility: public -/
+@[rust_loop_body]
+def interval.valid_chunks_loop.body
+  (bytes_len : Std.Usize)
+  (chunks : alloc.vec.Vec (Std.Usize × Std.Usize × (alloc.vec.Vec Std.U8)))
+  (state : interval.Validation) (i : Std.Usize) :
+  Result (ControlFlow (interval.Validation × Std.Usize) interval.Validation)
+  := do
+  let i1 := alloc.vec.Vec.len chunks
+  if i < i1
+  then
+    let (i2, i3, v) ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Std.Usize ×
+        Std.Usize × (alloc.vec.Vec Std.U8))) chunks i
+    let i4 := alloc.vec.Vec.len v
+    let state1 ← interval.validation_step state bytes_len i2 i3 i4
+    let i5 ← i + 1#usize
+    ok (cont (state1, i5))
+  else ok (done state)
+
+/-- [o5s_kernel::interval::valid_chunks]: loop 0:
+    Source: 'o5s/kernel/src/interval.rs', lines 87:4-91:5
+    Visibility: public -/
+@[rust_loop]
+def interval.valid_chunks_loop
+  (bytes_len : Std.Usize)
+  (chunks : alloc.vec.Vec (Std.Usize × Std.Usize × (alloc.vec.Vec Std.U8)))
+  (state : interval.Validation) (i : Std.Usize) :
+  Result interval.Validation
+  := do
+  loop
+    (fun (state1, i1) => interval.valid_chunks_loop.body bytes_len chunks
+      state1 i1)
+    (state, i)
+
+/-- [o5s_kernel::interval::valid_chunks]:
+    Source: 'o5s/kernel/src/interval.rs', lines 80:0-93:1
+    Visibility: public -/
+def interval.valid_chunks
+  (bytes_len : Std.Usize)
+  (chunks : alloc.vec.Vec (Std.Usize × Std.Usize × (alloc.vec.Vec Std.U8))) :
+  Result Bool
+  := do
+  let state ←
+    interval.valid_chunks_loop bytes_len chunks
+      { valid := true, cursor := 0#usize, capacity := bytes_len } 0#usize
+  ok state.valid
+
+/-- [o5s_kernel::interval::checked_render]:
+    Source: 'o5s/kernel/src/interval.rs', lines 95:0-101:1
+    Visibility: public -/
+def interval.checked_render
+  (bytes : alloc.vec.Vec Std.U8)
+  (chunks : alloc.vec.Vec (Std.Usize × Std.Usize × (alloc.vec.Vec Std.U8))) :
+  Result (Option (alloc.vec.Vec Std.U8))
+  := do
+  let i := alloc.vec.Vec.len bytes
+  let b ← interval.valid_chunks i chunks
+  if b
+  then let v ← interval.render_chunks bytes chunks
+       ok (some v)
+  else ok none
+
 /-- [o5s_kernel::Principal]
     Source: 'o5s/kernel/src/lib.rs', lines 11:0-14:1
     Visibility: public -/
