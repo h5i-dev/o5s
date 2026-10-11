@@ -850,4 +850,130 @@ theorem reachable_inv {s : St} (h : Reachable s) : Inv s := by
   | init => exact init_inv
   | step _ hs ih => exact inv_preserved _ _ _ _ ih hs
 
+/-! ## History -/
+
+/-- A successful merge's writes: the batch's writes under its invariant, then the channel and repository rows. -/
+theorem merge_FI {s : St} {u : U64} {n : alloc.vec.Vec U8} {ids : List U64} {ws r}
+    (hm : Model.merge u s n ids = .Ok (ws, r)) :
+    ∃ c ∈ s.channels, ∃ st, FI s c st ∧
+      ws = st.writes ++ [.PutChannel { c with size := st.size }, .SetRepository { s.repo with events := st.seq }] := by
+  unfold Model.merge at hm
+  split at hm
+  · simp at hm
+  split at hm
+  · simp at hm
+  rename_i c hc
+  dsimp only at hm
+  split at hm
+  · rename_i st hfold
+    simp only [core.result.Result.Ok.injEq, Prod.mk.injEq] at hm
+    refine ⟨c, List.mem_of_find?_eq_some hc, st, ?_, hm.1.symm⟩
+    have := fold_FI (u := u) ids
+      (⟨(s.members.filter (fun m => decide (m.channel = c.id))).map (·.patch), c.size, s.repo.events, 0#u64, []⟩, none)
+      (fun _ => ⟨le_refl _, le_refl _, by simp, by simp, by simp, by simp, by intro x; simp⟩)
+    rw [hfold] at this; exact this rfl
+  · simp at hm
+
+/-- What a command writes into the patches and members tables. -/
+theorem step_writes (a : Principal) {s : St} (c : Command) {ws r} (h : Model.step a s c = .Ok (ws, r)) :
+    (∀ x, Write.PutPatch x ∈ ws → s.repo.patches ≠ Model.MAX ∧ x.id = Model.inc s.repo.patches) ∧
+    (∀ x, Write.PutMember x ∈ ws →
+      (s.repo.channels ≠ Model.MAX ∧ x.channel = Model.inc s.repo.channels) ∨
+      ∃ c ∈ s.channels, x.channel = c.id ∧ c.size.val ≤ x.position.val) := by
+  cases c <;> simp only [Model.step] at h
+  case Register =>
+    unfold Model.register at h
+    repeat' split at h
+    all_goals simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h
+    all_goals obtain ⟨rfl, -⟩ := h
+    all_goals simp
+  case Create =>
+    unfold Model.create at h
+    split_ifs at h <;> simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, -⟩ := h; simp
+  all_goals first
+    | (simp at h; done)
+    | (split at h
+       swap
+       · simp at h)
+  case Fork =>
+    unfold Model.fork at h
+    repeat' split at h
+    all_goals simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, -⟩ := h
+    rename_i hm1 _
+    simp only [List.mem_append, List.mem_cons, List.mem_map, List.mem_filter, List.not_mem_nil, or_false,
+      reduceCtorEq, false_or, Write.PutMember.injEq, exists_false, imp_false, not_false_eq_true, implies_true,
+      true_and]
+    refine ⟨fun x hx => ?_, fun x hx => ?_⟩
+    · obtain ⟨_, _, hf⟩ := hx; exact hf.elim
+    · obtain ⟨m, -, rfl⟩ := hx; exact .inl ⟨hm1, rfl⟩
+  case Propose =>
+    unfold Model.propose at h
+    repeat' split at h
+    all_goals simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h
+    all_goals obtain ⟨rfl, -⟩ := h
+    · simp
+    · rename_i hm1 _
+      simp only [List.mem_append, List.mem_cons, List.mem_map, List.not_mem_nil, or_false, reduceCtorEq,
+        false_or, Write.PutPatch.injEq, exists_false, and_false, imp_false, not_false_eq_true, implies_true,
+        and_true]
+      exact ⟨fun x hx => by subst hx; exact ⟨hm1, rfl⟩, fun x hx => hx.elim⟩
+  case Approve | Check =>
+    first | unfold Model.approve at h | unfold Model.check at h
+    repeat' split at h
+    all_goals simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, -⟩ := h; simp
+  case Merge =>
+    obtain ⟨c, hc, st, hf, rfl⟩ := merge_FI h
+    simp only [List.mem_append, List.mem_cons, List.not_mem_nil, or_false, reduceCtorEq]
+    refine ⟨fun x hx => ?_, fun x hx => ?_⟩
+    · rcases hf.kinds _ hx with ⟨m, hm⟩ | ⟨e, he⟩
+      · exact Write.noConfusion hm
+      · exact Write.noConfusion he
+    · have : x ∈ st.writes.filterMap memberOf := List.mem_filterMap.2 ⟨_, hx, rfl⟩
+      obtain ⟨h1, h2, -⟩ := hf.members x this
+      exact .inr ⟨c, hc, h1, h2⟩
+
+/-- **Registered patches never change or disappear.** -/
+theorem patches_immutable (a : Principal) (s : Snapshot) (c : Command) (ws : alloc.vec.Vec Write)
+    (hi : Inv (Snapshot.toSt s)) (h : Guarantees.Succeeds a s c ws) :
+    ∀ p ∈ (Snapshot.toSt s).patches, p ∈ (applyAll (Snapshot.toSt s) ws.val).patches := by
+  obtain ⟨r, hm⟩ := Guarantees.model_of h
+  have hw := (step_writes a c hm).1
+  intro p hp
+  rw [applyAll_patches]
+  apply puts_keep _ hp
+  intro x hx e
+  obtain ⟨w, hw', hx'⟩ := List.mem_filterMap.1 hx
+  cases w <;> simp [patchOf] at hx'
+  subst hx'
+  obtain ⟨hne, hid⟩ := hw _ hw'
+  have := hi.patch_fresh p hp
+  have hv := Refine.inc_val hne
+  rw [← e, hid, hv] at this; omega
+
+/-- **Channel membership only grows.** -/
+theorem members_append_only (a : Principal) (s : Snapshot) (c : Command) (ws : alloc.vec.Vec Write)
+    (hi : Inv (Snapshot.toSt s)) (h : Guarantees.Succeeds a s c ws) :
+    ∀ m ∈ (Snapshot.toSt s).members, m ∈ (applyAll (Snapshot.toSt s) ws.val).members := by
+  obtain ⟨r, hm⟩ := Guarantees.model_of h
+  have hw := (step_writes a c hm).2
+  intro m hmem
+  rw [applyAll_members]
+  apply puts_keep _ hmem
+  intro x hx e
+  obtain ⟨w, hw', hx'⟩ := List.mem_filterMap.1 hx
+  cases w <;> simp [memberOf] at hx'
+  subst hx'
+  simp only [Prod.mk.injEq] at e
+  rcases hw _ hw' with ⟨hne, hch⟩ | ⟨c', hc', hch, hpos⟩
+  · have := channel_of_member hi hmem
+    have hv := Refine.inc_val hne
+    rw [← e.1, hch, hv] at this; omega
+  · obtain ⟨c'', hc'', hid, hp⟩ := hi.members_placed m hmem
+    have : c'' = c' := List.inj_on_of_nodup_map hi.channel_keys hc'' hc' (by rw [hid, ← e.1, hch])
+    subst this
+    rw [← e.2] at hp; omega
+
 end o5s_registry.Invariant
