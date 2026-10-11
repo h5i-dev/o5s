@@ -144,4 +144,87 @@ theorem check_refines (u : U64) (s : Snapshot) (patch : U64) (passed : Bool) :
         subst_vars
         simp [lift, ws2_post, ws1_post, ws_post]
 
+theorem push_ok_val {α} {v w : alloc.vec.Vec α} {x : α} (h : v.push x = ok w) : w.val = v.val ++ [x] := by
+  unfold alloc.vec.Vec.push at h
+  dsimp only at h
+  split at h
+  · simp only [ok.injEq] at h; subst h; simp
+  · simp at h
+
+/-- The members a fork copies, in table order. -/
+def copied (ms : List Member) (src id : U64) : List Write :=
+  (ms.filter (fun m => decide (m.channel = src))).map (fun m => .PutMember { m with channel := id })
+
+theorem fork_loop_ok (v : alloc.vec.Vec Member) (src id : U64) (ws : alloc.vec.Vec Write) (k : Usize)
+    (r : alloc.vec.Vec Write) (h : fork_loop v src id ws k = ok r) (hk : k.val ≤ v.val.length) :
+    r.val = ws.val ++ copied (v.val.drop k.val) src id := by
+  unfold fork_loop at h
+  refine H5iAppLib.loop_ok _ (fun x => x.2.val ≤ v.val.length ∧
+      ws.val ++ copied (v.val.drop k.val) src id = x.1.val ++ copied (v.val.drop x.2.val) src id)
+    (fun r' => r'.val = ws.val ++ copied (v.val.drop k.val) src id) (fun x => v.val.length - x.2.val) ?_ (ws, k) r
+    ⟨hk, rfl⟩ h
+  rintro ⟨acc, j⟩ c ⟨hj, heq⟩ hc
+  unfold fork_loop.body at hc
+  dsimp only at hc
+  split at hc
+  · rename_i hlt
+    have hj' : j.val < v.val.length := by scalar_tac
+    obtain ⟨m, hm, hc⟩ := bind_eq_ok.1 hc
+    obtain ⟨acc', hacc, hc⟩ := bind_eq_ok.1 hc
+    obtain ⟨j', hj'', hc⟩ := bind_eq_ok.1 hc
+    simp only [ok.injEq] at hc
+    subst hc
+    have hmv : m = v.val[j.val] := by
+      have := H5iAppLib.vec_index_ok_get? hm; simpa [List.getElem?_eq_getElem hj'] using this.symm
+    have hjv := H5iAppLib.add_ok_val hj''
+    have hjv' : j'.val = j.val + 1 := by simpa using hjv
+    refine ⟨⟨by simp only; omega, ?_⟩, by simp only; omega⟩
+    simp only
+    rw [heq, List.drop_eq_getElem_cons hj', hjv']
+    split at hacc
+    · rename_i hch
+      rw [push_ok_val hacc, hmv]
+      rw [hmv] at hch
+      have hf : decide (v.val[j.val].channel = src) = true := by simpa using hch
+      simp only [copied, List.filter_cons, hf, ↓reduceIte, List.map_cons, List.append_assoc, List.cons_append,
+        List.nil_append]
+    · rename_i hch
+      simp only [ok.injEq] at hacc; subst hacc
+      rw [hmv] at hch
+      have hf : decide (v.val[j.val].channel = src) = false := by simpa using hch
+      simp only [copied, List.filter_cons, hf, Bool.false_eq_true, ↓reduceIte]
+  · simp only [ok.injEq] at hc; subst hc
+    simp only
+    have : v.val.length ≤ j.val := by scalar_tac
+    rw [heq, List.drop_eq_nil_of_le this]; simp [copied]
+
+theorem fork_refines (u : U64) (s : Snapshot) (src n : alloc.vec.Vec U8) (r)
+    (h : fork u s src n = ok r) : lift r = Model.fork u (Snapshot.toSt s) src n := by
+  unfold fork at h
+  h5i_invert h
+  all_goals have hb' := post_of_ok (valid_name_exact n) hb
+  all_goals (try have ho' := post_of_ok (find_channel_spec _ _) ho)
+  all_goals (try have ho1' := post_of_ok (find_channel_spec _ _) ho1)
+  case isFalse.isFalse =>
+    have e1 : id = Model.inc s.repository.channels := add_one_eq hid
+    have e2 : i = Model.inc s.repository.events := add_one_eq hi
+    have e3 : v = n := by simpa [H5iAppLib.u8vec_clone] using hv.symm
+    have e4 : v1 = s.repository.label := by simpa [H5iAppLib.u8vec_clone] using hv1.symm
+    unfold event at he
+    simp only [ok.injEq] at he
+    have w3 := push_ok_val hws3
+    have w2 := push_ok_val hws2
+    have w1 := fork_loop_ok _ _ _ _ _ _ hws1 (by simp)
+    have w0 := push_ok_val hws
+    simp only [Model.fork, Snapshot.toSt, Model.findChannel, lift]
+    rw [← hb', ← ho', ← ho1']
+    simp only [hc, Bool.not_true, Bool.false_eq_true, ↓reduceIte, Model.MAX, hc_1, hc_2]
+    subst_vars
+    simp [w3, w2, w1, w0, copied]
+  all_goals simp only [Model.fork, Model.findChannel, Snapshot.toSt, lift]
+  all_goals rw [← hb']
+  all_goals (try rw [← ho'])
+  all_goals (try rw [← ho1'])
+  all_goals simp_all [Model.MAX]
+
 end o5s_registry.Refine
