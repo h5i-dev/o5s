@@ -9,7 +9,9 @@ main = "crates/worker/build/index.js"
 compatibility_date = "2026-10-01"
 
 [build]
-command = "cd crates/worker && sh build.sh"
+# Works whether the Workers Builds root directory is the repository root or
+# crates/worker (Wrangler finds this file upward and runs the build there).
+command = "[ -f build.sh ] || cd crates/worker; sh build.sh"
 
 # Required by `wrangler preview` (non-production branch builds). Empty: previews
 # use the top-level settings.
