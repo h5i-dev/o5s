@@ -75,4 +75,21 @@ fn main() {
         graph.summary_edges(),
         graph.live_reachable(0)
     );
+    let rows = vec![Vec::new(); 100_000];
+    let mut marks = vec![false; rows.len()];
+    let allocation = marks.as_ptr();
+    let seeds = vec![99_999];
+    let start = Instant::now();
+    let mut visited = 0;
+    for _ in 0..10_000 {
+        let search = o5s_kernel::indexed::reachable(&rows, &seeds, marks);
+        assert_eq!(search.marks.as_ptr(), allocation);
+        visited += search.queue.len();
+        marks = search.marks;
+    }
+    println!(
+        "indexed isolated component: vertices={}, searches=10000, visited={visited}, reused_marks=true, elapsed={:?}",
+        rows.len(),
+        start.elapsed()
+    );
 }

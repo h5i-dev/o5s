@@ -1056,6 +1056,161 @@ def graph.weak_component
   let v ← graph.weak_edges edges
   graph.reachable v seeds
 
+/-- [o5s_kernel::indexed::Traversal]
+    Source: 'o5s/kernel/src/indexed.rs', lines 4:0-7:1
+    Visibility: public -/
+structure indexed.Traversal where
+  marks : alloc.vec.Vec Bool
+  queue : alloc.vec.Vec Std.Usize
+
+/-- [o5s_kernel::indexed::enqueue]: loop body 0:
+    Source: 'o5s/kernel/src/indexed.rs', lines 11:4-18:5
+    Visibility: public -/
+@[rust_loop_body]
+def indexed.enqueue_loop.body
+  (neighbors : alloc.vec.Vec Std.Usize) (state : indexed.Traversal)
+  (i : Std.Usize) :
+  Result (ControlFlow (indexed.Traversal × Std.Usize) indexed.Traversal)
+  := do
+  let i1 := alloc.vec.Vec.len neighbors
+  if i < i1
+  then
+    let vertex ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        neighbors i
+    let b ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool)
+        state.marks vertex
+    let (v, v1) ←
+      if b
+      then ok (state.marks, state.queue)
+      else
+        do
+        let (_, index_mut_back) ←
+          alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Bool)
+            state.marks vertex
+        let v2 ← alloc.vec.Vec.push state.queue vertex
+        let v3 := index_mut_back true
+        ok (v3, v2)
+    let i2 ← i + 1#usize
+    ok (cont ({ marks := v, queue := v1 }, i2))
+  else ok (done state)
+
+/-- [o5s_kernel::indexed::enqueue]: loop 0:
+    Source: 'o5s/kernel/src/indexed.rs', lines 11:4-18:5
+    Visibility: public -/
+@[rust_loop]
+def indexed.enqueue_loop
+  (state : indexed.Traversal) (neighbors : alloc.vec.Vec Std.Usize)
+  (i : Std.Usize) :
+  Result indexed.Traversal
+  := do
+  loop
+    (fun (state1, i1) => indexed.enqueue_loop.body neighbors state1 i1)
+    (state, i)
+
+/-- [o5s_kernel::indexed::enqueue]:
+    Source: 'o5s/kernel/src/indexed.rs', lines 9:0-20:1
+    Visibility: public -/
+@[reducible]
+def indexed.enqueue
+  (state : indexed.Traversal) (neighbors : alloc.vec.Vec Std.Usize) :
+  Result indexed.Traversal
+  := do
+  indexed.enqueue_loop state neighbors 0#usize
+
+/-- [o5s_kernel::indexed::clear]: loop body 0:
+    Source: 'o5s/kernel/src/indexed.rs', lines 24:4-27:5
+    Visibility: public -/
+@[rust_loop_body]
+def indexed.clear_loop.body
+  (state : indexed.Traversal) (i : Std.Usize) :
+  Result (ControlFlow (indexed.Traversal × Std.Usize) ((alloc.vec.Vec Bool) ×
+    (alloc.vec.Vec Std.Usize)))
+  := do
+  let i1 := alloc.vec.Vec.len state.queue
+  if i < i1
+  then
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        state.queue i
+    let (_, index_mut_back) ←
+      alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Bool)
+        state.marks i2
+    let i3 ← i + 1#usize
+    let v := index_mut_back false
+    ok (cont ({ state with marks := v }, i3))
+  else ok (done (state.marks, state.queue))
+
+/-- [o5s_kernel::indexed::clear]: loop 0:
+    Source: 'o5s/kernel/src/indexed.rs', lines 24:4-27:5
+    Visibility: public -/
+@[rust_loop]
+def indexed.clear_loop
+  (state : indexed.Traversal) (i : Std.Usize) :
+  Result ((alloc.vec.Vec Bool) × (alloc.vec.Vec Std.Usize))
+  := do
+  loop
+    (fun (state1, i1) => indexed.clear_loop.body state1 i1)
+    (state, i)
+
+/-- [o5s_kernel::indexed::clear]:
+    Source: 'o5s/kernel/src/indexed.rs', lines 22:0-29:1
+    Visibility: public -/
+def indexed.clear (state : indexed.Traversal) : Result indexed.Traversal := do
+  let (v, v1) ← indexed.clear_loop state 0#usize
+  ok { marks := v, queue := v1 }
+
+/-- [o5s_kernel::indexed::reachable]: loop body 0:
+    Source: 'o5s/kernel/src/indexed.rs', lines 40:4-44:5
+    Visibility: public -/
+@[rust_loop_body]
+def indexed.reachable_loop.body
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (state : indexed.Traversal)
+  (i : Std.Usize) :
+  Result (ControlFlow (indexed.Traversal × Std.Usize) ((alloc.vec.Vec Bool) ×
+    (alloc.vec.Vec Std.Usize)))
+  := do
+  let i1 := alloc.vec.Vec.len state.queue
+  if i < i1
+  then
+    let vertex ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        state.queue i
+    let v ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
+        Std.Usize)) rows vertex
+    let state1 ← indexed.enqueue state v
+    let i2 ← i + 1#usize
+    ok (cont (state1, i2))
+  else ok (done (state.marks, state.queue))
+
+/-- [o5s_kernel::indexed::reachable]: loop 0:
+    Source: 'o5s/kernel/src/indexed.rs', lines 40:4-44:5
+    Visibility: public -/
+@[rust_loop]
+def indexed.reachable_loop
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (state : indexed.Traversal)
+  (i : Std.Usize) :
+  Result ((alloc.vec.Vec Bool) × (alloc.vec.Vec Std.Usize))
+  := do
+  loop
+    (fun (state1, i1) => indexed.reachable_loop.body rows state1 i1)
+    (state, i)
+
+/-- [o5s_kernel::indexed::reachable]:
+    Source: 'o5s/kernel/src/indexed.rs', lines 31:0-46:1
+    Visibility: public -/
+def indexed.reachable
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (seeds : alloc.vec.Vec Std.Usize) (marks : alloc.vec.Vec Bool) :
+  Result indexed.Traversal
+  := do
+  let state ←
+    indexed.enqueue { marks, queue := (alloc.vec.Vec.new Std.Usize) } seeds
+  let (v, v1) ← indexed.reachable_loop rows state 0#usize
+  indexed.clear { marks := v, queue := v1 }
+
 /-- [o5s_kernel::interval::conflict]:
     Source: 'o5s/kernel/src/interval.rs', lines 4:0-12:1
     Visibility: public -/

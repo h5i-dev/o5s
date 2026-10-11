@@ -5,10 +5,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 #[derive(Default)]
 pub struct Projection {
-    nodes: BTreeSet<u64>,
+    indices: BTreeMap<u64, usize>,
+    ids: Vec<u64>,
+    weak_rows: Vec<Vec<usize>>,
+    marks: Vec<bool>,
     live: BTreeSet<u64>,
     outgoing: BTreeMap<u64, BTreeSet<u64>>,
-    incoming: BTreeMap<u64, BTreeSet<u64>>,
     summary: BTreeMap<u64, BTreeSet<u64>>,
 }
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -23,7 +25,8 @@ impl Projection {
     pub fn apply(&mut self, vertices: &[(u64, bool)], edges: &[(u64, u64)]) -> ProjectionWork {
         let mut touched = BTreeSet::new();
         for &(id, alive) in vertices {
-            if self.nodes.insert(id) || self.live.contains(&id) != alive {
+            let (_, added) = self.ensure_vertex(id);
+            if added || self.live.contains(&id) != alive {
                 touched.insert(id);
             }
             if alive {
@@ -33,9 +36,13 @@ impl Projection {
             }
         }
         for &(a, b) in edges {
-            self.nodes.extend([a, b]);
+            let (ia, _) = self.ensure_vertex(a);
+            let (ib, _) = self.ensure_vertex(b);
             if self.outgoing.entry(a).or_default().insert(b) {
-                self.incoming.entry(b).or_default().insert(a);
+                self.weak_rows[ia].push(ib);
+                if ia != ib {
+                    self.weak_rows[ib].push(ia);
+                }
                 touched.extend([a, b]);
             }
         }
@@ -71,22 +78,26 @@ impl Projection {
         }
         work
     }
-    fn affected_component(&self, mut touched: BTreeSet<u64>) -> BTreeSet<u64> {
-        let mut stack: Vec<u64> = touched.iter().copied().collect();
-        while let Some(id) = stack.pop() {
-            for next in self
-                .outgoing
-                .get(&id)
-                .into_iter()
-                .flatten()
-                .chain(self.incoming.get(&id).into_iter().flatten())
-            {
-                if touched.insert(*next) {
-                    stack.push(*next);
-                }
-            }
+    fn ensure_vertex(&mut self, id: u64) -> (usize, bool) {
+        if let Some(&index) = self.indices.get(&id) {
+            return (index, false);
         }
-        touched
+        let index = self.ids.len();
+        self.indices.insert(id, index);
+        self.ids.push(id);
+        self.weak_rows.push(Vec::new());
+        self.marks.push(false);
+        (index, true)
+    }
+    fn affected_component(&mut self, touched: BTreeSet<u64>) -> BTreeSet<u64> {
+        let seeds = touched.iter().map(|id| self.indices[id]).collect();
+        let search = o5s_kernel::indexed::reachable(
+            &self.weak_rows,
+            &seeds,
+            std::mem::take(&mut self.marks),
+        );
+        self.marks = search.marks;
+        search.queue.into_iter().map(|i| self.ids[i]).collect()
     }
     pub fn original_edges(&self) -> Vec<(u64, u64)> {
         self.outgoing
@@ -146,5 +157,27 @@ mod tests {
                 );
             }
         }
+    }
+    #[test]
+    fn dense_indices_preserve_sparse_ids_when_components_join_and_marks_are_reused() {
+        let ids = [u64::MAX, 17, 9_000_000_001, 0];
+        let mut projection = Projection::default();
+        projection.apply(&ids.map(|id| (id, false)), &[]);
+        let mut edges = Vec::new();
+        for pair in [(17, 0), (u64::MAX, 9_000_000_001), (0, 9_000_000_001)] {
+            edges.push(pair);
+            projection.apply(&[], &[pair]);
+            for id in ids {
+                let expected = o5s_kernel::graph::weak_component(&edges, &vec![id]);
+                assert_eq!(
+                    projection.affected_component(BTreeSet::from([id])),
+                    expected.into_iter().collect(),
+                );
+                assert!(projection.marks.iter().all(|mark| !mark));
+            }
+        }
+        projection.apply(&[(42, false)], &[(42, 17)]);
+        assert_eq!(projection.affected_component(BTreeSet::from([42])).len(), 5);
+        assert!(projection.marks.iter().all(|mark| !mark));
     }
 }
