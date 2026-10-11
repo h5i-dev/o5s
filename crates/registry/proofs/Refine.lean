@@ -403,4 +403,48 @@ theorem register_paths_loop_ok (known : alloc.vec.Vec PathKind) (uses : alloc.ve
     rw [heq, List.drop_eq_nil_of_le this]
     simp [Model.registerPaths, liftP]
 
+set_option maxHeartbeats 1000000 in
+theorem propose_refines (u : U64) (s : Snapshot) (h : alloc.vec.Vec U8) (deps : alloc.vec.Vec U64)
+    (uses : alloc.vec.Vec PathUse) (body : alloc.vec.Vec U8) (r)
+    (hr : propose u s h deps uses body = ok r) :
+    lift r = Model.propose u (Snapshot.toSt s) h deps.val uses.val body := by
+  unfold propose at hr
+  h5i_invert hr
+  all_goals (try (obtain ⟨added, paths⟩ := x; simp at hr; h5i_invert hr))
+  all_goals have hb' := post_of_ok (valid_hash_exact h) hb
+  all_goals (try have hb1' := post_of_ok (all_known_spec _ _) hb1)
+  all_goals (try have ho' := post_of_ok (find_hash_spec _ _) ho)
+  all_goals (try have hrp : liftP _ = Model.registerPaths s.paths.val uses.val [] s.repository.paths := (by simpa using register_paths_loop_ok _ _ _ _ _ _ hr_1 (by simp)))
+  case h_1.isFalse.isFalse =>
+    have hn1 : s.repository.patches ≠ Model.MAX := hc_2
+    have hn2 : s.repository.events ≠ Model.MAX := hc_3
+    have e1 : id = Model.inc s.repository.patches := add_one_eq hid
+    have e2 : i = Model.inc s.repository.events := add_one_eq hi
+    have e3 : v = h := by simpa [H5iAppLib.u8vec_clone] using hv.symm
+    have e4 : v1 = body := by simpa [H5iAppLib.u8vec_clone] using hv1.symm
+    have e5 : v2 = s.repository.label := by simpa [H5iAppLib.u8vec_clone] using hv2.symm
+    unfold event at he
+    simp only [ok.injEq] at he
+    have w5 := push_ok_val hws5
+    have w4 := push_ok_val hws4
+    have w3 := propose_loop1_ok _ _ _ _ hws3 (by simp)
+    have w2 := propose_loop0_ok _ _ _ _ _ hws2 (by simp)
+    have w1 := push_ok_val hws1
+    have w0 := push_ok_val hws
+    simp only [Model.propose, Snapshot.toSt, lift]
+    rw [← hb', ← hb1', ← ho', ← hrp]
+    simp only [hc, hc_1, Bool.not_true, Bool.false_eq_true, ↓reduceIte, liftP, Model.MAX, hc_2, hc_3]
+    subst_vars
+    rw [w5, w4, w3, w2, w1, w0]
+    have h0 : (0#usize : Usize).val = 0 := rfl
+    simp only [h0, List.drop_zero, H5iAppLib.vec_new_val, List.nil_append, List.append_assoc, List.cons_append,
+      List.singleton_append]
+  all_goals simp only [Model.propose, Snapshot.toSt, lift]
+  · rw [← hb', ← hb1', ← ho', ← hrp]; simp [hc, hc_1, liftP, Model.MAX, hc_2]
+  · rw [← hb', ← hb1', ← ho', ← hrp]; simp [hc, hc_1, liftP, Model.MAX, hc_2, hc_3]
+  · rw [← hb', ← hb1', ← ho', ← hrp]; simp [hc, hc_1, liftP]
+  · rw [← hb', ← hb1', ← ho']; simp [hc, hc_1]
+  · rw [← hb', ← hb1']; simp [hc, hc_1]
+  · rw [← hb']; simp [hc]
+
 end o5s_registry.Refine
