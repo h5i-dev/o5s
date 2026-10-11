@@ -544,4 +544,116 @@ theorem inv_propose {s : St} (hi : Inv s) (hcr : s.repo.created = true) {u : U64
     exact ha.fresh k' hk' k hk e
   · intro hc; simp [hcr] at hc
 
+/-! ## Merge -/
+
+/-- The batch state while no admission has failed. -/
+structure FI (s : St) (c : Channel) (st : Model.Adm) : Prop where
+  size_le : c.size.val ≤ st.size.val
+  seq_le : s.repo.events.val ≤ st.seq.val
+  kinds : ∀ w ∈ st.writes, (∃ m, w = .PutMember m) ∨ (∃ e, w = .PutEvent e)
+  members : ∀ m ∈ st.writes.filterMap memberOf, m.channel = c.id ∧ c.size.val ≤ m.position.val ∧
+    m.position.val < st.size.val ∧ Model.approvedB s m.patch = true ∧ hasPatch s m.patch ∧
+    ∀ d ∈ Model.depsOf s m.patch, d ∈ st.members
+  positions : ((st.writes.filterMap memberOf).map (·.position)).Nodup
+  events : ∀ e ∈ st.writes.filterMap eventOf, s.repo.events.val < e.seq.val ∧ e.seq.val ≤ st.seq.val
+  mem : ∀ x, x ∈ st.members ↔ x ∈ (s.members.filter (fun m => decide (m.channel = c.id))).map (·.patch) ∨
+    ∃ m ∈ st.writes.filterMap memberOf, m.patch = x
+
+theorem admitK_ok' {ch deps : List U64} {a c : Bool} {id : U64} {next}
+    (h : Model.admitK ch deps a c id = .Ok next) :
+    a = true ∧ c = true ∧ (∀ d ∈ deps, d ∈ ch) ∧ next = if id ∈ ch then ch else ch ++ [id] := by
+  unfold Model.admitK at h
+  split_ifs at h with h1 h2 h3 h4 <;> simp only [core.result.Result.Ok.injEq, reduceCtorEq] at h <;>
+    subst h <;> exact ⟨by simpa using h1, by simpa using h2, by simpa using h3, by simp [h4]⟩
+
+theorem admitOne_FI {s : St} {c : Channel} {u id : U64} {st : Model.Adm} (hf : FI s c st)
+    (h : (Model.admitOne u s c.id id st).1 = none) : FI s c (Model.admitOne u s c.id id st).2 := by
+  unfold Model.admitOne at h ⊢
+  cases hp : s.patches.find? (fun p => decide (p.id = id)) with
+  | none => simp [hp] at h
+  | some p =>
+  simp only [hp] at h ⊢
+  cases hk : Model.admitK st.members (Model.depsOf s id) (Model.approvedB s id) (Model.passedB s id) id with
+  | Err e => simp [hk] at h
+  | Ok next =>
+  simp only [hk] at h ⊢
+  obtain ⟨ha, hc, hdeps, rfl⟩ := admitK_ok' hk
+  have hpat : hasPatch s id := ⟨p, List.mem_of_find?_eq_some hp, by simpa using List.find?_some hp⟩
+  by_cases hin : id ∈ st.members
+  · simp only [hin, ↓reduceIte] at h ⊢
+    by_cases hm : st.seq = Model.MAX
+    · simp [hm] at h
+    simp only [hm, ↓reduceIte] at h ⊢
+    have hinc := Refine.inc_val hm
+    refine ⟨hf.size_le, by have := hf.seq_le; simp only; omega, ?_, ?_, ?_, ?_, ?_⟩
+    · intro w hw; simp only [List.mem_append, List.mem_singleton] at hw
+      rcases hw with hw | rfl
+      · exact hf.kinds w hw
+      · exact .inr ⟨_, rfl⟩
+    · simpa [List.filterMap_append, memberOf] using hf.members
+    · simpa [List.filterMap_append, memberOf] using hf.positions
+    · intro e he
+      simp only [List.filterMap_append, List.filterMap_cons, List.filterMap_nil, eventOf, List.mem_append,
+        List.mem_singleton] at he
+      rcases he with he | rfl
+      · have := hf.events e he; simp only; omega
+      · simp only [hinc]; have := hf.seq_le; omega
+    · simpa [List.filterMap_append, memberOf] using hf.mem
+  · simp only [hin, ↓reduceIte] at h ⊢
+    by_cases hm1 : st.size = Model.MAX
+    · simp [hm1] at h
+    by_cases hm2 : st.admitted = Model.MAX
+    · simp [hm1, hm2] at h
+    by_cases hm3 : st.seq = Model.MAX
+    · simp [hm1, hm2, hm3] at h
+    simp only [hm1, hm2, hm3, ↓reduceIte] at h ⊢
+    have hs := Refine.inc_val hm1
+    have hq := Refine.inc_val hm3
+    have hmw : ((st.writes ++ [Write.PutMember ⟨c.id, st.size, id⟩]) ++
+        [Write.PutEvent ⟨Model.inc st.seq, u, MERGE, some id, some c.id⟩]).filterMap memberOf =
+        st.writes.filterMap memberOf ++ [⟨c.id, st.size, id⟩] := by
+      simp [List.filterMap_append, memberOf]
+    have hev : ((st.writes ++ [Write.PutMember ⟨c.id, st.size, id⟩]) ++
+        [Write.PutEvent ⟨Model.inc st.seq, u, MERGE, some id, some c.id⟩]).filterMap eventOf =
+        st.writes.filterMap eventOf ++ [⟨Model.inc st.seq, u, MERGE, some id, some c.id⟩] := by
+      simp [List.filterMap_append, eventOf]
+    refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+    · simp only [hs]; have := hf.size_le; omega
+    · simp only [hq]; have := hf.seq_le; omega
+    · intro w hw; simp only [List.mem_append, List.mem_singleton] at hw
+      rcases hw with (hw | rfl) | rfl
+      · exact hf.kinds w hw
+      · exact .inl ⟨_, rfl⟩
+      · exact .inr ⟨_, rfl⟩
+    · rw [hmw]
+      intro m hm
+      simp only [List.mem_append, List.mem_singleton] at hm
+      rcases hm with hm | rfl
+      · obtain ⟨h1, h2, h3, h4, h5, h6⟩ := hf.members m hm
+        refine ⟨h1, h2, by simp only [hs]; omega, h4, h5, fun d hd => List.mem_append_left _ (h6 d hd)⟩
+      · refine ⟨rfl, hf.size_le, by simp only [hs]; omega, ha, hpat, fun d hd => List.mem_append_left _ (hdeps d hd)⟩
+    · rw [hmw, List.map_append, List.nodup_append]
+      refine ⟨hf.positions, by simp, ?_⟩
+      simp only [List.mem_map, List.mem_singleton]
+      rintro _ ⟨m, hm, rfl⟩ _ ⟨_, rfl, rfl⟩ e
+      have := (hf.members m hm).2.2.1; simp only at e; rw [e] at this; omega
+    · rw [hev]
+      intro e he
+      simp only [List.mem_append, List.mem_singleton] at he
+      rcases he with he | rfl
+      · have := hf.events e he; simp only [hq]; omega
+      · simp only [hq]; have := hf.seq_le; omega
+    · rw [hmw]
+      intro x
+      simp only [List.mem_append, List.mem_singleton, hf.mem]
+      constructor
+      · rintro ((h0 | ⟨m, hm, hmx⟩) | rfl)
+        · exact .inl h0
+        · exact .inr ⟨m, .inl hm, hmx⟩
+        · exact .inr ⟨_, .inr rfl, rfl⟩
+      · rintro (h0 | ⟨m, hm | rfl, hmx⟩)
+        · exact .inl (.inl h0)
+        · exact .inl (.inr ⟨m, hm, hmx⟩)
+        · exact .inr hmx.symm
+
 end o5s_registry.Invariant
