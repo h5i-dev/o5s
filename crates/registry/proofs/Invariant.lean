@@ -740,8 +740,72 @@ theorem inv_merge {s : St} (hi : Inv s) {u : U64} {n : alloc.vec.Vec U8} {ids : 
       rw [List.filterMap_append, hnone repoOf (fun _ => rfl) (fun _ => rfl)]; rfl
     rw [ech, emb, eev, erp]
     simp only [puts_nil, puts_single]
-    trace_state
-    sorry
+    have hmemM : ∀ z ∈ M, z ∈ s.members ∨ z ∈ W := fun z hz => mem_puts _ hz
+    have hccm : cc ∈ upsert (·.id) cc s.channels := mem_upsert_self _ _ _
+    have hkeepC : ∀ c' ∈ s.channels, c'.id ≠ c.id → c' ∈ upsert (·.id) cc s.channels :=
+      fun c' hc' hne => mem_upsert_of_ne hc' hne
+    constructor
+    all_goals simp only [hasPatch, isMember]
+    · exact hi.patch_keys
+    · exact hi.patch_fresh
+    · exact hi.hashes
+    · exact hi.deps_known
+    · exact hi.approvals_independent
+    · exact hi.checks_independent
+    · exact nodup_upsert _ _ hi.channel_keys
+    · intro z hz
+      rcases mem_upsert_of hz with rfl | hz
+      · exact hi.channel_fresh c hcm
+      · exact hi.channel_fresh z hz
+    · refine nodup_map_upsert_attr _ _ cc _ hi.channel_keys hi.channel_labels ?_
+      intro y hy e
+      have : y = c := List.inj_on_of_nodup_map hi.channel_labels hy hcm e
+      rw [this]
+    · exact puts_nodup _ hi.member_keys
+    · intro z hz
+      rcases hmemM z hz with hz | hz
+      · obtain ⟨c', hc', hid', hpos⟩ := hi.members_placed z hz
+        by_cases he : c'.id = c.id
+        · have : c' = c := List.inj_on_of_nodup_map hi.channel_keys hc' hcm he
+          subst this
+          exact ⟨cc, hccm, hid', by have := hf.size_le; simp only [cc]; omega⟩
+        · exact ⟨c', hkeepC c' hc' he, hid', hpos⟩
+      · obtain ⟨h1, -, h3, -⟩ := hf.members z hz
+        exact ⟨cc, hccm, h1.symm, h3⟩
+    · intro z hz
+      rcases hmemM z hz with hz | hz
+      · exact hi.members_known z hz
+      · exact (hf.members z hz).2.2.2.2.1
+    · intro z hz d hd hdp
+      rcases hmemM z hz with hz | hz
+      · obtain ⟨m2, hm2, h1, h2⟩ := hi.closed z hz d hd hdp
+        exact ⟨m2, hkeep m2 hm2, h1, h2⟩
+      · obtain ⟨h1, -, -, -, -, h6⟩ := hf.members z hz
+        have hdm : d.dependency ∈ Model.depsOf s z.patch := by
+          simp only [Model.depsOf, List.mem_map, List.mem_filter, decide_eq_true_eq]
+          exact ⟨d, ⟨hd, hdp⟩, rfl⟩
+        rcases (hf.mem _).1 (h6 _ hdm) with h0 | ⟨m, hm, hmp⟩
+        · simp only [M0, List.mem_map, List.mem_filter, decide_eq_true_eq] at h0
+          obtain ⟨a, ⟨ha, hac⟩, hap⟩ := h0
+          exact ⟨a, hkeep a ha, hac.trans h1.symm, hap⟩
+        · exact ⟨m, hnew m hm, (hf.members m hm).1.trans h1.symm, hmp⟩
+    · intro z hz
+      rcases hmemM z hz with hz | hz
+      · exact hi.reviewed z hz
+      · have := (hf.members z hz).2.2.2.1
+        simp only [Model.approvedB, List.any_eq_true, decide_eq_true_eq] at this
+        exact this
+    · intro e he
+      rcases mem_puts _ he with he | he
+      · have := hi.event_fresh e he; have := hf.seq_le; simp only [rr]; omega
+      · exact (hf.events e he).2
+    · exact hi.bodies_known
+    · exact hi.path_keys
+    · exact hi.path_fresh
+    · exact hi.path_labels
+    · intro hcr
+      have := (hi.unborn hcr).2.2.2.2.1
+      rw [this] at hcm; simp at hcm
   · simp at hm
 
 end o5s_registry.Invariant
