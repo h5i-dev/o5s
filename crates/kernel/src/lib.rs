@@ -9,7 +9,7 @@ pub mod coordinates;
 pub mod graph;
 pub mod indexed;
 pub mod interval;
-/// Native edit-graph adapter; only its indexed traversal has Lean proofs.
+/// Native edit-graph adapter; traversal, frontier and tag scanners have Lean proofs.
 pub mod model;
 pub mod patch;
 

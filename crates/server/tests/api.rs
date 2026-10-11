@@ -3,18 +3,15 @@ use axum::{
     http::{Request, StatusCode},
 };
 use http_body_util::BodyExt;
-use o5s_server::{AppState, Store, auth::HmacAuth, router};
-use std::{
-    process::Command,
-    sync::{Arc, Mutex},
-};
+use o5s_server::{AppState, Backend, Store, auth::HmacAuth, router};
+use std::process::Command;
 use tower::ServiceExt;
 fn state(root: &std::path::Path) -> AppState {
-    AppState {
-        store: Arc::new(Mutex::new(Store::open(root).unwrap())),
-        auth: Arc::new(HmacAuth::new("test")),
-        root: root.into(),
-    }
+    AppState::new(
+        Backend::local(Store::open(root).unwrap()),
+        HmacAuth::new("test"),
+        root.into(),
+    )
 }
 async fn request(
     s: &AppState,
@@ -113,7 +110,7 @@ async fn authenticated_parallel_requests_restart_and_git_projection() {
         saved,
         request(&s, 1, 1, "/api/state?repo=demo", None).await.1
     );
-    let before = std::fs::read(dir.path().join("state.json")).unwrap();
+    let before = std::fs::read(dir.path().join("registry.log")).unwrap();
     let (status, _) = request(
         &s,
         1,
@@ -125,7 +122,7 @@ async fn authenticated_parallel_requests_restart_and_git_projection() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(
         before,
-        std::fs::read(dir.path().join("state.json")).unwrap()
+        std::fs::read(dir.path().join("registry.log")).unwrap()
     );
 }
 #[tokio::test]
@@ -171,11 +168,11 @@ async fn compact_view_cache_and_batch_rollback() {
         serde_json::json!({"cmd":"check","repo":"cache","patch":p,"passed":true}),
     )
     .await;
-    let before = std::fs::read(dir.path().join("state.json")).unwrap();
+    let before = std::fs::read(dir.path().join("registry.log")).unwrap();
     let (status,_) = request(&s,1,1,"/api/command",Some(serde_json::json!({"cmd":"merge_batch","repo":"cache","channel":"main","patches":[p,999]}))).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(
-        std::fs::read(dir.path().join("state.json")).unwrap(),
+        std::fs::read(dir.path().join("registry.log")).unwrap(),
         before
     );
     command(
@@ -251,11 +248,11 @@ async fn concurrent_line_proposals_survive_restart_and_export_merged_git_bytes()
         loop {
             match Store::open(dir.path()) {
                 Ok(store) => {
-                    break AppState {
-                        store: Arc::new(Mutex::new(store)),
-                        auth: Arc::new(HmacAuth::new("test")),
-                        root: dir.path().into(),
-                    };
+                    break AppState::new(
+                        Backend::local(store),
+                        HmacAuth::new("test"),
+                        dir.path().into(),
+                    );
                 }
                 Err(e)
                     if e.downcast_ref::<std::io::Error>()
@@ -479,7 +476,7 @@ async fn workspace_import_records_snapshot_dependencies_without_altering_files()
             .0,
         StatusCode::UNPROCESSABLE_ENTITY
     );
-    let before = std::fs::read(dir.path().join("state.json")).unwrap();
+    let before = std::fs::read(dir.path().join("registry.log")).unwrap();
     let outside = dir.path().join("outside.txt");
     std::fs::write(&outside, "must not import\n").unwrap();
     std::os::unix::fs::symlink(&outside, path.join("link.txt")).unwrap();
@@ -494,7 +491,7 @@ async fn workspace_import_records_snapshot_dependencies_without_altering_files()
     assert!(refusal["error"].as_str().unwrap().contains("regular file"));
     assert_eq!(
         before,
-        std::fs::read(dir.path().join("state.json")).unwrap()
+        std::fs::read(dir.path().join("registry.log")).unwrap()
     );
 }
 
@@ -588,4 +585,44 @@ async fn document_snapshot_preserves_observed_graph_when_channel_advances() {
         let url = format!("/api/document?repo=snap&path=a.txt&patches={selected}");
         assert_ne!(request(&s, 1, 1, &url, None).await.0, StatusCode::OK);
     }
+}
+
+#[tokio::test]
+async fn request_ids_and_metrics_are_reported() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = state(dir.path());
+    let app = router(s.clone());
+    let r = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/healthz")
+                .header("x-request-id", "trace-7")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.headers()["x-request-id"], "trace-7");
+    request(&s, 1, 1, "/api/repositories", None).await;
+    let r = app
+        .oneshot(
+            Request::builder()
+                .uri("/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let text =
+        String::from_utf8(r.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
+    assert!(
+        text.contains(r#"o5s_http_requests_total{method="GET",route="/healthz",status="200"} 1"#),
+        "{text}"
+    );
+    assert!(
+        text.contains(r#"route="/api/repositories",status="200""#),
+        "{text}"
+    );
+    assert!(text.contains("o5s_local_log_bytes"));
 }

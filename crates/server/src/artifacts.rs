@@ -38,22 +38,28 @@ fn git(path: &Path, args: &[&str], input: &[u8]) -> Result<String, Refusal> {
 }
 #[derive(Default)]
 struct Tree {
-    files: BTreeMap<String, String>,
+    /// Blob id and whether the entry is executable.
+    files: BTreeMap<String, (String, bool)>,
     dirs: BTreeMap<String, Tree>,
 }
 impl Tree {
-    fn add(&mut self, path: &str, blob: String) {
+    fn add(&mut self, path: &str, blob: String, executable: bool) {
         match path.split_once('/') {
-            Some((head, tail)) => self.dirs.entry(head.into()).or_default().add(tail, blob),
+            Some((head, tail)) => self
+                .dirs
+                .entry(head.into())
+                .or_default()
+                .add(tail, blob, executable),
             None => {
-                self.files.insert(path.into(), blob);
+                self.files.insert(path.into(), (blob, executable));
             }
         }
     }
     fn write(&self, path: &Path) -> Result<String, Refusal> {
         let mut entries = BTreeMap::new();
-        for (name, blob) in &self.files {
-            entries.insert(name.clone(), format!("100644 blob {blob}\t{name}\0"));
+        for (name, (blob, executable)) in &self.files {
+            let mode = if *executable { "100755" } else { "100644" };
+            entries.insert(name.clone(), format!("{mode} blob {blob}\t{name}\0"));
         }
         for (name, dir) in &self.dirs {
             entries.insert(
@@ -68,6 +74,12 @@ impl Tree {
         )
     }
 }
+fn write_mark(mark: &Path, generation: u64) -> Result<(), Refusal> {
+    let staged = mark.with_extension("tmp");
+    std::fs::write(&staged, generation.to_string()).map_err(|e| Refusal(e.to_string()))?;
+    std::fs::rename(&staged, mark).map_err(|e| Refusal(e.to_string()))
+}
+
 pub fn export(
     root: &Path,
     tenant: u64,
@@ -97,11 +109,39 @@ pub fn export(
             return Err(Refusal("git init failed".into()));
         }
     }
+    // One exporter per bare repository at a time, across processes; a view
+    // older than the last exported generation never moves the ref backwards.
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path.join("o5s-export.lock"))
+        .map_err(|e| Refusal(e.to_string()))?;
+    fs2::FileExt::lock_exclusive(&lock).map_err(|e| Refusal(e.to_string()))?;
+    let marks = path.join("o5s-generations");
+    std::fs::create_dir_all(&marks).map_err(|e| Refusal(e.to_string()))?;
+    let mark = marks.join(channel);
+    let exported: u64 = std::fs::read_to_string(&mark)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+    if repo.generation < exported {
+        let reference = format!("refs/heads/{channel}");
+        let commit = git(&path, &["rev-parse", "--verify", &reference], &[])?;
+        return Ok(
+            serde_json::json!({"path":path,"commit":commit,"ref":reference,
+            "stale":true,"generation":exported}),
+        );
+    }
     let mut tree = Tree::default();
-    for (name, content) in &view.files {
+    for name in view.files.keys() {
+        let (bytes, executable) = view
+            .bytes(name)
+            .ok_or_else(|| Refusal("corrupt binary file".into()))?;
         tree.add(
             name,
-            git(&path, &["hash-object", "-w", "--stdin"], content.as_bytes())?,
+            git(&path, &["hash-object", "-w", "--stdin"], &bytes)?,
+            executable,
         );
     }
     let tree = tree.write(&path)?;
@@ -122,8 +162,9 @@ pub fn export(
                 hashes.join("\n")
             );
             if old == expected.trim_end() {
+                write_mark(&mark, repo.generation)?;
                 return Ok(
-                    serde_json::json!({"path":path,"commit":p,"tree":tree,"unchanged":true}),
+                    serde_json::json!({"path":path,"commit":p,"tree":tree,"unchanged":true,"generation":repo.generation}),
                 );
             }
         }
@@ -139,8 +180,13 @@ pub fn export(
         vec!["commit-tree", &tree]
     };
     let commit = git(&path, &args, message.as_bytes())?;
-    git(&path, &["update-ref", &reference, &commit], &[])?;
-    Ok(serde_json::json!({"path":path,"commit":commit,"tree":tree,"ref":reference}))
+    // Compare-and-swap: fails if another writer moved the ref meanwhile.
+    let old = parent.clone().unwrap_or_else(|| "0".repeat(40));
+    git(&path, &["update-ref", &reference, &commit, &old], &[])?;
+    write_mark(&mark, repo.generation)?;
+    Ok(
+        serde_json::json!({"path":path,"commit":commit,"tree":tree,"ref":reference,"generation":repo.generation}),
+    )
 }
 
 /// Detached local workspaces are snapshots of admitted patch sets. Repeated
@@ -336,6 +382,8 @@ pub fn workspace_proposal(
                 Err(e) => return Err(Refusal(e.to_string())),
             }
         }
+        let mut executable = false;
+        let mut binary = false;
         let content = if absent {
             None
         } else {
@@ -354,11 +402,24 @@ pub fn workspace_proposal(
             if total > 4 * 1024 * 1024 {
                 return Err(refusal("workspace proposal exceeds limit"));
             }
-            Some(text(bytes)?)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                executable = metadata.permissions().mode() & 0o111 != 0;
+            }
+            match String::from_utf8(bytes) {
+                Ok(text) => Some(text),
+                Err(e) => {
+                    binary = true;
+                    Some(o5s_platform::base64_encode(e.as_bytes()))
+                }
+            }
         };
         edits.push(Edit {
             path: file,
             content,
+            executable,
+            base64: binary,
         });
     }
     Ok(Proposal::Propose {

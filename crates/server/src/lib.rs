@@ -1,6 +1,14 @@
 pub mod artifacts;
 pub mod auth;
+pub mod backend;
+pub mod legacy;
+pub mod local;
+pub mod metrics;
+pub mod pg;
 mod queries;
+
+pub use backend::{Backend, Failure};
+pub use local::Store;
 
 use axum::{
     Router,
@@ -10,274 +18,56 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
-use fs2::FileExt;
 use h5i_app_json::Value;
-use o5s_platform::{Actor, Command, Database, IncrementalView, Refusal};
+use o5s_platform::{Actor, Command, IncrementalView, Refusal, Repository};
 use serde::Deserialize;
 use std::{
-    fs::{self, File, OpenOptions},
-    io::{BufWriter, Write},
-    path::{Path, PathBuf},
+    collections::BTreeMap,
+    path::PathBuf,
     sync::{Arc, Mutex},
 };
 
-pub struct Store {
-    pub db: Database,
-    path: PathBuf,
-    views: std::collections::BTreeMap<(u64, String, String), IncrementalView>,
-    // Held for the process lifetime: no second writer can open the same store.
-    _lock: File,
-}
+/// Channel caches by repository scope and channel name. Channel membership is
+/// append-only, so a cache only integrates the suffix it has not seen.
+type Views = Arc<Mutex<BTreeMap<(u64, String), IncrementalView>>>;
 
-// Only the command's repository can change. Review/check commands change one
-// fact plus the event tail, so their rollback state need not clone patch bodies.
-enum Rollback {
-    Registry {
-        tenant: u64,
-        repo: String,
-        last_id: Option<u64>,
-        events: usize,
-    },
-    Channel {
-        tenant: u64,
-        repo: String,
-        channel: String,
-        previous: Option<Vec<u64>>,
-        events: usize,
-    },
-    Facts {
-        tenant: u64,
-        repo: String,
-        patch: u64,
-        approvals: Option<std::collections::BTreeSet<u64>>,
-        checked: Option<bool>,
-        events: usize,
-    },
-    Repository {
-        tenant: u64,
-        repo: String,
-        existed: bool,
-        previous: Option<o5s_platform::Repository>,
-    },
-}
-impl Rollback {
-    fn capture(db: &Database, actor: &Actor, command: &Command) -> Self {
-        let name = command.repo();
-        let repository = db.tenants.get(&actor.tenant).and_then(|t| t.get(name));
-        if let Some(repository) = repository {
-            match command {
-                Command::Propose { .. }
-                | Command::ProposeLines { .. }
-                | Command::ProposeGraph { .. } => {
-                    return Self::Registry {
-                        tenant: actor.tenant,
-                        repo: name.into(),
-                        last_id: repository.patches.last_key_value().map(|(id, _)| *id),
-                        events: repository.events.len(),
-                    };
-                }
-                Command::Fork { channel, .. }
-                | Command::Merge { channel, .. }
-                | Command::MergeBatch { channel, .. } => {
-                    return Self::Channel {
-                        tenant: actor.tenant,
-                        repo: name.into(),
-                        channel: channel.clone(),
-                        previous: repository.channels.get(channel).cloned(),
-                        events: repository.events.len(),
-                    };
-                }
-                _ => {}
-            }
-            let facts = match command {
-                Command::Approve { patch, .. } => Some((
-                    *patch,
-                    repository.patches.get(patch).map(|p| p.approvals.clone()),
-                    None,
-                )),
-                Command::Check { patch, .. } => Some((
-                    *patch,
-                    None,
-                    repository.patches.get(patch).map(|p| p.checks_passed),
-                )),
-                _ => None,
-            };
-            if let Some((patch, approvals, checked)) = facts {
-                return Self::Facts {
-                    tenant: actor.tenant,
-                    repo: name.into(),
-                    patch,
-                    approvals,
-                    checked,
-                    events: repository.events.len(),
-                };
-            }
-        }
-        Self::Repository {
-            tenant: actor.tenant,
-            repo: name.into(),
-            existed: db.tenants.contains_key(&actor.tenant),
-            previous: repository.cloned(),
-        }
-    }
-
-    fn restore(self, db: &mut Database) {
-        match self {
-            Self::Registry {
-                tenant,
-                repo,
-                last_id,
-                events,
-            } => {
-                let repository = db.tenants.get_mut(&tenant).unwrap().get_mut(&repo).unwrap();
-                while repository
-                    .patches
-                    .last_key_value()
-                    .is_some_and(|(id, _)| last_id.is_none_or(|last| *id > last))
-                {
-                    repository.patches.pop_last();
-                }
-                repository.events.truncate(events);
-            }
-            Self::Channel {
-                tenant,
-                repo,
-                channel,
-                previous,
-                events,
-            } => {
-                let repository = db.tenants.get_mut(&tenant).unwrap().get_mut(&repo).unwrap();
-                if let Some(previous) = previous {
-                    repository.channels.insert(channel, previous);
-                } else {
-                    repository.channels.remove(&channel);
-                }
-                repository.events.truncate(events);
-            }
-            Self::Facts {
-                tenant,
-                repo,
-                patch,
-                approvals,
-                checked,
-                events,
-            } => {
-                let repository = db.tenants.get_mut(&tenant).unwrap().get_mut(&repo).unwrap();
-                if let Some(p) = repository.patches.get_mut(&patch) {
-                    if let Some(approvals) = approvals {
-                        p.approvals = approvals;
-                    }
-                    if let Some(checked) = checked {
-                        p.checks_passed = checked;
-                    }
-                }
-                repository.events.truncate(events);
-            }
-            Self::Repository {
-                tenant,
-                repo,
-                existed,
-                previous,
-            } => {
-                if let Some(previous) = previous {
-                    db.tenants.entry(tenant).or_default().insert(repo, previous);
-                } else if let Some(repositories) = db.tenants.get_mut(&tenant) {
-                    repositories.remove(&repo);
-                }
-                if !existed {
-                    db.tenants.remove(&tenant);
-                }
-            }
-        }
-    }
-}
-impl Store {
-    pub fn open(root: &Path) -> Result<Self, Box<dyn std::error::Error>> {
-        fs::create_dir_all(root)?;
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(root.join("store.lock"))?;
-        lock.try_lock_exclusive()?;
-        let path = root.join("state.json");
-        let db = if path.exists() {
-            serde_json::from_slice(&fs::read(&path)?)?
-        } else {
-            Database::default()
-        };
-        Ok(Self {
-            db,
-            path,
-            _lock: lock,
-            views: Default::default(),
-        })
-    }
-    pub fn execute(
-        &mut self,
-        actor: &Actor,
-        command: Command,
-    ) -> Result<serde_json::Value, Refusal> {
-        if !o5s_platform::valid_name(command.repo()) {
-            return Err(Refusal("invalid repository name".into()));
-        }
-        if matches!(&command, Command::Create { .. })
-            && self
-                .db
-                .tenants
-                .get(&actor.tenant)
-                .is_some_and(|repos| repos.contains_key(command.repo()))
-        {
-            return Err(Refusal("repository already exists".into()));
-        }
-        let tmp = self.path.with_extension("json.tmp");
-        let parent = File::open(self.path.parent().unwrap()).map_err(|e| Refusal(e.to_string()))?;
-        let rollback = Rollback::capture(&self.db, actor, &command);
-        // The caller holds the store mutex throughout execution and persistence.
-        // No reader can see this tentative state before durable publication.
-        let reply = match self.db.execute(actor, command) {
-            Ok(reply) => reply,
-            Err(error) => {
-                rollback.restore(&mut self.db);
-                return Err(error);
-            }
-        };
-        // The registry returns before mutation for an existing canonical patch.
-        // Preserve its idempotent result without rewriting identical storage.
-        if reply.get("duplicate").and_then(serde_json::Value::as_bool) == Some(true) {
-            return Ok(reply);
-        }
-        let persist = || -> std::io::Result<()> {
-            let mut file = BufWriter::with_capacity(64 * 1024, File::create(&tmp)?);
-            serde_json::to_writer(&mut file, &self.db).map_err(std::io::Error::other)?;
-            file.flush()?;
-            file.get_ref().sync_all()?;
-            drop(file);
-            fs::rename(&tmp, &self.path)?;
-
-            Ok(())
-        };
-        if let Err(error) = persist() {
-            rollback.restore(&mut self.db);
-            return Err(Refusal(format!("storage unavailable: {error}")));
-        }
-        parent
-            .sync_all()
-            .map_err(|e| Refusal(format!("committed; directory sync failed: {e}")))?;
-        Ok(reply)
-    }
-}
 #[derive(Clone)]
 pub struct AppState {
-    pub store: Arc<Mutex<Store>>,
+    pub backend: Backend,
     pub auth: Arc<auth::HmacAuth>,
     pub root: PathBuf,
+    views: Views,
+    pub metrics: Arc<metrics::Metrics>,
+    /// Print one JSON line per request to stderr.
+    pub log_requests: bool,
 }
+
+impl AppState {
+    pub fn new(backend: Backend, auth: auth::HmacAuth, root: PathBuf) -> Self {
+        Self {
+            backend,
+            auth: Arc::new(auth),
+            root,
+            views: Arc::default(),
+            metrics: Arc::default(),
+            log_requests: false,
+        }
+    }
+
+    /// The local log store's state, for tests and tooling.
+    pub fn store(&self) -> Option<Arc<Mutex<Store>>> {
+        match &self.backend {
+            Backend::Local(store) => Some(store.clone()),
+            Backend::Postgres(_) => None,
+        }
+    }
+}
+
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(|| async { Html(include_str!("index.html")) }))
         .route("/healthz", get(|| async { "ok" }))
+        .route("/readyz", get(ready))
         .route("/api/repositories", get(repositories))
         .route("/api/state", get(repo_state))
         .route("/api/view", get(compact_view))
@@ -288,9 +78,15 @@ pub fn router(state: AppState) -> Router {
         .route("/api/export", post(export))
         .route("/api/worktree", post(worktree))
         .route("/api/worktree/propose", post(worktree_propose))
+        .route("/metrics", get(metrics::endpoint))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            metrics::observe,
+        ))
         .layer(DefaultBodyLimit::max(4 * 1024 * 1024))
         .with_state(state)
 }
+
 fn actor(state: &AppState, headers: &HeaderMap) -> Result<Actor, Response> {
     let now = h5i_app_core::Timestamp::now().secs();
     state
@@ -299,6 +95,20 @@ fn actor(state: &AppState, headers: &HeaderMap) -> Result<Actor, Response> {
         .map(|(tenant, user)| Actor { tenant, user })
         .map_err(|e| json(StatusCode::UNAUTHORIZED, serde_json::json!({"error":e.0})))
 }
+
+fn idempotency_key(headers: &HeaderMap) -> Result<Option<String>, Response> {
+    match headers.get("idempotency-key") {
+        None => Ok(None),
+        Some(value) => match value.to_str() {
+            Ok(key) if local::valid_key(key) => Ok(Some(key.to_string())),
+            _ => Err(json(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({"error":"invalid Idempotency-Key"}),
+            )),
+        },
+    }
+}
+
 fn out(v: serde_json::Value) -> Value {
     match v {
         serde_json::Value::Null => Value::Null,
@@ -313,6 +123,7 @@ fn out(v: serde_json::Value) -> Value {
         ),
     }
 }
+
 fn json(status: StatusCode, value: serde_json::Value) -> Response {
     (
         status,
@@ -321,18 +132,48 @@ fn json(status: StatusCode, value: serde_json::Value) -> Response {
     )
         .into_response()
 }
-fn result(r: Result<serde_json::Value, Refusal>) -> Response {
-    match r {
-        Ok(v) => json(StatusCode::OK, v),
-        Err(e) => json(
+
+fn failure(f: Failure) -> Response {
+    match f {
+        Failure::Refused(e) => json(
             StatusCode::UNPROCESSABLE_ENTITY,
             serde_json::json!({"error":e.0}),
         ),
+        Failure::Conflict(m) => json(StatusCode::CONFLICT, serde_json::json!({"error":m})),
+        Failure::Unavailable(m) => json(
+            StatusCode::SERVICE_UNAVAILABLE,
+            serde_json::json!({"error":m}),
+        ),
     }
 }
+
+fn result(r: Result<serde_json::Value, Refusal>) -> Response {
+    reply(r.map_err(Failure::Refused))
+}
+
+fn reply(r: Result<serde_json::Value, Failure>) -> Response {
+    match r {
+        Ok(v) => json(StatusCode::OK, v),
+        Err(f) => failure(f),
+    }
+}
+
+async fn ready(State(s): State<AppState>) -> Response {
+    reply(
+        s.backend
+            .ready()
+            .await
+            .map(|()| serde_json::json!({"ready":true})),
+    )
+}
+
 async fn command(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
     let a = match actor(&s, &headers) {
         Ok(a) => a,
+        Err(e) => return e,
+    };
+    let key = match idempotency_key(&headers) {
+        Ok(k) => k,
         Err(e) => return e,
     };
     let c = match serde_json::from_slice::<Command>(&body) {
@@ -344,59 +185,64 @@ async fn command(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> 
             );
         }
     };
-    match tokio::task::spawn_blocking(move || s.store.lock().unwrap().execute(&a, c)).await {
-        Ok(r) => result(r),
-        Err(_) => json(
-            StatusCode::SERVICE_UNAVAILABLE,
-            serde_json::json!({"error":"transaction failed"}),
-        ),
-    }
+    reply(s.backend.execute(a, c, key).await)
 }
+
 async fn repositories(State(s): State<AppState>, headers: HeaderMap) -> Response {
     let a = match actor(&s, &headers) {
         Ok(a) => a,
         Err(e) => return e,
     };
-    let store = s.store.lock().unwrap();
-    let names: Vec<&String> = store
-        .db
-        .tenants
-        .get(&a.tenant)
-        .map(|t| t.keys().collect())
-        .unwrap_or_default();
-    json(
-        StatusCode::OK,
-        serde_json::json!({"repositories":names,"actor":{"tenant":a.tenant,"user":a.user}}),
-    )
+    reply(s.backend.repositories(&a).await.map(
+        |names| serde_json::json!({"repositories":names,"actor":{"tenant":a.tenant,"user":a.user}}),
+    ))
 }
+
 #[derive(Deserialize)]
 struct RepoQuery {
     repo: String,
     #[serde(default = "main_channel")]
     channel: String,
 }
+
 fn main_channel() -> String {
     "main".into()
 }
-async fn repo_state(
-    State(s): State<AppState>,
-    headers: HeaderMap,
-    Query(q): Query<RepoQuery>,
-) -> Response {
-    let a = match actor(&s, &headers) {
-        Ok(a) => a,
-        Err(e) => return e,
-    };
+
+/// The authenticated actor and a fresh view of the named repository.
+async fn load(
+    s: &AppState,
+    headers: &HeaderMap,
+    name: &str,
+) -> Result<(Actor, Arc<Repository>), Response> {
+    let a = actor(s, headers)?;
+    let repo = s.backend.repository(&a, name).await.map_err(failure)?;
+    Ok((a, repo))
+}
+
+/// Run `f` on the repository's channel cache off the async runtime.
+async fn with_view<F>(
+    s: &AppState,
+    a: &Actor,
+    name: &str,
+    channel: &str,
+    repo: Arc<Repository>,
+    f: F,
+) -> Response
+where
+    F: FnOnce(&Repository, &mut IncrementalView) -> Result<serde_json::Value, Refusal>
+        + Send
+        + 'static,
+{
+    let views = s.views.clone();
+    let key = (
+        o5s_platform::repository_key(a.tenant, name),
+        channel.to_string(),
+    );
     match tokio::task::spawn_blocking(move || {
-        let mut store = s.store.lock().unwrap();
-        let Store { db, views, .. } = &mut *store;
-        let repo = db.repo(&a, &q.repo)?;
-        let cache = views
-            .entry((a.tenant, q.repo, q.channel.clone()))
-            .or_default();
-        let work = cache.sync_append_only(repo, &q.channel)?;
-        let view = cache.view()?;
-        Ok(serde_json::json!({"repository":repo,"view":view,"work":work}))
+        let mut views = views.lock().unwrap();
+        let cache = views.entry(key).or_default();
+        f(&repo, cache)
     })
     .await
     {
@@ -407,88 +253,97 @@ async fn repo_state(
         ),
     }
 }
+
+async fn repo_state(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<RepoQuery>,
+) -> Response {
+    let (a, repo) = match load(&s, &headers, &q.repo).await {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
+    let channel = q.channel.clone();
+    with_view(&s, &a, &q.repo, &q.channel, repo, move |repo, cache| {
+        let work = cache.sync_append_only(repo, &channel)?;
+        let view = cache.view()?;
+        Ok(serde_json::json!({"repository":repo,"view":view,"work":work}))
+    })
+    .await
+}
+
 async fn compact_view(
     State(s): State<AppState>,
     headers: HeaderMap,
     Query(q): Query<RepoQuery>,
 ) -> Response {
-    let a = match actor(&s, &headers) {
-        Ok(a) => a,
+    let (a, repo) = match load(&s, &headers, &q.repo).await {
+        Ok(x) => x,
         Err(e) => return e,
     };
-    match tokio::task::spawn_blocking(move || {
-        let mut store = s.store.lock().unwrap();
-        let Store { db, views, .. } = &mut *store;
-        let repo = db.repo(&a, &q.repo)?;
-        let cache = views.entry((a.tenant, q.repo, q.channel.clone())).or_default();
-        let work = cache.sync_append_only(repo, &q.channel)?;
+    let channel = q.channel.clone();
+    with_view(&s, &a, &q.repo, &q.channel, repo, move |repo, cache| {
+        let work = cache.sync_append_only(repo, &channel)?;
         let view = cache.content()?;
-        Ok(serde_json::json!({"files":view.files,"conflicts":view.conflicts,"patch_count":cache.patch_count(),"work":work}))
-    }).await {
-        Ok(r) => result(r),
-        Err(_) => json(StatusCode::SERVICE_UNAVAILABLE,serde_json::json!({"error":"view failed"})),
-    }
-}
-async fn export(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
-    let a = match actor(&s, &headers) {
-        Ok(a) => a,
-        Err(e) => return e,
-    };
-    let q: RepoQuery = match serde_json::from_slice(&body) {
-        Ok(q) => q,
-        Err(e) => {
-            return json(
-                StatusCode::BAD_REQUEST,
-                serde_json::json!({"error":e.to_string()}),
-            );
-        }
-    };
-    match tokio::task::spawn_blocking(move || {
-        // Keep the transaction lock until ref update: exports have a single
-        // consistent patch registry/channel and cannot race each other.
-        let store = s.store.lock().unwrap();
-        let repo = store.db.repo(&a, &q.repo)?;
-        artifacts::export(&s.root, a.tenant, &q.repo, &q.channel, repo)
+        Ok(serde_json::json!({"files":view.files,"conflicts":view.conflicts,"executable":view.executable,"binary":view.binary,"patch_count":cache.patch_count(),"work":work,"generation":repo.generation}))
     })
     .await
-    {
+}
+
+async fn blocking(
+    f: impl FnOnce() -> Result<serde_json::Value, Refusal> + Send + 'static,
+    what: &str,
+) -> Response {
+    match tokio::task::spawn_blocking(f).await {
         Ok(r) => result(r),
         Err(_) => json(
             StatusCode::SERVICE_UNAVAILABLE,
-            serde_json::json!({"error":"export failed"}),
+            serde_json::json!({"error":format!("{what} failed")}),
         ),
     }
 }
 
-async fn worktree(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
-    let a = match actor(&s, &headers) {
-        Ok(a) => a,
+fn body<T: serde::de::DeserializeOwned>(bytes: &Bytes) -> Result<T, Response> {
+    serde_json::from_slice(bytes).map_err(|e| {
+        json(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({"error":e.to_string()}),
+        )
+    })
+}
+
+async fn export(State(s): State<AppState>, headers: HeaderMap, bytes: Bytes) -> Response {
+    let q: RepoQuery = match body(&bytes) {
+        Ok(q) => q,
         Err(e) => return e,
     };
-    let q: RepoQuery = match serde_json::from_slice(&body) {
-        Ok(q) => q,
-        Err(e) => {
-            return json(
-                StatusCode::BAD_REQUEST,
-                serde_json::json!({"error":e.to_string()}),
-            );
-        }
+    let (a, repo) = match load(&s, &headers, &q.repo).await {
+        Ok(x) => x,
+        Err(e) => return e,
     };
-    match tokio::task::spawn_blocking(move || {
-        // Keep the transaction lock until ref update: exports have a single
-        // consistent patch registry/channel and cannot race each other.
-        let store = s.store.lock().unwrap();
-        let repo = store.db.repo(&a, &q.repo)?;
-        artifacts::worktree(&s.root, a.tenant, a.user, &q.repo, &q.channel, repo)
-    })
+    let root = s.root.clone();
+    blocking(
+        move || artifacts::export(&root, a.tenant, &q.repo, &q.channel, &repo),
+        "export",
+    )
     .await
-    {
-        Ok(r) => result(r),
-        Err(_) => json(
-            StatusCode::SERVICE_UNAVAILABLE,
-            serde_json::json!({"error":"workspace failed"}),
-        ),
-    }
+}
+
+async fn worktree(State(s): State<AppState>, headers: HeaderMap, bytes: Bytes) -> Response {
+    let q: RepoQuery = match body(&bytes) {
+        Ok(q) => q,
+        Err(e) => return e,
+    };
+    let (a, repo) = match load(&s, &headers, &q.repo).await {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
+    let root = s.root.clone();
+    blocking(
+        move || artifacts::worktree(&root, a.tenant, a.user, &q.repo, &q.channel, &repo),
+        "workspace",
+    )
+    .await
 }
 
 #[derive(Deserialize)]
@@ -500,31 +355,38 @@ struct WorkspaceProposal {
     commit: String,
     intent: String,
 }
-async fn worktree_propose(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
-    let a = match actor(&s, &headers) {
-        Ok(a) => a,
+
+async fn worktree_propose(State(s): State<AppState>, headers: HeaderMap, bytes: Bytes) -> Response {
+    let q: WorkspaceProposal = match body(&bytes) {
+        Ok(q) => q,
         Err(e) => return e,
     };
-    let q: WorkspaceProposal = match serde_json::from_slice(&body) {
-        Ok(q) => q,
-        Err(e) => {
-            return json(
-                StatusCode::BAD_REQUEST,
-                serde_json::json!({"error":e.to_string()}),
-            );
-        }
+    let key = match idempotency_key(&headers) {
+        Ok(k) => k,
+        Err(e) => return e,
     };
-    match tokio::task::spawn_blocking(move || {
-        let mut store = s.store.lock().unwrap();
-        let repo = store.db.repo(&a, &q.repo)?;
-        let proposal = artifacts::workspace_proposal(
-            &s.root, a.tenant, a.user, &q.repo, &q.channel, &q.commit, &q.intent, repo,
-        )?;
-        store.execute(&a, proposal)
+    let (a, repo) = match load(&s, &headers, &q.repo).await {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
+    let root = s.root.clone();
+    let user = a.clone();
+    let proposal = tokio::task::spawn_blocking(move || {
+        artifacts::workspace_proposal(
+            &root,
+            user.tenant,
+            user.user,
+            &q.repo,
+            &q.channel,
+            &q.commit,
+            &q.intent,
+            &repo,
+        )
     })
-    .await
-    {
-        Ok(r) => result(r),
+    .await;
+    match proposal {
+        Ok(Ok(command)) => reply(s.backend.execute(a, command, key).await),
+        Ok(Err(e)) => result(Err(e)),
         Err(_) => json(
             StatusCode::SERVICE_UNAVAILABLE,
             serde_json::json!({"error":"workspace proposal failed"}),
@@ -542,18 +404,17 @@ struct DocumentQuery {
     channel: String,
     path: String,
 }
+
 async fn document_view(
     State(s): State<AppState>,
     headers: HeaderMap,
     Query(q): Query<DocumentQuery>,
 ) -> Response {
-    let a = match actor(&s, &headers) {
-        Ok(a) => a,
+    let (_, repo) = match load(&s, &headers, &q.repo).await {
+        Ok(x) => x,
         Err(e) => return e,
     };
-    match tokio::task::spawn_blocking(move || {
-        let store = s.store.lock().unwrap();
-        let repo = store.db.repo(&a, &q.repo)?;
+    blocking(move || {
         if !o5s_platform::valid_path(&q.path) { return Err(Refusal("invalid document path".into())); }
         let selected: Vec<u64> = match q.patches {
             Some(value) if value.is_empty() => Vec::new(),
@@ -570,8 +431,5 @@ async fn document_view(
         let view = graph.materialize();
         let nodes: Vec<_> = view.layers.iter().flatten().map(|id| serde_json::json!({"id":id,"bytes":graph.atom(*id)})).collect();
         Ok(serde_json::json!({"path":q.path,"patches":selected,"graph_backed":graph.patch_count() > 0,"layers":view.layers,"nodes":nodes,"conflicts":view.conflicts,"bytes":view.bytes}))
-    }).await {
-        Ok(r) => result(r),
-        Err(_) => json(StatusCode::SERVICE_UNAVAILABLE,serde_json::json!({"error":"document view failed"})),
-    }
+    }, "document view").await
 }

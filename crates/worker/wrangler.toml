@@ -1,0 +1,20 @@
+# The o5s API on Workers. The JavaScript edge adapter in `cloudflare/` serves
+# Artifacts and forwards everything else here (set its O5S_ORIGIN to this
+# Worker's URL, or bind it as a service).
+name = "o5s-api"
+main = "build/index.js"
+compatibility_date = "2026-10-01"
+
+[build]
+command = "sh build.sh"
+
+# Run next to the database: each request is several round trips.
+[placement]
+region = "aws:us-east-1"
+
+# PostgreSQL through Hyperdrive. Create the tables once with the database
+# owner: `o5s-server ddl | psql "$OWNER_URL"`. For `wrangler dev`, set
+# CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE to a local database.
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "09738769027849ffb2cd540155d430c9"

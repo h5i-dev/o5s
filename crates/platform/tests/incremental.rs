@@ -12,6 +12,7 @@ fn add(r: &mut Repository, id: u64, dependencies: Vec<u64>, path: &str, content:
             edits: vec![Edit {
                 path: path.into(),
                 content,
+                ..Default::default()
             }],
             line_edits: vec![],
             graph_edits: vec![],

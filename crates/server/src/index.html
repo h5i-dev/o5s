@@ -204,7 +204,10 @@ function renderFiles(view) {
     $('files').append(card);
   }
   for (const [path, content] of Object.entries(view.files).slice(0, 80)) {
-    const details = el('details'); details.append(el('summary', path), el('pre', content));
+    const binary = (view.binary || []).includes(path), executable = (view.executable || []).includes(path);
+    const label = path + (executable ? ' · executable' : '') + (binary ? ' · binary' : '');
+    const body = binary ? el('p', 'Binary content, ' + Math.floor(content.length * 3 / 4) + ' bytes (base64 in the API).') : el('pre', content);
+    const details = el('details'); details.append(el('summary', label), body);
     if (paths.has(path)) details.append(button('Inspect graph · ' + path, () => inspectDocument(path)));
     $('files').append(details);
   }

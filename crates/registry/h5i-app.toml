@@ -1,0 +1,17 @@
+# Read by `h5i app` (extract, check, prove, mutate, doctor), run from this directory.
+
+[extract]
+crate = "."
+start-from = ["transition", "apply", "commit", "sql_writes", "decode", "visible"]
+schema = true
+include = ["h5i_app_sql", "h5i_app_std", "o5s_kernel"]
+std-specs = true
+
+[check]
+# Must exist and use only the standard axioms (every theorem in a hand-written
+# module is gated as well).
+theorems = [
+  "o5s_registry.ApplyProofs.apply_spec",
+  "o5s_registry.ApplyProofs.commit_spec",
+  "o5s_registry.Storage.stored",
+]

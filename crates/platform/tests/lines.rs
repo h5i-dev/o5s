@@ -68,6 +68,7 @@ fn fixture() -> Database {
             edits: vec![Edit {
                 path: "a".into(),
                 content: Some("one\ntwo\nthree\nfour\n".into()),
+                ..Default::default()
             }],
         },
     )
@@ -208,6 +209,7 @@ fn unicode_crlf_empty_file_and_insert_at_end_preserve_exact_bytes() {
                 edits: vec![Edit {
                     path: "a".into(),
                     content: Some(original.into()),
+                    ..Default::default()
                 }],
             },
         )

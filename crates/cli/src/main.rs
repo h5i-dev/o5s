@@ -355,7 +355,7 @@ impl Git {
             },
         ))
     }
-    fn committed(&self, commit: Option<&str>) -> Result<BTreeMap<String, String>> {
+    fn committed(&self, commit: Option<&str>) -> Result<Files> {
         let Some(commit) = commit else {
             return Ok(BTreeMap::new());
         };
@@ -369,19 +369,23 @@ impl Git {
                     .ok_or("Malformed Git tree")?,
             );
             let fields: Vec<&str> = std::str::from_utf8(meta)?.split_whitespace().collect();
-            if fields.len() != 3 || fields[1] != "blob" || fields[0] != "100644" {
+            if fields.len() != 3 || fields[1] != "blob" || !matches!(fields[0], "100644" | "100755")
+            {
                 return Err(error(
-                    "Only non-executable regular UTF-8 files are supported",
+                    "Only regular files are supported; symlinks and submodules are refused",
                 ));
             }
             files.insert(
                 std::str::from_utf8(&path[1..])?.into(),
-                String::from_utf8(self.run(&["cat-file", "blob", fields[2]], None)?)?,
+                FileData::from_bytes(
+                    self.run(&["cat-file", "blob", fields[2]], None)?,
+                    fields[0] == "100755",
+                ),
             );
         }
         Ok(files)
     }
-    fn working(&self) -> Result<BTreeMap<String, String>> {
+    fn working(&self) -> Result<Files> {
         let paths = self.run(
             &[
                 "ls-files",
@@ -427,13 +431,16 @@ impl Git {
                 return Err(error(format!("Non-regular file unsupported: {relative}")));
             }
             #[cfg(unix)]
-            {
+            let executable = {
                 use std::os::unix::fs::PermissionsExt;
-                if fs::metadata(&full)?.permissions().mode() & 0o111 != 0 {
-                    return Err(error(format!("Executable mode unsupported: {relative}")));
-                }
-            }
-            files.insert(relative.into(), fs::read_to_string(full)?);
+                fs::metadata(&full)?.permissions().mode() & 0o111 != 0
+            };
+            #[cfg(not(unix))]
+            let executable = false;
+            files.insert(
+                relative.into(),
+                FileData::from_bytes(fs::read(full)?, executable),
+            );
         }
         Ok(files)
     }
@@ -447,8 +454,25 @@ impl Git {
                 "Snapshot has conflicts; inspect o5s view and propose a resolution before fetching",
             ));
         }
-        let files: BTreeMap<String, String> =
+        let texts: BTreeMap<String, String> =
             serde_json::from_value(state["view"]["files"].clone())?;
+        let set = |key: &str| -> Result<BTreeSet<String>> {
+            Ok(serde_json::from_value(
+                state["view"].get(key).cloned().unwrap_or(json!([])),
+            )?)
+        };
+        let (executable, binary) = (set("executable")?, set("binary")?);
+        let files: Files = texts
+            .into_iter()
+            .map(|(path, text)| {
+                let data = FileData {
+                    executable: executable.contains(&path),
+                    binary: binary.contains(&path),
+                    text,
+                };
+                (path, data)
+            })
+            .collect();
         let patches: Vec<u64> = serde_json::from_value(state["view"]["patches"].clone())?;
         if channel.is_empty()
             || !channel
@@ -480,9 +504,8 @@ impl Git {
             if !valid_path(&path) {
                 return Err(error("Server supplied an unsafe file path"));
             }
-            let hash =
-                text(self.run(&["hash-object", "-w", "--stdin"], Some(content.as_bytes()))?)?;
-            entries.insert(path, hash);
+            let hash = text(self.run(&["hash-object", "-w", "--stdin"], Some(&content.bytes()?))?)?;
+            entries.insert(path, (hash, content.executable));
         }
         let tree = self.write_tree(&entries)?;
         let mut args = vec!["commit-tree", tree.as_str()];
@@ -520,16 +543,17 @@ impl Git {
         )?;
         Ok(json!({"ref":reference,"commit":commit,"patches":patches,"unchanged":false}))
     }
-    fn write_tree(&self, files: &BTreeMap<String, String>) -> Result<String> {
-        let mut dirs: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    fn write_tree(&self, files: &BTreeMap<String, (String, bool)>) -> Result<String> {
+        let mut dirs: BTreeMap<String, BTreeMap<String, (String, bool)>> = BTreeMap::new();
         let mut leaves: BTreeMap<String, String> = BTreeMap::new();
-        for (path, hash) in files {
+        for (path, (hash, executable)) in files {
             if let Some((dir, rest)) = path.split_once('/') {
                 dirs.entry(dir.into())
                     .or_default()
-                    .insert(rest.into(), hash.clone());
+                    .insert(rest.into(), (hash.clone(), *executable));
             } else {
-                leaves.insert(path.clone(), format!("100644 blob {hash}\t{path}\0"));
+                let mode = if *executable { "100755" } else { "100644" };
+                leaves.insert(path.clone(), format!("{mode} blob {hash}\t{path}\0"));
             }
         }
         for (dir, files) in dirs {
@@ -542,6 +566,76 @@ impl Git {
         )?)
     }
 }
+/// A file's content and Git mode. Non-UTF-8 content is carried as base64.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct FileData {
+    text: String,
+    executable: bool,
+    binary: bool,
+}
+impl FileData {
+    fn from_bytes(bytes: Vec<u8>, executable: bool) -> Self {
+        match String::from_utf8(bytes) {
+            Ok(text) => Self {
+                text,
+                executable,
+                binary: false,
+            },
+            Err(e) => Self {
+                text: base64_encode(e.as_bytes()),
+                executable,
+                binary: true,
+            },
+        }
+    }
+    fn bytes(&self) -> Result<Vec<u8>> {
+        if self.binary {
+            base64_decode(&self.text).ok_or_else(|| error("Server sent invalid base64 content"))
+        } else {
+            Ok(self.text.clone().into_bytes())
+        }
+    }
+}
+const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+fn base64_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        for i in 0..4 {
+            out.push(if i <= chunk.len() {
+                BASE64[(n >> (18 - 6 * i)) as usize & 63] as char
+            } else {
+                '='
+            });
+        }
+    }
+    out
+}
+fn base64_decode(text: &str) -> Option<Vec<u8>> {
+    let bytes = text.as_bytes();
+    if bytes.len() % 4 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+    for chunk in bytes.chunks(4) {
+        let pad = chunk.iter().rev().take_while(|c| **c == b'=').count();
+        let mut n = 0u32;
+        for (i, c) in chunk.iter().enumerate() {
+            let v = if i >= 4 - pad {
+                0
+            } else {
+                BASE64.iter().position(|b| b == c)? as u32
+            };
+            n |= v << (18 - 6 * i);
+        }
+        out.extend_from_slice(&[(n >> 16) as u8, (n >> 8) as u8, n as u8][..3 - pad.min(2)]);
+    }
+    (base64_encode(&out) == text).then_some(out)
+}
+type Files = BTreeMap<String, FileData>;
+
 fn valid_path(path: &str) -> bool {
     !path.is_empty()
         && path.len() <= 512
@@ -591,14 +685,26 @@ fn raw_git(root: Option<&Path>, args: &[&str], input: Option<&[u8]>) -> Result<V
 fn text(bytes: Vec<u8>) -> Result<String> {
     Ok(String::from_utf8(bytes)?.trim().into())
 }
-fn edits(before: &BTreeMap<String, String>, after: &BTreeMap<String, String>) -> Vec<Value> {
+fn edit_json(path: &str, file: Option<&FileData>) -> Value {
+    let mut edit = json!({"path": path, "content": file.map(|f| &f.text)});
+    if let Some(f) = file {
+        if f.executable {
+            edit["executable"] = json!(true);
+        }
+        if f.binary {
+            edit["base64"] = json!(true);
+        }
+    }
+    edit
+}
+fn edits(before: &Files, after: &Files) -> Vec<Value> {
     let mut paths: Vec<&String> = before.keys().chain(after.keys()).collect();
     paths.sort();
     paths.dedup();
     paths
         .into_iter()
         .filter(|p| before.get(*p) != after.get(*p))
-        .map(|p| json!({"path":p,"content":after.get(p)}))
+        .map(|p| edit_json(p, after.get(p)))
         .collect()
 }
 // The snapshot records a sole causal file head only. A merged file with
@@ -649,15 +755,19 @@ fn snapshot_bases(state: &Value, active: &[u64]) -> Result<BTreeMap<String, u64>
         .collect())
 }
 fn line_changes(
-    before: &BTreeMap<String, String>,
-    after: &BTreeMap<String, String>,
+    before: &Files,
+    after: &Files,
     bases: &BTreeMap<String, u64>,
 ) -> Option<Vec<Value>> {
     let mut changes = Vec::new();
     for edit in edits(before, after) {
         let path = edit["path"].as_str()?;
-        let original = before.get(path)?;
-        let updated = after.get(path)?;
+        let (original, updated) = (before.get(path)?, after.get(path)?);
+        // Line ranges change text only; binary content and mode changes are whole-file edits.
+        if original.binary || updated.binary || original.executable != updated.executable {
+            return None;
+        }
+        let (original, updated) = (&original.text, &updated.text);
         let base = bases.get(path)?;
         let old: Vec<&str> = original.split_inclusive('\n').collect();
         let new: Vec<&str> = updated.split_inclusive('\n').collect();
@@ -759,16 +869,18 @@ fn graph_operations(document: &Value, original: &str, updated: &str) -> Result<V
     Ok(operations)
 }
 
+/// Graph edits for graph documents, and whole-file edits for binary or legacy
+/// files, from a Git diff. `None` keeps a legacy repository's representation.
 fn automatic_graph_edits(
     api: &Api,
     repo: &str,
     channel: &str,
     state: &Value,
     snapshot: &Snapshot,
-    before: &BTreeMap<String, String>,
-    after: &BTreeMap<String, String>,
+    before: &Files,
+    after: &Files,
     changes: &[Value],
-) -> Result<Option<Vec<Value>>> {
+) -> Result<Option<(Vec<Value>, Vec<Value>)>> {
     let registry = state["repository"]["patches"]
         .as_object()
         .ok_or("Missing patch registry")?;
@@ -787,17 +899,10 @@ fn automatic_graph_edits(
     let changed_graph = changes
         .iter()
         .any(|edit| graph_paths.contains(edit["path"].as_str().unwrap_or("")));
-    let changed_legacy = changes
-        .iter()
-        .any(|edit| legacy_paths.contains(edit["path"].as_str().unwrap_or("")));
-    if changed_graph && changed_legacy {
-        return Err(error(
-            "Propose graph documents and legacy files separately; mixed-model proposals are unsupported",
-        ));
-    }
-    // Existing legacy repositories keep their historical representation. A new
-    // repository, or graph edits with new paths, use native document operations.
-    if changed_legacy || (!changed_graph && !legacy_paths.is_empty()) {
+    // Existing legacy repositories keep their historical representation for
+    // new paths. A new repository, or one with graph documents, uses native
+    // document operations for text and whole-file edits for binary content.
+    if !changed_graph && !legacy_paths.is_empty() {
         return Ok(None);
     }
     let patches = snapshot
@@ -807,16 +912,24 @@ fn automatic_graph_edits(
         .collect::<Vec<_>>()
         .join(",");
     let mut graph_edits = Vec::new();
+    let mut files = Vec::new();
     for edit in changes {
         let path = edit["path"].as_str().ok_or("Missing edited path")?;
-        let updated = after.get(path).ok_or(
-            "Graph document removal is unsupported; use an empty text file to delete its atoms",
-        )?;
-        let original = before.get(path).map(String::as_str).unwrap_or("");
-        if original.is_empty() && updated.is_empty() && !graph_paths.contains(path) {
-            return Err(error(
-                "Creating an empty graph file is unsupported; add text before proposing",
-            ));
+        let updated = after.get(path);
+        let legacy = legacy_paths.contains(path)
+            || (!graph_paths.contains(path) && updated.is_some_and(|f| f.binary));
+        if legacy {
+            files.push(edit.clone());
+            continue;
+        }
+        let Some(updated) = updated else {
+            graph_edits.push(json!({"path":path,"operations":[],"remove":true}));
+            continue;
+        };
+        if updated.binary {
+            return Err(error(format!(
+                "{path} is a text graph document; binary content needs a new path"
+            )));
         }
         let document = api.request(
             "/api/document",
@@ -828,13 +941,27 @@ fn automatic_graph_edits(
             ],
             None,
         )?;
-        let operations = graph_operations(&document, original, updated)?;
-        if operations.is_empty() {
-            return Err(error("Graph edit produced no operations"));
+        // A removed document keeps its graph; recreating it replaces those atoms.
+        let original = match before.get(path) {
+            Some(f) => f.text.clone(),
+            None => serde_json::from_value::<Vec<u8>>(document["bytes"].clone())
+                .ok()
+                .and_then(|b| String::from_utf8(b).ok())
+                .unwrap_or_default(),
+        };
+        let operations =
+            if graph_paths.contains(path) || !original.is_empty() || !updated.text.is_empty() {
+                graph_operations(&document, &original, &updated.text)?
+            } else {
+                Vec::new()
+            };
+        let mut graph = json!({"path":path,"operations":operations});
+        if updated.executable {
+            graph["executable"] = json!(true);
         }
-        graph_edits.push(json!({"path":path,"operations":operations}));
+        graph_edits.push(graph);
     }
-    Ok(Some(graph_edits))
+    Ok(Some((graph_edits, files)))
 }
 
 fn read_graph_edits(path: &Path) -> Result<Value> {
@@ -1016,8 +1143,10 @@ fn execute(cli: &Cli) -> Result<Value> {
                 let graph = automatic_graph_edits(
                     &api, repo, channel, &state, &snapshot, &before, &after, &changes,
                 )?;
-                let command = if let Some(graph_edits) = graph {
-                    json!({"cmd":"propose_graph","intent":intent,"dependencies":snapshot.patches,"edits":graph_edits})
+                let command = if let Some((graph_edits, files)) =
+                    graph.filter(|(g, _)| !g.is_empty())
+                {
+                    json!({"cmd":"propose_graph","intent":intent,"dependencies":snapshot.patches,"edits":graph_edits,"files":files})
                 } else if let Some(ranges) = line_changes(&before, &after, &snapshot.bases) {
                     json!({
                         "cmd": "propose_lines", "intent": intent,

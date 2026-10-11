@@ -1,4 +1,4 @@
-use o5s_server::{AppState, Store, auth::HmacAuth, router};
+use o5s_server::{AppState, Backend, Store, auth::HmacAuth, router};
 use serde_json::Value;
 use std::{
     fs,
@@ -18,11 +18,11 @@ impl Fixture {
     async fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
         let auth = Arc::new(HmacAuth::new("cli-workflow-test"));
-        let state = AppState {
-            store: Arc::new(Mutex::new(Store::open(&root.path().join("store")).unwrap())),
-            auth: auth.clone(),
-            root: root.path().join("store"),
-        };
+        let state = AppState::new(
+            Backend::local(Store::open(&root.path().join("store")).unwrap()),
+            HmacAuth::new("cli-workflow-test"),
+            root.path().join("store"),
+        );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -358,14 +358,11 @@ async fn staged_unstaged_untracked_and_deleted_files_are_proposed_without_index_
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn unsupported_git_content_is_rejected_before_a_proposal_exists() {
+async fn binary_executable_and_removed_files_round_trip_and_symlinks_are_refused() {
     use std::os::unix::fs::{PermissionsExt, symlink};
     let f = Fixture::new().await;
-    let a = f.repo("unsupported");
-    f.ok(&a, 1, &["connect", "unsupported"]);
-    fs::write(a.join("binary"), [0xff, 0xfe]).unwrap();
-    f.fail(&a, 1, &["propose", "--intent", "binary"], "UTF-8");
-    fs::remove_file(a.join("binary")).unwrap();
+    let a = f.repo("content");
+    f.ok(&a, 1, &["connect", "content"]);
     symlink("/etc/passwd", a.join("link")).unwrap();
     f.fail(
         &a,
@@ -374,20 +371,45 @@ async fn unsupported_git_content_is_rejected_before_a_proposal_exists() {
         "Symlink unsupported",
     );
     fs::remove_file(a.join("link")).unwrap();
-    fs::write(a.join("executable"), "#!/bin/sh\n").unwrap();
-    fs::set_permissions(a.join("executable"), fs::Permissions::from_mode(0o755)).unwrap();
-    f.fail(
-        &a,
-        1,
-        &["propose", "--intent", "mode"],
-        "Executable mode unsupported",
-    );
     assert!(
         f.ok(&a, 1, &["log"])["patches"]
             .as_array()
             .unwrap()
             .is_empty()
     );
+    // A new repository: text becomes graph documents, binary content whole files.
+    fs::write(a.join("blob.bin"), [0xff, 0xfe, 0, 7]).unwrap();
+    fs::write(a.join("run.sh"), "#!/bin/sh\necho hi\n").unwrap();
+    fs::set_permissions(a.join("run.sh"), fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(a.join("empty.txt"), "").unwrap();
+    let first = patch(f.ok(&a, 1, &["propose", "--intent", "content"]));
+    f.admit(&a, first);
+    f.ok(&a, 1, &["fetch"]);
+    let tree = git(&a, &["ls-tree", "-r", "refs/o5s/main"]);
+    assert!(
+        tree.contains("100755 blob") && tree.contains("run.sh"),
+        "{tree}"
+    );
+    assert!(
+        tree.contains("100644 blob") && tree.contains("empty.txt"),
+        "{tree}"
+    );
+    let blob = std::process::Command::new("git")
+        .args(["-C", a.to_str().unwrap(), "show", "refs/o5s/main:blob.bin"])
+        .output()
+        .unwrap()
+        .stdout;
+    assert_eq!(blob, vec![0xff, 0xfe, 0, 7]);
+    // Removing a graph document from the checked-out snapshot.
+    for name in ["blob.bin", "run.sh", "empty.txt"] {
+        fs::remove_file(a.join(name)).unwrap();
+    }
+    git(&a, &["checkout", "-q", "--detach", "refs/o5s/main"]);
+    fs::remove_file(a.join("empty.txt")).unwrap();
+    let removal = patch(f.ok(&a, 1, &["propose", "--intent", "remove"]));
+    f.admit(&a, removal);
+    f.ok(&a, 1, &["fetch"]);
+    assert!(!git(&a, &["ls-tree", "-r", "refs/o5s/main"]).contains("empty.txt"));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -667,22 +689,18 @@ async fn native_graph_worktrees_keep_causal_anchors_after_other_agents_merge() {
     f.admit(&b, empty);
     f.ok(&b, 2, &["fetch"]);
     assert_eq!(git(&b, &["show", "refs/o5s/main:file.txt"]), "");
-    // Keep a changed graph document for the mixed-model refusal below.
+    // An empty new document beside an edit, then removal of a document.
     fs::write(b.join("file.txt"), "changed\n").unwrap();
-    // No path deletion semantics or model mixing are silently invented.
     fs::write(b.join("new.txt"), "").unwrap();
-    f.fail(
-        &b,
-        2,
-        &["propose", "--intent", "empty new file"],
-        "empty graph file",
-    );
-    fs::remove_file(b.join("new.txt")).unwrap();
+    let created = patch(f.ok(&b, 2, &["propose", "--intent", "empty new file"]));
+    f.admit(&b, created);
+    f.ok(&b, 2, &["fetch"]);
+    assert_eq!(git(&b, &["show", "refs/o5s/main:new.txt"]), "");
+    assert_eq!(git(&b, &["show", "refs/o5s/main:file.txt"]), "changed");
+    git(&b, &["reset", "--hard", "refs/o5s/main"]);
     fs::remove_file(b.join("file.txt")).unwrap();
-    f.fail(
-        &b,
-        2,
-        &["propose", "--intent", "remove graph path"],
-        "removal is unsupported",
-    );
+    let removed = patch(f.ok(&b, 2, &["propose", "--intent", "remove graph path"]));
+    f.admit(&b, removed);
+    f.ok(&b, 2, &["fetch"]);
+    assert!(!git(&b, &["ls-tree", "-r", "--name-only", "refs/o5s/main"]).contains("file.txt"));
 }

@@ -187,18 +187,35 @@ impl DocumentGraph {
             return Err(Error::TooManyOperations);
         }
         let observed = self.dependency_closure(&patch.dependencies);
-        // Clone-and-publish makes all operations in a patch atomic. This is a
-        // specification strategy, not an acceptable production storage path.
-        let mut next = self.clone();
+        // References cannot use this patch's content hash; order evidence from
+        // earlier operations in the patch is nevertheless causal. Build once.
+        let mut causal_edges = observed.clone();
+        causal_edges.insert(patch.id);
+        // Validators refuse before mutation. Journal successful operations and
+        // reverse only their additions if a later operation is refused.
+        let mut journal = Vec::with_capacity(patch.operations.len());
         for (ordinal, operation) in patch.operations.iter().enumerate() {
             let id = OperationId {
                 patch: patch.id,
                 ordinal: ordinal as u32,
             };
-            next.apply_operation(id, operation, &observed)?;
+            let changed = match operation {
+                Operation::Restore { deletion } => !self.restored.contains(deletion),
+                Operation::KeepInsertion {
+                    deletion,
+                    insertion,
+                } => !self.acknowledged.contains(&(*deletion, *insertion)),
+                _ => true,
+            };
+            if let Err(error) = self.apply_operation(id, operation, &observed, &causal_edges) {
+                for (id, operation, changed) in journal.into_iter().rev() {
+                    self.rollback_operation(id, operation, changed);
+                }
+                return Err(error);
+            }
+            journal.push((id, operation, changed));
         }
-        next.patches.insert(patch.id, patch);
-        *self = next;
+        self.patches.insert(patch.id, patch);
         Ok(Applied::Inserted)
     }
 
@@ -247,20 +264,20 @@ impl DocumentGraph {
             }
             if seen.insert(at) {
                 if let Some(next) = self.edges.get(&at) {
-                    stack.extend(
-                        next.iter()
-                            .filter(|next| {
-                                observed.is_none_or(|known| {
-                                    (at == Anchor::Start && **next == Anchor::End)
-                                        || self.edge_sources.get(&(at, **next)).is_some_and(
-                                            |sources| {
-                                                sources.iter().any(|id| known.contains(&id.patch))
-                                            },
-                                        )
+                    // Common insertion anchors retain a direct causal edge.
+                    // Check it before visiting unrelated concurrent branches.
+                    let allowed = |next: &Anchor| {
+                        observed.is_none_or(|known| {
+                            (at == Anchor::Start && *next == Anchor::End)
+                                || self.edge_sources.get(&(at, *next)).is_some_and(|sources| {
+                                    sources.iter().any(|id| known.contains(&id.patch))
                                 })
-                            })
-                            .copied(),
-                    );
+                        })
+                    };
+                    if next.contains(&to) && allowed(&to) {
+                        return true;
+                    }
+                    stack.extend(next.iter().filter(|next| allowed(next)).copied());
                 }
             }
         }
@@ -275,16 +292,79 @@ impl DocumentGraph {
             .insert(source);
     }
 
+    fn rollback_edge(&mut self, from: Anchor, to: Anchor, source: OperationId) {
+        let sources = self
+            .edge_sources
+            .get_mut(&(from, to))
+            .expect("journaled edge");
+        assert!(sources.remove(&source));
+        if sources.is_empty() {
+            self.edge_sources.remove(&(from, to));
+            // The sentinel edge exists independently of operation evidence.
+            if (from, to) != (Anchor::Start, Anchor::End) {
+                let row = self.edges.get_mut(&from).expect("journaled row");
+                assert!(row.remove(&to));
+                if row.is_empty() {
+                    self.edges.remove(&from);
+                }
+            }
+        }
+    }
+
+    fn rollback_operation(&mut self, id: OperationId, operation: &Operation, changed: bool) {
+        match operation {
+            Operation::Insert { left, right, atoms } => {
+                let mut previous = *left;
+                for ordinal in 0..atoms.len() {
+                    let node = NodeId {
+                        insertion: id,
+                        ordinal: ordinal as u32,
+                    };
+                    self.rollback_edge(previous, Anchor::Node(node), id);
+                    self.atoms.remove(&node);
+                    previous = Anchor::Node(node);
+                }
+                self.rollback_edge(previous, *right, id);
+                self.insertions.remove(&id);
+                for anchor in [left, right] {
+                    if let Anchor::Node(node) = anchor {
+                        let users = self.insertions_at.get_mut(node).expect("journaled anchor");
+                        assert!(users.remove(&id));
+                        if users.is_empty() {
+                            self.insertions_at.remove(node);
+                        }
+                    }
+                }
+            }
+            Operation::Delete { .. } => {
+                self.deletions.remove(&id);
+            }
+            Operation::Restore { deletion } => {
+                if changed {
+                    self.restored.remove(deletion);
+                }
+            }
+            Operation::Order { before, after } => {
+                self.rollback_edge(Anchor::Node(*before), Anchor::Node(*after), id);
+            }
+            Operation::KeepInsertion {
+                deletion,
+                insertion,
+            } => {
+                if changed {
+                    self.acknowledged.remove(&(*deletion, *insertion));
+                }
+            }
+        }
+    }
+
     fn apply_operation(
         &mut self,
         id: OperationId,
         operation: &Operation,
         observed: &BTreeSet<PatchId>,
+        causal_edges: &BTreeSet<PatchId>,
     ) -> Result<(), Error> {
-        // References cannot use the current content hash, but order evidence
-        // introduced by earlier operations in this same patch is causal.
-        let mut causal_edges = observed.clone();
-        causal_edges.insert(id.patch);
         match operation {
             Operation::Insert { left, right, atoms } => {
                 self.anchor(*left, observed)?;
@@ -298,7 +378,7 @@ impl DocumentGraph {
                 {
                     return Err(Error::InvalidInsertion);
                 }
-                if !self.reachable_in(*left, *right, Some(&causal_edges)) {
+                if !self.reachable_in(*left, *right, Some(causal_edges)) {
                     return Err(Error::UnorderedAnchors);
                 }
                 let mut previous = *left;
@@ -351,7 +431,7 @@ impl DocumentGraph {
                 if self.reachable_in(
                     Anchor::Node(*after),
                     Anchor::Node(*before),
-                    Some(&causal_edges),
+                    Some(causal_edges),
                 ) {
                     return Err(Error::Cycle);
                 }
@@ -959,6 +1039,109 @@ mod tests {
         ));
         assert_eq!(result, Err(Error::UnobservedPatch(id(1))));
         assert_eq!(state, DocumentGraph::default());
+    }
+
+    #[test]
+    fn journal_rolls_back_every_mutation_kind_after_later_refusal() {
+        let mut original = base();
+        original.apply(delete(2, &[1], &[node(1, 1)])).unwrap();
+        original.apply(middle(3, "concurrent\n")).unwrap();
+        let operations = vec![
+            Operation::Insert {
+                left: Anchor::Node(node(1, 0)),
+                right: Anchor::Node(node(1, 1)),
+                atoms: vec![b"new-a\n".to_vec(), b"new-b\n".to_vec()],
+            },
+            Operation::Delete {
+                targets: vec![node(1, 0), node(1, 2)],
+            },
+            Operation::Restore { deletion: op(2) },
+            Operation::Restore { deletion: op(2) },
+            Operation::KeepInsertion {
+                deletion: op(2),
+                insertion: op(3),
+            },
+            Operation::KeepInsertion {
+                deletion: op(2),
+                insertion: op(3),
+            },
+            // Add new provenance to an edge that must survive rollback.
+            Operation::Order {
+                before: node(1, 0),
+                after: node(1, 1),
+            },
+            Operation::Order {
+                before: node(1, 0),
+                after: node(1, 1),
+            },
+            // Also roll back an edge with no preexisting provenance.
+            Operation::Order {
+                before: node(1, 0),
+                after: node(1, 2),
+            },
+        ];
+        for end in 1..=operations.len() {
+            let mut state = original.clone();
+            let mut candidate = operations[..end].to_vec();
+            candidate.push(Operation::Order {
+                before: node(1, 0),
+                after: node(1, 0),
+            });
+            assert_eq!(state.apply(patch(4, &[2, 3], candidate)), Err(Error::Cycle));
+            // Includes reverse indices, provenance and idempotent set entries.
+            assert_eq!(state, original, "refusal after operation {end}");
+            assert_eq!(state.materialize(), original.materialize());
+        }
+    }
+
+    #[test]
+    fn journal_keeps_preexisting_restore_and_acknowledgement() {
+        let mut state = base();
+        state.apply(delete(2, &[1], &[node(1, 1)])).unwrap();
+        state.apply(middle(3, "x\n")).unwrap();
+        state
+            .apply(patch(
+                4,
+                &[2, 3],
+                vec![
+                    Operation::Restore { deletion: op(2) },
+                    Operation::KeepInsertion {
+                        deletion: op(2),
+                        insertion: op(3),
+                    },
+                ],
+            ))
+            .unwrap();
+        let original = state.clone();
+        assert_eq!(
+            state.apply(patch(
+                5,
+                &[4],
+                vec![
+                    Operation::Restore { deletion: op(2) },
+                    Operation::KeepInsertion {
+                        deletion: op(2),
+                        insertion: op(3)
+                    },
+                    Operation::Delete {
+                        targets: vec![node(1, 0), node(1, 0)]
+                    },
+                ]
+            )),
+            Err(Error::DuplicateTarget(node(1, 0)))
+        );
+        assert_eq!(state, original);
+        // Reusing the rejected identity succeeds: no admission record leaked.
+        state
+            .apply(patch(
+                5,
+                &[4],
+                vec![Operation::Delete {
+                    targets: vec![node(1, 2)],
+                }],
+            ))
+            .unwrap();
+        assert_eq!(state.materialize().bytes, Some(b"a\nx\nb\n".to_vec()));
     }
 
     fn permutations(values: &mut [Patch], at: usize, visit: &mut impl FnMut(&[Patch])) {
