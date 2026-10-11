@@ -32,8 +32,19 @@ pub struct Store {
 // Only the command's repository can change. Review/check commands change one
 // fact plus the event tail, so their rollback state need not clone patch bodies.
 enum Rollback {
-    Registry { tenant: u64, repo: String, last_id: Option<u64>, events: usize },
-    Channel { tenant: u64, repo: String, channel: String, previous: Option<Vec<u64>>, events: usize },
+    Registry {
+        tenant: u64,
+        repo: String,
+        last_id: Option<u64>,
+        events: usize,
+    },
+    Channel {
+        tenant: u64,
+        repo: String,
+        channel: String,
+        previous: Option<Vec<u64>>,
+        events: usize,
+    },
     Facts {
         tenant: u64,
         repo: String,
@@ -55,23 +66,40 @@ impl Rollback {
         let repository = db.tenants.get(&actor.tenant).and_then(|t| t.get(name));
         if let Some(repository) = repository {
             match command {
-                Command::Propose { .. } | Command::ProposeLines { .. } | Command::ProposeGraph { .. } => {
-                    return Self::Registry { tenant: actor.tenant, repo: name.into(),
+                Command::Propose { .. }
+                | Command::ProposeLines { .. }
+                | Command::ProposeGraph { .. } => {
+                    return Self::Registry {
+                        tenant: actor.tenant,
+                        repo: name.into(),
                         last_id: repository.patches.last_key_value().map(|(id, _)| *id),
-                        events: repository.events.len() };
+                        events: repository.events.len(),
+                    };
                 }
-                Command::Fork { channel, .. } | Command::Merge { channel, .. }
+                Command::Fork { channel, .. }
+                | Command::Merge { channel, .. }
                 | Command::MergeBatch { channel, .. } => {
-                    return Self::Channel { tenant: actor.tenant, repo: name.into(), channel: channel.clone(),
-                        previous: repository.channels.get(channel).cloned(), events: repository.events.len() };
+                    return Self::Channel {
+                        tenant: actor.tenant,
+                        repo: name.into(),
+                        channel: channel.clone(),
+                        previous: repository.channels.get(channel).cloned(),
+                        events: repository.events.len(),
+                    };
                 }
                 _ => {}
             }
             let facts = match command {
-                Command::Approve { patch, .. } => Some((*patch,
-                    repository.patches.get(patch).map(|p| p.approvals.clone()), None)),
-                Command::Check { patch, .. } => Some((*patch, None,
-                    repository.patches.get(patch).map(|p| p.checks_passed))),
+                Command::Approve { patch, .. } => Some((
+                    *patch,
+                    repository.patches.get(patch).map(|p| p.approvals.clone()),
+                    None,
+                )),
+                Command::Check { patch, .. } => Some((
+                    *patch,
+                    None,
+                    repository.patches.get(patch).map(|p| p.checks_passed),
+                )),
                 _ => None,
             };
             if let Some((patch, approvals, checked)) = facts {
@@ -95,18 +123,35 @@ impl Rollback {
 
     fn restore(self, db: &mut Database) {
         match self {
-            Self::Registry { tenant, repo, last_id, events } => {
+            Self::Registry {
+                tenant,
+                repo,
+                last_id,
+                events,
+            } => {
                 let repository = db.tenants.get_mut(&tenant).unwrap().get_mut(&repo).unwrap();
-                while repository.patches.last_key_value().is_some_and(|(id, _)|
-                    last_id.is_none_or(|last| *id > last)) {
+                while repository
+                    .patches
+                    .last_key_value()
+                    .is_some_and(|(id, _)| last_id.is_none_or(|last| *id > last))
+                {
                     repository.patches.pop_last();
                 }
                 repository.events.truncate(events);
             }
-            Self::Channel { tenant, repo, channel, previous, events } => {
+            Self::Channel {
+                tenant,
+                repo,
+                channel,
+                previous,
+                events,
+            } => {
                 let repository = db.tenants.get_mut(&tenant).unwrap().get_mut(&repo).unwrap();
-                if let Some(previous) = previous { repository.channels.insert(channel, previous); }
-                else { repository.channels.remove(&channel); }
+                if let Some(previous) = previous {
+                    repository.channels.insert(channel, previous);
+                } else {
+                    repository.channels.remove(&channel);
+                }
                 repository.events.truncate(events);
             }
             Self::Facts {
@@ -119,8 +164,12 @@ impl Rollback {
             } => {
                 let repository = db.tenants.get_mut(&tenant).unwrap().get_mut(&repo).unwrap();
                 if let Some(p) = repository.patches.get_mut(&patch) {
-                    if let Some(approvals) = approvals { p.approvals = approvals; }
-                    if let Some(checked) = checked { p.checks_passed = checked; }
+                    if let Some(approvals) = approvals {
+                        p.approvals = approvals;
+                    }
+                    if let Some(checked) = checked {
+                        p.checks_passed = checked;
+                    }
                 }
                 repository.events.truncate(events);
             }
@@ -170,6 +219,18 @@ impl Store {
         actor: &Actor,
         command: Command,
     ) -> Result<serde_json::Value, Refusal> {
+        if !o5s_platform::valid_name(command.repo()) {
+            return Err(Refusal("invalid repository name".into()));
+        }
+        if matches!(&command, Command::Create { .. })
+            && self
+                .db
+                .tenants
+                .get(&actor.tenant)
+                .is_some_and(|repos| repos.contains_key(command.repo()))
+        {
+            return Err(Refusal("repository already exists".into()));
+        }
         let tmp = self.path.with_extension("json.tmp");
         let parent = File::open(self.path.parent().unwrap()).map_err(|e| Refusal(e.to_string()))?;
         let rollback = Rollback::capture(&self.db, actor, &command);
@@ -475,6 +536,8 @@ async fn worktree_propose(State(s): State<AppState>, headers: HeaderMap, body: B
 #[serde(deny_unknown_fields)]
 struct DocumentQuery {
     repo: String,
+    #[serde(default)]
+    patches: Option<String>,
     #[serde(default = "main_channel")]
     channel: String,
     path: String,
@@ -492,11 +555,21 @@ async fn document_view(
         let store = s.store.lock().unwrap();
         let repo = store.db.repo(&a, &q.repo)?;
         if !o5s_platform::valid_path(&q.path) { return Err(Refusal("invalid document path".into())); }
-        let channel = repo.channels.get(&q.channel).ok_or_else(|| Refusal("channel not found".into()))?;
-        let graph = repo.document_at(&q.path, channel)?;
+        let selected: Vec<u64> = match q.patches {
+            Some(value) if value.is_empty() => Vec::new(),
+            Some(value) => {
+                if value.len() > 128 * 1024 { return Err(Refusal("snapshot selection too large".into())); }
+                let ids: Result<Vec<u64>, _> = value.split(',').map(str::parse).collect();
+                let ids = ids.map_err(|_| Refusal("invalid snapshot patch identifiers".into()))?;
+                if ids.len() > 10_000 { return Err(Refusal("snapshot selection too large".into())); }
+                ids
+            },
+            None => repo.channels.get(&q.channel).ok_or_else(|| Refusal("channel not found".into()))?.clone(),
+        };
+        let graph = repo.document_at(&q.path, &selected)?;
         let view = graph.materialize();
         let nodes: Vec<_> = view.layers.iter().flatten().map(|id| serde_json::json!({"id":id,"bytes":graph.atom(*id)})).collect();
-        Ok(serde_json::json!({"path":q.path,"layers":view.layers,"nodes":nodes,"conflicts":view.conflicts,"bytes":view.bytes}))
+        Ok(serde_json::json!({"path":q.path,"patches":selected,"graph_backed":graph.patch_count() > 0,"layers":view.layers,"nodes":nodes,"conflicts":view.conflicts,"bytes":view.bytes}))
     }).await {
         Ok(r) => result(r),
         Err(_) => json(StatusCode::SERVICE_UNAVAILABLE,serde_json::json!({"error":"document view failed"})),

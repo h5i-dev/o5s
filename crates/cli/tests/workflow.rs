@@ -463,13 +463,22 @@ async fn graph_operations_use_portable_nodes_and_reviewed_order_resolution() {
     );
     assert!(!a.join("graph.txt").exists());
     git(&a, &["reset", "--hard", "refs/o5s/main"]);
-    fs::write(a.join("graph.txt"), "unsupported whole-file replacement\n").unwrap();
-    f.fail(
-        &a,
-        1,
-        &["propose", "--intent", "invalid mixed model"],
-        "graph document requires graph operations",
+    fs::write(a.join("graph.txt"), "updated left\nright\nbase\n").unwrap();
+    git(&a, &["add", "graph.txt"]);
+    fs::write(a.join("graph.txt"), "updated left\nupdated right\nbase\n").unwrap();
+    let index = git(&a, &["ls-files", "--stage"]);
+    let native = patch(f.ok(&a, 1, &["propose", "--intent", "native graph edit"]));
+    let detail = f.ok(&a, 1, &["show", &native.to_string()]);
+    assert_eq!(detail["graph_edits"].as_array().unwrap().len(), 1);
+    assert!(detail["edits"].as_array().unwrap().is_empty());
+    assert_eq!(git(&a, &["ls-files", "--stage"]), index);
+    f.admit(&a, native);
+    f.ok(&a, 1, &["fetch"]);
+    assert_eq!(
+        git(&a, &["show", "refs/o5s/main:graph.txt"]),
+        "updated left\nupdated right\nbase"
     );
+    assert_eq!(git(&a, &["ls-files", "--stage"]), index);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -543,4 +552,102 @@ async fn history_pages_omit_payloads_and_show_fetches_only_one_proposal() {
         assert_eq!(output.status.code(), Some(2));
     }
     assert!(f.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_graph_worktrees_keep_causal_anchors_after_other_agents_merge() {
+    use serde_json::json;
+    let f = Fixture::new().await;
+    let a = f.repo("native-graph");
+    f.ok(&a, 1, &["connect", "native-graph"]);
+    let operations = f.root.path().join("native-graph.json");
+    fs::write(
+        &operations,
+        json!([{"path":"file.txt","operations":[{
+            "kind":"insert","left":"Start","right":"End",
+            "atoms":[b"one\n".to_vec(),b"two\n".to_vec(),b"three\n".to_vec(),b"four\n".to_vec()]
+        }]}])
+        .to_string(),
+    )
+    .unwrap();
+    let base = patch(f.ok(
+        &a,
+        1,
+        &[
+            "propose-graph",
+            "--operations-file",
+            operations.to_str().unwrap(),
+            "--intent",
+            "base",
+        ],
+    ));
+    f.admit(&a, base);
+    f.ok(&a, 1, &["fetch"]);
+    git(&a, &["reset", "--hard", "refs/o5s/main"]);
+    let b = f.root.path().join("native-graph-agent");
+    git(
+        &a,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            b.to_str().unwrap(),
+            "refs/o5s/main",
+        ],
+    );
+    let original = f.ok(&a, 1, &["document", "file.txt"]);
+    fs::write(a.join("file.txt"), "ONE\ntwo\nthree\nfour\n").unwrap();
+    git(&a, &["add", "file.txt"]);
+    let first = patch(f.ok(&a, 1, &["propose", "--intent", "first atom"]));
+    f.admit(&a, first);
+    // This worktree still has the old snapshot; current channel rendering must
+    // never become the implicit base for its independent edit.
+    fs::write(b.join("file.txt"), "one\ntwo\nthree\nFOUR\n").unwrap();
+    let second = patch(f.ok(&b, 2, &["propose", "--intent", "last atom"]));
+    let detail = f.ok(&b, 2, &["show", &second.to_string()]);
+    assert_eq!(detail["dependencies"], json!([base]));
+    assert_eq!(
+        detail["graph_edits"][0]["operations"][0]["targets"][0],
+        original["layers"][3][0]
+    );
+    f.admit(&b, second);
+    f.ok(&b, 2, &["fetch"]);
+    assert_eq!(
+        git(&b, &["show", "refs/o5s/main:file.txt"]),
+        "ONE\ntwo\nthree\nFOUR"
+    );
+    assert_eq!(
+        fs::read_to_string(b.join("file.txt")).unwrap(),
+        "one\ntwo\nthree\nFOUR\n"
+    );
+    git(&b, &["reset", "--hard", "refs/o5s/main"]);
+    // Partial edits inside a UTF-8 atom replace that atom without splitting a
+    // code point, and preserve the unaffected middle anchors.
+    fs::write(b.join("file.txt"), "O日NE\ntwo\nthree\nFOUR\n").unwrap();
+    let unicode = patch(f.ok(&b, 2, &["propose", "--intent", "unicode atom"]));
+    f.admit(&b, unicode);
+    f.ok(&b, 2, &["fetch"]);
+    assert_eq!(
+        git(&b, &["show", "refs/o5s/main:file.txt"]),
+        "O日NE\ntwo\nthree\nFOUR"
+    );
+    git(&b, &["reset", "--hard", "refs/o5s/main"]);
+    fs::write(b.join("file.txt"), "").unwrap();
+    let empty = patch(f.ok(&b, 2, &["propose", "--intent", "delete all atoms"]));
+    f.admit(&b, empty);
+    f.ok(&b, 2, &["fetch"]);
+    assert_eq!(git(&b, &["show", "refs/o5s/main:file.txt"]), "");
+    // Keep a changed graph document for the mixed-model refusal below.
+    fs::write(b.join("file.txt"), "changed\n").unwrap();
+    // No path deletion semantics or model mixing are silently invented.
+    fs::write(b.join("new.txt"), "legacy addition\n").unwrap();
+    f.fail(&b, 2, &["propose", "--intent", "mixed"], "mixed-model");
+    fs::remove_file(b.join("new.txt")).unwrap();
+    fs::remove_file(b.join("file.txt")).unwrap();
+    f.fail(
+        &b,
+        2,
+        &["propose", "--intent", "remove graph path"],
+        "removal is unsupported",
+    );
 }

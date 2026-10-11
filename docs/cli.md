@@ -49,7 +49,7 @@ Graph documents use stable node identities rather than byte offsets. Inspect the
 ]
 ```
 
-Later insertions, deletions, restorations and ordering operations name the exact identities returned by `document`. Concurrent ambiguous orders and delete/insert disagreements remain explicit conflicts. The server refuses whole-file/line changes to graph documents and graph changes to legacy documents until a migration operation is specified. Ordinary Git diffs do not yet generate graph operations automatically. See [document operations](patch-model.md) for the wire types and examples.
+Later insertions, deletions, restorations and ordering operations name the exact identities returned by `document`. Concurrent ambiguous orders and delete/insert disagreements remain explicit conflicts. The server refuses whole-file/line changes to graph documents and graph changes to legacy documents until a migration operation is specified. For existing graph documents, ordinary `o5s propose` converts Git edits into deletion and insertion operations, preserving unchanged prefix/suffix atom identities and the exact Git snapshot dependencies. It refuses ambiguous graph output, graph path removal and mixed legacy/graph proposals. Separate edits inside one document can replace unchanged interior atoms; this is a conservative edit script. See [document operations](patch-model.md) for the wire types and examples.
 
 ## Supported file subset
 
@@ -57,4 +57,4 @@ The CLI accepts regular UTF-8 files, each at most 4 MiB, with a total request li
 
 The client locks connection metadata across commands and writes fetched refs with compare-and-swap. Saved credentials use an atomic file replacement with mode `0600` on Unix. A connected repository cannot be silently rebound to a different tenant or collaboration repository.
 
-The integration tests launch the actual CLI against a live Axum listener and real Git repositories. They cover native worktrees, concurrent line changes, graph conflicts and reviewed order resolution, ref/HEAD/index preservation, unsupported content and origin/tenant separation. Run `cargo test -p o5s-cli`.
+The integration tests launch the actual CLI against a live Axum listener and real Git repositories. They cover native worktrees, concurrent line changes, graph conflicts and reviewed order resolution, ref/HEAD/index preservation, native graph proposals from older snapshots, unsupported content and origin/tenant separation. Run `cargo test -p o5s-cli`.

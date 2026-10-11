@@ -15,6 +15,6 @@ This repository is a local MVP, not the complete distributed Git platform descri
 
 The extraction and proof gate cover the o5s kernels. The axiom gate checks actual extracted Rust refinements as well as supporting mathematical lemmas; a theorem count is not a count of end-to-end product guarantees.
 
-The block-graph path is connected to persisted proposals, admitted channel views and Git exports. Automatic conversion of ordinary Git edits, legacy document migration and component-local updates remain unfinished. Native transaction/persistence behavior and distributed execution also need explicit specifications before end-to-end verification can be claimed. Research-derived compression or incremental ordering should be accepted only with measured benefit and a refinement argument for this model.
+The block-graph path is connected to persisted proposals, admitted channel views and Git exports. Ordinary Git edits to existing graph documents now produce graph operations with their original snapshot dependencies. Initial graph creation from ordinary Git, legacy document migration and component-local updates remain unfinished. Native transaction/persistence behavior and distributed execution also need explicit specifications before end-to-end verification can be claimed. Research-derived compression or incremental ordering should be accepted only with measured benefit and a refinement argument for this model.
 
 The [production roadmap](roadmap.md) defines the missing semantics, implementations, proofs and operational acceptance tests.

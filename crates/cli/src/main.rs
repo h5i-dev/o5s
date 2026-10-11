@@ -672,6 +672,160 @@ fn line_changes(
     }
     Some(changes)
 }
+// Preserve complete unchanged atom blocks. A partial edit replaces its whole
+// atom; inserted text is split at LF boundaries so later edits retain anchors.
+fn graph_operations(document: &Value, original: &str, updated: &str) -> Result<Vec<Value>> {
+    let layers = document["layers"]
+        .as_array()
+        .ok_or("Missing document layers")?;
+    let conflicts = document["conflicts"]
+        .as_array()
+        .ok_or("Missing document conflicts")?;
+    if !conflicts.is_empty()
+        || layers
+            .iter()
+            .any(|layer| layer.as_array().is_none_or(|ids| ids.len() != 1))
+    {
+        return Err(error(
+            "Graph document has unresolved conflicts; inspect o5s document and submit explicit reviewed operations",
+        ));
+    }
+    let rendered: Vec<u8> = serde_json::from_value(document["bytes"].clone())
+        .map_err(|_| error("Graph document has no unambiguous rendered bytes"))?;
+    if rendered != original.as_bytes() {
+        return Err(error(
+            "Graph causal view differs from the Git snapshot; refusing to overwrite unobserved content",
+        ));
+    }
+    let nodes = document["nodes"]
+        .as_array()
+        .ok_or("Missing document nodes")?;
+    let mut atoms = Vec::new();
+    for layer in layers {
+        let id = &layer[0];
+        let node = nodes
+            .iter()
+            .find(|node| node.get("id") == Some(id))
+            .ok_or("Missing rendered document atom")?;
+        let bytes: Vec<u8> = serde_json::from_value(node["bytes"].clone())?;
+        if bytes.is_empty() {
+            return Err(error("Document contains an empty atom"));
+        }
+        atoms.push((id.clone(), bytes));
+    }
+    if atoms
+        .iter()
+        .flat_map(|(_, bytes)| bytes.iter().copied())
+        .collect::<Vec<_>>()
+        != rendered
+    {
+        return Err(error("Document nodes do not match its rendered bytes"));
+    }
+    let target = updated.as_bytes();
+    let mut prefix = 0;
+    let mut left_bytes = 0;
+    while prefix < atoms.len() && target[left_bytes..].starts_with(&atoms[prefix].1) {
+        left_bytes += atoms[prefix].1.len();
+        prefix += 1;
+    }
+    let mut end = atoms.len();
+    let mut right_bytes = target.len();
+    while end > prefix
+        && right_bytes >= left_bytes + atoms[end - 1].1.len()
+        && target[..right_bytes].ends_with(&atoms[end - 1].1)
+    {
+        right_bytes -= atoms[end - 1].1.len();
+        end -= 1;
+    }
+    let mut operations = Vec::new();
+    if prefix < end {
+        operations.push(json!({"kind":"delete","targets":atoms[prefix..end].iter().map(|(id,_)|id).collect::<Vec<_>>()}));
+    }
+    if left_bytes < right_bytes {
+        let replacement = std::str::from_utf8(&target[left_bytes..right_bytes])?;
+        let left = if prefix == 0 {
+            json!("Start")
+        } else {
+            json!({"Node":atoms[prefix-1].0})
+        };
+        let right = if end == atoms.len() {
+            json!("End")
+        } else {
+            json!({"Node":atoms[end].0})
+        };
+        operations.push(json!({"kind":"insert","left":left,"right":right,
+            "atoms":replacement.split_inclusive('\n').map(|line|line.as_bytes()).collect::<Vec<_>>() }));
+    }
+    Ok(operations)
+}
+
+fn automatic_graph_edits(
+    api: &Api,
+    repo: &str,
+    channel: &str,
+    state: &Value,
+    snapshot: &Snapshot,
+    before: &BTreeMap<String, String>,
+    after: &BTreeMap<String, String>,
+    changes: &[Value],
+) -> Result<Option<Vec<Value>>> {
+    let registry = state["repository"]["patches"]
+        .as_object()
+        .ok_or("Missing patch registry")?;
+    let graph_paths: BTreeSet<&str> = registry
+        .values()
+        .filter_map(|patch| patch["graph_edits"].as_array())
+        .flatten()
+        .filter_map(|edit| edit["path"].as_str())
+        .collect();
+    if !changes
+        .iter()
+        .any(|edit| graph_paths.contains(edit["path"].as_str().unwrap_or("")))
+    {
+        return Ok(None);
+    }
+    if changes
+        .iter()
+        .any(|edit| !graph_paths.contains(edit["path"].as_str().unwrap_or("")))
+    {
+        return Err(error(
+            "Propose graph documents and legacy files separately; mixed-model proposals are unsupported",
+        ));
+    }
+    let patches = snapshot
+        .patches
+        .iter()
+        .map(u64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut graph_edits = Vec::new();
+    for edit in changes {
+        let path = edit["path"].as_str().ok_or("Missing edited path")?;
+        let updated = after.get(path).ok_or(
+            "Graph document removal is unsupported; use an empty text file to delete its atoms",
+        )?;
+        let original = before
+            .get(path)
+            .ok_or("Graph document is missing from the Git snapshot")?;
+        let document = api.request(
+            "/api/document",
+            &[
+                ("repo", repo),
+                ("channel", channel),
+                ("path", path),
+                ("patches", &patches),
+            ],
+            None,
+        )?;
+        let operations = graph_operations(&document, original, updated)?;
+        if operations.is_empty() {
+            return Err(error("Graph edit produced no operations"));
+        }
+        graph_edits.push(json!({"path":path,"operations":operations}));
+    }
+    Ok(Some(graph_edits))
+}
+
 fn read_graph_edits(path: &Path) -> Result<Value> {
     let file = fs::File::open(path)?;
     let mut bytes = Vec::new();
@@ -848,7 +1002,12 @@ fn execute(cli: &Cli) -> Result<Value> {
                 if changes.is_empty() {
                     return Err(error("No changes to propose"));
                 }
-                let command = if let Some(ranges) = line_changes(&before, &after, &snapshot.bases) {
+                let graph = automatic_graph_edits(
+                    &api, repo, channel, &state, &snapshot, &before, &after, &changes,
+                )?;
+                let command = if let Some(graph_edits) = graph {
+                    json!({"cmd":"propose_graph","intent":intent,"dependencies":snapshot.patches,"edits":graph_edits})
+                } else if let Some(ranges) = line_changes(&before, &after, &snapshot.bases) {
                     json!({
                         "cmd": "propose_lines", "intent": intent,
                         "dependencies": snapshot.patches, "edits": ranges
@@ -1007,6 +1166,32 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn automatic_graph_edit_refuses_ambiguity_and_unobserved_bytes() {
+        let mut document = json!({"layers":[[1,2]],"conflicts":[],"nodes":[],"bytes":[97]});
+        assert!(
+            graph_operations(&document, "a", "b")
+                .unwrap_err()
+                .to_string()
+                .contains("unresolved conflicts")
+        );
+        document["layers"] = json!([[1]]);
+        document["conflicts"] = json!([{"kind":"delete_insert"}]);
+        assert!(
+            graph_operations(&document, "a", "b")
+                .unwrap_err()
+                .to_string()
+                .contains("unresolved conflicts")
+        );
+        document["conflicts"] = json!([]);
+        assert!(
+            graph_operations(&document, "old", "new")
+                .unwrap_err()
+                .to_string()
+                .contains("unobserved content")
+        );
+    }
+
     #[test]
     fn graph_commands_parse_explicit_dependencies_and_document_channel() {
         let cli = Cli::try_parse_from([

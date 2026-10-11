@@ -533,3 +533,59 @@ async fn history_pages_bound_payloads_and_enforce_tenant() {
         assert_ne!(request(&s, 1, 1, url, None).await.0, StatusCode::OK);
     }
 }
+
+#[tokio::test]
+async fn document_snapshot_preserves_observed_graph_when_channel_advances() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = state(dir.path());
+    command(&s, 1, serde_json::json!({"cmd":"create","repo":"snap"})).await;
+    for (user, bytes) in [(1, vec![65u8]), (2, vec![66u8])] {
+        command(&s, user, serde_json::json!({"cmd":"propose_graph","repo":"snap","intent":"insert","dependencies":[],"edits":[{"path":"a.txt","operations":[{"kind":"insert","left":"Start","right":"End","atoms":[bytes]}]}]})).await;
+        command(
+            &s,
+            3,
+            serde_json::json!({"cmd":"approve","repo":"snap","patch":user}),
+        )
+        .await;
+        command(
+            &s,
+            4,
+            serde_json::json!({"cmd":"check","repo":"snap","patch":user,"passed":true}),
+        )
+        .await;
+        command(
+            &s,
+            3,
+            serde_json::json!({"cmd":"merge","repo":"snap","channel":"main","patch":user}),
+        )
+        .await;
+    }
+    let (status, old) = request(
+        &s,
+        1,
+        1,
+        "/api/document?repo=snap&path=a.txt&patches=1",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{old}");
+    assert_eq!(old["bytes"], serde_json::json!([65]));
+    assert_eq!(old["graph_backed"], true);
+    let (_, current) = request(&s, 1, 1, "/api/document?repo=snap&path=a.txt", None).await;
+    assert!(current["bytes"].is_null());
+    assert!(!current["conflicts"].as_array().unwrap().is_empty());
+    let (_, empty) = request(
+        &s,
+        1,
+        1,
+        "/api/document?repo=snap&path=a.txt&patches=",
+        None,
+    )
+    .await;
+    assert_eq!(empty["graph_backed"], false);
+    assert_eq!(empty["bytes"], serde_json::json!([]));
+    for selected in ["999", "invalid", "-1"] {
+        let url = format!("/api/document?repo=snap&path=a.txt&patches={selected}");
+        assert_ne!(request(&s, 1, 1, &url, None).await.0, StatusCode::OK);
+    }
+}

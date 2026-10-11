@@ -33,15 +33,27 @@ fn failed_fact_writes_restore_memory_disk_and_event_tail() {
             .unwrap();
         propose(&mut store, repo);
     }
+    store
+        .execute(
+            &actor(2),
+            command(json!({"cmd":"approve","repo":"alpha","patch":1})),
+        )
+        .unwrap();
+    store
+        .execute(
+            &actor(3),
+            command(json!({"cmd":"check","repo":"alpha","patch":1,"passed":true})),
+        )
+        .unwrap();
     let before = snapshot(&store);
     let disk = std::fs::read(dir.path().join("state.json")).unwrap();
     // A directory at the temporary snapshot path forces failure before rename.
     std::fs::create_dir(dir.path().join("state.json.tmp")).unwrap();
     for value in [
         json!({"cmd":"approve","repo":"alpha","patch":1}),
-        json!({"cmd":"check","repo":"alpha","patch":1,"passed":true}),
+        json!({"cmd":"check","repo":"alpha","patch":1,"passed":false}),
     ] {
-        let error = store.execute(&actor(2), command(value)).unwrap_err();
+        let error = store.execute(&actor(4), command(value)).unwrap_err();
         assert!(error.0.starts_with("storage unavailable:"));
         assert_eq!(snapshot(&store), before);
         assert_eq!(std::fs::read(dir.path().join("state.json")).unwrap(), disk);
@@ -96,6 +108,16 @@ fn failed_repository_writes_and_batch_refusal_are_atomic() {
     std::fs::create_dir(dir.path().join("state.json.tmp")).unwrap();
     for (a, value) in [
         (
+            actor(1),
+            json!({"cmd":"propose","repo":"alpha","intent":"failed new patch",
+            "dependencies":[],"edits":[{"path":"failed.txt","content":"not committed"}]}),
+        ),
+        (
+            actor(1),
+            json!({"cmd":"propose_lines","repo":"alpha","intent":"failed line patch",
+            "dependencies":[],"edits":[{"path":"file.txt","base":first,"start":0,"end":1,"content":"new"}]}),
+        ),
+        (
             actor(2),
             json!({"cmd":"fork","repo":"alpha","source":"main","channel":"new"}),
         ),
@@ -111,6 +133,9 @@ fn failed_repository_writes_and_batch_refusal_are_atomic() {
         assert!(store.execute(&a, command(value)).is_err());
         assert_eq!(snapshot(&store), before);
     }
+    // An already registered canonical patch succeeds without rewriting storage.
+    assert_eq!(propose(&mut store, "alpha"), first);
+    assert_eq!(snapshot(&store), before);
     drop(store);
     assert_eq!(snapshot(&Store::open(dir.path()).unwrap()), before);
 }
