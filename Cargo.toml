@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/server", "crates/kernel", "crates/registry", "crates/platform", "crates/cli", "crates/loadgen", "crates/pgwire", "crates/worker"]
+members = ["crates/server", "crates/kernel", "crates/registry", "crates/platform", "crates/cli", "crates/loadgen", "crates/pgwire", "crates/worker", "crates/gitpush"]
 
 [profile.release]
 opt-level = 3

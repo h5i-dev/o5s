@@ -1,9 +1,11 @@
 //! The o5s API on Cloudflare Workers. The registry kernel, command planning,
 //! narrow loads and repository views are the same crates the native server
-//! runs (`o5s_pgwire::service`); this crate only binds them to Hyperdrive and
-//! to the Workers fetch handler. Git projections and Artifacts stay in the
-//! JavaScript edge adapter (`cloudflare/`), which forwards here.
+//! runs (`o5s_pgwire::service`); this crate binds them to Hyperdrive and to
+//! the Workers fetch handler. Git export pushes snapshots to Cloudflare
+//! Artifacts (`artifacts.rs`); agent workspaces need a filesystem and are
+//! not served here.
 
+pub mod artifacts;
 #[path = "../../server/src/auth.rs"]
 pub mod auth;
 
@@ -71,6 +73,7 @@ type Registry = Service<Hyper, Delay>;
 #[derive(Clone)]
 struct AppState {
     env: Arc<Env>,
+    ctx: Arc<Context>,
 }
 
 impl AppState {
@@ -100,7 +103,7 @@ impl AppState {
     }
 }
 
-fn router(env: Env) -> Router {
+fn router(env: Env, ctx: Context) -> Router {
     Router::new()
         .route(
             "/",
@@ -115,19 +118,22 @@ fn router(env: Env) -> Router {
         .route("/api/patches", get(patches))
         .route("/api/patch", get(patch))
         .route("/api/command", post(command))
-        .route("/api/export", post(no_filesystem))
+        .route("/api/export", post(export))
         .route("/api/worktree", post(no_filesystem))
         .route("/api/worktree/propose", post(no_filesystem))
-        .with_state(AppState { env: Arc::new(env) })
+        .with_state(AppState {
+            env: Arc::new(env),
+            ctx: Arc::new(ctx),
+        })
 }
 
 #[event(fetch)]
 async fn fetch(
     req: HttpRequest,
     env: Env,
-    _ctx: Context,
+    ctx: Context,
 ) -> worker::Result<axum::http::Response<axum::body::Body>> {
-    Ok(router(env).call(req).await?)
+    Ok(router(env, ctx).call(req).await?)
 }
 
 fn out(v: serde_json::Value) -> h5i_app_json::Value {
@@ -214,8 +220,74 @@ async fn command(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> 
             );
         }
     };
+    // A merge also refreshes the channel's Git projection, after the reply.
+    let merged = match &c {
+        Command::Merge { repo, channel, .. } | Command::MergeBatch { repo, channel, .. } => {
+            Some((repo.clone(), channel.clone()))
+        }
+        _ => None,
+    };
     let r = async { s.registry()?.execute(&a, c, key.as_deref()).await }.await;
+    if r.is_ok()
+        && let Some((repo, channel)) = merged
+    {
+        let state = s.clone();
+        s.ctx.wait_until(async move {
+            if let Err(e) = export_channel(&state, &a, &repo, &channel).await {
+                worker::console_error!("Git export after merge failed: {e:?}");
+            }
+        });
+    }
     reply(r)
+}
+
+/// Push a channel's admitted snapshot to its Artifacts repository.
+async fn export_channel(
+    s: &AppState,
+    a: &Actor,
+    repo: &str,
+    channel: &str,
+) -> Result<serde_json::Value, Failure> {
+    let view_repo = s.registry()?.repository(a, repo).await?;
+    let view = view_repo.materialize(channel).map_err(Failure::Refused)?;
+    artifacts::export(
+        &s.env,
+        &format!("{}-{}", a.tenant, repo),
+        channel,
+        &view_repo,
+        &view,
+    )
+    .await
+    .map_err(|e| {
+        if e.contains("conflicts") {
+            Failure::Refused(Refusal(e))
+        } else {
+            Failure::Unavailable(e)
+        }
+    })
+}
+
+#[worker::send]
+async fn export(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    let a = match s.actor(&headers) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let q: RepoQuery = match serde_json::from_slice(&body) {
+        Ok(q) => q,
+        Err(e) => {
+            return json(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({"error":e.to_string()}),
+            );
+        }
+    };
+    if !o5s_platform::valid_name(&q.channel) {
+        return reply(Err(Failure::Refused(Refusal(
+            "invalid channel name".into(),
+        ))));
+    }
+    reply(export_channel(&s, &a, &q.repo, &q.channel).await)
 }
 
 #[worker::send]
@@ -406,6 +478,6 @@ async fn patch(
 async fn no_filesystem() -> Response {
     json(
         StatusCode::NOT_IMPLEMENTED,
-        serde_json::json!({"error":"Git projections are served by the Artifacts edge adapter, not this Worker"}),
+        serde_json::json!({"error":"agent workspaces need a filesystem; use the native server or `o5s fetch`"}),
     )
 }
