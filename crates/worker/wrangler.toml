@@ -1,12 +1,17 @@
 # The o5s API on Workers. The JavaScript edge adapter in `cloudflare/` serves
 # Artifacts and forwards everything else here (set its O5S_ORIGIN to this
 # Worker's URL, or bind it as a service).
-name = "o5s-api"
+# Same name as the Worker deployed from the dashboard (Workers Builds).
+name = "o5s"
 main = "build/index.js"
 compatibility_date = "2026-10-01"
 
 [build]
 command = "sh build.sh"
+
+# Required by `wrangler preview` (non-production branch builds). Empty: previews
+# use the top-level settings.
+[previews]
 
 # Run next to the database: each request is several round trips.
 [placement]

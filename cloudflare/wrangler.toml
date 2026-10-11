@@ -2,6 +2,9 @@ name = "o5s-edge"
 main = "worker.mjs"
 compatibility_date = "2026-10-11"
 
+# Required by `wrangler preview`; previews use the top-level settings.
+[previews]
+
 [vars]
 # Local development only. Set an HTTPS axum endpoint for deployment.
 O5S_ORIGIN = "http://127.0.0.1:3000"
