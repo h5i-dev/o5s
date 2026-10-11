@@ -78,6 +78,28 @@ impl Fixture {
             String::from_utf8_lossy(&o.stderr)
         );
     }
+    fn legacy(&self, cwd: &Path, repo: &str, paths: &[&str], intent: &str) -> u64 {
+        // These fixtures explicitly seed historical whole-file repositories;
+        // the production CLI defaults new repositories to graph documents.
+        let edits: Vec<_> = paths
+            .iter()
+            .map(|path| {
+                serde_json::json!({
+                    "path":path,"content":fs::read_to_string(cwd.join(path)).unwrap()
+                })
+            })
+            .collect();
+        let response: Value = std::thread::scope(|scope| {
+            scope.spawn(|| {
+            reqwest::blocking::Client::new()
+            .post(format!("{}/api/command", self.url))
+            .bearer_auth(self.auth.issue(1, 1, u64::MAX))
+            .json(&serde_json::json!({"cmd":"propose","repo":repo,"intent":intent,"dependencies":[],"edits":edits}))
+            .send().unwrap().error_for_status().unwrap().json().unwrap()
+        }).join().unwrap()
+        });
+        patch(response)
+    }
     fn admit(&self, cwd: &Path, patch: u64) {
         let id = patch.to_string();
         self.ok(cwd, 90, &["approve", &id]);
@@ -118,7 +140,12 @@ async fn native_git_worktrees_independent_review_and_parallel_line_merge() {
     git(&a, &["add", "nested/staged.txt"]);
     let before_index = git(&a, &["ls-files", "--stage"]);
     f.ok(&a, 1, &["connect", "demo"]);
-    let initial = patch(f.ok(&a, 1, &["propose", "--intent", "initial import"]));
+    let initial = f.legacy(
+        &a,
+        "demo",
+        &["file.txt", "nested/staged.txt"],
+        "initial import",
+    );
     f.fail(
         &a,
         1,
@@ -199,7 +226,7 @@ async fn conflicting_edits_never_overwrite_git_ref_or_checkout() {
     let a = f.repo("conflict");
     f.ok(&a, 1, &["connect", "conflict"]);
     fs::write(a.join("f"), "base\n").unwrap();
-    let base = patch(f.ok(&a, 1, &["propose", "--intent", "base"]));
+    let base = f.legacy(&a, "conflict", &["f"], "base");
     f.admit(&a, base);
     let fetched = f.ok(&a, 1, &["fetch"]);
     git(
@@ -294,7 +321,12 @@ async fn staged_unstaged_untracked_and_deleted_files_are_proposed_without_index_
     fs::write(a.join("tracked"), "original\n").unwrap();
     fs::write(a.join("deleted"), "remove\n").unwrap();
     fs::write(a.join(".gitignore"), "ignored\n").unwrap();
-    let initial = patch(f.ok(&a, 1, &["propose", "--intent", "import"]));
+    let initial = f.legacy(
+        &a,
+        "changes",
+        &["tracked", "deleted", ".gitignore"],
+        "import",
+    );
     f.admit(&a, initial);
     let commit = f.ok(&a, 1, &["fetch"])["commit"]
         .as_str()
@@ -494,11 +526,11 @@ async fn history_pages_omit_payloads_and_show_fetches_only_one_proposal() {
             format!("version {i}\n{}", "payload\n".repeat(8192)),
         )
         .unwrap();
-        ids.push(patch(f.ok(
-            &a,
-            1,
-            &["propose", "--intent", &format!("proposal {i}")],
-        )));
+        ids.push(if i == 0 {
+            f.legacy(&a, "paged-history", &["file.txt"], "proposal 0")
+        } else {
+            patch(f.ok(&a, 1, &["propose", "--intent", &format!("proposal {i}")]))
+        });
     }
     f.requests.lock().unwrap().clear();
     let first = f.ok(&a, 1, &["log", "--limit", "2"]);
@@ -560,27 +592,18 @@ async fn native_graph_worktrees_keep_causal_anchors_after_other_agents_merge() {
     let f = Fixture::new().await;
     let a = f.repo("native-graph");
     f.ok(&a, 1, &["connect", "native-graph"]);
-    let operations = f.root.path().join("native-graph.json");
-    fs::write(
-        &operations,
-        json!([{"path":"file.txt","operations":[{
-            "kind":"insert","left":"Start","right":"End",
-            "atoms":[b"one\n".to_vec(),b"two\n".to_vec(),b"three\n".to_vec(),b"four\n".to_vec()]
-        }]}])
-        .to_string(),
-    )
-    .unwrap();
-    let base = patch(f.ok(
-        &a,
-        1,
-        &[
-            "propose-graph",
-            "--operations-file",
-            operations.to_str().unwrap(),
-            "--intent",
-            "base",
-        ],
-    ));
+    fs::write(a.join("file.txt"), "one\ntwo\nthree\nfour\n").unwrap();
+    git(&a, &["add", "file.txt"]);
+    let base = patch(f.ok(&a, 1, &["propose", "--intent", "base"]));
+    let initial = f.ok(&a, 1, &["show", &base.to_string()]);
+    assert!(initial["edits"].as_array().unwrap().is_empty());
+    assert_eq!(
+        initial["graph_edits"][0]["operations"][0]["atoms"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
     f.admit(&a, base);
     f.ok(&a, 1, &["fetch"]);
     git(&a, &["reset", "--hard", "refs/o5s/main"]);
@@ -624,12 +647,19 @@ async fn native_graph_worktrees_keep_causal_anchors_after_other_agents_merge() {
     // Partial edits inside a UTF-8 atom replace that atom without splitting a
     // code point, and preserve the unaffected middle anchors.
     fs::write(b.join("file.txt"), "O日NE\ntwo\nthree\nFOUR\n").unwrap();
-    let unicode = patch(f.ok(&b, 2, &["propose", "--intent", "unicode atom"]));
+    fs::write(b.join("added.txt"), "new graph document\n").unwrap();
+    let unicode = patch(f.ok(&b, 2, &["propose", "--intent", "unicode atom and new file"]));
+    let detail = f.ok(&b, 2, &["show", &unicode.to_string()]);
+    assert_eq!(detail["graph_edits"].as_array().unwrap().len(), 2);
     f.admit(&b, unicode);
     f.ok(&b, 2, &["fetch"]);
     assert_eq!(
         git(&b, &["show", "refs/o5s/main:file.txt"]),
         "O日NE\ntwo\nthree\nFOUR"
+    );
+    assert_eq!(
+        git(&b, &["show", "refs/o5s/main:added.txt"]),
+        "new graph document"
     );
     git(&b, &["reset", "--hard", "refs/o5s/main"]);
     fs::write(b.join("file.txt"), "").unwrap();
@@ -640,8 +670,13 @@ async fn native_graph_worktrees_keep_causal_anchors_after_other_agents_merge() {
     // Keep a changed graph document for the mixed-model refusal below.
     fs::write(b.join("file.txt"), "changed\n").unwrap();
     // No path deletion semantics or model mixing are silently invented.
-    fs::write(b.join("new.txt"), "legacy addition\n").unwrap();
-    f.fail(&b, 2, &["propose", "--intent", "mixed"], "mixed-model");
+    fs::write(b.join("new.txt"), "").unwrap();
+    f.fail(
+        &b,
+        2,
+        &["propose", "--intent", "empty new file"],
+        "empty graph file",
+    );
     fs::remove_file(b.join("new.txt")).unwrap();
     fs::remove_file(b.join("file.txt")).unwrap();
     f.fail(

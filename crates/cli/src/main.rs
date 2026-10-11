@@ -778,19 +778,27 @@ fn automatic_graph_edits(
         .flatten()
         .filter_map(|edit| edit["path"].as_str())
         .collect();
-    if !changes
+    let legacy_paths: BTreeSet<&str> = registry
+        .values()
+        .filter_map(|patch| patch["edits"].as_array())
+        .flatten()
+        .filter_map(|edit| edit["path"].as_str())
+        .collect();
+    let changed_graph = changes
         .iter()
-        .any(|edit| graph_paths.contains(edit["path"].as_str().unwrap_or("")))
-    {
-        return Ok(None);
-    }
-    if changes
+        .any(|edit| graph_paths.contains(edit["path"].as_str().unwrap_or("")));
+    let changed_legacy = changes
         .iter()
-        .any(|edit| !graph_paths.contains(edit["path"].as_str().unwrap_or("")))
-    {
+        .any(|edit| legacy_paths.contains(edit["path"].as_str().unwrap_or("")));
+    if changed_graph && changed_legacy {
         return Err(error(
             "Propose graph documents and legacy files separately; mixed-model proposals are unsupported",
         ));
+    }
+    // Existing legacy repositories keep their historical representation. A new
+    // repository, or graph edits with new paths, use native document operations.
+    if changed_legacy || (!changed_graph && !legacy_paths.is_empty()) {
+        return Ok(None);
     }
     let patches = snapshot
         .patches
@@ -804,9 +812,12 @@ fn automatic_graph_edits(
         let updated = after.get(path).ok_or(
             "Graph document removal is unsupported; use an empty text file to delete its atoms",
         )?;
-        let original = before
-            .get(path)
-            .ok_or("Graph document is missing from the Git snapshot")?;
+        let original = before.get(path).map(String::as_str).unwrap_or("");
+        if original.is_empty() && updated.is_empty() && !graph_paths.contains(path) {
+            return Err(error(
+                "Creating an empty graph file is unsupported; add text before proposing",
+            ));
+        }
         let document = api.request(
             "/api/document",
             &[
