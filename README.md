@@ -1,6 +1,6 @@
 # o5s
 
-A local patch collaboration prototype for concurrent agents, built with Rust, axum and h5i-app. Changes are immutable patches with stable SHA-256 identities and explicit dependencies. Channels select dependency-closed patch sets. Concurrent edits remain visible; a resolution is another reviewed patch. Git provides working copies and exported projections.
+A local patch collaboration prototype for concurrent agents, built with Rust, axum and h5i-app. Changes are immutable patches with stable SHA-256 identities and explicit dependencies. Channels select dependency-closed patch sets. Concurrent edits remain visible; a resolution is another reviewed patch. Git provides working copies and exported projections.a
 
 The Axum application lives in `crates/server/src/`. The verified registry kernel, which makes every committed registry decision, is in `crates/registry/`, with its Lean proofs in `crates/registry/proofs/`. The verified document and admission kernels are in `crates/kernel/` with proofs in `proofs/`. Collaboration logic is in `crates/platform/`, the agent CLI in `crates/cli/`, the load and Git-comparison driver in `crates/loadgen/`, and the Cloudflare edge adapter in `cloudflare/`.
 
