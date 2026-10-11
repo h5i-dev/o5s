@@ -72,7 +72,9 @@ async fn call(target: &JsValue, method: &str, args: &[JsValue]) -> Result<JsValu
     for a in args {
         array.push(a);
     }
-    let value = f.apply(target, &array).map_err(js_err)?;
+    // `Reflect.apply`, not `f.apply`: on an RPC stub, the property `apply`
+    // would itself be a remote method.
+    let value = Reflect::apply(&f, target, &array).map_err(js_err)?;
     // Binding methods return RPC promises, which are thenables but not
     // `Promise` instances; `Promise.resolve` awaits any thenable.
     JsFuture::from(Promise::resolve(&value)).await.map_err(js_err)
@@ -102,7 +104,7 @@ impl Drop for Repo {
             && let Ok(f) = Reflect::get(&self.0, &key)
             && let Ok(f) = f.dyn_into::<Function>()
         {
-            let _ = f.call0(&self.0);
+            let _ = Reflect::apply(&f, &self.0, &js_sys::Array::new());
         }
     }
 }
