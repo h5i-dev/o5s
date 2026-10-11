@@ -574,4 +574,43 @@ theorem merge_loop_ok (user : U64) (r : Repository) (v : alloc.vec.Vec PatchRow)
     have : ids.val.length ≤ j.val := by scalar_tac
     rw [heq, List.drop_eq_nil_of_le this]; rfl
 
+theorem merge_refines (u : U64) (s : Snapshot) (n : alloc.vec.Vec U8) (ids : alloc.vec.Vec U64) (r)
+    (h : merge u s n ids = ok r) : lift r = Model.merge u (Snapshot.toSt s) n ids.val := by
+  unfold merge at h
+  h5i_invert h
+  all_goals have hb' := post_of_ok (valid_batch_exact ids) hb
+  all_goals (try have ho' := post_of_ok (find_channel_spec _ _) ho)
+  case h_2 =>
+    obtain ⟨st, f⟩ := x_1
+    have hl := merge_loop_ok _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ hx_1 (by simp)
+    have hv' := post_of_ok (members_of_spec _ _) hv
+    have hs : Snapshot.toSt ⟨s.repository, s.patches, s.dependencies, s.approvals, s.checks, s.channels, s.members,
+        s.paths, s.events, s.bodies, s.listings⟩ = Snapshot.toSt s := rfl
+    rw [hs] at hl
+    simp only [Model.merge, Snapshot.toSt, Model.findChannel]
+    rw [← hb', ← ho']
+    simp only [hc, Bool.not_true, Bool.false_eq_true, ↓reduceIte]
+    have h0 : (0#usize : Usize).val = 0 := rfl
+    simp only [h0, List.drop_zero, liftAdm, hv', H5iAppLib.vec_new_val] at hl
+    simp only [Snapshot.toSt] at hl
+    rw [← hl]
+    simp at h
+    cases f with
+    | none =>
+      simp only at h ⊢
+      h5i_invert h
+      have e1 : v1 = x.label := by simpa [H5iAppLib.u8vec_clone] using hv1.symm
+      have e2 : v2 = s.repository.label := by simpa [H5iAppLib.u8vec_clone] using hv2.symm
+      subst e1 e2
+      simp [lift, push_ok_val hws1, push_ok_val hws]
+    | some e =>
+      simp only at h ⊢
+      simp only [Result.ok.injEq] at h
+      subst h
+      rfl
+  all_goals simp only [Model.merge, Snapshot.toSt, Model.findChannel, lift]
+  all_goals rw [← hb']
+  all_goals (try rw [← ho'])
+  all_goals simp_all
+
 end o5s_registry.Refine
