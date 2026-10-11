@@ -30,6 +30,7 @@ structure Inv (s : St) : Prop where
   channel_keys : (s.channels.map (·.id)).Nodup
   channel_fresh : ∀ c ∈ s.channels, c.id.val ≤ s.repo.channels.val
   channel_labels : (s.channels.map (fun c => c.label.val)).Nodup
+  member_keys : (s.members.map (fun m => (m.channel, m.position))).Nodup
   /-- Every member sits below its channel's size, so admission appends. -/
   members_placed : ∀ m ∈ s.members, ∃ c ∈ s.channels, c.id = m.channel ∧ m.position.val < c.size.val
   members_known : ∀ m ∈ s.members, hasPatch s m.patch
@@ -102,6 +103,7 @@ theorem inv_approve {s : St} (hi : Inv s) {u patch : U64} {ws r}
     · exact hi.channel_keys
     · exact hi.channel_fresh
     · exact hi.channel_labels
+    · exact hi.member_keys
     · exact hi.members_placed
     · exact hi.members_known
     · exact hi.closed
@@ -151,6 +153,7 @@ theorem inv_check {s : St} (hi : Inv s) {u patch : U64} {passed : Bool} {ws r}
     · exact hi.channel_keys
     · exact hi.channel_fresh
     · exact hi.channel_labels
+    · exact hi.member_keys
     · exact hi.members_placed
     · exact hi.members_known
     · exact hi.closed
@@ -181,7 +184,7 @@ theorem inv_register {s : St} (hi : Inv s) {a : Principal} {n : alloc.vec.Vec U8
     simp only [List.filterMap_cons, List.filterMap_nil, repoOf, patchOf, depOf, approvalOf, checkOf, channelOf,
       memberOf, pathOf, eventOf, bodyOf, listingOf, puts_nil, puts_single, List.getLast?_nil, Option.getD_none]
     exact ⟨hi.1, hi.2, hi.3, hi.4, hi.5, hi.6, hi.7, hi.8, hi.9, hi.10, hi.11, hi.12, hi.13, hi.14, hi.15, hi.16,
-      hi.17, hi.18, hi.19⟩
+      hi.17, hi.18, hi.19, hi.20⟩
 
 theorem inv_create {s : St} (hi : Inv s) {a : Principal} {n : alloc.vec.Vec U8} {ws r}
     (h : Model.create a s.repo n = .Ok (ws, r)) : Inv (applyAll s ws) := by
