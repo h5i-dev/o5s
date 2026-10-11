@@ -26,7 +26,7 @@ References to a patch's own identity are rejected. Hashing an envelope that cont
 | `Order { before, after }` | Add order evidence for two observed atoms | Unknown or unobserved atom, or an order edge closing a cycle already visible to the author |
 | `KeepInsertion { deletion, insertion }` | Acknowledge retention of one insertion anchored on an atom covered by one named deletion | Unknown or unobserved operations, or a deletion that covers neither insertion anchor |
 
-All operations in a patch apply atomically. The implementation currently validates against a cloned document and publishes the clone only after every operation succeeds. Production storage must replace this copying strategy with a durable transaction that has the same failure behavior.
+All operations in a patch apply atomically for returned validation errors. Each operation validates before mutating. A journal records successful additions and reverses them if a later operation is refused, including edge provenance, reverse anchor indices and newly inserted restoration or acknowledgement entries. Entries that existed before the patch remain present. The patch record is published only after all operations succeed. The native journal has refusal tests but no Lean proof; durable storage still requires a transaction with the same failure behavior.
 
 ## Deletion, restoration and later arrivals
 
@@ -67,16 +67,39 @@ Each insertion below names the initial patch as its dependency unless stated oth
 | Receive a patch before its dependency | No mutation; retryable missing-dependency result |
 | Valid deletion followed by an invalid order in one patch | Entire patch rejected; deletion has no effect |
 
+## Files, modes and binary content
+
+A path is either a graph document or a legacy whole-file/line document, for its whole history. The registry kernel records the model of each path at its first proposal and refuses the other kind afterwards.
+
+- **Graph documents.** Every graph edit states whether the file exists (`"remove": true` removes it) and whether it is executable. These states form a causal register per path. A patch supersedes the nearest earlier edits of the path in its causal past, and concurrent heads that disagree, such as a removal and an edit, are an explicit conflict. A later patch observing both resolves it. An edit without operations creates an empty document, removes one, or changes only its mode. Removal keeps the graph, so restoring the file can continue from its atoms. Atoms are UTF-8.
+- **Whole-file edits.** `{"path","content","executable","base64"}`. A `null` content removes the file. With `"base64": true` the content is standard padded base64 of arbitrary bytes. Concurrent edits conflict when content, mode or encoding differ. Line edits apply only to text files and keep the base's mode.
+- **Mixed proposals.** `propose_graph` accepts `files` (whole-file edits) beside graph edits, so a proposal can carry text documents and binary files together. A path cannot be both in one proposal.
+- **Identity.** The new fields appear in a patch body only when set, and mixed proposals use the body tag `o5s-mixed-patch-v1`. Every earlier patch keeps its SHA-256 identity.
+- **Not supported.** Symbolic links, submodules and identity-preserving renames are refused rather than approximated.
+
+Views list executable paths in `executable` and base64 paths in `binary`. Git export and `o5s fetch` write modes 100755/100644 and the decoded bytes.
+
 ## Evidence and remaining work
 
-The model tests cover stable anchors, atomic rejection, duplicate delivery, tag restoration, pair-specific acknowledgement, late arrivals, concurrent order cycles and all 120 permutations of five independent changes. A differential test checks indexed frontier reconstruction against full-history reachability for 64 deletion masks. Run them with `cargo test -p o5s-kernel model::tests`.
+The model tests cover stable anchors, atomic rejection, duplicate delivery, tag restoration, pair-specific acknowledgement, late arrivals, concurrent order cycles and all 120 permutations of five independent changes. Refusal tests reject a patch after each prefix of mixed operations and compare the entire state, including duplicate set entries and shared edge provenance. A differential test checks indexed frontier reconstruction against full-history reachability for 64 deletion masks. Run them with `cargo test -p o5s-kernel model::tests`.
 
-The current boundary search reuses visited marks and stops at live atoms. It avoids a separate full graph search for every pair of live atoms. A reverse anchor index restricts delete/insert conflict checks to insertions that actually use a deleted target; unrelated insertions are skipped. Causal ancestry checks still traverse dependency records for each candidate pair.
+The current boundary search reuses visited marks and stops at live atoms. It avoids a separate full graph search for every pair of live atoms. A reverse anchor index restricts delete/insert conflict checks to insertions that actually use a deleted target; unrelated insertions are skipped. Anchor validation checks an available direct causal edge before expanding concurrent branches. Causal ancestry checks still traverse dependency records for each candidate pair and compute a dependency closure for each admitted patch.
 
-Each materialization still reconstructs all adjacency rows and every live boundary row. There is no affected-component cache, persistent adjacency index or measured thousands-of-agents throughput for this document path.
+Each materialization still reconstructs all adjacency rows and every live boundary row. There is no affected-component cache or persistent adjacency index in this document adapter. The `document_history` example measures actual admission and materialization for independent and sequential histories, and repeats admission with a whole-document clone wrapped around the same production function. That comparison isolates copying overhead; it does not compare against a historical binary. Run `cargo run -p o5s-kernel --example document_history --release -- 2000`. These local in-memory measurements do not establish network or durable multi-agent throughput.
+
+One release-mode run on the development host produced these results. Each patch inserts one two-byte atom. Independent patches share one base; sequential patches depend on their predecessor. The host exposes an AMD EPYC 7502 CPU and was also running development tasks. Times are milliseconds, measured once per case.
+
+| Additional patches | History | Journal admission | Clone-wrapper admission | Journal materialization |
+|---|---|---:|---:|---:|
+| 2,000 | Independent | 17.376 | 1,202.570 | 4.172 |
+| 2,000 | Sequential | 421.106 | 1,840.243 | 1.870 |
+| 8,000 | Independent | 43.570 | 39,673.679 | 8.609 |
+| 8,000 | Sequential | 8,685.275 | Not completed | 8.057 |
+
+The 8,000-patch sequential clone-wrapper case was stopped after the other results were recorded. Sequential admission still computes the complete dependency closure for every patch and therefore accumulates quadratic ancestry work. Removing whole-document copying does not resolve that cost. A bounded causal index and affected-component materialization remain required before claiming long-history scalability.
 
 `proofs/Tags.lean` proves the extracted visibility scanner returns true exactly when no active covering tag remains. It also proves that changing a different restoration flag cannot revive an atom with an active covering tag. Both results require valid covering indices; they do not prove the adapter's dense-ID mapping or the operation admission rules.
 
 The Lean boundary theorems justify the traversal under their dense-row and liveness assumptions. They do not yet prove that this adapter constructs those rows correctly, that operation application preserves its invariants, or that these conflict layers implement a complete patch theory. Initial indegree construction and subsequent Kahn updates also need invariant proofs. The M3 proof work must follow the Rust functions called here and discharge those adapter obligations. A separate abstract model would leave the application unverified.
 
-Further work must specify atom splitting, document/file identity, creation and removal, rename conflicts, byte encoding policy, binary objects, modes, symlinks, submodules, cycle recovery and canonical wire envelopes. Storage and replication must also connect reviewed patch identities to admitted graph operations before claiming end-to-end verified merge behavior.
+Further work must specify atom splitting, identity-preserving renames, symlinks, submodules, cycle recovery and canonical wire envelopes. Storage and replication must also connect reviewed patch identities to admitted graph operations before claiming end-to-end verified merge behavior.

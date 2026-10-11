@@ -1,0 +1,51 @@
+{
+  "o5s": {
+    "approve_and_check": {
+      "failed": 0,
+      "max_ms": 56.684814,
+      "p50_ms": 17.600465,
+      "p95_ms": 40.651376000000006,
+      "p99_ms": 50.523115,
+      "per_second": 1542.2056103373548,
+      "requests": 200,
+      "seconds": 0.129684394
+    },
+    "content_matches": true,
+    "failed": 0,
+    "integrate_seconds": 0.72781887,
+    "integrated": 200,
+    "integrated_per_second": 274.7936447429564,
+    "merge_batch": {
+      "failed": 0,
+      "max_ms": 1.831925,
+      "p50_ms": 1.16643,
+      "p95_ms": 1.16643,
+      "p99_ms": 1.16643,
+      "per_second": 665.6825659400187,
+      "requests": 2,
+      "seconds": 0.003004435
+    },
+    "pipeline": "propose; independent approve and check report; merge_batch",
+    "proposals_from": "o5s CLI processes in per-agent Git repositories",
+    "propose": {
+      "failed": 0,
+      "max_ms": 85.725775,
+      "p50_ms": 46.018622,
+      "p95_ms": 77.358874,
+      "p99_ms": 84.340757,
+      "per_second": 605.6158142786084,
+      "requests": 200,
+      "seconds": 0.330242367
+    },
+    "system": "o5s",
+    "transport": "HTTP over loopback"
+  },
+  "settings": {
+    "agents": 200,
+    "batch": 100,
+    "cli": true,
+    "concurrency": 32,
+    "spacing": 4,
+    "workload": "disjoint"
+  }
+}

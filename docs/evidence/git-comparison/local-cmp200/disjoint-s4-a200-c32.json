@@ -1,0 +1,73 @@
+{
+  "git": {
+    "clone_seconds": 0.24926052,
+    "git": "push; on rejection pull --rebase and push again; a rebase conflict stops the agent",
+    "integrate": {
+      "failed": 0,
+      "max_ms": 11691.717997,
+      "p50_ms": 1898.507359,
+      "p95_ms": 7253.341155,
+      "p99_ms": 10217.651089,
+      "per_second": 11.841559048031115,
+      "requests": 200,
+      "seconds": 16.889667922
+    },
+    "integrated": 200,
+    "integrated_per_second": 11.841559048031115,
+    "max_push_attempts": 140,
+    "push_attempts": 6043,
+    "remote_content_matches_integrated_changes": true,
+    "system": "git",
+    "transport": "file://",
+    "unintegrated_conflicts": 0
+  },
+  "o5s": {
+    "approve_and_check": {
+      "failed": 0,
+      "max_ms": 47.044813,
+      "p50_ms": 15.91747,
+      "p95_ms": 31.514011,
+      "p99_ms": 41.679988,
+      "per_second": 1942.0410661284986,
+      "requests": 200,
+      "seconds": 0.102984434
+    },
+    "content_matches": true,
+    "failed": 0,
+    "integrate_seconds": 0.317342663,
+    "integrated": 200,
+    "integrated_per_second": 630.233571840922,
+    "merge_batch": {
+      "failed": 0,
+      "max_ms": 1.116431,
+      "p50_ms": 1.083961,
+      "p95_ms": 1.083961,
+      "p99_ms": 1.083961,
+      "per_second": 901.0299673556842,
+      "requests": 2,
+      "seconds": 0.002219682
+    },
+    "pipeline": "propose; independent approve and check report; merge_batch",
+    "proposals_from": "HTTP API",
+    "propose": {
+      "failed": 0,
+      "max_ms": 39.776663,
+      "p50_ms": 32.978688999999996,
+      "p95_ms": 39.182498,
+      "p99_ms": 39.561185,
+      "per_second": 943.414035580049,
+      "requests": 200,
+      "seconds": 0.211995998
+    },
+    "system": "o5s",
+    "transport": "HTTP over loopback"
+  },
+  "settings": {
+    "agents": 200,
+    "batch": 100,
+    "cli": false,
+    "concurrency": 32,
+    "spacing": 4,
+    "workload": "disjoint"
+  }
+}
