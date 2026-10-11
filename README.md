@@ -44,7 +44,15 @@ See [production roadmap](docs/roadmap.md), [implementation status](docs/status.m
 
 ## Current boundary
 
-The system runs locally on either storage backend. Every committed registry decision comes from the extracted `o5s_registry::transition`: repository directory, content identities, independent review and check reports, forks and dependency-closed admission. Lean proves that `apply` and the local `commit` compute the specified state, and that the store holds what committing computes (`Storage.stored`). The invariant, frame, isolation and admission theorems are stated in `crates/registry/pending/Theorems.lean`; their proofs are pending. Admission, graph boundary construction, interval conflicts, checked rendering, frontiers and deletion tags are proved in `proofs/`. Hashing, authentication, preparation of line/graph edits, materialization and Git export are tested native code.
+The system runs locally on either storage backend. Every committed registry decision comes from the extracted `o5s_registry::transition`: repository directory, content identities, independent review and check reports, forks and dependency-closed admission. Lean proves:
+
+- the extracted `transition` computes a pure model of every command (`Refine.transition_refines`);
+- every successful command keeps the registry invariant (`Invariant.inv_preserved`, `reachable_inv`), including dependency-closed channels, independent reviews and checks, and unique, fresh identities;
+- patches never change and channel membership only grows (`patches_immutable`, `members_append_only`);
+- only approved patches with a passing check report are admitted (`Guarantees.merge_gate`);
+- tenant isolation (`isolation`, `scopes_separate`);
+- the PostgreSQL store's partial, per-command loads compute what the whole tenant specifies (`frame`, `Narrow.narrow_load`);
+- the store holds what committing computes (`Storage.stored`). Admission, graph boundary construction, interval conflicts, checked rendering, frontiers and deletion tags are proved in `proofs/`. Hashing, authentication, preparation of line/graph edits, materialization and Git export are tested native code.
 
 Files may be text (graph documents or line/whole-file edits), binary (base64 whole-file edits) or executable; graph documents can be empty and removed, and removal against a concurrent edit is an explicit conflict. Symlinks and submodules are refused. See the [comparison with Git](docs/git-comparison.md) for measured multi-agent integration against `push`/`pull --rebase`, and [load testing](docs/load-testing.md) for storage throughput.
 

@@ -20,7 +20,3 @@ lean_lib Generated where
 @[default_target] lean_lib Proofs where
   roots := #[`Spec, `Apply, `Storage, `Helpers, `Commands, `Exact, `Model, `Writes, `Refine, `Guarantees, `Invariant, `Narrow]
 
--- Stated guarantees whose proofs are pending (`sorry`); outside the gated target.
-lean_lib Pending where
-  srcDir := "../pending"
-  roots := #[`Theorems]

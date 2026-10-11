@@ -93,8 +93,8 @@ async fn members_of_named(
 
 /// The rows a command can read, and no others. Every lookup the kernel makes
 /// is by a key or column named in the command, so the transition on these
-/// rows is the transition on the whole tenant (`narrow_load` in
-/// `crates/registry/pending/Theorems.lean`): a repository command reads no
+/// rows is the transition on the whole tenant (`Narrow.narrow_load` in
+/// `crates/registry/proofs/Narrow.lean`): a repository command reads no
 /// events, bodies or listings; approve and check read one patch; a proposal
 /// reads the patches with its identity or dependency handles and the paths
 /// it names; a merge reads the named channel, its members and the facts of
