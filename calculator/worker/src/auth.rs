@@ -41,6 +41,14 @@ impl HmacAuth {
         Ok((t.tenant, t.user))
     }
 
+    /// Length and a short HMAC fingerprint of the secret, to compare with
+    /// `admin fingerprint` when tokens fail to verify. Reveals neither.
+    pub fn fingerprint(&self) -> String {
+        let tag = self.tag(b"o5s-secret-check");
+        let hex: String = tag.iter().take(6).map(|b| format!("{b:02x}")).collect();
+        format!("{} bytes, {hex}", self.secret.len())
+    }
+
     /// The tenant and user of the request's bearer token.
     pub fn authenticate(&self, headers: &HeaderMap, now: u64) -> Result<(u64, u64), AuthError> {
         let h = headers.get("authorization").ok_or_else(|| AuthError("missing authorization".into()))?;

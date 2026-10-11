@@ -47,9 +47,15 @@ async fn rpc(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> 
         Ok(s) => s.to_string(),
         Err(e) => return unavailable(&e),
     };
-    let (org, user) = match auth::HmacAuth::new(secret).authenticate(&headers, engine::now().secs()) {
+    let auth = auth::HmacAuth::new(secret);
+    let (org, user) = match auth.authenticate(&headers, engine::now().secs()) {
         Ok(p) => p,
-        Err(auth::AuthError(m)) => return reply(StatusCode::UNAUTHORIZED, error_body(&m)),
+        Err(auth::AuthError(m)) => {
+            if m == "bad signature" {
+                worker::console_log!("bad signature; H5I_APP_SECRET is {}", auth.fingerprint());
+            }
+            return reply(StatusCode::UNAUTHORIZED, error_body(&m));
+        }
     };
     let actor = calc::principal(org, user);
     let cmd = match Calc::decode_command(&body) {

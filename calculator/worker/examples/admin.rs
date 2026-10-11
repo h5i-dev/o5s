@@ -6,6 +6,9 @@
 //!
 //! `H5I_APP_SECRET=... cargo run -p calculator-worker --example admin -- issue <org>:<user>`
 //! prints a one-day token.
+//!
+//! `H5I_APP_SECRET=... cargo run -p calculator-worker --example admin -- fingerprint`
+//! prints what the worker logs for its secret on a bad signature.
 
 use calculator_worker::calc::Calc;
 use calculator_worker::{SCHEMA, auth::HmacAuth, engine};
@@ -25,7 +28,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let auth = HmacAuth::new(std::env::var("H5I_APP_SECRET")?);
             println!("{}", auth.issue(o.parse()?, u.parse()?, now + 86_400));
         }
-        _ => return Err("usage: admin ddl | admin issue <org>:<user>".into()),
+        ["fingerprint"] => println!("{}", HmacAuth::new(std::env::var("H5I_APP_SECRET")?).fingerprint()),
+        _ => return Err("usage: admin ddl | admin issue <org>:<user> | admin fingerprint".into()),
     }
     Ok(())
 }
