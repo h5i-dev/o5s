@@ -1,0 +1,40 @@
+# Architecture
+
+```mermaid
+flowchart LR
+    A[Agents and web UI] --> W[Cloudflare Worker adapter]
+    A --> L[Local axum API]
+    W --> L
+    W --> G[Cloudflare Artifacts Git projections]
+    L --> K[h5i-app Kernel admission]
+    K --> P[Extracted Lean 4 refinement proofs]
+    L --> S[Local atomic snapshot store]
+    L --> V[Causal file view and explicit conflicts]
+    V --> E[Local bare Git export]
+```
+
+The local UI and API work without Cloudflare. The edge adapter forwards ordinary requests to axum and calls Artifacts only after resolving identity and repository membership through axum. A deployment needs a reachable HTTPS axum origin and an Artifacts binding. The retained Rust Worker is the original PostgreSQL sample; the new edge integration is the JavaScript Worker.
+
+## Model
+
+- Repository: immutable patch registry, channels, review/check facts and audit events, scoped by authenticated tenant.
+- Patch: full SHA-256 identity, intent, author, dependencies and sorted file edits. Duplicate proposals retain their identity/reviews. Editing a proposal creates a new identity.
+- Channel: a named dependency-closed patch set; a fork copies its membership. There is no rebase step in this model.
+- Proposal/review: applies to a patch identity; admission requires an independent reviewer and a passing independent check report.
+- Resolution: a patch depending on all competing heads. Existing conflicts can be integrated as data; export requires a conflict-free view.
+- Worktree: ordinary Git clone of an exported bare projection for now. Importing Git edits into patch proposals and sandbox execution are future work.
+
+Local transactions are serialized. A successful response follows snapshot replacement and parent-directory sync. A directory-sync failure after replacement is reported explicitly as an already committed operation; retrying must account for that outcome. The single process lock prevents two native writers sharing one data directory. This makes behavior reviewable locally, but cloning/serializing a whole database on every command and vector set operations limit production throughput. Materialization caches per-path causal heads and inspects newly appended channel membership. Dependency searches stop when the relevant existing heads are found; the former quadratic ancestry implementation remains only as a differential-test oracle. A compact `/api/view` endpoint omits the patch registry. The admin `/api/state` response still includes it, so UI payload size remains proportional to history. See [scaling](scaling.md) for measured work and worst cases. Channel forks copy their vector today; they are not constant-cost distributed forks.
+
+## References and interpretation
+
+- [Cloudflare competition and Artifacts](https://blog.cloudflare.com/next-git-platform-on-cloudflare/): Git storage/capabilities as infrastructure for agent collaboration.
+- [Artifacts Workers binding](https://developers.cloudflare.com/artifacts/api/workers-binding/): actual adapter contract and disposal rules.
+- [h5i](https://github.com/h5i-dev/h5i): h5i-app extraction, kernels and proof gate.
+- [Pijul FAQ](https://pijul.org/faq) and [Pijul](https://pijul.org/) and [Theory](https://pijul.org/manual/theory): patch identity/dependencies, channels and conflict-preserving collaboration. o5s is an independent whole-file register design, not a reimplementation of libpijul.
+- [Jujutsu overview](https://www.git-tower.com/blog/jujutsu): stable change identity and operation-oriented work.
+- [Stacked PR preview article](https://itbrief.co.uk/story/github-puts-stacked-pull-requests-into-public-preview): review dependencies are better expressed explicitly.
+- [Review after the pull request](https://www.grahambrooks.com/post/code-review-after-the-pull-request/): intent and continuous review inspire proposal intent/events.
+- [Toward Agentic Code Review](https://conf.researchr.org/details/icse-2026/jaws-2026-papers/58/Toward-Agentic-Code-Review-Reimagining-the-Process-in-the-AI-Era): independent agents and humans as reviewers.
+
+These references motivate design choices. Patch theories do not make arbitrary edits commute without conditions, and approval of a patch does not prove the resulting combined program correct. A future CI/preview layer should validate the combined channel snapshot and bind its results to that snapshot as well as individual patch identities.

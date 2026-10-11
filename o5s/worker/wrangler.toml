@@ -9,8 +9,8 @@ command = "sh build.sh"
 [placement]
 region = "aws:us-east-1"
 
-# PlanetScale Postgres (planetscale-o5s-main-7r8e). For `wrangler dev`, set
+# Placeholder: configure a Hyperdrive connection before deployment. For local use set
 # CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE to a local database.
 [[hyperdrive]]
 binding = "HYPERDRIVE"
-id = "09738769027849ffb2cd540155d430c9"
+id = "00000000000000000000000000000000"

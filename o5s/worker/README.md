@@ -1,9 +1,10 @@
 # o5s-worker
 
-The h5i calculator (`../kernel`, proofs in `../proofs`) on Cloudflare Workers,
-with axum (as in workers-rs `examples/axum`) and PostgreSQL through Hyperdrive
-(as in workers-rs `examples/tokio-postgres`). Same API, tokens and tables as
-h5i's `examples/app/o5s/server`, so the two can share a database.
+This retained arithmetic regression example uses axum on Cloudflare Workers
+and PostgreSQL through Hyperdrive. Its kernel/proofs share the workspace
+with the new patch platform, but its `/rpc` arithmetic API and database are
+separate from `o5s/server`. For the patch platform's edge adapter, use
+[`../cloudflare`](../cloudflare/README.md).
 
 `h5i-app-pg` and `h5i-app-http` do not build for `wasm32-unknown-unknown`
 (tokio's runtime, `deadpool-postgres`, tokio-postgres's default `runtime`
@@ -50,17 +51,17 @@ set the root directory to `o5s/worker` and keep the deploy command
 `npx wrangler deploy`; the Worker's name must be `name` in `wrangler.toml`.
 Builds are cut off after 20 minutes.
 
-The deployed worker uses PlanetScale Postgres through the Hyperdrive config
-the Cloudflare dashboard made for it (`planetscale-o5s-main-7r8e`). Its role
-(`pscale_api_...`) only reads and writes data (`pg_read_all_data`,
-`pg_write_all_data`), so apply `admin ddl` as the database's `postgres` role.
+No deployment is configured for this repository. The Hyperdrive ID in
+`wrangler.toml` is a placeholder. Provision a database and replace that ID
+before deliberately deploying this compatibility example. Apply `admin ddl`
+with a role allowed to create the schema.
 
 By hand:
 
 ```sh
 npx wrangler login
 admin ddl | psql "$DATABASE_URL"              # directly, not through Hyperdrive
-npx wrangler hyperdrive create o5s-calculator --connection-string="$DATABASE_URL"
+npx wrangler hyperdrive create o5s-arithmetic --connection-string="$DATABASE_URL"
 # put the printed id in wrangler.toml
 npx wrangler secret put H5I_APP_SECRET
 npx wrangler deploy

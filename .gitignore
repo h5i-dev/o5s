@@ -37,3 +37,6 @@ o5s/proofs/.lake/
 
 # Local o5s state, credentials and Git artifact projections
 .o5s/
+
+# Python demo artifacts
+__pycache__/
