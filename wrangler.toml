@@ -27,3 +27,9 @@ region = "aws:us-east-1"
 [[hyperdrive]]
 binding = "HYPERDRIVE"
 id = "09738769027849ffb2cd540155d430c9"
+
+# Git projections: /api/export and every merge push the channel's snapshot to
+# the Artifacts repository `<tenant>-<repo>` (crates/worker/src/artifacts.rs).
+[[artifacts]]
+binding = "ARTIFACTS"
+namespace = "default"
