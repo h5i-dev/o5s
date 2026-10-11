@@ -39,20 +39,7 @@ impl Projection {
                 touched.extend([a, b]);
             }
         }
-        let mut stack: Vec<u64> = touched.iter().copied().collect();
-        while let Some(id) = stack.pop() {
-            for next in self
-                .outgoing
-                .get(&id)
-                .into_iter()
-                .flatten()
-                .chain(self.incoming.get(&id).into_iter().flatten())
-            {
-                if touched.insert(*next) {
-                    stack.push(*next);
-                }
-            }
-        }
+        let touched = self.affected_component(touched);
         let mut work = ProjectionWork {
             component_vertices: touched.len(),
             ..Default::default()
@@ -84,6 +71,23 @@ impl Projection {
         }
         work
     }
+    fn affected_component(&self, mut touched: BTreeSet<u64>) -> BTreeSet<u64> {
+        let mut stack: Vec<u64> = touched.iter().copied().collect();
+        while let Some(id) = stack.pop() {
+            for next in self
+                .outgoing
+                .get(&id)
+                .into_iter()
+                .flatten()
+                .chain(self.incoming.get(&id).into_iter().flatten())
+            {
+                if touched.insert(*next) {
+                    stack.push(*next);
+                }
+            }
+        }
+        touched
+    }
     pub fn original_edges(&self) -> Vec<(u64, u64)> {
         self.outgoing
             .iter()
@@ -110,5 +114,37 @@ impl Projection {
             }
         }
         found
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn indexed_components_match_extracted_reference_for_every_small_graph() {
+        for edge_mask in 0..512 {
+            let mut edges = Vec::new();
+            for u in 0..3 {
+                for v in 0..3 {
+                    if edge_mask & (1 << (u * 3 + v)) != 0 {
+                        edges.push((u, v));
+                    }
+                }
+            }
+            let mut projection = Projection::default();
+            projection.apply(&[(0, false), (1, false), (2, false)], &edges);
+            for seed_mask in 0..8 {
+                let seeds = (0..3)
+                    .filter(|id| seed_mask & (1 << id) != 0)
+                    .collect::<Vec<_>>();
+                let expected = o5s_kernel::graph::weak_component(&edges, &seeds)
+                    .into_iter()
+                    .collect::<BTreeSet<_>>();
+                assert_eq!(
+                    projection.affected_component(seeds.into_iter().collect()),
+                    expected
+                );
+            }
+        }
     }
 }

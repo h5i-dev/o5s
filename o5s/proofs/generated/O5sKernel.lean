@@ -1000,6 +1000,62 @@ def graph.summary_rows
   graph.summary_rows_loop edges live (alloc.vec.Vec.new (alloc.vec.Vec
     Std.U64)) 0#usize
 
+/-- [o5s_kernel::graph::weak_edges]: loop body 0:
+    Source: 'o5s/kernel/src/graph.rs', lines 71:4-74:5
+    Visibility: public -/
+@[rust_loop_body]
+def graph.weak_edges_loop.body
+  (edges : alloc.vec.Vec (Std.U64 × Std.U64))
+  (out : alloc.vec.Vec (Std.U64 × Std.U64)) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec (Std.U64 × Std.U64)) × Std.Usize)
+    (alloc.vec.Vec (Std.U64 × Std.U64)))
+  := do
+  let i1 := alloc.vec.Vec.len edges
+  if i < i1
+  then
+    let (i2, i3) ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Std.U64 ×
+        Std.U64)) edges i
+    let out1 ← alloc.vec.Vec.push out (i3, i2)
+    let i4 ← i + 1#usize
+    ok (cont (out1, i4))
+  else ok (done out)
+
+/-- [o5s_kernel::graph::weak_edges]: loop 0:
+    Source: 'o5s/kernel/src/graph.rs', lines 71:4-74:5
+    Visibility: public -/
+@[rust_loop]
+def graph.weak_edges_loop
+  (edges : alloc.vec.Vec (Std.U64 × Std.U64))
+  (out : alloc.vec.Vec (Std.U64 × Std.U64)) (i : Std.Usize) :
+  Result (alloc.vec.Vec (Std.U64 × Std.U64))
+  := do
+  loop
+    (fun (out1, i1) => graph.weak_edges_loop.body edges out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::graph::weak_edges]:
+    Source: 'o5s/kernel/src/graph.rs', lines 68:0-76:1
+    Visibility: public -/
+def graph.weak_edges
+  (edges : alloc.vec.Vec (Std.U64 × Std.U64)) :
+  Result (alloc.vec.Vec (Std.U64 × Std.U64))
+  := do
+  let out ←
+    alloc.vec.CloneVec.clone (BuiltinClone (Std.U64 × Std.U64)) edges
+  graph.weak_edges_loop edges out 0#usize
+
+/-- [o5s_kernel::graph::weak_component]:
+    Source: 'o5s/kernel/src/graph.rs', lines 78:0-80:1
+    Visibility: public -/
+def graph.weak_component
+  (edges : alloc.vec.Vec (Std.U64 × Std.U64)) (seeds : alloc.vec.Vec Std.U64)
+  :
+  Result (alloc.vec.Vec Std.U64)
+  := do
+  let v ← graph.weak_edges edges
+  graph.reachable v seeds
+
 /-- [o5s_kernel::interval::conflict]:
     Source: 'o5s/kernel/src/interval.rs', lines 4:0-12:1
     Visibility: public -/

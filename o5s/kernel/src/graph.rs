@@ -62,3 +62,19 @@ pub fn summary_rows(edges: &Vec<(u64, u64)>, live: &Vec<u64>) -> Vec<Vec<u64>> {
     }
     rows
 }
+
+/// Reference weak-component construction. The optimized native index is tested
+/// against this extracted implementation; both directions use original edges.
+pub fn weak_edges(edges: &Vec<(u64, u64)>) -> Vec<(u64, u64)> {
+    let mut out = edges.clone();
+    let mut i = 0;
+    while i < edges.len() {
+        out.push((edges[i].1, edges[i].0));
+        i += 1;
+    }
+    out
+}
+
+pub fn weak_component(edges: &Vec<(u64, u64)>, seeds: &Vec<u64>) -> Vec<u64> {
+    reachable(&weak_edges(edges), seeds)
+}
