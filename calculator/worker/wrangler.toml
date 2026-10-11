@@ -1,9 +1,9 @@
-name = "o5s-calculator"
+name = "o5s"
 main = "build/index.js"
 compatibility_date = "2026-10-01"
 
 [build]
-command = "worker-build --release"
+command = "sh build.sh"
 
 # `npx wrangler hyperdrive create o5s-calculator --connection-string=postgres://...`
 # prints the id. For `wrangler dev`, set

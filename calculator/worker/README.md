@@ -43,6 +43,15 @@ curl -X POST localhost:8787/rpc -H "Authorization: Bearer $TOKEN" -d '{"cmd":"ap
 
 ## Deploy
 
+`build.sh` is wrangler's build command: it installs rustup, the wasm target
+and worker-build when they are missing (Workers Builds' image has no Rust),
+then runs `worker-build --release`. With Workers Builds (Git integration),
+set the root directory to `calculator/worker` and keep the deploy command
+`npx wrangler deploy`; the Worker's name must be `name` in `wrangler.toml`.
+Builds are cut off after 20 minutes.
+
+By hand:
+
 ```sh
 npx wrangler login
 admin ddl | psql "$DATABASE_URL"              # directly, not through Hyperdrive
