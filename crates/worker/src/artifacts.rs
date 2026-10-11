@@ -73,10 +73,14 @@ async fn call(target: &JsValue, method: &str, args: &[JsValue]) -> Result<JsValu
         array.push(a);
     }
     let value = f.apply(target, &array).map_err(js_err)?;
-    match value.dyn_into::<Promise>() {
-        Ok(p) => JsFuture::from(p).await.map_err(js_err),
-        Err(v) => Ok(v),
-    }
+    // Binding methods return RPC promises, which are thenables but not
+    // `Promise` instances; `Promise.resolve` awaits any thenable.
+    JsFuture::from(Promise::resolve(&value)).await.map_err(js_err)
+}
+
+/// A short description of a value the binding returned, for error messages.
+fn describe(v: &JsValue) -> String {
+    js_sys::JSON::stringify(v).ok().and_then(|s| s.as_string()).unwrap_or_else(|| format!("{v:?}"))
 }
 
 fn field(v: &JsValue, name: &str) -> Option<String> {
@@ -115,7 +119,8 @@ async fn open(binding: &JsValue, name: &str) -> Result<(Repo, String), String> {
         }
     };
     let info = call(&repo.0, "info", &[]).await?;
-    let remote = field(&info, "remote").ok_or("Artifacts repository info has no remote")?;
+    let remote = field(&info, "remote")
+        .ok_or_else(|| format!("Artifacts repository info has no remote: {}", describe(&info)))?;
     Ok((repo, remote))
 }
 
@@ -175,7 +180,7 @@ pub async fn export(
     let refname = format!("refs/heads/{channel}");
     let (artifact, remote) = open(&binding, name).await?;
     let token = call(&artifact.0, "createToken", &["write".into(), 300.into()]).await?;
-    let token = field(&token, "plaintext").ok_or("Artifacts returned no token")?;
+    let token = field(&token, "plaintext").ok_or_else(|| format!("Artifacts returned no token: {}", describe(&token)))?;
     let remote = remote.trim_end_matches('/');
     for _ in 0..3 {
         let refs = git::advertised_refs(
@@ -191,6 +196,9 @@ pub async fn export(
         if let Some(h) = head {
             let commit = call(&artifact.0, "readCommit", &[git::hex(&h).into()]).await?;
             let current = field(&commit, "message").unwrap_or_default();
+            if current.is_empty() && !commit.is_null() && !commit.is_undefined() {
+                worker::console_log!("readCommit returned no message: {}", describe(&commit));
+            }
             if current.trim_end() == message.trim_end() {
                 return Ok(
                     serde_json::json!({"remote":remote,"ref":refname,"commit":git::hex(&h),"unchanged":true}),
