@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["calculator/kernel", "calculator/worker"]
+members = ["o5s/kernel", "o5s/worker", "o5s/platform", "o5s/server"]
 
 # As workers-rs: optimized for size. `worker-build` runs `wasm-opt` after.
 [profile.release]

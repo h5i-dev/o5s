@@ -1,0 +1,43 @@
+# Read by `h5i app` (extract, check, prove, mutate, doctor).
+
+[extract]
+start-from = ["transition", "apply", "sql_writes", "patch::merge"]
+schema = true
+include = ["h5i_app_sql", "h5i_app_std"]
+std-specs = true
+
+[check]
+# Must exist and use only the standard axioms (every theorem in a hand-written
+# module is gated as well).
+theorems = [
+  "o5s_kernel.Storage.pg_stored",
+  "o5s_kernel.Patch.merge_spec",
+  "o5s_kernel.Patch.merge_authorized",
+  "o5s_kernel.Patch.no_lost_patch",
+  "o5s_kernel.Patch.dependency_closed",
+  "o5s_kernel.Patch.successful_orders_converge",
+  "o5s_kernel.Patch.delivery_converges",
+]
+
+[[mutant]]
+name = "underflow_boundary"
+old = "if a < b {"
+new = "if a <= b {"
+
+[[mutant]]
+name = "merge_approval_gate"
+file = "kernel/src/patch.rs"
+old = "if !approved {"
+new = "if approved {"
+
+[[mutant]]
+name = "merge_check_gate"
+file = "kernel/src/patch.rs"
+old = "if !checks_passed {"
+new = "if checks_passed {"
+
+[[mutant]]
+name = "merge_dependency_gate"
+file = "kernel/src/patch.rs"
+old = "if !h5i_app_std::set::subset(dependencies, channel) {"
+new = "if h5i_app_std::set::subset(dependencies, channel) {"
