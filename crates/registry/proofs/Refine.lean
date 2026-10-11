@@ -613,4 +613,35 @@ theorem merge_refines (u : U64) (s : Snapshot) (n : alloc.vec.Vec U8) (ids : all
   all_goals (try rw [← ho'])
   all_goals simp_all
 
+theorem visible_eq (a : Principal) (r : Repository) (n : alloc.vec.Vec U8) (b) (h : visible a r n = ok b) :
+    b = Model.visible a r n := by
+  have := post_of_ok (visible_spec a r n) h
+  rw [this, Model.visible]
+
+/-- **Refinement.** Whenever the extracted `transition` returns, its result is
+`Model.step` on the same rows. -/
+theorem transition_refines (a : Principal) (s : Snapshot) (c : Command) (r)
+    (h : transition a s c = ok r) : lift r = Model.step a (Snapshot.toSt s) c := by
+  cases c <;> simp only [transition] at h <;> simp only [Model.step]
+  case Register n repo => have := post_of_ok (register_refines a s.listings n repo) h; exact this
+  case Create n => have := post_of_ok (create_refines a s.repository n) h; exact this
+  all_goals first
+    | (simp only [Result.ok.injEq] at h; subst h; rfl)
+    | (obtain ⟨b, hb, h⟩ := bind_eq_ok.1 h
+       have hv := visible_eq _ _ _ _ hb
+       simp only [Snapshot.toSt] at hv ⊢
+       rw [← hv]
+       split at h
+       · rename_i hb1
+         simp only [hb1, ↓reduceIte]
+         first
+           | exact fork_refines _ _ _ _ _ h
+           | exact propose_refines _ _ _ _ _ _ _ h
+           | (have := post_of_ok (approve_refines _ _ _) h; exact this)
+           | (have := post_of_ok (check_refines _ _ _ _) h; exact this)
+           | exact merge_refines _ _ _ _ _ h
+       · rename_i hb1
+         simp only [Result.ok.injEq] at h; subst h
+         simp [hb1, lift])
+
 end o5s_registry.Refine
