@@ -1,0 +1,524 @@
+{
+  "build": {
+    "debug_info": 0,
+    "incremental": false,
+    "profile": "dev"
+  },
+  "environment_note": "Loopback client/server, concurrent load jobs and development builds; exploratory measurements, not controlled comparisons.",
+  "measurement_date": "2026-10-11",
+  "reports": [
+    {
+      "admission_batch_size": 100,
+      "admission_seconds": 0.2456158548593521,
+      "admitted_proposals_per_second": 65.14237449843023,
+      "agents": 16,
+      "checks": {
+        "acknowledged_membership": true,
+        "arrival_order_convergence": true,
+        "graceful_restart": true,
+        "materialized_bytes_or_conflict_alternatives": true
+      },
+      "concurrency": 8,
+      "edit_payload_bytes": 1024,
+      "historical_patches_per_repo": 1,
+      "limitations": [
+        "Closed-loop client concurrency, not fixed offered load.",
+        "Review/check results are API reports, not executed CI.",
+        "Graceful restart is not crash-injection or multi-process durability.",
+        "Current JSON store and one-process mutex are the measured backend."
+      ],
+      "machine": {
+        "cpu_count": 128,
+        "platform": "Linux-6.8.0-137-generic-x86_64-with-glibc2.39",
+        "python": "3.12.3"
+      },
+      "proposal_seconds": 0.057311479933559895,
+      "proposals_per_second": 279.17617933699313,
+      "requests": {
+        "approve": {
+          "failed": 0,
+          "max_ms": 43.097469955682755,
+          "p50_ms": 38.163467310369015,
+          "p95_ms": 42.89973061531782,
+          "p99_ms": 42.89973061531782,
+          "received_bytes": 440,
+          "requests": 16
+        },
+        "check": {
+          "failed": 0,
+          "max_ms": 43.27339772135019,
+          "p50_ms": 42.62438230216503,
+          "p95_ms": 43.198298662900925,
+          "p99_ms": 43.198298662900925,
+          "received_bytes": 520,
+          "requests": 16
+        },
+        "merge_batch": {
+          "failed": 0,
+          "max_ms": 7.3874834924936295,
+          "p50_ms": 7.3500340804457664,
+          "p95_ms": 7.3500340804457664,
+          "p99_ms": 7.3500340804457664,
+          "received_bytes": 143,
+          "requests": 2
+        },
+        "propose_lines": {
+          "failed": 0,
+          "max_ms": 33.13215635716915,
+          "p50_ms": 15.971438027918339,
+          "p95_ms": 30.96076287329197,
+          "p99_ms": 30.96076287329197,
+          "received_bytes": 1368,
+          "requests": 16
+        },
+        "read": {
+          "failed": 0,
+          "max_ms": 7.6043615117669106,
+          "p50_ms": 6.984846666455269,
+          "p95_ms": 6.984846666455269,
+          "p99_ms": 6.984846666455269,
+          "received_bytes": 190737,
+          "requests": 3
+        }
+      },
+      "restart_seconds": 0.07781029306352139,
+      "run_id": "load-1791723625763773829",
+      "workload": "disjoint"
+    },
+    {
+      "admission_batch_size": 100,
+      "admission_seconds": 3.2496728589758277,
+      "admitted_proposals_per_second": 19.694290095456054,
+      "agents": 64,
+      "checks": {
+        "acknowledged_membership": true,
+        "arrival_order_convergence": true,
+        "graceful_restart": true,
+        "materialized_bytes_or_conflict_alternatives": true
+      },
+      "concurrency": 16,
+      "edit_payload_bytes": 1024,
+      "historical_patches_per_repo": 1,
+      "limitations": [
+        "Closed-loop client concurrency, not fixed offered load.",
+        "Review/check results are API reports, not executed CI.",
+        "Graceful restart is not crash-injection or multi-process durability.",
+        "Current JSON store and one-process mutex are the measured backend."
+      ],
+      "machine": {
+        "cpu_count": 128,
+        "platform": "Linux-6.8.0-137-generic-x86_64-with-glibc2.39",
+        "python": "3.12.3"
+      },
+      "proposal_seconds": 0.6576420376077294,
+      "proposals_per_second": 97.31737988162908,
+      "requests": {
+        "approve": {
+          "failed": 0,
+          "max_ms": 342.9332999512553,
+          "p50_ms": 317.5899852067232,
+          "p95_ms": 332.62609876692295,
+          "p99_ms": 335.44813748449087,
+          "received_bytes": 1784,
+          "requests": 64
+        },
+        "check": {
+          "failed": 0,
+          "max_ms": 347.1722463145852,
+          "p50_ms": 319.47800051420927,
+          "p95_ms": 346.16836439818144,
+          "p99_ms": 347.00555726885796,
+          "received_bytes": 2104,
+          "requests": 64
+        },
+        "merge_batch": {
+          "failed": 0,
+          "max_ms": 24.20820388942957,
+          "p50_ms": 19.846027716994286,
+          "p95_ms": 19.846027716994286,
+          "p99_ms": 19.846027716994286,
+          "received_bytes": 431,
+          "requests": 2
+        },
+        "propose_lines": {
+          "failed": 0,
+          "max_ms": 261.87266409397125,
+          "p50_ms": 142.39359460771084,
+          "p95_ms": 252.44885589927435,
+          "p99_ms": 257.37661961466074,
+          "received_bytes": 5496,
+          "requests": 64
+        },
+        "read": {
+          "failed": 0,
+          "max_ms": 29.430934228003025,
+          "p50_ms": 25.30569490045309,
+          "p95_ms": 25.30569490045309,
+          "p99_ms": 25.30569490045309,
+          "received_bytes": 1037073,
+          "requests": 3
+        }
+      },
+      "restart_seconds": 0.09474064968526363,
+      "run_id": "load-1791723642320701675",
+      "workload": "overlap"
+    },
+    {
+      "admission_batch_size": 100,
+      "admission_seconds": 1.5226929867640138,
+      "admitted_proposals_per_second": 21.01539855910517,
+      "agents": 32,
+      "checks": {
+        "acknowledged_membership": true,
+        "arrival_order_convergence": true,
+        "graceful_restart": true,
+        "materialized_bytes_or_conflict_alternatives": true
+      },
+      "concurrency": 16,
+      "edit_payload_bytes": 1024,
+      "historical_patches_per_repo": 1,
+      "limitations": [
+        "Closed-loop client concurrency, not fixed offered load.",
+        "Review/check results are API reports, not executed CI.",
+        "Graceful restart is not crash-injection or multi-process durability.",
+        "Current JSON store and one-process mutex are the measured backend."
+      ],
+      "machine": {
+        "cpu_count": 128,
+        "platform": "Linux-6.8.0-137-generic-x86_64-with-glibc2.39",
+        "python": "3.12.3"
+      },
+      "proposal_seconds": 0.18685260228812695,
+      "proposals_per_second": 171.2579841444004,
+      "requests": {
+        "approve": {
+          "failed": 0,
+          "max_ms": 145.12211363762617,
+          "p50_ms": 130.55643532425165,
+          "p95_ms": 144.89048440009356,
+          "p99_ms": 144.95216310024261,
+          "received_bytes": 864,
+          "requests": 32
+        },
+        "check": {
+          "failed": 0,
+          "max_ms": 159.42158177495003,
+          "p50_ms": 136.05845253914595,
+          "p95_ms": 157.1794804185629,
+          "p99_ms": 157.2302794083953,
+          "received_bytes": 1024,
+          "requests": 32
+        },
+        "merge_batch": {
+          "failed": 0,
+          "max_ms": 15.770538710057735,
+          "p50_ms": 11.681560426950455,
+          "p95_ms": 12.158416211605072,
+          "p99_ms": 15.766018070280552,
+          "received_bytes": 2144,
+          "requests": 64
+        },
+        "propose": {
+          "failed": 0,
+          "max_ms": 109.82932429760695,
+          "p50_ms": 63.25127370655537,
+          "p95_ms": 107.56256245076656,
+          "p99_ms": 108.87512192130089,
+          "received_bytes": 2720,
+          "requests": 32
+        },
+        "read": {
+          "failed": 0,
+          "max_ms": 2.045554108917713,
+          "p50_ms": 1.4633983373641968,
+          "p95_ms": 1.6509080305695534,
+          "p99_ms": 1.7069969326257706,
+          "received_bytes": 407730,
+          "requests": 96
+        }
+      },
+      "restart_seconds": 0.11913774255663157,
+      "run_id": "load-1791723642277016151",
+      "workload": "repositories"
+    },
+    {
+      "admission_batch_size": 100,
+      "admission_seconds": 1.6385772097855806,
+      "admitted_proposals_per_second": 19.529137723200378,
+      "agents": 32,
+      "checks": {
+        "acknowledged_membership": true,
+        "arrival_order_convergence": true,
+        "graceful_restart": true,
+        "materialized_bytes_or_conflict_alternatives": true
+      },
+      "concurrency": 16,
+      "edit_payload_bytes": 1024,
+      "historical_patches_per_repo": 129,
+      "limitations": [
+        "Closed-loop client concurrency, not fixed offered load.",
+        "Review/check results are API reports, not executed CI.",
+        "Graceful restart is not crash-injection or multi-process durability.",
+        "Current JSON store and one-process mutex are the measured backend."
+      ],
+      "machine": {
+        "cpu_count": 128,
+        "platform": "Linux-6.8.0-137-generic-x86_64-with-glibc2.39",
+        "python": "3.12.3"
+      },
+      "proposal_seconds": 0.4917740123346448,
+      "proposals_per_second": 65.07053890075119,
+      "requests": {
+        "approve": {
+          "failed": 0,
+          "max_ms": 281.0581661760807,
+          "p50_ms": 242.94042959809303,
+          "p95_ms": 280.6260986253619,
+          "p99_ms": 280.82736767828465,
+          "received_bytes": 928,
+          "requests": 32
+        },
+        "check": {
+          "failed": 0,
+          "max_ms": 299.0686958655715,
+          "p50_ms": 279.1520794853568,
+          "p95_ms": 298.08123502880335,
+          "p99_ms": 298.8941576331854,
+          "received_bytes": 1088,
+          "requests": 32
+        },
+        "merge_batch": {
+          "failed": 0,
+          "max_ms": 21.399044431746006,
+          "p50_ms": 21.395744755864143,
+          "p95_ms": 21.395744755864143,
+          "p99_ms": 21.395744755864143,
+          "received_bytes": 319,
+          "requests": 2
+        },
+        "propose": {
+          "failed": 0,
+          "max_ms": 278.78473326563835,
+          "p50_ms": 197.96775467693806,
+          "p95_ms": 270.595645532012,
+          "p99_ms": 272.2999323159456,
+          "received_bytes": 2784,
+          "requests": 32
+        },
+        "read": {
+          "failed": 0,
+          "max_ms": 26.96185279637575,
+          "p50_ms": 24.57874920219183,
+          "p95_ms": 24.57874920219183,
+          "p99_ms": 24.57874920219183,
+          "received_bytes": 599478,
+          "requests": 3
+        }
+      },
+      "restart_seconds": 0.0943176131695509,
+      "run_id": "load-1791723642296805749",
+      "workload": "files"
+    },
+    {
+      "admission_batch_size": 100,
+      "admission_seconds": 0.723675380460918,
+      "admitted_proposals_per_second": 11.054680338724111,
+      "agents": 8,
+      "checks": {
+        "acknowledged_membership": true,
+        "arrival_order_convergence": true,
+        "graceful_restart": true,
+        "materialized_bytes_or_conflict_alternatives": true,
+        "self_approval_and_unreviewed_admission_rejected": true
+      },
+      "concurrency": 4,
+      "edit_payload_bytes": 1024,
+      "historical_patches_per_repo": 1,
+      "limitations": [
+        "Closed-loop client concurrency, not fixed offered load.",
+        "Review/check results are API reports, not executed CI.",
+        "Graceful restart is not crash-injection or multi-process durability.",
+        "Current JSON store and one-process mutex are the measured backend."
+      ],
+      "machine": {
+        "cpu_count": 128,
+        "platform": "Linux-6.8.0-137-generic-x86_64-with-glibc2.39",
+        "python": "3.12.3"
+      },
+      "proposal_seconds": 0.1793837919831276,
+      "proposals_per_second": 44.59711722869846,
+      "requests": {
+        "approve": {
+          "failed": 0,
+          "max_ms": 110.74532475322485,
+          "p50_ms": 47.28914704173803,
+          "p95_ms": 109.00351777672768,
+          "p99_ms": 109.00351777672768,
+          "received_bytes": 216,
+          "requests": 8
+        },
+        "check": {
+          "failed": 0,
+          "max_ms": 78.6634786054492,
+          "p50_ms": 50.39448197931051,
+          "p95_ms": 78.06583307683468,
+          "p99_ms": 78.06583307683468,
+          "received_bytes": 256,
+          "requests": 8
+        },
+        "expected_refusal_approve": {
+          "failed": 1,
+          "max_ms": 41.929339058697224,
+          "p50_ms": 41.929339058697224,
+          "p95_ms": 41.929339058697224,
+          "p99_ms": 41.929339058697224,
+          "received_bytes": 0,
+          "requests": 1
+        },
+        "expected_refusal_merge_batch": {
+          "failed": 1,
+          "max_ms": 33.10765791684389,
+          "p50_ms": 33.10765791684389,
+          "p95_ms": 33.10765791684389,
+          "p99_ms": 33.10765791684389,
+          "received_bytes": 0,
+          "requests": 1
+        },
+        "merge_batch": {
+          "failed": 0,
+          "max_ms": 51.53448320925236,
+          "p50_ms": 47.96392098069191,
+          "p95_ms": 47.96392098069191,
+          "p99_ms": 47.96392098069191,
+          "received_bytes": 95,
+          "requests": 2
+        },
+        "propose_lines": {
+          "failed": 0,
+          "max_ms": 111.69650685042143,
+          "p50_ms": 61.943501234054565,
+          "p95_ms": 110.73276493698359,
+          "p99_ms": 110.73276493698359,
+          "received_bytes": 680,
+          "requests": 8
+        },
+        "read": {
+          "failed": 0,
+          "max_ms": 50.68384949117899,
+          "p50_ms": 33.38806610554457,
+          "p95_ms": 36.16482391953468,
+          "p99_ms": 36.16482391953468,
+          "received_bytes": 138880,
+          "requests": 5
+        }
+      },
+      "restart_seconds": 0.10484844073653221,
+      "run_id": "load-1791723811929868596",
+      "workload": "overlap"
+    },
+    {
+      "admission_batch_size": 100,
+      "admission_seconds": 1.9799387929961085,
+      "admitted_proposals_per_second": 8.081057887546248,
+      "agents": 16,
+      "checks": {
+        "acknowledged_membership": true,
+        "arrival_order_convergence": true,
+        "graceful_restart": true,
+        "materialized_bytes_or_conflict_alternatives": true,
+        "self_approval_and_unreviewed_admission_rejected": true
+      },
+      "concurrency": 8,
+      "edit_payload_bytes": 1024,
+      "historical_patches_per_repo": 1,
+      "limitations": [
+        "Closed-loop client concurrency, not fixed offered load.",
+        "Review/check results are API reports, not executed CI.",
+        "Graceful restart is not crash-injection or multi-process durability.",
+        "Current JSON store and one-process mutex are the measured backend."
+      ],
+      "local_backend_sample": {
+        "peak_server_rss_kib": 12048,
+        "retained_state_json_bytes": 45649,
+        "sampled_server_cpu_seconds": 0.39,
+        "sampling": "Linux /proc, 100 ms; includes setup and restart"
+      },
+      "machine": {
+        "cpu_count": 128,
+        "platform": "Linux-6.8.0-137-generic-x86_64-with-glibc2.39",
+        "python": "3.12.3"
+      },
+      "proposal_seconds": 0.5435225209221244,
+      "proposals_per_second": 29.437602645893804,
+      "requests": {
+        "approve": {
+          "failed": 0,
+          "max_ms": 388.7637695297599,
+          "p50_ms": 305.14875426888466,
+          "p95_ms": 383.816609159112,
+          "p99_ms": 383.816609159112,
+          "received_bytes": 440,
+          "requests": 16
+        },
+        "check": {
+          "failed": 0,
+          "max_ms": 322.72614538669586,
+          "p50_ms": 218.6161121353507,
+          "p95_ms": 318.761776201427,
+          "p99_ms": 318.761776201427,
+          "received_bytes": 520,
+          "requests": 16
+        },
+        "expected_refusal_approve": {
+          "failed": 1,
+          "max_ms": 41.47535003721714,
+          "p50_ms": 41.47535003721714,
+          "p95_ms": 41.47535003721714,
+          "p99_ms": 41.47535003721714,
+          "received_bytes": 0,
+          "requests": 1
+        },
+        "expected_refusal_merge_batch": {
+          "failed": 1,
+          "max_ms": 37.02895529568195,
+          "p50_ms": 37.02895529568195,
+          "p95_ms": 37.02895529568195,
+          "p99_ms": 37.02895529568195,
+          "received_bytes": 0,
+          "requests": 1
+        },
+        "merge_batch": {
+          "failed": 0,
+          "max_ms": 56.11207336187363,
+          "p50_ms": 49.906362779438496,
+          "p95_ms": 49.906362779438496,
+          "p99_ms": 49.906362779438496,
+          "received_bytes": 143,
+          "requests": 2
+        },
+        "propose_lines": {
+          "failed": 0,
+          "max_ms": 358.6055804044008,
+          "p50_ms": 193.43386311084032,
+          "p95_ms": 357.87404607981443,
+          "p99_ms": 357.87404607981443,
+          "received_bytes": 1368,
+          "requests": 16
+        },
+        "read": {
+          "failed": 0,
+          "max_ms": 47.06677608191967,
+          "p50_ms": 37.059975787997246,
+          "p95_ms": 44.412787072360516,
+          "p99_ms": 44.412787072360516,
+          "received_bytes": 277393,
+          "requests": 5
+        }
+      },
+      "restart_seconds": 0.11387053411453962,
+      "run_id": "load-1791723858148635597",
+      "workload": "disjoint"
+    }
+  ],
+  "server_binary_sha256": "bcfaef121245afbc80e585a8485b7132baf5b35498f316d313e5dc3d37de16e7"
+}

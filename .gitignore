@@ -24,7 +24,6 @@ rustc-ice-*.txt
 #.idea/
 
 # Cloudflare Workers
-worker/build/
 .wrangler/
 .dev.vars
 node_modules/

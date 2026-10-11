@@ -19,124 +19,6 @@ set_option maxRecDepth 2048
 
 namespace o5s_kernel
 
-/-- [h5i_app_sql::Val]
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-sql-0.1.1/src/lib.rs', lines 8:0-8:12
-    Name pattern: [h5i_app_sql::Val]
-    Visibility: public -/
-@[discriminant isize, rust_type "h5i_app_sql::Val"]
-inductive h5i_app_sql.Val where
-| Int : Std.I64 → h5i_app_sql.Val
-| Bool : Bool → h5i_app_sql.Val
-| Text : alloc.vec.Vec Std.U8 → h5i_app_sql.Val
-| Bytes : alloc.vec.Vec Std.U8 → h5i_app_sql.Val
-| Null : h5i_app_sql.Val
-
-/-- [h5i_app_sql::{impl h5i_app_sql::Column for u64}::to_val]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-sql-0.1.1/src/lib.rs', lines 25:4-25:27
-    Name pattern: [h5i_app_sql::{h5i_app_sql::Column<u64>}::to_val]
-    Visibility: public -/
-@[rust_fun "h5i_app_sql::{h5i_app_sql::Column<u64>}::to_val"]
-def U64.Insts.H5i_app_sqlColumn.to_val
-  (self : Std.U64) : Result h5i_app_sql.Val := do
-  let i ← lift (UScalar.hcast .I64 self)
-  ok (h5i_app_sql.Val.Int i)
-
-/-- [h5i_app_sql::{impl h5i_app_sql::Column for u64}::from_val]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-sql-0.1.1/src/lib.rs', lines 28:4-28:39
-    Name pattern: [h5i_app_sql::{h5i_app_sql::Column<u64>}::from_val]
-    Visibility: public -/
-@[rust_fun "h5i_app_sql::{h5i_app_sql::Column<u64>}::from_val"]
-def U64.Insts.H5i_app_sqlColumn.from_val
-  (v : h5i_app_sql.Val) : Result (Option Std.U64) := do
-  match v with
-  | h5i_app_sql.Val.Int i =>
-    let i1 ← lift (IScalar.hcast .U64 i)
-    ok (some i1)
-  | h5i_app_sql.Val.Bool _ => ok none
-  | h5i_app_sql.Val.Text _ => ok none
-  | h5i_app_sql.Val.Bytes _ => ok none
-  | h5i_app_sql.Val.Null => ok none
-
-/-- [h5i_app_sql::val_eq]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-sql-0.1.1/src/lib.rs', lines 134:0-134:39
-    Name pattern: [h5i_app_sql::val_eq]
-    Visibility: public -/
-@[rust_fun "h5i_app_sql::val_eq"]
-def h5i_app_sql.val_eq
-  (a : h5i_app_sql.Val) (b : h5i_app_sql.Val) : Result Bool := do
-  match a with
-  | h5i_app_sql.Val.Int x =>
-    match b with
-    | h5i_app_sql.Val.Int y => ok (x = y)
-    | h5i_app_sql.Val.Bool _ => ok false
-    | h5i_app_sql.Val.Text _ => ok false
-    | h5i_app_sql.Val.Bytes _ => ok false
-    | h5i_app_sql.Val.Null => ok false
-  | h5i_app_sql.Val.Bool x =>
-    match b with
-    | h5i_app_sql.Val.Int _ => ok false
-    | h5i_app_sql.Val.Bool y => ok (x = y)
-    | h5i_app_sql.Val.Text _ => ok false
-    | h5i_app_sql.Val.Bytes _ => ok false
-    | h5i_app_sql.Val.Null => ok false
-  | h5i_app_sql.Val.Text x =>
-    match b with
-    | h5i_app_sql.Val.Int _ => ok false
-    | h5i_app_sql.Val.Bool _ => ok false
-    | h5i_app_sql.Val.Text y =>
-      alloc.vec.partial_eq.PartialEqVec.eq core.cmp.PartialEqU8 x y
-    | h5i_app_sql.Val.Bytes _ => ok false
-    | h5i_app_sql.Val.Null => ok false
-  | h5i_app_sql.Val.Bytes x =>
-    match b with
-    | h5i_app_sql.Val.Int _ => ok false
-    | h5i_app_sql.Val.Bool _ => ok false
-    | h5i_app_sql.Val.Text _ => ok false
-    | h5i_app_sql.Val.Bytes y =>
-      alloc.vec.partial_eq.PartialEqVec.eq core.cmp.PartialEqU8 x y
-    | h5i_app_sql.Val.Null => ok false
-  | h5i_app_sql.Val.Null =>
-    match b with
-    | h5i_app_sql.Val.Int _ => ok false
-    | h5i_app_sql.Val.Bool _ => ok false
-    | h5i_app_sql.Val.Text _ => ok false
-    | h5i_app_sql.Val.Bytes _ => ok false
-    | h5i_app_sql.Val.Null => ok true
-
-/-- [h5i_app_sql::has_col]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-sql-0.1.1/src/lib.rs', lines 160:0-160:59
-    Name pattern: [h5i_app_sql::has_col]
-    Visibility: public -/
-@[rust_fun "h5i_app_sql::has_col"]
-def h5i_app_sql.has_col
-  (row : alloc.vec.Vec h5i_app_sql.Val) (col : Std.U32) (val : h5i_app_sql.Val)
-  :
-  Result Bool
-  := do
-  let i ← lift (UScalar.cast .Usize col)
-  let i1 := alloc.vec.Vec.len row
-  if i < i1
-  then
-    let v ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
-        h5i_app_sql.Val) row i
-    h5i_app_sql.val_eq v val
-  else ok false
-
-/-- [h5i_app_sql::Write]
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-sql-0.1.1/src/lib.rs', lines 171:0-171:14
-    Name pattern: [h5i_app_sql::Write]
-    Visibility: public -/
-@[discriminant isize, rust_type "h5i_app_sql::Write"]
-inductive h5i_app_sql.Write where
-| Put :
-  Std.U32 →
-  Std.U32 →
-  alloc.vec.Vec h5i_app_sql.Val →
-  h5i_app_sql.Write
-| Del : Std.U32 → alloc.vec.Vec h5i_app_sql.Val → h5i_app_sql.Write
-| DelWhere : Std.U32 → Std.U32 → h5i_app_sql.Val → h5i_app_sql.Write
-
 /-- [h5i_app_std::bytes::slice]: loop body 0:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/bytes.rs', lines 46:4-49:5
     Name pattern: [h5i_app_std::bytes::slice]
@@ -469,6 +351,54 @@ def h5i_app_std.set.subset
   := do
   h5i_app_std.set.subset_loop corecmpPartialEqInst a b 0#usize
 
+/-- [h5i_app_std::set::intersects]: loop body 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/set.rs', lines 39:4-46:1
+    Name pattern: [h5i_app_std::set::intersects]
+    Visibility: public -/
+@[rust_loop_body, rust_fun "h5i_app_std::set::intersects"]
+def h5i_app_std.set.intersects_loop.body
+  {T : Type} (corecmpPartialEqInst : core.cmp.PartialEq T T)
+  (a : alloc.vec.Vec T) (b : alloc.vec.Vec T) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let i1 := alloc.vec.Vec.len a
+  if i < i1
+  then
+    let t ← alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice T) a i
+    let b1 ← h5i_app_std.set.contains corecmpPartialEqInst b t
+    if b1
+    then ok (done true)
+    else let i2 ← i + 1#usize
+         ok (cont i2)
+  else ok (done false)
+
+/-- [h5i_app_std::set::intersects]: loop 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/set.rs', lines 39:4-46:1
+    Name pattern: [h5i_app_std::set::intersects]
+    Visibility: public -/
+@[rust_loop, rust_fun "h5i_app_std::set::intersects"]
+def h5i_app_std.set.intersects_loop
+  {T : Type} (corecmpPartialEqInst : core.cmp.PartialEq T T)
+  (a : alloc.vec.Vec T) (b : alloc.vec.Vec T) (i : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun i1 => h5i_app_std.set.intersects_loop.body corecmpPartialEqInst a b
+      i1)
+    i
+
+/-- [h5i_app_std::set::intersects]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/set.rs', lines 37:0-37:63
+    Name pattern: [h5i_app_std::set::intersects]
+    Visibility: public -/
+@[reducible, rust_fun "h5i_app_std::set::intersects"]
+def h5i_app_std.set.intersects
+  {T : Type} (corecmpPartialEqInst : core.cmp.PartialEq T T)
+  (a : alloc.vec.Vec T) (b : alloc.vec.Vec T) :
+  Result Bool
+  := do
+  h5i_app_std.set.intersects_loop corecmpPartialEqInst a b 0#usize
+
 /-- [h5i_app_std::set::insert]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/set.rs', lines 61:0-61:64
     Name pattern: [h5i_app_std::set::insert]
@@ -486,316 +416,15 @@ def h5i_app_std.set.insert
   else let t ← corecloneCloneInst.clone x
        alloc.vec.Vec.push out t
 
-/-- [o5s_kernel::Memory]
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 95:12-98:13
-    Visibility: public -/
-structure Memory where
-  user : Std.U64
-  value : Std.U64
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::TABLE]
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 135:12-135:60
-    Visibility: public -/
-@[global_simps, irreducible] def Memory.TABLE : Std.U32 := 0#u32
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::KEY_LEN]
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 136:12-136:62
-    Visibility: public -/
-@[global_simps, irreducible] def Memory.KEY_LEN : Std.U32 := 1#u32
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::to_row]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 138:12-143:13
-    Visibility: public -/
-def Memory.to_row
-  (self : Memory) : Result (alloc.vec.Vec h5i_app_sql.Val) := do
-  let v ← U64.Insts.H5i_app_sqlColumn.to_val self.user
-  let out ← alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Val) v
-  let v1 ← U64.Insts.H5i_app_sqlColumn.to_val self.value
-  alloc.vec.Vec.push out v1
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::from_row]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 146:12-167:13
-    Visibility: public -/
-def Memory.from_row
-  (row : alloc.vec.Vec h5i_app_sql.Val) : Result (Option Memory) := do
-  let i := alloc.vec.Vec.len row
-  let i1 ← 0#usize + 1#usize
-  let i2 ← i1 + 1#usize
-  if i != i2
-  then ok none
-  else
-    let v ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
-        h5i_app_sql.Val) row 0#usize
-    let o ← U64.Insts.H5i_app_sqlColumn.from_val v
-    match o with
-    | none => ok none
-    | some x =>
-      let v1 ←
-        alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
-          h5i_app_sql.Val) row i1
-      let o1 ← U64.Insts.H5i_app_sqlColumn.from_val v1
-      match o1 with
-      | none => ok none
-      | some x1 => let _ ← i1 + 1#usize
-                   ok (some { user := x, value := x1 })
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::from_rows]: loop body 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 174:16-180:17
-    Visibility: public -/
-@[rust_loop_body]
-def Memory.from_rows_loop.body
-  (rows : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val))
-  (out : alloc.vec.Vec Memory) (ok1 : Bool) (i : Std.Usize) :
-  Result (ControlFlow ((alloc.vec.Vec Memory) × Bool × Std.Usize)
-    ((alloc.vec.Vec Memory) × Bool))
-  := do
-  let i1 := alloc.vec.Vec.len rows
-  if i < i1
-  then
-    let v ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
-        h5i_app_sql.Val)) rows i
-    let o ← Memory.from_row v
-    let (out1, ok2) ←
-      match o with
-      | none => ok (out, false)
-      | some x => do
-                  let out2 ← alloc.vec.Vec.push out x
-                  ok (out2, ok1)
-    let i2 ← i + 1#usize
-    ok (cont (out1, ok2, i2))
-  else ok (done (out, ok1))
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::from_rows]: loop 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 174:16-180:17
-    Visibility: public -/
-@[rust_loop]
-def Memory.from_rows_loop
-  (rows : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val))
-  (out : alloc.vec.Vec Memory) (ok1 : Bool) (i : Std.Usize) :
-  Result ((alloc.vec.Vec Memory) × Bool)
-  := do
-  loop
-    (fun (out1, ok2, i1) => Memory.from_rows_loop.body rows out1 ok2 i1)
-    (out, ok1, i)
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::from_rows]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 170:12-186:13
-    Visibility: public -/
-def Memory.from_rows
-  (rows : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val)) :
-  Result (Option (alloc.vec.Vec Memory))
-  := do
-  let (out, ok1) ←
-    Memory.from_rows_loop rows (alloc.vec.Vec.new Memory) true 0#usize
-  if ok1
-  then ok (some out)
-  else ok none
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::sql_put]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 189:12-191:13
-    Visibility: public -/
-def Memory.sql_put (self : Memory) : Result h5i_app_sql.Write := do
-  let v ← Memory.to_row self
-  ok (h5i_app_sql.Write.Put Memory.TABLE Memory.KEY_LEN v)
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::put]: loop body 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 220:16-228:13
-    Visibility: public -/
-@[rust_loop_body]
-def Memory.put_loop.body
-  (v : alloc.vec.Vec Memory) (x : Memory) (i : Std.Usize) :
-  Result (ControlFlow Std.Usize (alloc.vec.Vec Memory))
-  := do
-  let i1 := alloc.vec.Vec.len v
-  if i < i1
-  then
-    let m ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Memory) v i
-    if m.user = x.user
-    then
-      let (_, index_mut_back) ←
-        alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Memory)
-          v i
-      let v1 := index_mut_back x
-      ok (done v1)
-    else let i2 ← i + 1#usize
-         ok (cont i2)
-  else let v1 ← alloc.vec.Vec.push v x
-       ok (done v1)
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::put]: loop 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 220:16-228:13
-    Visibility: public -/
-@[rust_loop]
-def Memory.put_loop
-  (v : alloc.vec.Vec Memory) (x : Memory) (i : Std.Usize) :
-  Result (alloc.vec.Vec Memory)
-  := do
-  loop
-    (fun i1 => Memory.put_loop.body v x i1)
-    i
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::put]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 218:12-228:13
-    Visibility: public -/
-@[reducible]
-def Memory.put
-  (v : alloc.vec.Vec Memory) (x : Memory) : Result (alloc.vec.Vec Memory) := do
-  Memory.put_loop v x 0#usize
-
-/-- [o5s_kernel::{impl core::clone::Clone for o5s_kernel::Memory}::clone]:
-    Source: 'kernel/src/lib.rs', lines 29:13-29:18
-    Visibility: public -/
-def Memory.Insts.CoreCloneClone.clone (self : Memory) : Result Memory := do
-  ok self
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::del]: loop body 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 234:16-239:17
-    Visibility: public -/
-@[rust_loop_body]
-def Memory.del_loop.body
-  (v : alloc.vec.Vec Memory) (user : Std.U64) (out : alloc.vec.Vec Memory)
-  (i : Std.Usize) :
-  Result (ControlFlow ((alloc.vec.Vec Memory) × Std.Usize) (alloc.vec.Vec
-    Memory))
-  := do
-  let i1 := alloc.vec.Vec.len v
-  if i < i1
-  then
-    let m ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Memory) v i
-    let out1 ←
-      if m.user = user
-      then ok out
-      else
-        do
-        let m1 ← Memory.Insts.CoreCloneClone.clone m
-        alloc.vec.Vec.push out m1
-    let i2 ← i + 1#usize
-    ok (cont (out1, i2))
-  else ok (done out)
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::del]: loop 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 234:16-239:17
-    Visibility: public -/
-@[rust_loop]
-def Memory.del_loop
-  (v : alloc.vec.Vec Memory) (user : Std.U64) (out : alloc.vec.Vec Memory)
-  (i : Std.Usize) :
-  Result (alloc.vec.Vec Memory)
-  := do
-  loop
-    (fun (out1, i1) => Memory.del_loop.body v user out1 i1)
-    (out, i)
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::del]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 231:12-241:13
-    Visibility: public -/
-@[reducible]
-def Memory.del
-  (v : alloc.vec.Vec Memory) (user : Std.U64) :
-  Result (alloc.vec.Vec Memory)
-  := do
-  Memory.del_loop v user (alloc.vec.Vec.new Memory) 0#usize
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::del_where]: loop body 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 247:16-252:17
-    Visibility: public -/
-@[rust_loop_body]
-def Memory.del_where_loop.body
-  (v : alloc.vec.Vec Memory) (col : Std.U32) (val : h5i_app_sql.Val)
-  (out : alloc.vec.Vec Memory) (i : Std.Usize) :
-  Result (ControlFlow ((alloc.vec.Vec Memory) × Std.Usize) (alloc.vec.Vec
-    Memory))
-  := do
-  let i1 := alloc.vec.Vec.len v
-  if i < i1
-  then
-    let m ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Memory) v i
-    let v1 ← Memory.to_row m
-    let b ← h5i_app_sql.has_col v1 col val
-    let out1 ←
-      if b
-      then ok out
-      else
-        do
-        let m1 ← Memory.Insts.CoreCloneClone.clone m
-        alloc.vec.Vec.push out m1
-    let i2 ← i + 1#usize
-    ok (cont (out1, i2))
-  else ok (done out)
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::del_where]: loop 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 247:16-252:17
-    Visibility: public -/
-@[rust_loop]
-def Memory.del_where_loop
-  (v : alloc.vec.Vec Memory) (col : Std.U32) (val : h5i_app_sql.Val)
-  (out : alloc.vec.Vec Memory) (i : Std.Usize) :
-  Result (alloc.vec.Vec Memory)
-  := do
-  loop
-    (fun (out1, i1) => Memory.del_where_loop.body v col val out1 i1)
-    (out, i)
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::del_where]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 244:12-254:13
-    Visibility: public -/
-@[reducible]
-def Memory.del_where
-  (v : alloc.vec.Vec Memory) (col : Std.U32) (val : h5i_app_sql.Val) :
-  Result (alloc.vec.Vec Memory)
-  := do
-  Memory.del_where_loop v col val (alloc.vec.Vec.new Memory) 0#usize
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::sql_del]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 257:12-261:13
-    Visibility: public -/
-def Memory.sql_del (user : Std.U64) : Result h5i_app_sql.Write := do
-  let v ← U64.Insts.H5i_app_sqlColumn.to_val user
-  let key ← alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Val) v
-  ok (h5i_app_sql.Write.Del Memory.TABLE key)
-
-/-- [o5s_kernel::{o5s_kernel::Memory}::sql_del_where]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 264:12-266:13
-    Visibility: public -/
-def Memory.sql_del_where
-  (col : Std.U32) (val : h5i_app_sql.Val) : Result h5i_app_sql.Write := do
-  ok (h5i_app_sql.Write.DelWhere Memory.TABLE col val)
-
-/-- [o5s_kernel::Snapshot]
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 278:8-280:9
-    Visibility: public -/
-structure Snapshot where
-  memories : alloc.vec.Vec Memory
-
-/-- [o5s_kernel::Rows]
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 284:8-286:9
-    Visibility: public -/
-structure Rows where
-  memories : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val)
-
-/-- [o5s_kernel::decode]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 289:8-297:9
-    Visibility: public -/
-def decode (r : Rows) : Result (Option Snapshot) := do
-  let o ← Memory.from_rows r.memories
-  match o with
-  | none => ok none
-  | some x => ok (some { memories := x })
-
 /-- [o5s_kernel::coordinates::Scan]
-    Source: 'kernel/src/coordinates.rs', lines 5:0-8:1
+    Source: 'crates/kernel/src/coordinates.rs', lines 5:0-8:1
     Visibility: public -/
 structure coordinates.Scan where
   offsets : alloc.vec.Vec Std.Usize
   position : Std.Usize
 
 /-- [o5s_kernel::coordinates::step]:
-    Source: 'kernel/src/coordinates.rs', lines 10:0-16:1
+    Source: 'crates/kernel/src/coordinates.rs', lines 10:0-16:1
     Visibility: public -/
 def coordinates.step
   (state : coordinates.Scan) (byte : Std.U8) (length : Std.Usize) :
@@ -812,7 +441,7 @@ def coordinates.step
   else ok { state with position := i }
 
 /-- [o5s_kernel::coordinates::line_boundaries]: loop body 0:
-    Source: 'kernel/src/coordinates.rs', lines 26:4-29:5
+    Source: 'crates/kernel/src/coordinates.rs', lines 26:4-29:5
     Visibility: public -/
 @[rust_loop_body]
 def coordinates.line_boundaries_loop.body
@@ -832,7 +461,7 @@ def coordinates.line_boundaries_loop.body
   else ok (done state)
 
 /-- [o5s_kernel::coordinates::line_boundaries]: loop 0:
-    Source: 'kernel/src/coordinates.rs', lines 26:4-29:5
+    Source: 'crates/kernel/src/coordinates.rs', lines 26:4-29:5
     Visibility: public -/
 @[rust_loop]
 def coordinates.line_boundaries_loop
@@ -844,7 +473,7 @@ def coordinates.line_boundaries_loop
     (state, i)
 
 /-- [o5s_kernel::coordinates::line_boundaries]:
-    Source: 'kernel/src/coordinates.rs', lines 18:0-34:1
+    Source: 'crates/kernel/src/coordinates.rs', lines 18:0-34:1
     Visibility: public -/
 def coordinates.line_boundaries
   (bytes : alloc.vec.Vec Std.U8) : Result (alloc.vec.Vec Std.Usize) := do
@@ -859,7 +488,7 @@ def coordinates.line_boundaries
   else ok state.offsets
 
 /-- [o5s_kernel::graph::reachable]:
-    Source: 'kernel/src/graph.rs', lines 3:0-5:1
+    Source: 'crates/kernel/src/graph.rs', lines 3:0-5:1
     Visibility: public -/
 def graph.reachable
   (edges : alloc.vec.Vec (Std.U64 × Std.U64)) (start : alloc.vec.Vec Std.U64)
@@ -870,7 +499,7 @@ def graph.reachable
     start
 
 /-- [o5s_kernel::graph::dead_edges]: loop body 0:
-    Source: 'kernel/src/graph.rs', lines 12:4-17:5
+    Source: 'crates/kernel/src/graph.rs', lines 12:4-17:5
     Visibility: public -/
 @[rust_loop_body]
 def graph.dead_edges_loop.body
@@ -896,7 +525,7 @@ def graph.dead_edges_loop.body
   else ok (done out)
 
 /-- [o5s_kernel::graph::dead_edges]: loop 0:
-    Source: 'kernel/src/graph.rs', lines 12:4-17:5
+    Source: 'crates/kernel/src/graph.rs', lines 12:4-17:5
     Visibility: public -/
 @[rust_loop]
 def graph.dead_edges_loop
@@ -909,7 +538,7 @@ def graph.dead_edges_loop
     (out, i)
 
 /-- [o5s_kernel::graph::dead_edges]:
-    Source: 'kernel/src/graph.rs', lines 9:0-19:1
+    Source: 'crates/kernel/src/graph.rs', lines 9:0-19:1
     Visibility: public -/
 @[reducible]
 def graph.dead_edges
@@ -920,7 +549,7 @@ def graph.dead_edges
     0#usize
 
 /-- [o5s_kernel::graph::successors]: loop body 0:
-    Source: 'kernel/src/graph.rs', lines 24:4-29:5
+    Source: 'crates/kernel/src/graph.rs', lines 24:4-29:5
     Visibility: public -/
 @[rust_loop_body]
 def graph.successors_loop.body
@@ -943,7 +572,7 @@ def graph.successors_loop.body
   else ok (done out)
 
 /-- [o5s_kernel::graph::successors]: loop 0:
-    Source: 'kernel/src/graph.rs', lines 24:4-29:5
+    Source: 'crates/kernel/src/graph.rs', lines 24:4-29:5
     Visibility: public -/
 @[rust_loop]
 def graph.successors_loop
@@ -956,7 +585,7 @@ def graph.successors_loop
     (out, i)
 
 /-- [o5s_kernel::graph::successors]:
-    Source: 'kernel/src/graph.rs', lines 21:0-31:1
+    Source: 'crates/kernel/src/graph.rs', lines 21:0-31:1
     Visibility: public -/
 @[reducible]
 def graph.successors
@@ -966,7 +595,7 @@ def graph.successors
   graph.successors_loop edges source (alloc.vec.Vec.new Std.U64) 0#usize
 
 /-- [o5s_kernel::graph::keep_live]: loop body 0:
-    Source: 'kernel/src/graph.rs', lines 36:4-41:5
+    Source: 'crates/kernel/src/graph.rs', lines 36:4-41:5
     Visibility: public -/
 @[rust_loop_body]
 def graph.keep_live_loop.body
@@ -990,7 +619,7 @@ def graph.keep_live_loop.body
   else ok (done out)
 
 /-- [o5s_kernel::graph::keep_live]: loop 0:
-    Source: 'kernel/src/graph.rs', lines 36:4-41:5
+    Source: 'crates/kernel/src/graph.rs', lines 36:4-41:5
     Visibility: public -/
 @[rust_loop]
 def graph.keep_live_loop
@@ -1003,7 +632,7 @@ def graph.keep_live_loop
     (out, i)
 
 /-- [o5s_kernel::graph::keep_live]:
-    Source: 'kernel/src/graph.rs', lines 33:0-43:1
+    Source: 'crates/kernel/src/graph.rs', lines 33:0-43:1
     Visibility: public -/
 @[reducible]
 def graph.keep_live
@@ -1013,7 +642,7 @@ def graph.keep_live
   graph.keep_live_loop nodes live (alloc.vec.Vec.new Std.U64) 0#usize
 
 /-- [o5s_kernel::graph::boundary]:
-    Source: 'kernel/src/graph.rs', lines 47:0-52:1
+    Source: 'crates/kernel/src/graph.rs', lines 47:0-52:1
     Visibility: public -/
 def graph.boundary
   (edges : alloc.vec.Vec (Std.U64 × Std.U64)) (live : alloc.vec.Vec Std.U64)
@@ -1026,7 +655,7 @@ def graph.boundary
   graph.keep_live reached live
 
 /-- [o5s_kernel::graph::summary_rows]: loop body 0:
-    Source: 'kernel/src/graph.rs', lines 59:4-62:5
+    Source: 'crates/kernel/src/graph.rs', lines 59:4-62:5
     Visibility: public -/
 @[rust_loop_body]
 def graph.summary_rows_loop.body
@@ -1048,7 +677,7 @@ def graph.summary_rows_loop.body
   else ok (done rows)
 
 /-- [o5s_kernel::graph::summary_rows]: loop 0:
-    Source: 'kernel/src/graph.rs', lines 59:4-62:5
+    Source: 'crates/kernel/src/graph.rs', lines 59:4-62:5
     Visibility: public -/
 @[rust_loop]
 def graph.summary_rows_loop
@@ -1061,7 +690,7 @@ def graph.summary_rows_loop
     (rows, i)
 
 /-- [o5s_kernel::graph::summary_rows]:
-    Source: 'kernel/src/graph.rs', lines 56:0-64:1
+    Source: 'crates/kernel/src/graph.rs', lines 56:0-64:1
     Visibility: public -/
 @[reducible]
 def graph.summary_rows
@@ -1072,7 +701,7 @@ def graph.summary_rows
     Std.U64)) 0#usize
 
 /-- [o5s_kernel::graph::weak_edges]: loop body 0:
-    Source: 'kernel/src/graph.rs', lines 71:4-74:5
+    Source: 'crates/kernel/src/graph.rs', lines 71:4-74:5
     Visibility: public -/
 @[rust_loop_body]
 def graph.weak_edges_loop.body
@@ -1093,7 +722,7 @@ def graph.weak_edges_loop.body
   else ok (done out)
 
 /-- [o5s_kernel::graph::weak_edges]: loop 0:
-    Source: 'kernel/src/graph.rs', lines 71:4-74:5
+    Source: 'crates/kernel/src/graph.rs', lines 71:4-74:5
     Visibility: public -/
 @[rust_loop]
 def graph.weak_edges_loop
@@ -1106,7 +735,7 @@ def graph.weak_edges_loop
     (out, i)
 
 /-- [o5s_kernel::graph::weak_edges]:
-    Source: 'kernel/src/graph.rs', lines 68:0-76:1
+    Source: 'crates/kernel/src/graph.rs', lines 68:0-76:1
     Visibility: public -/
 def graph.weak_edges
   (edges : alloc.vec.Vec (Std.U64 × Std.U64)) :
@@ -1117,7 +746,7 @@ def graph.weak_edges
   graph.weak_edges_loop edges out 0#usize
 
 /-- [o5s_kernel::graph::weak_component]:
-    Source: 'kernel/src/graph.rs', lines 78:0-80:1
+    Source: 'crates/kernel/src/graph.rs', lines 78:0-80:1
     Visibility: public -/
 def graph.weak_component
   (edges : alloc.vec.Vec (Std.U64 × Std.U64)) (seeds : alloc.vec.Vec Std.U64)
@@ -1128,14 +757,14 @@ def graph.weak_component
   graph.reachable v seeds
 
 /-- [o5s_kernel::indexed::Traversal]
-    Source: 'kernel/src/indexed.rs', lines 4:0-7:1
+    Source: 'crates/kernel/src/indexed.rs', lines 4:0-7:1
     Visibility: public -/
 structure indexed.Traversal where
   marks : alloc.vec.Vec Bool
   queue : alloc.vec.Vec Std.Usize
 
 /-- [o5s_kernel::indexed::enqueue]: loop body 0:
-    Source: 'kernel/src/indexed.rs', lines 11:4-18:5
+    Source: 'crates/kernel/src/indexed.rs', lines 11:4-18:5
     Visibility: public -/
 @[rust_loop_body]
 def indexed.enqueue_loop.body
@@ -1168,7 +797,7 @@ def indexed.enqueue_loop.body
   else ok (done state)
 
 /-- [o5s_kernel::indexed::enqueue]: loop 0:
-    Source: 'kernel/src/indexed.rs', lines 11:4-18:5
+    Source: 'crates/kernel/src/indexed.rs', lines 11:4-18:5
     Visibility: public -/
 @[rust_loop]
 def indexed.enqueue_loop
@@ -1181,7 +810,7 @@ def indexed.enqueue_loop
     (state, i)
 
 /-- [o5s_kernel::indexed::enqueue]:
-    Source: 'kernel/src/indexed.rs', lines 9:0-20:1
+    Source: 'crates/kernel/src/indexed.rs', lines 9:0-20:1
     Visibility: public -/
 @[reducible]
 def indexed.enqueue
@@ -1191,7 +820,7 @@ def indexed.enqueue
   indexed.enqueue_loop state neighbors 0#usize
 
 /-- [o5s_kernel::indexed::clear]: loop body 0:
-    Source: 'kernel/src/indexed.rs', lines 24:4-27:5
+    Source: 'crates/kernel/src/indexed.rs', lines 24:4-27:5
     Visibility: public -/
 @[rust_loop_body]
 def indexed.clear_loop.body
@@ -1214,7 +843,7 @@ def indexed.clear_loop.body
   else ok (done (state.marks, state.queue))
 
 /-- [o5s_kernel::indexed::clear]: loop 0:
-    Source: 'kernel/src/indexed.rs', lines 24:4-27:5
+    Source: 'crates/kernel/src/indexed.rs', lines 24:4-27:5
     Visibility: public -/
 @[rust_loop]
 def indexed.clear_loop
@@ -1226,14 +855,14 @@ def indexed.clear_loop
     (state, i)
 
 /-- [o5s_kernel::indexed::clear]:
-    Source: 'kernel/src/indexed.rs', lines 22:0-29:1
+    Source: 'crates/kernel/src/indexed.rs', lines 22:0-29:1
     Visibility: public -/
 def indexed.clear (state : indexed.Traversal) : Result indexed.Traversal := do
   let (v, v1) ← indexed.clear_loop state 0#usize
   ok { marks := v, queue := v1 }
 
 /-- [o5s_kernel::indexed::reachable]: loop body 0:
-    Source: 'kernel/src/indexed.rs', lines 40:4-44:5
+    Source: 'crates/kernel/src/indexed.rs', lines 40:4-44:5
     Visibility: public -/
 @[rust_loop_body]
 def indexed.reachable_loop.body
@@ -1257,7 +886,7 @@ def indexed.reachable_loop.body
   else ok (done (state.marks, state.queue))
 
 /-- [o5s_kernel::indexed::reachable]: loop 0:
-    Source: 'kernel/src/indexed.rs', lines 40:4-44:5
+    Source: 'crates/kernel/src/indexed.rs', lines 40:4-44:5
     Visibility: public -/
 @[rust_loop]
 def indexed.reachable_loop
@@ -1270,7 +899,7 @@ def indexed.reachable_loop
     (state, i)
 
 /-- [o5s_kernel::indexed::reachable]:
-    Source: 'kernel/src/indexed.rs', lines 31:0-46:1
+    Source: 'crates/kernel/src/indexed.rs', lines 31:0-46:1
     Visibility: public -/
 def indexed.reachable
   (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
@@ -1283,7 +912,7 @@ def indexed.reachable
   indexed.clear { marks := v, queue := v1 }
 
 /-- [o5s_kernel::indexed::keep_live]: loop body 0:
-    Source: 'kernel/src/indexed.rs', lines 52:4-58:5
+    Source: 'crates/kernel/src/indexed.rs', lines 52:4-58:5
     Visibility: public -/
 @[rust_loop_body]
 def indexed.keep_live_loop.body
@@ -1309,7 +938,7 @@ def indexed.keep_live_loop.body
   else ok (done out)
 
 /-- [o5s_kernel::indexed::keep_live]: loop 0:
-    Source: 'kernel/src/indexed.rs', lines 52:4-58:5
+    Source: 'crates/kernel/src/indexed.rs', lines 52:4-58:5
     Visibility: public -/
 @[rust_loop]
 def indexed.keep_live_loop
@@ -1322,7 +951,7 @@ def indexed.keep_live_loop
     (out, i)
 
 /-- [o5s_kernel::indexed::keep_live]:
-    Source: 'kernel/src/indexed.rs', lines 49:0-60:1
+    Source: 'crates/kernel/src/indexed.rs', lines 49:0-60:1
     Visibility: public -/
 @[reducible]
 def indexed.keep_live
@@ -1332,7 +961,7 @@ def indexed.keep_live
   indexed.keep_live_loop nodes live (alloc.vec.Vec.new Std.Usize) 0#usize
 
 /-- [o5s_kernel::indexed::boundary]:
-    Source: 'kernel/src/indexed.rs', lines 64:0-73:1
+    Source: 'crates/kernel/src/indexed.rs', lines 64:0-73:1
     Visibility: public -/
 def indexed.boundary
   (dead_rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
@@ -1345,7 +974,7 @@ def indexed.boundary
   ok { state with queue := v }
 
 /-- [o5s_kernel::interval::conflict]:
-    Source: 'kernel/src/interval.rs', lines 4:0-12:1
+    Source: 'crates/kernel/src/interval.rs', lines 4:0-12:1
     Visibility: public -/
 def interval.conflict
   (a_start : Std.U64) (a_end : Std.U64) (b_start : Std.U64) (b_end : Std.U64) :
@@ -1365,7 +994,7 @@ def interval.conflict
          else ok false
 
 /-- [o5s_kernel::interval::splice]:
-    Source: 'kernel/src/interval.rs', lines 16:0-21:1
+    Source: 'crates/kernel/src/interval.rs', lines 16:0-21:1
     Visibility: public -/
 def interval.splice
   (bytes : alloc.vec.Vec Std.U8) (start : Std.Usize) («end» : Std.Usize)
@@ -1379,7 +1008,7 @@ def interval.splice
   h5i_app_std.bytes.concat «prefix» after
 
 /-- [o5s_kernel::interval::append_range]: loop body 0:
-    Source: 'kernel/src/interval.rs', lines 27:4-30:5
+    Source: 'crates/kernel/src/interval.rs', lines 27:4-30:5
     Visibility: public -/
 @[rust_loop_body]
 def interval.append_range_loop.body
@@ -1399,7 +1028,7 @@ def interval.append_range_loop.body
   else ok (done out)
 
 /-- [o5s_kernel::interval::append_range]: loop 0:
-    Source: 'kernel/src/interval.rs', lines 27:4-30:5
+    Source: 'crates/kernel/src/interval.rs', lines 27:4-30:5
     Visibility: public -/
 @[rust_loop]
 def interval.append_range_loop
@@ -1412,7 +1041,7 @@ def interval.append_range_loop
     (out, i)
 
 /-- [o5s_kernel::interval::append_range]:
-    Source: 'kernel/src/interval.rs', lines 25:0-32:1
+    Source: 'crates/kernel/src/interval.rs', lines 25:0-32:1
     Visibility: public -/
 @[reducible]
 def interval.append_range
@@ -1423,7 +1052,7 @@ def interval.append_range
   interval.append_range_loop out bytes «end» start
 
 /-- [o5s_kernel::interval::render_chunks]: loop body 0:
-    Source: 'kernel/src/interval.rs', lines 40:4-46:5
+    Source: 'crates/kernel/src/interval.rs', lines 40:4-46:5
     Visibility: public -/
 @[rust_loop_body]
 def interval.render_chunks_loop.body
@@ -1447,7 +1076,7 @@ def interval.render_chunks_loop.body
   else ok (done (out, cursor))
 
 /-- [o5s_kernel::interval::render_chunks]: loop 0:
-    Source: 'kernel/src/interval.rs', lines 40:4-46:5
+    Source: 'crates/kernel/src/interval.rs', lines 40:4-46:5
     Visibility: public -/
 @[rust_loop]
 def interval.render_chunks_loop
@@ -1462,7 +1091,7 @@ def interval.render_chunks_loop
     (out, cursor, i)
 
 /-- [o5s_kernel::interval::render_chunks]:
-    Source: 'kernel/src/interval.rs', lines 36:0-48:1
+    Source: 'crates/kernel/src/interval.rs', lines 36:0-48:1
     Visibility: public -/
 def interval.render_chunks
   (bytes : alloc.vec.Vec Std.U8)
@@ -1476,14 +1105,14 @@ def interval.render_chunks
   interval.append_range out bytes cursor i
 
 /-- [o5s_kernel::interval::Validation]
-    Source: 'kernel/src/interval.rs', lines 50:0-54:1 -/
+    Source: 'crates/kernel/src/interval.rs', lines 50:0-54:1 -/
 structure interval.Validation where
   valid : Bool
   cursor : Std.Usize
   capacity : Std.Usize
 
 /-- [o5s_kernel::interval::validation_step]:
-    Source: 'kernel/src/interval.rs', lines 55:0-76:1 -/
+    Source: 'crates/kernel/src/interval.rs', lines 55:0-76:1 -/
 def interval.validation_step
   (state : interval.Validation) (bytes_len : Std.Usize) (start : Std.Usize)
   («end» : Std.Usize) (replacement_len : Std.Usize) :
@@ -1506,7 +1135,7 @@ def interval.validation_step
   else ok { state with valid := false, cursor := «end» }
 
 /-- [o5s_kernel::interval::valid_chunks]: loop body 0:
-    Source: 'kernel/src/interval.rs', lines 87:4-91:5
+    Source: 'crates/kernel/src/interval.rs', lines 87:4-91:5
     Visibility: public -/
 @[rust_loop_body]
 def interval.valid_chunks_loop.body
@@ -1528,7 +1157,7 @@ def interval.valid_chunks_loop.body
   else ok (done state)
 
 /-- [o5s_kernel::interval::valid_chunks]: loop 0:
-    Source: 'kernel/src/interval.rs', lines 87:4-91:5
+    Source: 'crates/kernel/src/interval.rs', lines 87:4-91:5
     Visibility: public -/
 @[rust_loop]
 def interval.valid_chunks_loop
@@ -1543,7 +1172,7 @@ def interval.valid_chunks_loop
     (state, i)
 
 /-- [o5s_kernel::interval::valid_chunks]:
-    Source: 'kernel/src/interval.rs', lines 80:0-93:1
+    Source: 'crates/kernel/src/interval.rs', lines 80:0-93:1
     Visibility: public -/
 def interval.valid_chunks
   (bytes_len : Std.Usize)
@@ -1556,7 +1185,7 @@ def interval.valid_chunks
   ok state.valid
 
 /-- [o5s_kernel::interval::checked_render]:
-    Source: 'kernel/src/interval.rs', lines 95:0-101:1
+    Source: 'crates/kernel/src/interval.rs', lines 95:0-101:1
     Visibility: public -/
 def interval.checked_render
   (bytes : alloc.vec.Vec Std.U8)
@@ -1570,183 +1199,167 @@ def interval.checked_render
        ok (some v)
   else ok none
 
-/-- [o5s_kernel::Principal]
-    Source: 'kernel/src/lib.rs', lines 13:0-16:1
-    Visibility: public -/
-structure Principal where
-  org : Std.U64
-  user : Std.U64
-
-/-- Trait implementation: [o5s_kernel::{impl core::clone::Clone for o5s_kernel::Memory}]
-    Source: 'kernel/src/lib.rs', lines 29:13-29:18 -/
-@[reducible]
-def Memory.Insts.CoreCloneClone : core.clone.Clone Memory := {
-  clone := Memory.Insts.CoreCloneClone.clone
-}
-
-/-- [o5s_kernel::{impl core::clone::Clone for o5s_kernel::Snapshot}::clone]:
-    Source: 'kernel/src/lib.rs', lines 24:13-24:18
-    Visibility: public -/
-def Snapshot.Insts.CoreCloneClone.clone
-  (self : Snapshot) : Result Snapshot := do
-  let v ← alloc.vec.CloneVec.clone Memory.Insts.CoreCloneClone self.memories
-  ok { memories := v }
-
-/-- [o5s_kernel::Op]
-    Source: 'kernel/src/lib.rs', lines 37:0-42:1
-    Visibility: public -/
-@[discriminant isize]
-inductive Op where
-| Add : Op
-| Sub : Op
-| Mul : Op
-| Div : Op
-
-/-- [o5s_kernel::Command]
-    Source: 'kernel/src/lib.rs', lines 45:0-52:1
-    Visibility: public -/
-@[discriminant isize]
-inductive Command where
-| Set : Std.U64 → Command
-| Apply : Op → Std.U64 → Command
-| Get : Command
-
-/-- [o5s_kernel::Reply]
-    Source: 'kernel/src/lib.rs', lines 55:0-57:1
-    Visibility: public -/
-@[discriminant isize]
-inductive Reply where
-| Value : Std.U64 → Reply
-
-/-- [o5s_kernel::Error]
-    Source: 'kernel/src/lib.rs', lines 60:0-64:1
-    Visibility: public -/
-@[discriminant isize]
-inductive Error where
-| Overflow : Error
-| Underflow : Error
-| DivByZero : Error
-
-/-- [o5s_kernel::memory_of]: loop body 0:
-    Source: 'kernel/src/lib.rs', lines 69:4-76:1
+/-- [o5s_kernel::order::predecessors]: loop body 0:
+    Source: 'crates/kernel/src/order.rs', lines 7:4-12:5
     Visibility: public -/
 @[rust_loop_body]
-def memory_of_loop.body
-  (ms : alloc.vec.Vec Memory) (user : Std.U64) (i : Std.Usize) :
-  Result (ControlFlow Std.Usize Std.U64)
+def order.predecessors_loop.body
+  (edges : alloc.vec.Vec (Std.U64 × Std.U64)) (vertex : Std.U64)
+  (out : alloc.vec.Vec Std.U64) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.U64) × Std.Usize) (alloc.vec.Vec
+    Std.U64))
   := do
-  let i1 := alloc.vec.Vec.len ms
+  let i1 := alloc.vec.Vec.len edges
   if i < i1
   then
-    let m ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Memory) ms i
-    if m.user = user
-    then ok (done m.value)
-    else let i2 ← i + 1#usize
-         ok (cont i2)
-  else ok (done 0#u64)
+    let (i2, i3) ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Std.U64 ×
+        Std.U64)) edges i
+    let out1 ← if i3 = vertex
+                 then alloc.vec.Vec.push out i2
+                 else ok out
+    let i4 ← i + 1#usize
+    ok (cont (out1, i4))
+  else ok (done out)
 
-/-- [o5s_kernel::memory_of]: loop 0:
-    Source: 'kernel/src/lib.rs', lines 69:4-76:1
+/-- [o5s_kernel::order::predecessors]: loop 0:
+    Source: 'crates/kernel/src/order.rs', lines 7:4-12:5
     Visibility: public -/
 @[rust_loop]
-def memory_of_loop
-  (ms : alloc.vec.Vec Memory) (user : Std.U64) (i : Std.Usize) :
-  Result Std.U64
+def order.predecessors_loop
+  (edges : alloc.vec.Vec (Std.U64 × Std.U64)) (vertex : Std.U64)
+  (out : alloc.vec.Vec Std.U64) (i : Std.Usize) :
+  Result (alloc.vec.Vec Std.U64)
   := do
   loop
-    (fun i1 => memory_of_loop.body ms user i1)
-    i
+    (fun (out1, i1) => order.predecessors_loop.body edges vertex out1 i1)
+    (out, i)
 
-/-- [o5s_kernel::memory_of]:
-    Source: 'kernel/src/lib.rs', lines 67:0-76:1
+/-- [o5s_kernel::order::predecessors]:
+    Source: 'crates/kernel/src/order.rs', lines 4:0-14:1
     Visibility: public -/
 @[reducible]
-def memory_of
-  (ms : alloc.vec.Vec Memory) (user : Std.U64) : Result Std.U64 := do
-  memory_of_loop ms user 0#usize
-
-/-- [o5s_kernel::compute]:
-    Source: 'kernel/src/lib.rs', lines 79:0-110:1
-    Visibility: public -/
-def compute
-  (op : Op) (a : Std.U64) (b : Std.U64) :
-  Result (core.result.Result Std.U64 Error)
+def order.predecessors
+  (edges : alloc.vec.Vec (Std.U64 × Std.U64)) (vertex : Std.U64) :
+  Result (alloc.vec.Vec Std.U64)
   := do
-  match op with
-  | Op.Add =>
-    let i ← core.num.U64.MAX - b
-    if a > i
-    then ok (core.result.Result.Err Error.Overflow)
-    else let i1 ← a + b
-         ok (core.result.Result.Ok i1)
-  | Op.Sub =>
-    if a < b
-    then ok (core.result.Result.Err Error.Underflow)
-    else let i ← a - b
-         ok (core.result.Result.Ok i)
-  | Op.Mul =>
-    if b != 0#u64
-    then
-      let i ← core.num.U64.MAX / b
-      if a > i
-      then ok (core.result.Result.Err Error.Overflow)
-      else let i1 ← a * b
-           ok (core.result.Result.Ok i1)
-    else let i ← a * b
-         ok (core.result.Result.Ok i)
-  | Op.Div =>
-    if b = 0#u64
-    then ok (core.result.Result.Err Error.DivByZero)
-    else let i ← a / b
-         ok (core.result.Result.Ok i)
+  order.predecessors_loop edges vertex (alloc.vec.Vec.new Std.U64) 0#usize
 
-/-- [o5s_kernel::transition]:
-    Source: 'kernel/src/lib.rs', lines 114:0-142:1
+/-- [o5s_kernel::order::ready]:
+    Source: 'crates/kernel/src/order.rs', lines 16:0-18:1
     Visibility: public -/
-def transition
-  (actor : Principal) (snap : Snapshot) (cmd : Command) :
-  Result (core.result.Result ((Option Memory) × Reply) Error)
+def order.ready
+  (predecessors : alloc.vec.Vec Std.U64) (remaining : alloc.vec.Vec Std.U64) :
+  Result Bool
   := do
-  match cmd with
-  | Command.Set value =>
-    ok (core.result.Result.Ok (some { user := actor.user, value }, Reply.Value
-      value))
-  | Command.Apply op arg =>
-    let m ← memory_of snap.memories actor.user
-    let r ← compute op m arg
-    match r with
-    | core.result.Result.Ok v =>
-      ok (core.result.Result.Ok (some { user := actor.user, value := v },
-        Reply.Value v))
-    | core.result.Result.Err e => ok (core.result.Result.Err e)
-  | Command.Get =>
-    let i ← memory_of snap.memories actor.user
-    ok (core.result.Result.Ok (none, Reply.Value i))
+  let b ←
+    h5i_app_std.set.intersects core.cmp.PartialEqU64 predecessors remaining
+  ok (¬ b)
 
-/-- [o5s_kernel::apply]:
-    Source: 'kernel/src/lib.rs', lines 146:0-153:1
+/-- [o5s_kernel::order::frontier]: loop body 0:
+    Source: 'crates/kernel/src/order.rs', lines 25:4-32:5
     Visibility: public -/
-def apply (snap : Snapshot) (w : Option Memory) : Result Snapshot := do
-  let s ← Snapshot.Insts.CoreCloneClone.clone snap
-  match w with
-  | none => ok s
-  | some m => let v ← Memory.put s.memories m
-              ok { memories := v }
+@[rust_loop_body]
+def order.frontier_loop.body
+  (edges : alloc.vec.Vec (Std.U64 × Std.U64))
+  (remaining : alloc.vec.Vec Std.U64) (out : alloc.vec.Vec Std.U64)
+  (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.U64) × Std.Usize) (alloc.vec.Vec
+    Std.U64))
+  := do
+  let i1 := alloc.vec.Vec.len remaining
+  if i < i1
+  then
+    let vertex ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U64)
+        remaining i
+    let incoming ← order.predecessors edges vertex
+    let b ← order.ready incoming remaining
+    let out1 ← if b
+                 then alloc.vec.Vec.push out vertex
+                 else ok out
+    let i2 ← i + 1#usize
+    ok (cont (out1, i2))
+  else ok (done out)
 
-/-- [o5s_kernel::sql_writes]:
-    Source: 'kernel/src/lib.rs', lines 156:0-163:1
+/-- [o5s_kernel::order::frontier]: loop 0:
+    Source: 'crates/kernel/src/order.rs', lines 25:4-32:5
     Visibility: public -/
-def sql_writes
-  (w : Option Memory) : Result (alloc.vec.Vec h5i_app_sql.Write) := do
-  match w with
-  | none => ok (alloc.vec.Vec.new h5i_app_sql.Write)
-  | some m =>
-    let w1 ← Memory.sql_put m
-    alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Write) w1
+@[rust_loop]
+def order.frontier_loop
+  (edges : alloc.vec.Vec (Std.U64 × Std.U64))
+  (remaining : alloc.vec.Vec Std.U64) (out : alloc.vec.Vec Std.U64)
+  (i : Std.Usize) :
+  Result (alloc.vec.Vec Std.U64)
+  := do
+  loop
+    (fun (out1, i1) => order.frontier_loop.body edges remaining out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::order::frontier]:
+    Source: 'crates/kernel/src/order.rs', lines 22:0-34:1
+    Visibility: public -/
+@[reducible]
+def order.frontier
+  (edges : alloc.vec.Vec (Std.U64 × Std.U64))
+  (remaining : alloc.vec.Vec Std.U64) :
+  Result (alloc.vec.Vec Std.U64)
+  := do
+  order.frontier_loop edges remaining (alloc.vec.Vec.new Std.U64) 0#usize
+
+/-- [o5s_kernel::order::frontier_counts]: loop body 0:
+    Source: 'crates/kernel/src/order.rs', lines 42:4-48:5
+    Visibility: public -/
+@[rust_loop_body]
+def order.frontier_counts_loop.body
+  (indegree : alloc.vec.Vec Std.Usize) (remaining : alloc.vec.Vec Std.Usize)
+  (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize) (alloc.vec.Vec
+    Std.Usize))
+  := do
+  let i1 := alloc.vec.Vec.len remaining
+  if i < i1
+  then
+    let vertex ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        remaining i
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        indegree vertex
+    let out1 ← if i2 = 0#usize
+                 then alloc.vec.Vec.push out vertex
+                 else ok out
+    let i3 ← i + 1#usize
+    ok (cont (out1, i3))
+  else ok (done out)
+
+/-- [o5s_kernel::order::frontier_counts]: loop 0:
+    Source: 'crates/kernel/src/order.rs', lines 42:4-48:5
+    Visibility: public -/
+@[rust_loop]
+def order.frontier_counts_loop
+  (indegree : alloc.vec.Vec Std.Usize) (remaining : alloc.vec.Vec Std.Usize)
+  (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  loop
+    (fun (out1, i1) => order.frontier_counts_loop.body indegree remaining out1
+      i1)
+    (out, i)
+
+/-- [o5s_kernel::order::frontier_counts]:
+    Source: 'crates/kernel/src/order.rs', lines 39:0-50:1
+    Visibility: public -/
+@[reducible]
+def order.frontier_counts
+  (indegree : alloc.vec.Vec Std.Usize) (remaining : alloc.vec.Vec Std.Usize) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  order.frontier_counts_loop indegree remaining (alloc.vec.Vec.new Std.Usize)
+    0#usize
 
 /-- [o5s_kernel::patch::MergeError]
-    Source: 'kernel/src/patch.rs', lines 8:0-12:1
+    Source: 'crates/kernel/src/patch.rs', lines 8:0-12:1
     Visibility: public -/
 @[discriminant isize]
 inductive patch.MergeError where
@@ -1755,7 +1368,7 @@ inductive patch.MergeError where
 | MissingDependency : patch.MergeError
 
 /-- [o5s_kernel::patch::merge]:
-    Source: 'kernel/src/patch.rs', lines 17:0-34:1
+    Source: 'crates/kernel/src/patch.rs', lines 17:0-34:1
     Visibility: public -/
 def patch.merge
   (channel : alloc.vec.Vec Std.U64) (dependencies : alloc.vec.Vec Std.U64)

@@ -1,16 +1,16 @@
 # Read by `h5i app` (extract, check, prove, mutate, doctor).
 
 [extract]
-start-from = ["transition", "apply", "sql_writes", "patch::merge", "graph::reachable", "graph::boundary", "graph::summary_rows", "graph::weak_component", "interval::conflict", "interval::splice", "interval::append_range", "interval::render_chunks", "interval::checked_render", "indexed::reachable", "indexed::boundary", "coordinates::line_boundaries"]
-schema = true
-include = ["h5i_app_sql", "h5i_app_std"]
+crate = "crates/kernel"
+start-from = ["patch::merge", "graph::reachable", "graph::boundary", "graph::summary_rows", "graph::weak_component", "interval::conflict", "interval::splice", "interval::append_range", "interval::render_chunks", "interval::checked_render", "indexed::reachable", "indexed::boundary", "coordinates::line_boundaries", "order::frontier", "order::frontier_counts"]
+schema = false
+include = ["h5i_app_std"]
 std-specs = true
 
 [check]
 # Must exist and use only the standard axioms (every theorem in a hand-written
 # module is gated as well).
 theorems = [
-  "o5s_kernel.Storage.pg_stored",
   "o5s_kernel.Patch.merge_spec",
   "o5s_kernel.Patch.merge_authorized",
   "o5s_kernel.Patch.no_lost_patch",
@@ -37,93 +37,90 @@ theorems = [
   "o5s_kernel.Indexed.clear_clean_spec",
   "o5s_kernel.Boundary.boundary_segment",
   "o5s_kernel.Coordinates.line_boundaries_ordered",
+  "o5s_kernel.Order.frontier_exact",
+  "o5s_kernel.Order.frontier_counts_exact",
 ]
 
 [[mutant]]
-name = "underflow_boundary"
-old = "if a < b {"
-new = "if a <= b {"
-
-[[mutant]]
 name = "merge_approval_gate"
-file = "kernel/src/patch.rs"
+file = "crates/kernel/src/patch.rs"
 old = "if !approved {"
 new = "if approved {"
 
 [[mutant]]
 name = "merge_check_gate"
-file = "kernel/src/patch.rs"
+file = "crates/kernel/src/patch.rs"
 old = "if !checks_passed {"
 new = "if checks_passed {"
 
 [[mutant]]
 name = "merge_dependency_gate"
-file = "kernel/src/patch.rs"
+file = "crates/kernel/src/patch.rs"
 old = "if !h5i_app_std::set::subset(dependencies, channel) {"
 new = "if h5i_app_std::set::subset(dependencies, channel) {"
 
 [[mutant]]
 name = "line_conflict_boundary"
-file = "kernel/src/interval.rs"
+file = "crates/kernel/src/interval.rs"
 old = "b_start <= a_start && a_start <= b_end"
 new = "b_start < a_start && a_start < b_end"
 
 [[mutant]]
 name = "splice_suffix_boundary"
-file = "kernel/src/interval.rs"
+file = "crates/kernel/src/interval.rs"
 old = "slice(bytes, end, bytes.len())"
 new = "slice(bytes, start, bytes.len())"
 
 [[mutant]]
 name = "render_cursor_boundary"
-file = "kernel/src/interval.rs"
+file = "crates/kernel/src/interval.rs"
 old = "cursor = chunk.1;"
 new = "cursor = chunk.0;"
 
 [[mutant]]
 name = "validation_order_boundary"
-file = "kernel/src/interval.rs"
+file = "crates/kernel/src/interval.rs"
 old = "state.cursor <= start"
 new = "state.cursor >= start"
 
 [[mutant]]
 name = "validation_capacity_boundary"
-file = "kernel/src/interval.rs"
+file = "crates/kernel/src/interval.rs"
 old = "replacement_len <= usize::MAX - state.capacity"
 new = "replacement_len <= usize::MAX"
 
 [[mutant]]
 name = "component_reverse_edge"
-file = "kernel/src/graph.rs"
+file = "crates/kernel/src/graph.rs"
 old = "out.push((edges[i].1, edges[i].0));"
 new = "out.push((edges[i].0, edges[i].1));"
 
 [[mutant]]
 name = "indexed_mark"
-file = "kernel/src/indexed.rs"
+file = "crates/kernel/src/indexed.rs"
 old = "state.marks[vertex] = true;"
 new = "state.marks[vertex] = false;"
 
 [[mutant]]
 name = "indexed_clear"
-file = "kernel/src/indexed.rs"
+file = "crates/kernel/src/indexed.rs"
 old = "state.marks[state.queue[i]] = false;"
 new = "state.marks[state.queue[i]] = true;"
 
 [[mutant]]
 name = "indexed_live_filter"
-file = "kernel/src/indexed.rs"
+file = "crates/kernel/src/indexed.rs"
 old = "if live[vertex] {"
 new = "if !live[vertex] {"
 
 [[mutant]]
 name = "line_lf_delimiter"
-file = "kernel/src/coordinates.rs"
+file = "crates/kernel/src/coordinates.rs"
 old = "byte == b'\\n'"
 new = "byte == b'\\r'"
 
 [[mutant]]
 name = "line_trailing_lf"
-file = "kernel/src/coordinates.rs"
+file = "crates/kernel/src/coordinates.rs"
 old = "state.position < length"
 new = "state.position <= length"

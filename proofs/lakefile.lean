@@ -14,8 +14,8 @@ package o5s_proofs
 -- Generated Lean: the extracted Rust (`h5i app extract`). Do not edit.
 lean_lib Generated where
   srcDir := "generated"
-  roots := #[`O5sKernel, `Schema, `StdSpecs]
+  roots := #[`O5sKernel, `StdSpecs]
 
 -- Hand-written spec and proofs.
 @[default_target] lean_lib Proofs where
-  roots := #[`Spec, `Proofs, `Storage, `Patch, `Projection, `Constructor, `Interval, `Splice, `Rendering, `Checked, `Components, `Indexed, `Boundary, `Coordinates]
+  roots := #[`Patch, `Projection, `Constructor, `Interval, `Splice, `Rendering, `Checked, `Components, `Indexed, `Boundary, `Coordinates, `Order]

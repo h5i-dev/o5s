@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>o5s · Collaboration console</title>
+<style>
+:root{color-scheme:dark;--bg:#0b111b;--panel:#111a27;--line:#253143;--muted:#8e9db2;--text:#edf1f6;--accent:#b9f878;--conflict:#ffb780}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer;background:#1d2b3d;border:1px solid #344359;color:var(--text);padding:9px 13px;border-radius:7px}button:hover{border-color:var(--accent)}button:disabled{opacity:.4;cursor:default}input,select,textarea{background:#0c1420;border:1px solid var(--line);border-radius:7px;color:var(--text);padding:10px;max-width:100%}textarea{width:100%;resize:vertical;min-height:82px;font:13px ui-monospace,monospace}input:focus,textarea:focus{outline:1px solid var(--accent)}header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:18px 30px;gap:20px}.brand{font-size:26px;font-weight:750;letter-spacing:-1px}.brand span{font-size:12px;color:var(--muted);font-weight:400;letter-spacing:0;margin-left:15px}.pill{font:11px ui-monospace,monospace;background:#1a3024;color:var(--accent);padding:6px 10px;border-radius:20px}.session{display:flex;gap:8px}.session input{width:310px}main{max-width:1460px;margin:auto;padding:30px}.intro{display:flex;justify-content:space-between;align-items:end;margin-bottom:25px}.eyebrow{text-transform:uppercase;letter-spacing:2px;font-size:11px;color:var(--accent)}h1{font-size:35px;letter-spacing:-1.2px;margin:9px 0}p{color:var(--muted);line-height:1.7}h2{font-size:15px;margin:0}h3{font-size:14px;margin:0}.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:20px}.toolbar input{width:180px}.primary{background:var(--accent);color:#102015;border-color:var(--accent);font-weight:650}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:20px 0}.metric,.panel{background:var(--panel);border:1px solid var(--line);border-radius:11px}.metric{padding:17px}.metric strong{font-size:27px;display:block;margin-top:5px}.metric span{font-size:12px;color:var(--muted)}.grid{display:grid;grid-template-columns:1.7fr 1fr;gap:20px}.panel-head{padding:17px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}.panel-body{padding:20px}.stack{display:grid;gap:20px}.graph{overflow:auto;padding:10px 20px;background:linear-gradient(transparent 23px,#172131 24px);background-size:24px 24px}.graph svg{display:block;min-height:90px}.muted{color:var(--muted);font-size:12px}.card{border-bottom:1px solid var(--line);padding:17px 20px}.card:last-child{border-bottom:0}.card-top{display:flex;justify-content:space-between;gap:10px;margin-bottom:8px}.card p{margin:5px 0 12px;color:var(--text);white-space:pre-wrap}.hash{font:11px ui-monospace,monospace;color:var(--muted)}.tag{font-size:11px;border:1px solid var(--line);padding:3px 7px;border-radius:5px;color:var(--muted)}.tag.good{color:var(--accent)}.tag.warn{color:var(--conflict)}.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.actions button{font-size:12px;padding:6px 9px}pre{background:#0b131e;border:1px solid var(--line);padding:12px;border-radius:7px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.7 ui-monospace,monospace;max-height:230px;overflow:auto}.conflict{border-left:2px solid var(--conflict);padding-left:15px;margin-bottom:25px}.conflict h3{color:var(--conflict)}label{display:block;color:var(--muted);font-size:12px;margin:13px 0 6px}.field-row{display:flex;gap:10px}.field-row input{flex:1}.status{position:sticky;bottom:16px;margin-top:20px;padding:12px 16px;border:1px solid var(--line);background:#172438;border-radius:8px;display:none;white-space:pre-wrap}.status.error{color:var(--conflict);border-color:#64452e}details{margin-top:15px}summary{cursor:pointer;color:var(--muted);font-size:12px}.empty{padding:28px;color:var(--muted);text-align:center}.activity{max-height:220px;overflow:auto}.activity div{font:12px/2 ui-monospace,monospace;color:var(--muted)}footer{padding:25px 0;color:var(--muted);font-size:11px;border-top:1px solid var(--line);margin-top:30px}@media(max-width:900px){header,.intro{align-items:start;flex-direction:column}.grid{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}main{padding:20px}.session input{width:240px}h1{font-size:28px}}
+
+/* Theme tokens match ../h5i/web/src/theme.css (Apache-2.0). */
+:root{--ground:#0a0a0c;--surface:#101013;--surface-2:#16161a;--raised:#1d1d22;--hover:#202026;--line:#24242a;--line-strong:#34343c;--ink:#ededf0;--ink-2:#a8a8b2;--ink-3:#75757f;--accent:#ff6258;--accent-hi:#ff8a82;--green:#5cbf88;--amber:#d9a441;--cyan:#7db8d3;--violet:#b08ad6;--bg:var(--ground);--panel:var(--surface);--muted:var(--ink-2);--text:var(--ink);--conflict:var(--amber);--font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;--font-mono:"SFMono-Regular",Menlo,Consolas,"DejaVu Sans Mono",monospace}
+body{font:13.5px var(--font-ui)}header{padding:14px 24px;background:var(--surface);position:sticky;top:0;z-index:10}.brand{font-size:23px}main{padding:24px;max-width:1500px}.intro{margin-bottom:18px}h1{font-size:27px;margin:6px 0}.intro p{margin:0}.eyebrow{letter-spacing:1px}.pill{background:var(--raised);color:var(--ink-2);border-radius:4px}.toolbar{padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:4px}.toolbar #repositories{min-width:190px}.toolbar #channel{min-width:120px}.toolbar #export{margin-left:auto}button{background:var(--raised);border-color:var(--line-strong);border-radius:4px}button:hover{background:var(--hover);border-color:var(--accent)}input,select,textarea{background:var(--ground);border-radius:4px}.primary{background:var(--raised);color:var(--ink);border-color:var(--accent)}.primary:hover{background:var(--hover)}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.metric,.panel{border-radius:4px}.metrics{gap:10px;margin:16px 0}.metric{padding:12px 16px}.metric strong{font-size:23px}.metric:last-child strong{color:var(--amber)}.grid{grid-template-columns:minmax(0,1.5fr) minmax(330px,1fr);gap:16px;align-items:start}.stack{gap:16px}.panel-head{padding:13px 16px}.panel-body,.card{padding:16px}.grid>.stack:nth-child(2){position:sticky;top:85px}.card-top{margin-bottom:6px}.card p{max-width:75ch}.tag.good{color:var(--green)}pre{background:var(--ground);font-family:var(--font-mono);border-radius:4px}.graph{background:var(--ground)}.status{background:var(--raised);z-index:11;border-radius:4px}.status.error{border-color:var(--amber)}.queue-tools{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line)}.queue-tools input{flex:1;min-width:0}.conflict{background:rgba(217,164,65,.05);padding:12px;border-radius:4px;margin-bottom:16px}.conflict .actions{position:sticky;bottom:0}.conflict pre{max-height:150px}.panel-head a{color:var(--accent);text-decoration:none}.empty{text-align:left}.activity{max-height:160px}.graph-section{padding:14px 16px}.graph-section summary{font-size:13px;color:var(--ink-2)}.graph-section .graph{padding-top:16px}.context{font:12px var(--font-mono);color:var(--ink-2);padding:8px 0}#proposal-panel{scroll-margin-top:90px}#files-panel{scroll-margin-top:90px}#work{color:var(--ink-3)}@media(max-width:1000px){.grid{grid-template-columns:1fr}.grid>.stack:nth-child(2){position:static}.toolbar #export{margin-left:0}.intro{align-items:start}.session{max-width:100%}.session input{min-width:0}.queue-tools{flex-wrap:wrap}}
+
+#document-panel{scroll-margin-top:90px}.document-notice{border-left:3px solid var(--amber);padding:8px 12px;margin-bottom:16px}.document-notice p{margin:0}.node-list{display:grid;gap:10px}.node-card{padding:12px;border:1px solid var(--line);border-radius:4px}.node-card pre{margin:8px 0}.node-card summary{color:var(--ink-2)}.graph-conflict-title{color:var(--amber)}.hash{overflow-wrap:anywhere}.graph-operation{border-left:2px solid var(--cyan);padding-left:12px;margin-top:12px}.form-note{color:var(--ink-2);font-size:12px;line-height:1.6}#graph-fields textarea{min-height:190px}#content[hidden],#content-label[hidden],#delete-label[hidden]{display:none}
+</style></head><body>
+<header><div class="brand">o5s<span>collaboration console</span></div><div class="session"><input id="token" type="password" placeholder="Paste your agent’s bearer token" autocomplete="off" aria-label="Bearer token"><button id="connect">Connect</button></div></header>
+<main><div class="intro"><div><div class="eyebrow">Repository / Review / Integration</div><h1>Review and integrate changes.</h1><p>Inspect intent and edits, check readiness, then integrate. Conflicts remain visible until resolved.</p></div><span class="pill" id="identity">LOCAL / DISCONNECTED</span></div>
+<div class="toolbar"><select id="repositories" aria-label="Repository"><option value="">Select repository</option></select><input id="new-repo" placeholder="Repository name" aria-label="New repository name"><button id="create">Create repository</button><select id="channel" aria-label="Channel"><option>main</option></select><button id="fork">Fork view</button><button id="refresh">Refresh</button><button id="worktree">Create workspace</button><button id="export">Export to local Git</button></div>
+<div class="metrics"><div class="metric"><span>Immutable patches</span><strong id="m-patches">—</strong></div><div class="metric"><span>Integrated in this view</span><strong id="m-merged">—</strong></div><div class="metric"><span>Awaiting integration</span><strong id="m-pending">—</strong></div><div class="metric"><span>Unresolved paths</span><strong id="m-conflicts">—</strong></div></div>
+<div class="grid"><div class="stack"><section class="panel" id="files-panel"><div class="panel-head"><h2>Channel files & conflicts</h2><span class="muted">files, graph order & conflicts</span></div><div class="panel-body" id="files"><p>No view selected.</p></div></section><section class="panel" id="document-panel" hidden tabindex="-1" aria-labelledby="document-title"><div class="panel-head"><h2 id="document-title">Document graph</h2><button type="button" id="close-document" aria-label="Close document inspection">Close</button></div><div class="panel-body" id="document-details"></div></section><section class="panel"><div class="panel-head"><h2>Patch proposals</h2><div class="actions"><span class="muted" id="count"></span><button id="integrate-ready" disabled>Integrate ready patches</button></div></div><div class="queue-tools"><input id="search" type="search" placeholder="Find by intent, path or patch ID" aria-label="Search patches"><select id="filter" aria-label="Review queue filter"><option value="pending">Awaiting integration</option><option value="ready">Ready to integrate</option><option value="conflicted">In conflict</option><option value="all">All patches</option></select></div><div id="patches"><div class="empty">Connect to a local repository to begin.</div></div></section><details class="panel graph-section"><summary>Dependency graph · latest 80 patches</summary><div class="graph" id="graph"></div></details></div>
+<div class="stack"><section class="panel" id="workspace-panel" hidden><div class="panel-head"><h2>Workspace changes</h2><span class="tag">detached snapshot</span></div><form class="panel-body" id="workspace-proposal"><p class="muted">Edit files locally, then record an immutable proposal. Staged and unstaged text edits, additions and deletions are included.</p><pre id="workspace-path"></pre><div class="hash" id="workspace-commit"></div><label for="workspace-intent">Intent · why should these changes exist?</label><textarea id="workspace-intent" required></textarea><button type="submit" class="primary">Record workspace proposal</button></form></section><section class="panel" id="proposal-panel"><div class="panel-head"><h2>Propose a change</h2><span class="tag">immutable</span></div><form class="panel-body" id="proposal"><div class="context" id="compose-context">New independent change</div><label for="intent">Intent · why should this change exist?</label><textarea id="intent" placeholder="Describe the behavior and acceptance criteria" required></textarea><label for="deps">Dependencies · patch IDs separated by commas</label><input id="deps" placeholder="1, 2" style="width:100%"><label for="path">File path</label><input id="path" placeholder="src/main.rs" required style="width:100%"><label for="edit-mode">Edit scope</label><select id="edit-mode"><option value="file">Complete file</option><option value="lines">Line range on an immutable base</option><option value="graph">Graph operations on stable nodes</option></select><div id="line-fields" hidden><label for="line-base">Base patch ID</label><input id="line-base" type="number" min="1"><div class="field-row"><div><label for="line-start">Start line · zero based</label><input id="line-start" type="number" min="0" value="0"></div><div><label for="line-end">End line · excluded</label><input id="line-end" type="number" min="0" value="1"></div></div><p class="muted">Equal start and end inserts text. Empty replacement deletes the range. Disjoint ranges on the same base merge automatically.</p></div><div id="graph-fields" hidden><label for="graph-operations">Operations · JSON array</label><textarea id="graph-operations" rows="9" spellcheck="false" aria-describedby="graph-hint"></textarea><p class="muted" id="graph-hint">Inspect the document to find stable node IDs. Dependencies must include the patches whose anchors you use. Order, deletion and restoration operations receive the same review as text edits.</p><button type="button" id="inspect-compose">Inspect this document</button><button type="button" id="graph-example">Start a new document</button></div><label for="content" id="content-label">Complete file content</label><textarea id="content" rows="7" placeholder="Your version of this file"></textarea><label id="delete-label"><input type="checkbox" id="delete"> Delete this file (tombstone)</label><button class="primary" type="submit" style="width:100%;margin-top:15px">Record patch</button><p class="muted">Review and check reports must come from another authenticated identity. Set dependencies to the changes you are building on.</p></form></section><section class="panel"><div class="panel-head"><h2>Activity</h2><span class="muted">persisted locally</span></div><div class="panel-body activity" id="activity"></div></section><section class="panel"><div class="panel-body"><h2>A different collaboration unit</h2><p>A channel is a named patch set. A proposal is an immutable intent, dependency set and edit bundle. Concurrent edits remain visible until an explicit resolution depends on them.</p><p class="muted">Whole-file proposals preserve conflicting alternatives. Line proposals merge disjoint ranges on a shared base. Graph operations retain stable text nodes, deletion tags and reviewed ordering. The complete graph operation model, native adapters and storage are tested; existing Lean proofs cover narrower kernel properties.</p></div></section></div></div>
+<div class="context" id="work"></div><div id="status" class="status" role="status"></div><footer>o5s / Apache-2.0 &nbsp;·&nbsp; Local axum + h5i-app &nbsp;·&nbsp; No remote push is performed.</footer></main>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+let data = null, actor = null, token = '', busy = false, workspace = null, inspection = null;
+const el = (tag, text, cls) => {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  if (cls) node.className = cls;
+  return node;
+};
+function message(text, error = false) {
+  $('status').textContent = text;
+  $('status').className = 'status' + (error ? ' error' : '');
+  $('status').style.display = 'block';
+}
+async function api(path, body) {
+  const response = await fetch(path, {
+    method: body ? 'POST' : 'GET',
+    headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const value = await response.json();
+  if (!response.ok) throw Error(value.error || 'Request failed');
+  return value;
+}
+function repo() {
+  const name = $('repositories').value;
+  if (!name) throw Error('Select or create a repository first.');
+  return name;
+}
+async function cmd(command) {
+  const reply = await api('/api/command', {repo: repo(), ...command});
+  message(JSON.stringify(reply));
+  await load();
+  return reply;
+}
+async function connect() {
+  token = $('token').value.trim() || token;
+  const result = await api('/api/repositories');
+  actor = result.actor;
+  workspace = null;
+  closeDocument();
+  $('workspace-panel').hidden = true;
+  $('token').value = '';
+  $('token').placeholder = 'Connected · paste token to switch identity';
+  $('identity').textContent = `TENANT ${actor.tenant} / AGENT ${actor.user}`;
+  const selected = $('repositories').value;
+  $('repositories').replaceChildren(...result.repositories.map(name => {
+    const option = el('option', name); option.value = name; return option;
+  }));
+  if (result.repositories.includes(selected)) $('repositories').value = selected;
+  if (result.repositories.length) await load();
+  else message('Connected. Create your first repository.');
+}
+async function load() {
+  const repository = repo(), channel = $('channel').value || 'main';
+  data = await api(`/api/state?repo=${encodeURIComponent(repository)}&channel=${encodeURIComponent(channel)}`);
+  render();
+  if (inspection) {
+    if (inspection.repo === repository && inspection.channel === channel) await inspectDocument(inspection.path, false);
+    else closeDocument();
+  }
+}
+function readyPatches() {
+  if (!data) return [];
+  const known = new Set(data.view.patches), ids = [];
+  for (const patch of Object.values(data.repository.patches).sort((a, b) => a.id - b.id)) {
+    if (!known.has(patch.id) && patch.approvals.length && patch.checks_passed && patch.dependencies.every(id => known.has(id))) {
+      known.add(patch.id); ids.push(patch.id);
+    }
+  }
+  return ids;
+}
+function button(text, action, disabled = false) {
+  const node = el('button', text);
+  node.type = 'button'; node.disabled = disabled;
+  node.onclick = () => safe(action);
+  return node;
+}
+function graphEdits(patch) { return patch.graph_edits || []; }
+function pathsOf(patch) { return [...(patch.edits || []), ...graphEdits(patch)].map(edit => edit.path); }
+function graphPaths() {
+  return new Set(Object.values(data.repository.patches).flatMap(patch => graphEdits(patch).map(edit => edit.path)));
+}
+function focusComposer() {
+  $('proposal-panel').scrollIntoView({behavior: 'smooth', block: 'start'});
+  $('intent').focus({preventScroll: true});
+}
+function composeGraph(path, dependencies, context) {
+  $('edit-mode').value = 'graph'; editScope();
+  $('path').value = path;
+  $('deps').value = dependencies.join(', ');
+  $('graph-operations').value = '[]';
+  $('delete').checked = false;
+  $('compose-context').textContent = context;
+  focusComposer();
+}
+function bytesText(bytes) { return new TextDecoder().decode(Uint8Array.from(bytes || [])); }
+function nodeCard(node, title) {
+  const card = el('div', undefined, 'node-card');
+  card.append(el('h3', title), el('pre', bytesText(node.bytes)));
+  const details = el('details');
+  details.append(el('summary', 'Stable node ID'), el('pre', JSON.stringify(node.id, null, 2)));
+  details.append(button('Copy node ID', async () => {
+    if (!navigator.clipboard) throw Error('Clipboard is unavailable. Select the node ID text to copy it.');
+    await navigator.clipboard.writeText(JSON.stringify(node.id));
+    message('Node ID copied.');
+  }));
+  card.append(details);
+  return card;
+}
+function insertedNodes(patch, operations) {
+  if (!/^[0-9a-f]{64}$/.test(patch.hash)) return [];
+  const identity = patch.hash.match(/../g).map(byte => parseInt(byte, 16));
+  return operations.flatMap((operation, index) => operation.kind !== 'insert' ? [] : operation.atoms.map((bytes, ordinal) => ({
+    id: {insertion: {patch: identity, ordinal: index}, ordinal}, bytes
+  })));
+}
+function renderPatch(patch, active) {
+  const card = el('div', undefined, 'card'), top = el('div', undefined, 'card-top');
+  top.append(el('h3', `#${patch.id} · agent ${patch.author}`), el('span', active.has(patch.id) ? 'integrated' : 'proposed', 'tag' + (active.has(patch.id) ? ' good' : '')));
+  card.append(top, el('div', `SHA-256 ${patch.hash}`, 'hash'), el('p', patch.intent));
+  const graph = graphEdits(patch), edits = patch.edits || [];
+  card.append(el('div', `depends on ${patch.dependencies.length ? patch.dependencies.map(id => '#' + id).join(', ') : '∅'} · ${pathsOf(patch).length} file(s)${graph.length ? ' · graph operations' : ''}`, 'muted'));
+  const actions = el('div', undefined, 'actions');
+  actions.append(
+    button(patch.approvals.length ? '✓ Reviewed' : 'Approve', () => cmd({cmd: 'approve', patch: patch.id}), patch.author === actor.user),
+    button(patch.checks_passed ? '✓ Passing report' : 'Report passing checks', () => cmd({cmd: 'check', patch: patch.id, passed: true}), patch.author === actor.user),
+    button('Integrate', () => cmd({cmd: 'merge', patch: patch.id, channel: $('channel').value}), active.has(patch.id) || !patch.approvals.length || !patch.checks_passed || !patch.dependencies.every(id => active.has(id)))
+  );
+  if (graph.length) {
+    actions.append(button('Build on graph patch', () => composeGraph(graph[0].path, [patch.id], 'Graph operations observing patch #' + patch.id)));
+  } else if (edits.length) {
+    actions.append(button('Build on this patch', () => {
+      const edit = edits[0];
+      $('edit-mode').value = 'file'; editScope();
+      $('line-base').value = String(patch.id); $('deps').value = String(patch.id);
+      $('path').value = edit.path; $('content').value = edit.content || ''; $('delete').checked = edit.content === null;
+      $('compose-context').textContent = 'Building on patch #' + patch.id; focusComposer();
+    }));
+  }
+  card.append(actions);
+  const details = el('details'); details.append(el('summary', graph.length ? 'Inspect graph operations & node IDs' : 'Inspect edits'));
+  for (const edit of edits) {
+    details.append(el('div', edit.path, 'muted'), el('pre', edit.content === null ? '[deleted]' : edit.content));
+    if (edit.content !== null) details.append(button('Edit lines in ' + edit.path, () => {
+      $('edit-mode').value = 'lines'; editScope();
+      $('line-base').value = String(patch.id); $('deps').value = String(patch.id); $('path').value = edit.path;
+      $('content').value = ''; $('delete').checked = false;
+      $('compose-context').textContent = 'Line edits on #' + patch.id + ' · ' + edit.path; focusComposer();
+    }));
+  }
+  for (const edit of graph) {
+    const section = el('div', undefined, 'graph-operation');
+    section.append(el('h3', edit.path), el('pre', JSON.stringify(edit.operations, null, 2)));
+    section.append(button('Inspect channel graph · ' + edit.path, () => inspectDocument(edit.path)));
+    const nodes = insertedNodes(patch, edit.operations);
+    if (nodes.length) {
+      const nodeDetails = el('details'); nodeDetails.append(el('summary', `${nodes.length} inserted text block(s) · stable IDs`));
+      nodes.forEach((node, index) => nodeDetails.append(nodeCard(node, 'Block ' + (index + 1)))); section.append(nodeDetails);
+    }
+    details.append(section);
+  }
+  card.append(details);
+  return card;
+}
+function renderFiles(view) {
+  const paths = graphPaths(); $('files').replaceChildren();
+  for (const [path, alternatives] of Object.entries(view.conflicts)) {
+    const card = el('div', undefined, 'conflict'); card.append(el('h3', path + ' · unresolved'));
+    if (paths.has(path)) {
+      card.append(el('p', 'This graph retains competing operations. Inspect the text blocks and conflict evidence before proposing a resolution.', 'form-note'));
+      card.append(button('Inspect graph conflict', () => inspectDocument(path)));
+      card.append(button('Propose graph operations', () => composeGraph(path, view.patches, 'Reviewed graph resolution · ' + path)));
+    } else {
+      for (const alternative of alternatives) card.append(el('div', `patch #${alternative.patch}`, 'muted'), el('pre', alternative.content === null ? '[deleted]' : alternative.content));
+      card.append(button('Compose resolution', () => {
+        $('edit-mode').value = 'file'; editScope(); $('path').value = path;
+        $('deps').value = alternatives.map(alternative => alternative.patch).join(', ');
+        $('intent').value = 'Resolve concurrent edits to ' + path;
+        $('content').value = alternatives.find(alternative => alternative.content !== null)?.content || '';
+        $('delete').checked = false; $('compose-context').textContent = 'Resolution · ' + path + ' · ' + alternatives.length + ' alternatives';
+        focusComposer();
+      }));
+    }
+    $('files').append(card);
+  }
+  for (const [path, content] of Object.entries(view.files).slice(0, 80)) {
+    const details = el('details'); details.append(el('summary', path), el('pre', content));
+    if (paths.has(path)) details.append(button('Inspect graph · ' + path, () => inspectDocument(path)));
+    $('files').append(details);
+  }
+  if (!Object.keys(view.files).length && !Object.keys(view.conflicts).length) $('files').append(el('p', 'This view contains no live files.'));
+}
+function render() {
+  $('workspace-panel').hidden = !workspace || workspace.repo !== repo() || workspace.channel !== $('channel').value;
+  const registry = data.repository, view = data.view, active = new Set(view.patches), all = Object.values(registry.patches).reverse();
+  const selected = $('channel').value;
+  $('channel').replaceChildren(...Object.keys(registry.channels).map(name => { const option = el('option', name); option.value = name; return option; }));
+  $('channel').value = Object.hasOwn(registry.channels, selected) ? selected : 'main';
+  $('m-patches').textContent = all.length; $('m-merged').textContent = view.patches.length;
+  $('m-pending').textContent = all.filter(patch => !active.has(patch.id)).length; $('m-conflicts').textContent = Object.keys(view.conflicts).length;
+  $('export').disabled = Object.keys(view.conflicts).length > 0; $('worktree').disabled = $('export').disabled;
+  const search = $('search').value.toLowerCase(), filter = $('filter').value, ready = new Set(readyPatches());
+  const conflicted = new Set(Object.values(view.conflicts).flat().map(alternative => alternative.patch));
+  const shown = all.filter(patch => (
+    filter === 'all' || filter === 'pending' && !active.has(patch.id) || filter === 'ready' && ready.has(patch.id) || filter === 'conflicted' && conflicted.has(patch.id)
+  ) && (!search || `${patch.id} ${patch.intent} ${pathsOf(patch).join(' ')}`.toLowerCase().includes(search)));
+  $('count').textContent = `${shown.length} matching · ${all.length} total`; $('integrate-ready').disabled = !ready.size;
+  $('patches').replaceChildren(...shown.slice(0, 80).map(patch => renderPatch(patch, active)));
+  if (!shown.length) $('patches').append(el('div', all.length ? 'No patches match this queue.' : 'Record the first patch to begin.', 'empty'));
+  renderFiles(view);
+  $('activity').replaceChildren(...registry.events.slice(-30).reverse().map(event => el('div', `agent ${event.actor} · ${event.action}${event.patch ? ' #' + event.patch : ''}${event.channel ? ' → ' + event.channel : ''}`)));
+  graph(all.slice(0, 80).reverse(), active);
+  if (data.work) $('work').textContent = `Last refresh: ${data.work.processed_patches} new patches · ${data.work.updated_paths} file updates · ${data.work.rendered_paths} paths rendered · ${data.work.dependency_edges} dependency edges examined`;
+}
+function closeDocument() { inspection = null; $('document-panel').hidden = true; $('document-details').replaceChildren(); }
+async function inspectDocument(path, focus = true) {
+  const repository = repo(), channel = $('channel').value;
+  const result = await api(`/api/document?repo=${encodeURIComponent(repository)}&channel=${encodeURIComponent(channel)}&path=${encodeURIComponent(path)}`);
+  inspection = {repo: repository, channel, path};
+  $('document-title').textContent = path + ' · document graph';
+  const body = $('document-details'); body.replaceChildren();
+  const notice = el('div', undefined, result.conflicts.length ? 'document-notice' : 'context');
+  notice.append(el('p', result.conflicts.length ? `${result.conflicts.length} unresolved graph conflict(s). No complete text projection is available.` : 'The established graph order produces this text.'));
+  body.append(notice);
+  if (result.bytes !== null) body.append(el('pre', bytesText(result.bytes)));
+  const nodes = new Map(result.nodes.map(node => [JSON.stringify(node.id), node]));
+  const descriptions = {
+    order: 'Concurrent blocks have no established order.',
+    cycle: 'Ordering operations form a cycle.',
+    delete_insert: 'An insertion uses an anchor deleted concurrently.'
+  };
+  for (const conflict of result.conflicts) {
+    const card = el('div', undefined, 'conflict');
+    card.append(el('h3', descriptions[conflict.kind] || conflict.kind));
+    for (const id of conflict.frontier || conflict.blocked || conflict.anchors || []) {
+      const node = nodes.get(JSON.stringify(id)); if (node) card.append(nodeCard(node, 'Involved text block'));
+    }
+    const evidence = el('details'); evidence.append(el('summary', 'Exact operation evidence'), el('pre', JSON.stringify(conflict, null, 2))); card.append(evidence);
+    body.append(card);
+  }
+  body.append(el('h3', 'Text blocks by graph frontier'));
+  if (!result.layers.length) body.append(el('p', 'No live blocks in the current ordering.', 'muted'));
+  result.layers.forEach((layer, index) => {
+    const details = el('details'); details.open = index === 0 || layer.length > 1;
+    details.append(el('summary', `Frontier ${index + 1} · ${layer.length} block(s)${layer.length > 1 ? ' · order is unresolved' : ''}`));
+    for (const id of layer) {
+      const node = nodes.get(JSON.stringify(id)); if (node) details.append(nodeCard(node, 'Text block'));
+    }
+    body.append(details);
+  });
+  // Deleted atoms remain addressable for restoration and later operation review.
+  const allNodes = el('details'); allNodes.append(el('summary', `All addressable blocks · ${result.nodes.length}`));
+  result.nodes.forEach((node, index) => allNodes.append(nodeCard(node, 'Block ' + (index + 1)))); body.append(allNodes);
+  body.append(button('Compose graph operations', () => composeGraph(path, data.view.patches, 'Graph operations · ' + path)));
+  body.append(el('p', 'Node IDs identify immutable blocks. A resolution is a new operation proposal and needs independent review and a passing check report.', 'form-note'));
+  $('document-panel').hidden = false;
+  if (focus) { $('document-panel').scrollIntoView({behavior: 'smooth', block: 'start'}); $('document-panel').focus({preventScroll: true}); }
+}
+function graph(patches, active) {
+  const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg'), columns = 4;
+  const height = Math.max(100, Math.ceil(patches.length / columns) * 74);
+  svg.setAttribute('viewBox', `0 0 760 ${height}`); svg.style.width = '100%';
+  const positions = new Map(patches.map((patch, index) => [patch.id, [35 + (index % columns) * 180, 30 + Math.floor(index / columns) * 74]]));
+  for (const patch of patches) for (const dependency of patch.dependencies) {
+    if (!positions.has(dependency)) continue;
+    const [x, y] = positions.get(dependency), [nextX, nextY] = positions.get(patch.id), edge = document.createElementNS(ns, 'path');
+    edge.setAttribute('d', `M ${x} ${y} C ${x} ${y + 30},${nextX} ${nextY - 30},${nextX} ${nextY}`);
+    edge.setAttribute('stroke', '#34343c'); edge.setAttribute('fill', 'none'); svg.append(edge);
+  }
+  for (const patch of patches) {
+    const [x, y] = positions.get(patch.id), circle = document.createElementNS(ns, 'circle');
+    circle.setAttribute('cx', x); circle.setAttribute('cy', y); circle.setAttribute('r', 7);
+    circle.setAttribute('fill', active.has(patch.id) ? '#5cbf88' : '#75757f'); svg.append(circle);
+    const text = document.createElementNS(ns, 'text'); text.setAttribute('x', x + 15); text.setAttribute('y', y + 4);
+    text.setAttribute('fill', '#a8a8b2'); text.setAttribute('font-size', 11); text.textContent = `#${patch.id} / agent ${patch.author}`; svg.append(text);
+  }
+  $('graph').replaceChildren(svg);
+}
+async function safe(action) {
+  if (busy) return;
+  busy = true; document.body.setAttribute('aria-busy', 'true');
+  try { await action(); } catch (error) { message(error.message, true); }
+  finally { busy = false; document.body.removeAttribute('aria-busy'); }
+}
+function editScope() {
+  const mode = $('edit-mode').value, lines = mode === 'lines', graph = mode === 'graph';
+  $('line-fields').hidden = !lines; $('graph-fields').hidden = !graph;
+  $('delete').disabled = lines || graph; $('delete-label').hidden = graph;
+  $('content').hidden = graph; $('content-label').hidden = graph;
+  $('content-label').textContent = lines ? 'Replacement text' : 'Complete file content';
+}
+$('edit-mode').onchange = editScope;
+$('close-document').onclick = () => { closeDocument(); $('files-panel').scrollIntoView({block: 'start'}); $('refresh').focus(); };
+$('inspect-compose').onclick = () => safe(() => inspectDocument($('path').value.trim()));
+$('graph-example').onclick = () => {
+  $('graph-operations').value = JSON.stringify([{kind: 'insert', left: 'Start', right: 'End', atoms: [Array.from(new TextEncoder().encode('Your text\n'))]}], null, 2);
+  $('graph-operations').focus();
+};
+$('integrate-ready').onclick = () => safe(() => cmd({cmd: 'merge_batch', channel: $('channel').value, patches: readyPatches()}));
+$('search').oninput = () => { if (data) render(); };
+$('filter').onchange = () => { if (data) render(); };
+document.addEventListener('keydown', event => {
+  if (event.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(event.target.tagName)) { event.preventDefault(); $('search').focus(); }
+  if (event.key === 'Escape' && inspection && !$('document-panel').hidden) { closeDocument(); $('refresh').focus(); }
+});
+$('connect').onclick = () => safe(connect); $('refresh').onclick = () => safe(load);
+$('repositories').onchange = () => safe(async () => { closeDocument(); $('channel').value = 'main'; await load(); });
+$('channel').onchange = () => safe(async () => { closeDocument(); await load(); });
+$('create').onclick = () => safe(async () => {
+  const name = $('new-repo').value.trim(); await api('/api/command', {cmd: 'create', repo: name});
+  await connect(); $('repositories').value = name; await load();
+});
+$('fork').onclick = () => safe(async () => { const name = prompt('New channel name'); if (name) await cmd({cmd: 'fork', source: $('channel').value, channel: name}); });
+$('worktree').onclick = () => safe(async () => {
+  const repository = repo(), channel = $('channel').value;
+  workspace = {...await api('/api/worktree', {repo: repository, channel}), repo: repository, channel};
+  $('workspace-path').textContent = workspace.path; $('workspace-commit').textContent = workspace.commit;
+  $('workspace-panel').hidden = false; $('workspace-intent').focus();
+  message(workspace.dirty ? 'Workspace ready · existing local changes preserved.' : 'Workspace ready · edit files, then record your proposal.');
+});
+$('workspace-proposal').onsubmit = event => {
+  event.preventDefault(); return safe(async () => {
+    if (!workspace) throw Error('Create a workspace first.');
+    const reply = await api('/api/worktree/propose', {repo: workspace.repo, channel: workspace.channel, commit: workspace.commit, intent: $('workspace-intent').value});
+    message(JSON.stringify(reply)); await load();
+  });
+};
+$('export').onclick = () => safe(async () => message(JSON.stringify(await api('/api/export', {repo: repo(), channel: $('channel').value}), null, 2)));
+$('proposal').onsubmit = event => {
+  event.preventDefault(); return safe(async () => {
+    const dependencies = $('deps').value.split(',').map(part => part.trim()).filter(Boolean).map(Number);
+    if (dependencies.some(id => !Number.isSafeInteger(id) || id < 1)) throw Error('Dependencies must be positive patch IDs.');
+    const path = $('path').value.trim(), intent = $('intent').value, mode = $('edit-mode').value;
+    if (mode === 'graph') {
+      let operations;
+      try { operations = JSON.parse($('graph-operations').value); } catch (_) { throw Error('Operations must be valid JSON.'); }
+      if (!Array.isArray(operations) || !operations.length) throw Error('Enter a nonempty JSON array of graph operations.');
+      await cmd({cmd: 'propose_graph', intent, dependencies, edits: [{path, operations}]});
+    } else if (mode === 'lines') {
+      const base = Number($('line-base').value), start = Number($('line-start').value), end = Number($('line-end').value);
+      if (!Number.isSafeInteger(base) || base < 1 || ![start, end].every(value => Number.isSafeInteger(value) && value >= 0) || end < start) throw Error('Enter a positive base ID and a valid line range.');
+      await cmd({cmd: 'propose_lines', intent, dependencies, edits: [{path, base, start, end, content: $('content').value}]});
+    } else {
+      await cmd({cmd: 'propose', intent, dependencies, edits: [{path, content: $('delete').checked ? null : $('content').value}]});
+    }
+  });
+};
+</script></body></html>

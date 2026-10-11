@@ -1,0 +1,138 @@
+{
+  "build_profile": "release, opt-level=3, thin LTO",
+  "host_contention": "Debug and release 1000-author loads were running concurrently. This smoke establishes fixture behavior only.",
+  "measurement_date": "2026-10-11",
+  "report": {
+    "admission_batch_size": 100,
+    "admission_seconds": 0.7836515922099352,
+    "admitted_proposals_per_second": 10.208618319066533,
+    "agents": 8,
+    "checks": {
+      "acknowledged_membership": true,
+      "arrival_order_convergence": true,
+      "graceful_restart": true,
+      "materialized_bytes_or_conflict_alternatives": true,
+      "self_approval_and_unreviewed_admission_rejected": true
+    },
+    "concurrency": 4,
+    "edit_payload_bytes": 1024,
+    "historical_patches_per_repo": 1,
+    "identity_probe_requests": {
+      "identity_probe_author": {
+        "failed": 0,
+        "max_ms": 22.13918697088957,
+        "p50_ms": 21.66517172008753,
+        "p95_ms": 21.889209747314453,
+        "p99_ms": 21.889209747314453,
+        "received_bytes": 392,
+        "requests": 8
+      },
+      "identity_probe_checker": {
+        "failed": 0,
+        "max_ms": 21.717680618166924,
+        "p50_ms": 21.717680618166924,
+        "p95_ms": 21.717680618166924,
+        "p99_ms": 21.717680618166924,
+        "received_bytes": 50,
+        "requests": 1
+      },
+      "identity_probe_reviewer": {
+        "failed": 0,
+        "max_ms": 22.044587880373,
+        "p50_ms": 22.044587880373,
+        "p95_ms": 22.044587880373,
+        "p99_ms": 22.044587880373,
+        "received_bytes": 49,
+        "requests": 1
+      }
+    },
+    "limitations": [
+      "Closed-loop client concurrency, not fixed offered load.",
+      "Review/check results are API reports, not executed CI.",
+      "Graceful restart is not crash-injection or multi-process durability.",
+      "Current JSON store and one-process mutex are the measured backend."
+    ],
+    "local_backend_sample": {
+      "peak_server_rss_kib": 7688,
+      "retained_state_json_bytes": 22518,
+      "sampled_server_cpu_seconds": 0.08,
+      "sampling": "Linux /proc, 100 ms; includes setup and restart",
+      "server_binary_sha256": "700afbc5356b0d5f57df40e0e5ba0efa73776f6c6a54b8d12376d0d133dd580b"
+    },
+    "machine": {
+      "cpu_count": 128,
+      "platform": "Linux-6.8.0-137-generic-x86_64-with-glibc2.39",
+      "python": "3.12.3"
+    },
+    "proposal_seconds": 0.2078218525275588,
+    "proposals_per_second": 38.49450816987178,
+    "requests": {
+      "approve": {
+        "failed": 0,
+        "max_ms": 133.2325991243124,
+        "p50_ms": 58.01405105739832,
+        "p95_ms": 132.539383135736,
+        "p99_ms": 132.539383135736,
+        "received_bytes": 216,
+        "requests": 8
+      },
+      "check": {
+        "failed": 0,
+        "max_ms": 124.29182231426239,
+        "p50_ms": 54.731687530875206,
+        "p95_ms": 123.90003632754087,
+        "p99_ms": 123.90003632754087,
+        "received_bytes": 256,
+        "requests": 8
+      },
+      "expected_refusal_approve": {
+        "failed": 1,
+        "max_ms": 41.29251837730408,
+        "p50_ms": 41.29251837730408,
+        "p95_ms": 41.29251837730408,
+        "p99_ms": 41.29251837730408,
+        "received_bytes": 0,
+        "requests": 1
+      },
+      "expected_refusal_merge_batch": {
+        "failed": 1,
+        "max_ms": 33.77165086567402,
+        "p50_ms": 33.77165086567402,
+        "p95_ms": 33.77165086567402,
+        "p99_ms": 33.77165086567402,
+        "received_bytes": 0,
+        "requests": 1
+      },
+      "merge_batch": {
+        "failed": 0,
+        "max_ms": 49.32870157063007,
+        "p50_ms": 22.79691118746996,
+        "p95_ms": 22.79691118746996,
+        "p99_ms": 22.79691118746996,
+        "received_bytes": 95,
+        "requests": 2
+      },
+      "propose_lines": {
+        "failed": 0,
+        "max_ms": 152.4661099538207,
+        "p50_ms": 50.92860944569111,
+        "p95_ms": 151.96245349943638,
+        "p99_ms": 151.96245349943638,
+        "received_bytes": 680,
+        "requests": 8
+      },
+      "read": {
+        "failed": 0,
+        "max_ms": 48.67193754762411,
+        "p50_ms": 22.34241459518671,
+        "p95_ms": 34.47388485074043,
+        "p99_ms": 34.47388485074043,
+        "received_bytes": 138880,
+        "requests": 5
+      }
+    },
+    "restart_seconds": 0.10293423943221569,
+    "run_id": "load-1791724420597569997",
+    "workload": "overlap"
+  }
+}

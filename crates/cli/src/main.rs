@@ -1,0 +1,1058 @@
+//! Git remains the working-copy interface. o5s coordinates immutable proposals.
+use clap::{Parser, Subcommand};
+use reqwest::blocking::Client;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    time::Duration,
+};
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+#[derive(Parser)]
+#[command(
+    name = "o5s",
+    version,
+    about = "Patch collaboration for ordinary Git repositories and worktrees"
+)]
+struct Cli {
+    #[arg(long, global = true, env = "O5S_URL")]
+    url: Option<String>,
+    #[arg(long, global = true, env = "O5S_PROFILE", default_value = "default")]
+    profile: String,
+    #[arg(long, global = true)]
+    compact: bool,
+    #[command(subcommand)]
+    command: Action,
+}
+#[derive(Subcommand)]
+enum Action {
+    /// Validate and save a bearer token. Read stdin by default; never prints the token.
+    Login {
+        #[arg(long)]
+        token_file: Option<PathBuf>,
+    },
+    /// Remove this profile's saved token.
+    Logout,
+    /// Attach this existing Git repository to an o5s collaboration repository.
+    Connect { repository: String },
+    /// Show local changes, remote conflicts and the snapshot this worktree builds on.
+    Status {
+        #[arg(long, default_value = "main")]
+        channel: String,
+    },
+    /// Record this Git worktree's changes as an immutable proposal; leaves Git untouched.
+    Propose {
+        #[arg(short, long)]
+        intent: String,
+        #[arg(long, default_value = "main")]
+        channel: String,
+    },
+    /// Record an explicit half-open line range against an immutable patch.
+    ProposeLines {
+        #[arg(long)]
+        base: u64,
+        #[arg(long)]
+        path: String,
+        #[arg(long)]
+        start: u64,
+        #[arg(long)]
+        end: u64,
+        #[arg(long)]
+        content_file: PathBuf,
+        #[arg(short, long)]
+        intent: String,
+        #[arg(long, value_delimiter = ',')]
+        depends: Vec<u64>,
+    },
+    /// Propose graph operations with stable node identities from a JSON edits array.
+    ProposeGraph {
+        #[arg(long)]
+        operations_file: PathBuf,
+        #[arg(short, long)]
+        intent: String,
+        #[arg(long, value_delimiter = ',')]
+        dependencies: Vec<u64>,
+    },
+    /// Inspect the materialized graph's node identities, layers and conflicts.
+    Document {
+        path: String,
+        #[arg(long, default_value = "main")]
+        channel: String,
+    },
+    /// Propose an explicit whole-file resolution of the current channel alternatives.
+    Resolve {
+        path: String,
+        #[arg(long, required_unless_present = "delete", conflicts_with = "delete")]
+        content_file: Option<PathBuf>,
+        #[arg(long)]
+        delete: bool,
+        #[arg(short, long)]
+        intent: String,
+        #[arg(long, default_value = "main")]
+        channel: String,
+    },
+    /// Read a proposal and its review/check state.
+    Show { patch: u64 },
+    /// List proposals and review/check state.
+    Log {
+        #[arg(long, default_value = "main")]
+        channel: String,
+    },
+    /// Independently approve an immutable proposal.
+    Approve { patch: u64 },
+    /// Report an independently executed check result (does not run CI).
+    Check {
+        patch: u64,
+        #[arg(long, conflicts_with = "fail", required_unless_present = "fail")]
+        pass: bool,
+        #[arg(long, required_unless_present = "pass")]
+        fail: bool,
+    },
+    /// Atomically admit reviewed, passing proposals to a channel.
+    Merge {
+        #[arg(required = true)]
+        patches: Vec<u64>,
+        #[arg(long, default_value = "main")]
+        channel: String,
+    },
+    /// Fetch a conflict-free snapshot into refs/o5s/CHANNEL; never changes HEAD or files.
+    Fetch {
+        #[arg(long, default_value = "main")]
+        channel: String,
+    },
+    /// Read materialized files and explicit conflicts.
+    View {
+        #[arg(long, default_value = "main")]
+        channel: String,
+    },
+    /// Fork patch membership (Git branches/worktrees still use ordinary Git commands).
+    Channel {
+        name: String,
+        #[arg(long, default_value = "main")]
+        from: String,
+    },
+}
+#[derive(Default, Serialize, Deserialize)]
+struct Profiles {
+    profiles: BTreeMap<String, Profile>,
+}
+#[derive(Serialize, Deserialize)]
+struct Profile {
+    url: String,
+    token: String,
+}
+#[derive(Serialize, Deserialize)]
+struct Context {
+    repository: String,
+    url: String,
+    tenant: u64,
+    snapshots: BTreeMap<String, Snapshot>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+struct Snapshot {
+    patches: Vec<u64>,
+    #[serde(default)]
+    bases: BTreeMap<String, u64>,
+}
+struct Git {
+    root: PathBuf,
+    common: PathBuf,
+}
+struct Api {
+    client: Client,
+    url: String,
+    token: String,
+}
+
+fn error(s: impl Into<String>) -> Box<dyn std::error::Error> {
+    s.into().into()
+}
+fn origin(s: &str) -> Result<String> {
+    let u = reqwest::Url::parse(s)?;
+    if !matches!(u.scheme(), "http" | "https")
+        || u.host_str().is_none()
+        || !u.username().is_empty()
+        || u.password().is_some()
+        || u.query().is_some()
+        || u.fragment().is_some()
+        || u.path() != "/"
+    {
+        return Err(error(
+            "URL must be an HTTP(S) origin without credentials, query or path",
+        ));
+    }
+    Ok(s.trim_end_matches('/').into())
+}
+impl Api {
+    fn new(url: String, token: String) -> Result<Self> {
+        if token.trim().is_empty() {
+            return Err(error("Missing token: set O5S_TOKEN or run o5s login"));
+        }
+        Ok(Self {
+            client: Client::builder()
+                .timeout(Duration::from_secs(60))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()?,
+            url: origin(&url)?,
+            token,
+        })
+    }
+    fn request(&self, route: &str, query: &[(&str, &str)], body: Option<Value>) -> Result<Value> {
+        if let Some(value) = &body {
+            if serde_json::to_vec(value)?.len() > 4 * 1024 * 1024 {
+                return Err(error("Command exceeds server 4 MiB request limit"));
+            }
+        }
+        let url = format!("{}{}", self.url, route);
+        let req = if body.is_some() {
+            self.client.post(url)
+        } else {
+            self.client.get(url)
+        };
+        let mut req = req.bearer_auth(&self.token).query(query);
+        if let Some(body) = body {
+            req = req.json(&body);
+        }
+        let response = req.send()?;
+        let status = response.status();
+        let bytes = response.bytes()?;
+        let value: Value = serde_json::from_slice(&bytes)
+            .map_err(|_| error(format!("Server returned non-JSON ({status})")))?;
+        if !status.is_success() {
+            return Err(error(format!(
+                "{status}: {}",
+                value
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("request refused")
+            )));
+        }
+        Ok(value)
+    }
+    fn state(&self, repo: &str, channel: &str) -> Result<Value> {
+        self.request("/api/state", &[("repo", repo), ("channel", channel)], None)
+    }
+    fn command(&self, repo: &str, mut value: Value) -> Result<Value> {
+        value["repo"] = json!(repo);
+        self.request("/api/command", &[], Some(value))
+    }
+}
+fn config_path() -> Result<PathBuf> {
+    if let Some(p) = std::env::var_os("O5S_CONFIG") {
+        return Ok(p.into());
+    }
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".config")))
+        .ok_or("Set O5S_CONFIG or XDG_CONFIG_HOME")?;
+    Ok(base.join("o5s/config.json"))
+}
+fn profiles() -> Result<Profiles> {
+    let path = config_path()?;
+    match fs::read(path) {
+        Ok(bytes) => Ok(serde_json::from_slice(&bytes)?),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Profiles::default()),
+        Err(e) => Err(e.into()),
+    }
+}
+fn save<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    fs::create_dir_all(parent)?;
+    let tmp = parent.join(format!(
+        ".o5s-{}-{}.tmp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    ));
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let result = (|| -> Result<()> {
+        let mut f = opts.open(&tmp)?;
+        f.write_all(&serde_json::to_vec_pretty(value)?)?;
+        f.sync_all()?;
+        fs::rename(&tmp, path)?;
+        fs::File::open(parent)?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
+}
+impl Git {
+    fn discover() -> Result<Self> {
+        let root = raw_git(None, &["rev-parse", "--show-toplevel"], None)?;
+        let root = PathBuf::from(text(root)?);
+        let common = text(raw_git(
+            Some(&root),
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+            None,
+        )?)?;
+        Ok(Self {
+            root,
+            common: common.into(),
+        })
+    }
+    fn run(&self, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
+        raw_git(Some(&self.root), args, input)
+    }
+    fn context_path(&self) -> PathBuf {
+        self.common.join("o5s/context.json")
+    }
+    fn context(&self) -> Result<Context> {
+        let bytes = fs::read(self.context_path()).map_err(|e| {
+            error(format!(
+                "No o5s connection for this Git repository ({e}); run o5s connect NAME"
+            ))
+        })?;
+        Ok(serde_json::from_slice(&bytes)?)
+    }
+    fn baseline(
+        &self,
+        context: &Context,
+        state: &Value,
+        channel: &str,
+    ) -> Result<(Option<String>, Snapshot)> {
+        // Local commits after a fetched snapshot retain its causal patch base.
+        if let Ok(history) = self.run(&["rev-list", "HEAD"], None) {
+            for commit in text(history)?.lines() {
+                if let Some(snapshot) = context.snapshots.get(commit) {
+                    return Ok((Some(commit.into()), snapshot.clone()));
+                }
+            }
+        }
+        let members = state["repository"]["channels"][channel]
+            .as_array()
+            .ok_or("Unknown channel")?;
+        if !members.is_empty() {
+            return Err(error(
+                "HEAD has no known o5s snapshot. Run o5s fetch, then use git switch or git worktree add with refs/o5s/CHANNEL; local files will not be overwritten.",
+            ));
+        }
+        Ok((
+            None,
+            Snapshot {
+                patches: vec![],
+                bases: BTreeMap::new(),
+            },
+        ))
+    }
+    fn committed(&self, commit: Option<&str>) -> Result<BTreeMap<String, String>> {
+        let Some(commit) = commit else {
+            return Ok(BTreeMap::new());
+        };
+        let listing = self.run(&["ls-tree", "-r", "-z", commit], None)?;
+        let mut files = BTreeMap::new();
+        for entry in listing.split(|b| *b == 0).filter(|b| !b.is_empty()) {
+            let (meta, path) = entry.split_at(
+                entry
+                    .iter()
+                    .position(|b| *b == b'\t')
+                    .ok_or("Malformed Git tree")?,
+            );
+            let fields: Vec<&str> = std::str::from_utf8(meta)?.split_whitespace().collect();
+            if fields.len() != 3 || fields[1] != "blob" || fields[0] != "100644" {
+                return Err(error(
+                    "Only non-executable regular UTF-8 files are supported",
+                ));
+            }
+            files.insert(
+                std::str::from_utf8(&path[1..])?.into(),
+                String::from_utf8(self.run(&["cat-file", "blob", fields[2]], None)?)?,
+            );
+        }
+        Ok(files)
+    }
+    fn working(&self) -> Result<BTreeMap<String, String>> {
+        let paths = self.run(
+            &[
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "-z",
+            ],
+            None,
+        )?;
+        let mut files = BTreeMap::new();
+        for path in paths.split(|b| *b == 0).filter(|b| !b.is_empty()) {
+            let relative = std::str::from_utf8(path)?;
+            if !valid_path(relative) {
+                return Err(error(format!("Unsupported Git path: {relative}")));
+            }
+            let mut full = self.root.clone();
+            let mut missing = false;
+            for component in Path::new(relative).components() {
+                let std::path::Component::Normal(part) = component else {
+                    return Err(error("Invalid Git path"));
+                };
+                full.push(part);
+                match fs::symlink_metadata(&full) {
+                    Ok(meta) if meta.file_type().is_symlink() => {
+                        return Err(error(format!("Symlink unsupported: {relative}")));
+                    }
+                    Ok(_) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        missing = true;
+                        break;
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            if missing {
+                continue;
+            }
+            if fs::metadata(&full)?.len() > 4 * 1024 * 1024 {
+                return Err(error(format!("File exceeds local 4 MiB limit: {relative}")));
+            }
+            if !fs::metadata(&full)?.is_file() {
+                return Err(error(format!("Non-regular file unsupported: {relative}")));
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if fs::metadata(&full)?.permissions().mode() & 0o111 != 0 {
+                    return Err(error(format!("Executable mode unsupported: {relative}")));
+                }
+            }
+            files.insert(relative.into(), fs::read_to_string(full)?);
+        }
+        Ok(files)
+    }
+    fn fetch(&self, context: &mut Context, state: &Value, channel: &str) -> Result<Value> {
+        if !state["view"]["conflicts"]
+            .as_object()
+            .ok_or("Missing conflict map")?
+            .is_empty()
+        {
+            return Err(error(
+                "Snapshot has conflicts; inspect o5s view and propose a resolution before fetching",
+            ));
+        }
+        let files: BTreeMap<String, String> =
+            serde_json::from_value(state["view"]["files"].clone())?;
+        let patches: Vec<u64> = serde_json::from_value(state["view"]["patches"].clone())?;
+        if channel.is_empty()
+            || !channel
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            return Err(error("Invalid channel name"));
+        }
+        let reference = format!("refs/o5s/{channel}");
+        let old = self
+            .run(&["rev-parse", "--verify", &reference], None)
+            .ok()
+            .map(text)
+            .transpose()?;
+        if let Some(old) = &old {
+            if context
+                .snapshots
+                .get(old)
+                .is_some_and(|s| s.patches == patches)
+            {
+                return Ok(
+                    json!({"ref":reference,"commit":old,"patches":patches,"unchanged":true}),
+                );
+            }
+        }
+        // Build objects and a tree without touching the real index or checkout.
+        let mut entries = BTreeMap::new();
+        for (path, content) in files {
+            if !valid_path(&path) {
+                return Err(error("Server supplied an unsafe file path"));
+            }
+            let hash =
+                text(self.run(&["hash-object", "-w", "--stdin"], Some(content.as_bytes()))?)?;
+            entries.insert(path, hash);
+        }
+        let tree = self.write_tree(&entries)?;
+        let mut args = vec!["commit-tree", tree.as_str()];
+        if let Some(p) = &old {
+            args.extend(["-p", p.as_str()]);
+        }
+        let msg = format!(
+            "o5s {} / {channel}\n\nPatch handles: {}\n",
+            context.repository,
+            patches
+                .iter()
+                .map(u64::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let commit = text(self.run(&args, Some(msg.as_bytes()))?)?;
+        // Record metadata before exposing the ref. Orphan metadata is harmless
+        // if Git's atomic old-value ref check fails under a concurrent fetch.
+        context.snapshots.insert(
+            commit.clone(),
+            Snapshot {
+                patches: patches.clone(),
+                bases: snapshot_bases(state, &patches)?,
+            },
+        );
+        save(&self.context_path(), context)?;
+        self.run(
+            &[
+                "update-ref",
+                &reference,
+                &commit,
+                old.as_deref().unwrap_or(""),
+            ],
+            None,
+        )?;
+        Ok(json!({"ref":reference,"commit":commit,"patches":patches,"unchanged":false}))
+    }
+    fn write_tree(&self, files: &BTreeMap<String, String>) -> Result<String> {
+        let mut dirs: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+        let mut leaves: BTreeMap<String, String> = BTreeMap::new();
+        for (path, hash) in files {
+            if let Some((dir, rest)) = path.split_once('/') {
+                dirs.entry(dir.into())
+                    .or_default()
+                    .insert(rest.into(), hash.clone());
+            } else {
+                leaves.insert(path.clone(), format!("100644 blob {hash}\t{path}\0"));
+            }
+        }
+        for (dir, files) in dirs {
+            let tree = self.write_tree(&files)?;
+            leaves.insert(format!("{dir}/"), format!("040000 tree {tree}\t{dir}\0"));
+        }
+        text(self.run(
+            &["mktree", "-z"],
+            Some(leaves.values().cloned().collect::<String>().as_bytes()),
+        )?)
+    }
+}
+fn valid_path(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= 512
+        && !path
+            .chars()
+            .any(|c| c.is_control() || c == '\\' || c == ':')
+        && path
+            .split('/')
+            .all(|p| !p.is_empty() && p != "." && p != ".." && !p.eq_ignore_ascii_case(".git"))
+}
+fn raw_git(root: Option<&Path>, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
+    let mut cmd = Command::new("git");
+    if let Some(root) = root {
+        cmd.arg("-C").arg(root);
+    }
+    let mut child = cmd
+        .args(args)
+        .env("GIT_AUTHOR_NAME", "o5s")
+        .env("GIT_AUTHOR_EMAIL", "o5s@localhost")
+        .env("GIT_COMMITTER_NAME", "o5s")
+        .env("GIT_COMMITTER_EMAIL", "o5s@localhost")
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    if let Some(input) = input {
+        child
+            .stdin
+            .take()
+            .ok_or("Missing Git stdin")?
+            .write_all(input)?;
+    }
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        return Err(error(format!(
+            "git {}: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(output.stdout)
+}
+fn text(bytes: Vec<u8>) -> Result<String> {
+    Ok(String::from_utf8(bytes)?.trim().into())
+}
+fn edits(before: &BTreeMap<String, String>, after: &BTreeMap<String, String>) -> Vec<Value> {
+    let mut paths: Vec<&String> = before.keys().chain(after.keys()).collect();
+    paths.sort();
+    paths.dedup();
+    paths
+        .into_iter()
+        .filter(|p| before.get(*p) != after.get(*p))
+        .map(|p| json!({"path":p,"content":after.get(p)}))
+        .collect()
+}
+// The snapshot records a sole causal file head only. A merged file with
+// multiple concurrent heads must first receive an explicit resolution before
+// subsequent edits can use immutable-base ranges.
+fn snapshot_bases(state: &Value, active: &[u64]) -> Result<BTreeMap<String, u64>> {
+    let registry = state["repository"]["patches"]
+        .as_object()
+        .ok_or("Missing patch registry")?;
+    let mut heads: BTreeMap<String, BTreeSet<u64>> = BTreeMap::new();
+    let mut ids = active.to_vec();
+    ids.sort_unstable();
+    for id in ids {
+        let patch = registry
+            .get(&id.to_string())
+            .ok_or("Unknown snapshot patch")?;
+        let dependencies: Vec<u64> = serde_json::from_value(patch["dependencies"].clone())?;
+        for edit in patch["edits"].as_array().ok_or("Missing patch edits")? {
+            let path = edit["path"].as_str().ok_or("Missing edit path")?;
+            let current = heads.entry(path.into()).or_default();
+            let mut targets = current.clone();
+            let mut stack = dependencies.clone();
+            let mut visited = BTreeSet::new();
+            let min = targets.first().copied().unwrap_or(u64::MAX);
+            while !targets.is_empty() {
+                let Some(parent) = stack.pop() else { break };
+                if parent < min || !visited.insert(parent) {
+                    continue;
+                }
+                if targets.remove(&parent) {
+                    current.remove(&parent);
+                }
+                if !targets.is_empty() {
+                    let record = registry
+                        .get(&parent.to_string())
+                        .ok_or("Unknown dependency")?;
+                    stack.extend(serde_json::from_value::<Vec<u64>>(
+                        record["dependencies"].clone(),
+                    )?);
+                }
+            }
+            current.insert(id);
+        }
+    }
+    Ok(heads
+        .into_iter()
+        .filter_map(|(path, heads)| (heads.len() == 1).then(|| (path, *heads.first().unwrap())))
+        .collect())
+}
+fn line_changes(
+    before: &BTreeMap<String, String>,
+    after: &BTreeMap<String, String>,
+    bases: &BTreeMap<String, u64>,
+) -> Option<Vec<Value>> {
+    let mut changes = Vec::new();
+    for edit in edits(before, after) {
+        let path = edit["path"].as_str()?;
+        let original = before.get(path)?;
+        let updated = after.get(path)?;
+        let base = bases.get(path)?;
+        let old: Vec<&str> = original.split_inclusive('\n').collect();
+        let new: Vec<&str> = updated.split_inclusive('\n').collect();
+        let prefix = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+        let suffix = old[prefix..]
+            .iter()
+            .rev()
+            .zip(new[prefix..].iter().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        changes.push(json!({"path":path,"base":base,"start":prefix,"end":old.len()-suffix,"content":new[prefix..new.len()-suffix].concat()}));
+    }
+    Some(changes)
+}
+fn read_graph_edits(path: &Path) -> Result<Value> {
+    let file = fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take(4 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > 4 * 1024 * 1024 {
+        return Err(error("Graph operations file exceeds 4 MiB limit"));
+    }
+    let value: Value = serde_json::from_slice(&bytes)?;
+    let edits = value
+        .as_array()
+        .ok_or("Graph operations file must contain a JSON edits array")?;
+    if edits.is_empty() {
+        return Err(error("Graph edits array must not be empty"));
+    }
+    for edit in edits {
+        let path = edit["path"]
+            .as_str()
+            .ok_or("Each graph edit needs a path")?;
+        if !valid_path(path) {
+            return Err(error("Graph edit contains an unsupported path"));
+        }
+        if !edit["operations"].is_array() {
+            return Err(error("Each graph edit needs an operations array"));
+        }
+    }
+    // The server validates operation variants, node anchors and dependencies.
+    Ok(value)
+}
+fn execute(cli: &Cli) -> Result<Value> {
+    // Serialize profile read-modify-write without serializing unrelated Git work.
+    let _profile_lock = if matches!(cli.command, Action::Login { .. } | Action::Logout) {
+        let path = config_path()?;
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        fs::create_dir_all(parent)?;
+        let mut lock_name = path.as_os_str().to_os_string();
+        lock_name.push(".lock");
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(PathBuf::from(lock_name))?;
+        fs2::FileExt::lock_exclusive(&file)?;
+        Some(file)
+    } else {
+        None
+    };
+    let mut profiles = profiles()?;
+    if let Action::Logout = cli.command {
+        profiles.profiles.remove(&cli.profile);
+        save(&config_path()?, &profiles)?;
+        return Ok(json!({"profile":cli.profile,"logged_out":true}));
+    }
+    if let Action::Login { token_file } = &cli.command {
+        let token = if let Some(file) = token_file {
+            fs::read_to_string(file)?
+        } else {
+            let mut s = String::new();
+            std::io::stdin().read_to_string(&mut s)?;
+            s
+        };
+        let url = cli.url.clone().unwrap_or("http://127.0.0.1:3000".into());
+        let api = Api::new(url, token.trim().into())?;
+        let result = api.request("/api/repositories", &[], None)?;
+        profiles.profiles.insert(
+            cli.profile.clone(),
+            Profile {
+                url: api.url.clone(),
+                token: api.token,
+            },
+        );
+        save(&config_path()?, &profiles)?;
+        return Ok(json!({"profile":cli.profile,"url":api.url,"actor":result["actor"]}));
+    }
+    let git = Git::discover()?;
+    // Native Git worktrees share snapshot metadata and remote refs.
+    fs::create_dir_all(git.common.join("o5s"))?;
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(git.common.join("o5s/context.lock"))?;
+    fs2::FileExt::lock_exclusive(&lock)?;
+    let existing = if matches!(cli.command, Action::Connect { .. }) {
+        None
+    } else {
+        Some(git.context()?)
+    };
+    let profile = profiles.profiles.get(&cli.profile);
+    let url = cli
+        .url
+        .clone()
+        .or_else(|| existing.as_ref().map(|c| c.url.clone()))
+        .or_else(|| profile.map(|p| p.url.clone()))
+        .unwrap_or("http://127.0.0.1:3000".into());
+    let token = match std::env::var("O5S_TOKEN") {
+        Ok(token) => token,
+        Err(_) => {
+            let profile = profile.ok_or("Set O5S_TOKEN or run o5s login")?;
+            if origin(&profile.url)? != origin(&url)? {
+                return Err(error(
+                    "Saved token belongs to a different origin; select a matching profile",
+                ));
+            }
+            profile.token.clone()
+        }
+    };
+    let api = Api::new(url, token)?;
+    let repos = api.request("/api/repositories", &[], None)?;
+    let tenant = repos["actor"]["tenant"]
+        .as_u64()
+        .ok_or("Missing authenticated tenant")?;
+    if let Some(context) = &existing {
+        if context.tenant != tenant {
+            return Err(error(
+                "Authenticated tenant differs from this Git repository's connection",
+            ));
+        }
+    }
+    if let Action::Connect { repository } = &cli.command {
+        if repository.is_empty()
+            || !repository
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            return Err(error("Invalid repository name"));
+        }
+        let context = if git.context_path().try_exists()? {
+            let old = git.context()?;
+            if old.repository != *repository || old.url != api.url || old.tenant != tenant {
+                return Err(error(
+                    "Git repository is already connected elsewhere; use a separate clone",
+                ));
+            }
+            old
+        } else {
+            Context {
+                repository: repository.clone(),
+                url: api.url.clone(),
+                tenant,
+                snapshots: BTreeMap::new(),
+            }
+        };
+        if !repos["repositories"]
+            .as_array()
+            .ok_or("Malformed repository list")?
+            .iter()
+            .any(|r| r.as_str() == Some(repository))
+        {
+            api.command(repository, json!({"cmd":"create"}))?;
+        }
+        save(&git.context_path(), &context)?;
+        return Ok(json!({"repository":repository,"url":api.url,"git_root":git.root}));
+    }
+    let mut context = existing.ok_or("Missing repository connection")?;
+    if context.url != api.url {
+        return Err(error(
+            "URL differs from this Git repository's saved connection",
+        ));
+    }
+    let repo = &context.repository.clone();
+    match &cli.command {
+        Action::Status { channel } | Action::Propose { channel, .. } => {
+            let state = api.state(repo, channel)?;
+            let (base, snapshot) = git.baseline(&context, &state, channel)?;
+            let before = git.committed(base.as_deref())?;
+            let after = git.working()?;
+            let changes = edits(&before, &after);
+            if let Action::Propose { intent, .. } = &cli.command {
+                if changes.is_empty() {
+                    return Err(error("No changes to propose"));
+                }
+                let command = if let Some(ranges) = line_changes(&before, &after, &snapshot.bases) {
+                    json!({
+                        "cmd": "propose_lines", "intent": intent,
+                        "dependencies": snapshot.patches, "edits": ranges
+                    })
+                } else {
+                    json!({
+                        "cmd": "propose", "intent": intent,
+                        "dependencies": snapshot.patches, "edits": changes
+                    })
+                };
+                api.command(repo, command)
+            } else {
+                let changed_paths: Vec<_> = changes
+                    .iter()
+                    .map(|edit| json!({"path": edit["path"], "deleted": edit["content"].is_null()}))
+                    .collect();
+                Ok(json!({
+                    "repository": repo, "channel": channel, "base_commit": base,
+                    "dependencies": snapshot.patches, "changes": changed_paths,
+                    "conflicts": state["view"]["conflicts"]
+                }))
+            }
+        }
+        Action::Resolve {
+            path,
+            content_file,
+            delete,
+            intent,
+            channel,
+        } => {
+            let state = api.state(repo, channel)?;
+            if state["view"]["conflicts"].get(path).is_none() {
+                return Err(error(
+                    "Path has no current conflict; use o5s propose for ordinary edits",
+                ));
+            }
+            let content = if *delete {
+                None
+            } else {
+                Some(fs::read_to_string(
+                    content_file.as_ref().ok_or("Missing resolution content")?,
+                )?)
+            };
+            api.command(
+                repo,
+                json!({
+                    "cmd": "propose", "intent": intent,
+                    "dependencies": state["view"]["patches"],
+                    "edits": [{"path": path, "content": content}]
+                }),
+            )
+        }
+        Action::Fetch { channel } => {
+            let state = api.state(repo, channel)?;
+            git.fetch(&mut context, &state, channel)
+        }
+        Action::View { channel } => {
+            api.request("/api/view", &[("repo", repo), ("channel", channel)], None)
+        }
+        Action::Log { channel } => Ok(api.state(repo, channel)?["repository"]["patches"].clone()),
+        Action::Show { patch } => {
+            let state = api.state(repo, "main")?;
+            let proposal = state["repository"]["patches"][patch.to_string()].clone();
+            if proposal.is_null() {
+                Err(error("Unknown patch"))
+            } else {
+                Ok(proposal)
+            }
+        }
+        Action::Approve { patch } => api.command(repo, json!({"cmd": "approve", "patch": patch})),
+        Action::Check { patch, pass, .. } => api.command(
+            repo,
+            json!({
+                "cmd": "check", "patch": patch, "passed": pass
+            }),
+        ),
+        Action::Merge { patches, channel } => api.command(
+            repo,
+            json!({
+                "cmd": "merge_batch", "channel": channel, "patches": patches
+            }),
+        ),
+        Action::Channel { name, from } => api.command(
+            repo,
+            json!({
+                "cmd": "fork", "source": from, "channel": name
+            }),
+        ),
+        Action::ProposeLines {
+            base,
+            path,
+            start,
+            end,
+            content_file,
+            intent,
+            depends,
+        } => {
+            let content = fs::read_to_string(content_file)?;
+            api.command(repo, json!({
+                "cmd": "propose_lines", "intent": intent, "dependencies": depends,
+                "edits": [{"path": path, "base": base, "start": start, "end": end, "content": content}]
+            }))
+        }
+        Action::ProposeGraph {
+            operations_file,
+            intent,
+            dependencies,
+        } => {
+            let edits = read_graph_edits(operations_file)?;
+            api.command(
+                repo,
+                json!({
+                    "cmd": "propose_graph", "intent": intent,
+                    "dependencies": dependencies, "edits": edits
+                }),
+            )
+        }
+        Action::Document { path, channel } => api.request(
+            "/api/document",
+            &[("repo", repo), ("channel", channel), ("path", path)],
+            None,
+        ),
+        Action::Login { .. } | Action::Logout | Action::Connect { .. } => unreachable!(),
+    }
+}
+
+fn main() {
+    let cli = Cli::parse();
+    match execute(&cli) {
+        Ok(value) => println!(
+            "{}",
+            if cli.compact {
+                serde_json::to_string(&value).unwrap()
+            } else {
+                serde_json::to_string_pretty(&value).unwrap()
+            }
+        ),
+        Err(e) => {
+            eprintln!("o5s: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn graph_commands_parse_explicit_dependencies_and_document_channel() {
+        let cli = Cli::try_parse_from([
+            "o5s",
+            "propose-graph",
+            "--operations-file",
+            "operations.json",
+            "--intent",
+            "insert block",
+            "--dependencies",
+            "1,4",
+        ])
+        .unwrap();
+        match cli.command {
+            Action::ProposeGraph {
+                dependencies,
+                operations_file,
+                intent,
+            } => {
+                assert_eq!(dependencies, [1, 4]);
+                assert_eq!(operations_file, PathBuf::from("operations.json"));
+                assert_eq!(intent, "insert block");
+            }
+            _ => panic!("Wrong command"),
+        }
+        let cli =
+            Cli::try_parse_from(["o5s", "document", "src/main.rs", "--channel", "review"]).unwrap();
+        assert!(
+            matches!(cli.command, Action::Document { path, channel } if path == "src/main.rs" && channel == "review")
+        );
+        assert!(
+            Cli::try_parse_from([
+                "o5s",
+                "propose-graph",
+                "--operations-file",
+                "operations.json"
+            ])
+            .is_err()
+        );
+    }
+    #[test]
+    fn graph_files_reject_envelopes_unsafe_paths_and_oversize_before_http() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("operations.json");
+        for invalid in [
+            r#"{"edits":[]}"#,
+            "[]",
+            r#"[{"path":"../secret","operations":[]}]"#,
+            r#"[{"path":"file","operations":{}}]"#,
+        ] {
+            fs::write(&file, invalid).unwrap();
+            assert!(read_graph_edits(&file).is_err());
+        }
+        fs::write(&file, vec![b' '; 4 * 1024 * 1024 + 1]).unwrap();
+        assert!(
+            read_graph_edits(&file)
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds")
+        );
+        fs::write(&file, r#"[{"path":"file","operations":[]}]"#).unwrap();
+        assert!(read_graph_edits(&file).is_ok());
+    }
+}
