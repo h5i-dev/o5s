@@ -50,6 +50,11 @@ set the root directory to `calculator/worker` and keep the deploy command
 `npx wrangler deploy`; the Worker's name must be `name` in `wrangler.toml`.
 Builds are cut off after 20 minutes.
 
+The deployed worker uses PlanetScale Postgres through the Hyperdrive config
+the Cloudflare dashboard made for it (`planetscale-o5s-main-7r8e`). Its role
+(`pscale_api_...`) only reads and writes data (`pg_read_all_data`,
+`pg_write_all_data`), so apply `admin ddl` as the database's `postgres` role.
+
 By hand:
 
 ```sh
