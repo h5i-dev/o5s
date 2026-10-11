@@ -8,6 +8,9 @@ pub struct Projection {
     indices: BTreeMap<u64, usize>,
     ids: Vec<u64>,
     weak_rows: Vec<Vec<usize>>,
+    original_rows: Vec<Vec<usize>>,
+    dead_rows: Vec<Vec<usize>>,
+    alive: Vec<bool>,
     marks: Vec<bool>,
     live: BTreeSet<u64>,
     outgoing: BTreeMap<u64, BTreeSet<u64>>,
@@ -25,20 +28,29 @@ impl Projection {
     pub fn apply(&mut self, vertices: &[(u64, bool)], edges: &[(u64, u64)]) -> ProjectionWork {
         let mut touched = BTreeSet::new();
         for &(id, alive) in vertices {
-            let (_, added) = self.ensure_vertex(id);
+            let (index, added) = self.ensure_vertex(id);
             if added || self.live.contains(&id) != alive {
                 touched.insert(id);
             }
             if alive {
+                self.dead_rows[index].clear();
                 self.live.insert(id);
             } else {
+                if self.alive[index] {
+                    self.dead_rows[index] = self.original_rows[index].clone();
+                }
                 self.live.remove(&id);
             }
+            self.alive[index] = alive;
         }
         for &(a, b) in edges {
             let (ia, _) = self.ensure_vertex(a);
             let (ib, _) = self.ensure_vertex(b);
             if self.outgoing.entry(a).or_default().insert(b) {
+                self.original_rows[ia].push(ib);
+                if !self.alive[ia] {
+                    self.dead_rows[ia].push(ib);
+                }
                 self.weak_rows[ia].push(ib);
                 if ia != ib {
                     self.weak_rows[ib].push(ia);
@@ -57,23 +69,23 @@ impl Projection {
                 continue;
             }
             work.rebuilt_sources += 1;
-            let mut seen = BTreeSet::new();
-            let mut boundary = BTreeSet::new();
-            let mut stack: Vec<u64> = self
-                .outgoing
-                .get(&source)
+            let index = self.indices[&source];
+            let search = o5s_kernel::indexed::reachable(
+                &self.dead_rows,
+                &self.original_rows[index],
+                std::mem::take(&mut self.marks),
+            );
+            work.examined_edges += self.original_rows[index].len()
+                + search
+                    .queue
+                    .iter()
+                    .map(|i| self.dead_rows[*i].len())
+                    .sum::<usize>();
+            let boundary = o5s_kernel::indexed::keep_live(&search.queue, &self.alive)
                 .into_iter()
-                .flatten()
-                .copied()
+                .map(|i| self.ids[i])
                 .collect();
-            while let Some(next) = stack.pop() {
-                work.examined_edges += 1;
-                if self.live.contains(&next) {
-                    boundary.insert(next);
-                } else if seen.insert(next) {
-                    stack.extend(self.outgoing.get(&next).into_iter().flatten().copied());
-                }
-            }
+            self.marks = search.marks;
             self.summary.insert(source, boundary);
         }
         work
@@ -86,6 +98,9 @@ impl Projection {
         self.indices.insert(id, index);
         self.ids.push(id);
         self.weak_rows.push(Vec::new());
+        self.original_rows.push(Vec::new());
+        self.dead_rows.push(Vec::new());
+        self.alive.push(false);
         self.marks.push(false);
         (index, true)
     }

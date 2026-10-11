@@ -1,7 +1,7 @@
 # Read by `h5i app` (extract, check, prove, mutate, doctor).
 
 [extract]
-start-from = ["transition", "apply", "sql_writes", "patch::merge", "graph::reachable", "graph::boundary", "graph::summary_rows", "graph::weak_component", "interval::conflict", "interval::splice", "interval::append_range", "interval::render_chunks", "interval::checked_render", "indexed::reachable"]
+start-from = ["transition", "apply", "sql_writes", "patch::merge", "graph::reachable", "graph::boundary", "graph::summary_rows", "graph::weak_component", "interval::conflict", "interval::splice", "interval::append_range", "interval::render_chunks", "interval::checked_render", "indexed::reachable", "indexed::boundary"]
 schema = true
 include = ["h5i_app_sql", "h5i_app_std"]
 std-specs = true
@@ -35,6 +35,7 @@ theorems = [
   "o5s_kernel.Components.extracted_batch_incremental",
   "o5s_kernel.Indexed.reachable_spec",
   "o5s_kernel.Indexed.clear_clean_spec",
+  "o5s_kernel.Boundary.boundary_segment",
 ]
 
 [[mutant]]
@@ -107,3 +108,9 @@ name = "indexed_clear"
 file = "kernel/src/indexed.rs"
 old = "state.marks[state.queue[i]] = false;"
 new = "state.marks[state.queue[i]] = true;"
+
+[[mutant]]
+name = "indexed_live_filter"
+file = "kernel/src/indexed.rs"
+old = "if live[vertex] {"
+new = "if !live[vertex] {"

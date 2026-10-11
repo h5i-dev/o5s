@@ -45,9 +45,77 @@ pub fn reachable(rows: &Vec<Vec<usize>>, seeds: &Vec<usize>, marks: Vec<bool>) -
     clear(state)
 }
 
+/// Filter reached dense indices using constant-time liveness lookup.
+pub fn keep_live(nodes: &Vec<usize>, live: &Vec<bool>) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < nodes.len() {
+        let vertex = nodes[i];
+        if live[vertex] {
+            out.push(vertex);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Rows have outgoing edges only for dead vertices; seeds are the original
+/// source's direct successors. This computes nonempty dead-interior boundaries.
+pub fn boundary(
+    dead_rows: &Vec<Vec<usize>>,
+    successors: &Vec<usize>,
+    live: &Vec<bool>,
+    marks: Vec<bool>,
+) -> Traversal {
+    let mut state = reachable(dead_rows, successors, marks);
+    state.queue = keep_live(&state.queue, live);
+    state
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn indexed_boundary_matches_reference_with_cycles_and_deletions() {
+        for mask in 0..512 {
+            let mut rows = vec![vec![]; 3];
+            let mut edges = Vec::new();
+            for (u, row) in rows.iter_mut().enumerate() {
+                for v in 0..3 {
+                    if mask & (1 << (u * 3 + v)) != 0 {
+                        row.push(v);
+                        edges.push((u as u64, v as u64));
+                    }
+                }
+            }
+            let mut marks = vec![false; 3];
+            for live_mask in 0..8 {
+                let live = (0..3)
+                    .map(|v| live_mask & (1 << v) != 0)
+                    .collect::<Vec<_>>();
+                let live_ids = (0..3).filter(|v| live[*v]).map(|v| v as u64).collect();
+                let dead_rows = rows
+                    .iter()
+                    .enumerate()
+                    .map(|(v, row)| if live[v] { Vec::new() } else { row.clone() })
+                    .collect();
+                for (source, successors) in rows.iter().enumerate() {
+                    let state = boundary(&dead_rows, successors, &live, marks);
+                    assert!(state.marks.iter().all(|v| !v));
+                    let mut actual = state
+                        .queue
+                        .into_iter()
+                        .map(|v| v as u64)
+                        .collect::<Vec<_>>();
+                    let mut expected = crate::graph::boundary(&edges, &live_ids, source as u64);
+                    actual.sort_unstable();
+                    expected.sort_unstable();
+                    assert_eq!(actual, expected);
+                    marks = state.marks;
+                }
+            }
+        }
+    }
     #[test]
     fn indexed_search_matches_reference_and_reuses_clean_marks() {
         for mask in 0..512 {

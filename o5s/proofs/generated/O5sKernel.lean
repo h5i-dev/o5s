@@ -1211,6 +1211,68 @@ def indexed.reachable
   let (v, v1) ← indexed.reachable_loop rows state 0#usize
   indexed.clear { marks := v, queue := v1 }
 
+/-- [o5s_kernel::indexed::keep_live]: loop body 0:
+    Source: 'o5s/kernel/src/indexed.rs', lines 52:4-58:5
+    Visibility: public -/
+@[rust_loop_body]
+def indexed.keep_live_loop.body
+  (nodes : alloc.vec.Vec Std.Usize) (live : alloc.vec.Vec Bool)
+  (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize) (alloc.vec.Vec
+    Std.Usize))
+  := do
+  let i1 := alloc.vec.Vec.len nodes
+  if i < i1
+  then
+    let vertex ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        nodes i
+    let b ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool) live
+        vertex
+    let out1 ← if b
+                 then alloc.vec.Vec.push out vertex
+                 else ok out
+    let i2 ← i + 1#usize
+    ok (cont (out1, i2))
+  else ok (done out)
+
+/-- [o5s_kernel::indexed::keep_live]: loop 0:
+    Source: 'o5s/kernel/src/indexed.rs', lines 52:4-58:5
+    Visibility: public -/
+@[rust_loop]
+def indexed.keep_live_loop
+  (nodes : alloc.vec.Vec Std.Usize) (live : alloc.vec.Vec Bool)
+  (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  loop
+    (fun (out1, i1) => indexed.keep_live_loop.body nodes live out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::indexed::keep_live]:
+    Source: 'o5s/kernel/src/indexed.rs', lines 49:0-60:1
+    Visibility: public -/
+@[reducible]
+def indexed.keep_live
+  (nodes : alloc.vec.Vec Std.Usize) (live : alloc.vec.Vec Bool) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  indexed.keep_live_loop nodes live (alloc.vec.Vec.new Std.Usize) 0#usize
+
+/-- [o5s_kernel::indexed::boundary]:
+    Source: 'o5s/kernel/src/indexed.rs', lines 64:0-73:1
+    Visibility: public -/
+def indexed.boundary
+  (dead_rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (successors : alloc.vec.Vec Std.Usize) (live : alloc.vec.Vec Bool)
+  (marks : alloc.vec.Vec Bool) :
+  Result indexed.Traversal
+  := do
+  let state ← indexed.reachable dead_rows successors marks
+  let v ← indexed.keep_live state.queue live
+  ok { state with queue := v }
+
 /-- [o5s_kernel::interval::conflict]:
     Source: 'o5s/kernel/src/interval.rs', lines 4:0-12:1
     Visibility: public -/
