@@ -485,4 +485,38 @@ theorem patch_merge_ok (ch deps : alloc.vec.Vec U64) (a c : Bool) (id : U64) (r)
   · simp [Model.admitK, liftK, hc, hc_1]
   · simp [Model.admitK, liftK, hc]
 
+def liftAdm (st : Admission) : Model.Adm := ⟨st.members.val, st.size, st.seq, st.admitted, st.writes.val⟩
+
+theorem admit_one_ok (u : U64) (s : Snapshot) (ch id : U64) (st : Admission) (r)
+    (h : admit_one u s ch id st = ok r) :
+    (r.1, liftAdm r.2) = Model.admitOne u (Snapshot.toSt s) ch id (liftAdm st) := by
+  unfold admit_one at h
+  h5i_invert h
+  all_goals have ho' := post_of_ok (find_patch_spec _ _) ho
+  all_goals simp only [Model.admitOne, Snapshot.toSt, liftAdm]
+  all_goals rw [← ho']
+  all_goals (try (
+    have hp' := post_of_ok (h5i_app_std.Specs.set.contains_spec core.cmp.PartialEqU64 _ _) hpresent
+    have hd' := post_of_ok (dependencies_of_spec _ _) hdeps
+    have hb' := post_of_ok (approved_spec _ _) hb
+    have hb1' := post_of_ok (checks_passed_spec _ _) hb1
+    have hk := patch_merge_ok _ _ _ _ _ _ hr_1
+    rw [hd', hb', hb1'] at hk
+    simp only [Model.depsOf, Model.approvedB, Model.passedB]
+    rw [← hk]
+    simp only [liftK]))
+  all_goals first
+    | (unfold merge_error at he1
+       cases e <;> simp only [ok.injEq] at he1 <;> subst he1 <;> rfl)
+    | (have hp' := post_of_ok (h5i_app_std.Specs.set.contains_spec core.cmp.PartialEqU64 _ _) hpresent
+       (try have e1 := add_one_eq hi)
+       (try have e2 := add_one_eq hi1)
+       (try have e3 := add_one_eq hi2)
+       (try have e3 := add_one_eq hi)
+       (try (unfold event at he; simp only [ok.injEq] at he))
+       (try have w1 := push_ok_val hv1)
+       (try have w0 := push_ok_val hv)
+       subst_vars
+       simp_all [Model.MAX])
+
 end o5s_registry.Refine
