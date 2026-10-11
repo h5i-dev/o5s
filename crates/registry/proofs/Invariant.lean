@@ -808,4 +808,46 @@ theorem inv_merge {s : St} (hi : Inv s) {u : U64} {n : alloc.vec.Vec U8} {ids : 
       rw [this] at hcm; simp at hcm
   · simp at hm
 
+/-! ## Every successful command keeps the invariant -/
+
+theorem inv_step (a : Principal) {s : St} (hi : Inv s) (c : Command) {ws r}
+    (h : Model.step a s c = .Ok (ws, r)) : Inv (applyAll s ws) := by
+  cases c <;> simp only [Model.step] at h
+  case Register => exact inv_register hi h
+  case Create => exact inv_create hi h
+  all_goals first
+    | (simp at h; done)
+    | (split at h
+       · rename_i hv
+         have hcr : s.repo.created = true := by
+           simp only [Model.visible, Bool.and_eq_true, decide_eq_true_eq] at hv; exact hv.1.1.2
+         first
+           | exact inv_fork hi h
+           | exact inv_propose hi hcr h
+           | exact inv_approve hi h
+           | exact inv_check hi h
+           | exact inv_merge hi h
+       · simp at h)
+
+/-- **Every successful run of the extracted `transition` keeps the invariant.** -/
+theorem inv_preserved (a : Principal) (s : Snapshot) (c : Command) (ws : alloc.vec.Vec Write)
+    (hi : Inv (Snapshot.toSt s)) (h : Guarantees.Succeeds a s c ws) : Inv (applyAll (Snapshot.toSt s) ws.val) := by
+  obtain ⟨r, hm⟩ := Guarantees.model_of h
+  exact inv_step a hi c hm
+
+theorem init_inv : Inv init := by
+  constructor <;> simp [init, Schema.Repository.zero]
+
+/-- The states reachable from a fresh tenant by successful commands. -/
+inductive Reachable : St → Prop
+  | init : Reachable init
+  | step {a s c ws} : Reachable (Snapshot.toSt s) → Guarantees.Succeeds a s c ws →
+      Reachable (applyAll (Snapshot.toSt s) ws.val)
+
+/-- The invariant holds in every reachable state. -/
+theorem reachable_inv {s : St} (h : Reachable s) : Inv s := by
+  induction h with
+  | init => exact init_inv
+  | step _ hs ih => exact inv_preserved _ _ _ _ ih hs
+
 end o5s_registry.Invariant
