@@ -1,0 +1,13 @@
+name = "o5s-calculator"
+main = "build/index.js"
+compatibility_date = "2026-10-01"
+
+[build]
+command = "worker-build --release"
+
+# `npx wrangler hyperdrive create o5s-calculator --connection-string=postgres://...`
+# prints the id. For `wrangler dev`, set
+# CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE to a local database.
+[[hyperdrive]]
+binding = "HYPERDRIVE"
+id = "00000000000000000000000000000000"

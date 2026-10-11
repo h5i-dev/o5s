@@ -1,0 +1,11 @@
+[workspace]
+resolver = "3"
+members = ["calculator/kernel", "calculator/worker"]
+
+# As workers-rs: optimized for size. `worker-build` runs `wasm-opt` after.
+[profile.release]
+opt-level = "z"
+
+[profile.release.package."*"]
+codegen-units = 1
+opt-level = "z"
