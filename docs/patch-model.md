@@ -1,6 +1,6 @@
 # Document graph operations
 
-`crates/kernel/src/model.rs` defines immutable operations for one document. Its `DocumentGraph` validates causal references, retains deleted anchors and materializes bytes only when the surviving graph has an unambiguous order. Materialization calls the extracted `indexed::boundary` traversal used by the existing graph proofs. Validation, the dense-index adapter and the complete text/conflict semantics still need extraction and Lean proofs.
+`crates/kernel/src/model.rs` defines immutable operations for one document. Its `DocumentGraph` validates causal references, retains deleted anchors and materializes bytes only when the surviving graph has an unambiguous order. Materialization calls the extracted `indexed::boundary`, `order::frontier_counts` and `tags::visible` functions. Validation, the dense-index adapter and the complete text/conflict semantics still need extraction and Lean proofs.
 
 This module covers a document subset of M1 and M2 in [the production roadmap](roadmap.md). File identity, path changes, mode changes and operation-block splitting remain unspecified. It does not implement Pijul's complete data model.
 
@@ -31,6 +31,8 @@ All operations in a patch apply atomically. The implementation currently validat
 ## Deletion, restoration and later arrivals
 
 An atom is live exactly when no uncancelled deletion tag covers it. Two concurrent deletions therefore combine without selecting one author. Restoring one deletion leaves the other effective. A later deletion creates another tag and can hide the atom again. Multiple restorations of the same tag have the same effect as one restoration.
+
+Materialization assigns each deletion a local dense index and builds one restoration flag per deletion, plus the covering-index list for each atom. It calls `tags::visible` on those lists. The scanners visit each covering entry once; they do not search the full restoration history for each target. Constructing the lists still uses native ordered-map lookups. Each scanner requires every covering index to be within the restoration table. Rust vector lengths fit `usize`; the scanner allocates no output buffer. Mapping operation identities to those indices and matching restoration flags to operations remain native adapter obligations.
 
 Deletion removes visibility, not the anchor or its edges. An insertion that observes the deletion may deliberately use the dead anchor. Such an insertion remains live. A concurrent insertion using that anchor produces a `DeleteInsert` conflict until the deletion is restored or a `KeepInsertion` operation acknowledges that exact pair. A resolution naming one pair does not acknowledge a different deletion or a later insertion.
 
@@ -72,6 +74,8 @@ The model tests cover stable anchors, atomic rejection, duplicate delivery, tag 
 The current boundary search reuses visited marks and stops at live atoms. It avoids a separate full graph search for every pair of live atoms. A reverse anchor index restricts delete/insert conflict checks to insertions that actually use a deleted target; unrelated insertions are skipped. Causal ancestry checks still traverse dependency records for each candidate pair.
 
 Each materialization still reconstructs all adjacency rows and every live boundary row. There is no affected-component cache, persistent adjacency index or measured thousands-of-agents throughput for this document path.
+
+`proofs/Tags.lean` proves the extracted visibility scanner returns true exactly when no active covering tag remains. It also proves that changing a different restoration flag cannot revive an atom with an active covering tag. Both results require valid covering indices; they do not prove the adapter's dense-ID mapping or the operation admission rules.
 
 The Lean boundary theorems justify the traversal under their dense-row and liveness assumptions. They do not yet prove that this adapter constructs those rows correctly, that operation application preserves its invariants, or that these conflict layers implement a complete patch theory. Initial indegree construction and subsequent Kahn updates also need invariant proofs. The M3 proof work must follow the Rust functions called here and discharge those adapter obligations. A separate abstract model would leave the application unverified.
 

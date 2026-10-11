@@ -392,13 +392,11 @@ impl DocumentGraph {
     /// Reconstruct the live partial order by traversing the full history.
     /// Deleted atoms remain anchors and contribute ordering paths.
     pub fn materialize(&self) -> Materialized {
-        let mut dead = BTreeSet::new();
         let mut conflicts = Vec::new();
         for (deletion, targets) in &self.deletions {
             if self.restored.contains(deletion) {
                 continue;
             }
-            dead.extend(targets.iter().copied());
             let candidates: BTreeSet<_> = targets
                 .iter()
                 .filter_map(|target| self.insertions_at.get(target))
@@ -451,9 +449,23 @@ impl DocumentGraph {
                     .collect()
             })
             .collect();
+        // Dense deletion IDs are local projection indices, never replicated IDs.
+        // Every covering entry indexes the flag appended for that deletion.
+        let mut covering = vec![Vec::new(); anchors.len()];
+        let mut restored = Vec::with_capacity(self.deletions.len());
+        for (tag, (deletion, targets)) in self.deletions.iter().enumerate() {
+            restored.push(self.restored.contains(deletion));
+            for node in targets {
+                covering[indices[&Anchor::Node(*node)]].push(tag);
+            }
+        }
         let live: Vec<bool> = anchors
             .iter()
-            .map(|a| matches!(a, Anchor::Node(n) if !dead.contains(n)))
+            .enumerate()
+            .map(|(index, anchor)| {
+                matches!(anchor, Anchor::Node(_))
+                    && crate::tags::visible(&covering[index], &restored)
+            })
             .collect();
         let dead_rows = rows
             .iter()

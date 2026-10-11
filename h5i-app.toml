@@ -2,7 +2,7 @@
 
 [extract]
 crate = "crates/kernel"
-start-from = ["patch::merge", "graph::reachable", "graph::boundary", "graph::summary_rows", "graph::weak_component", "interval::conflict", "interval::splice", "interval::append_range", "interval::render_chunks", "interval::checked_render", "indexed::reachable", "indexed::boundary", "coordinates::line_boundaries", "order::frontier", "order::frontier_counts"]
+start-from = ["patch::merge", "graph::reachable", "graph::boundary", "graph::summary_rows", "graph::weak_component", "interval::conflict", "interval::splice", "interval::append_range", "interval::render_chunks", "interval::checked_render", "indexed::reachable", "indexed::boundary", "coordinates::line_boundaries", "order::frontier", "order::frontier_counts", "tags::visible"]
 schema = false
 include = ["h5i_app_std"]
 std-specs = true
@@ -39,6 +39,9 @@ theorems = [
   "o5s_kernel.Coordinates.line_boundaries_ordered",
   "o5s_kernel.Order.frontier_exact",
   "o5s_kernel.Order.frontier_counts_exact",
+  "o5s_kernel.Tags.visible_spec",
+  "o5s_kernel.Tags.visible_iff_no_active_tag",
+  "o5s_kernel.Tags.restore_other_cannot_revive",
 ]
 
 [[mutant]]

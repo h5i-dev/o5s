@@ -184,7 +184,7 @@
         {
           "path": "crates/server/src/lib.rs",
           "anchor": "pub fn router",
-          "digest": "85e0ae41efa43dd29deaaa14ff93bffd5ffb4263783475223fc152fb0958b3a3"
+          "digest": "9d21c022c25c79531f7263b88776725f3b1b629ffedf7d208ee5243360781670"
         }
       ]
     },

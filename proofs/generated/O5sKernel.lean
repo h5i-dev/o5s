@@ -1391,4 +1391,53 @@ def patch.merge
     else ok (core.result.Result.Err patch.MergeError.ChecksFailed)
   else ok (core.result.Result.Err patch.MergeError.Unapproved)
 
+/-- [o5s_kernel::tags::visible]: loop body 0:
+    Source: 'crates/kernel/src/tags.rs', lines 9:4-14:5
+    Visibility: public -/
+@[rust_loop_body]
+def tags.visible_loop.body
+  (covering : alloc.vec.Vec Std.Usize) (restored : alloc.vec.Vec Bool)
+  (visible : Bool) (i : Std.Usize) :
+  Result (ControlFlow (Bool × Std.Usize) Bool)
+  := do
+  let i1 := alloc.vec.Vec.len covering
+  if i < i1
+  then
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        covering i
+    let b ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool) restored
+        i2
+    let visible1 ← if b
+                     then ok visible
+                     else ok false
+    let i3 ← i + 1#usize
+    ok (cont (visible1, i3))
+  else ok (done visible)
+
+/-- [o5s_kernel::tags::visible]: loop 0:
+    Source: 'crates/kernel/src/tags.rs', lines 9:4-14:5
+    Visibility: public -/
+@[rust_loop]
+def tags.visible_loop
+  (covering : alloc.vec.Vec Std.Usize) (restored : alloc.vec.Vec Bool)
+  (visible : Bool) (i : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun (visible1, i1) => tags.visible_loop.body covering restored visible1
+      i1)
+    (visible, i)
+
+/-- [o5s_kernel::tags::visible]:
+    Source: 'crates/kernel/src/tags.rs', lines 6:0-16:1
+    Visibility: public -/
+@[reducible]
+def tags.visible
+  (covering : alloc.vec.Vec Std.Usize) (restored : alloc.vec.Vec Bool) :
+  Result Bool
+  := do
+  tags.visible_loop covering restored true 0#usize
+
 end o5s_kernel

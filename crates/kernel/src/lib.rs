@@ -14,3 +14,5 @@ pub mod model;
 pub mod patch;
 
 pub mod order;
+
+pub mod tags;
