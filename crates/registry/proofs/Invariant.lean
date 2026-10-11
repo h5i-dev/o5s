@@ -340,4 +340,78 @@ theorem inv_fork {s : St} (hi : Inv s) {u : U64} {src n : alloc.vec.Vec U8} {ws 
     have := (hi.unborn hcr).2.2.2.2.1
     rw [this] at hcm; simp at hcm
 
+/-- Rows with fresh, distinct keys are appended. -/
+theorem puts_fresh {α κ : Type} [DecidableEq κ] (k : α → κ) (xs l : List α) (hn : (xs.map k).Nodup)
+    (hf : ∀ x ∈ xs, ∀ y ∈ l, k y ≠ k x) : puts k xs l = l ++ xs := by
+  induction xs generalizing l with
+  | nil => simp [puts]
+  | cons x xs ih =>
+    simp only [List.map_cons, List.nodup_cons, List.mem_map, not_exists, not_and] at hn
+    show puts k xs (upsert k x l) = l ++ x :: xs
+    rw [upsert_fresh k x l (hf x (by simp)), ih _ hn.2]
+    · simp
+    · intro x' hx' y hy
+      rcases List.mem_append.1 hy with hy | hy
+      · exact hf x' (by simp [hx']) y hy
+      · simp at hy; subst hy; exact fun e => hn.1 x' hx' e.symm
+
+/-- What `registerPaths` adds: fresh ids above the counter, paths new to the
+table and to each other. -/
+structure Added (known : List PathKind) (c0 : U64) (added : List PathKind) (next : U64) : Prop where
+  ids : (added.map (·.id)).Nodup
+  labels : (added.map (fun k => k.path.val)).Nodup
+  bounds : ∀ k ∈ added, c0.val < k.id.val ∧ k.id.val ≤ next.val
+  fresh : ∀ k ∈ added, ∀ k' ∈ known, k'.path.val ≠ k.path.val
+  le : c0.val ≤ next.val
+
+theorem registerPaths_added (known : List PathKind) (c0 : U64) :
+    ∀ (uses : List PathUse) (acc : List PathKind) (nx : U64) added paths,
+      Added known c0 acc nx → Model.registerPaths known uses acc nx = .Ok (added, paths) → Added known c0 added paths := by
+  intro uses
+  induction uses with
+  | nil => intro acc nx added paths ha h; simp only [Model.registerPaths, core.result.Result.Ok.injEq,
+      Prod.mk.injEq] at h; obtain ⟨rfl, rfl⟩ := h; exact ha
+  | cons u us ih =>
+    intro acc nx added paths ha h
+    simp only [Model.registerPaths] at h
+    split at h
+    · rename_i hnone
+      split at h
+      · simp at h
+      rename_i hmax
+      apply ih _ _ _ _ _ h
+      have hinc := Refine.inc_val hmax
+      -- The path is in neither table.
+      have hk : known.find? (fun (k : PathKind) => decide (k.path.val = u.path.val)) = none := by
+        cases hk : known.find? (fun (k : PathKind) => decide (k.path.val = u.path.val)) <;> simp_all
+      have ha' : acc.find? (fun (k : PathKind) => decide (k.path.val = u.path.val)) = none := by
+        rw [hk] at hnone; exact hnone
+      have hkn : ∀ k' ∈ known, k'.path.val ≠ u.path.val := by
+        intro k' hk' e; have := List.find?_eq_none.1 hk k' hk'; simp [e] at this
+      have han : ∀ k' ∈ acc, k'.path.val ≠ u.path.val := by
+        intro k' hk' e; have := List.find?_eq_none.1 ha' k' hk'; simp [e] at this
+      refine ⟨?_, ?_, ?_, ?_, ?_⟩
+      · rw [List.map_append, List.nodup_append]
+        refine ⟨ha.ids, by simp, ?_⟩
+        simp only [List.mem_map, List.mem_singleton]
+        rintro _ ⟨k, hk, rfl⟩ _ ⟨_, rfl, rfl⟩ e
+        have := (ha.bounds k hk).2; rw [e, hinc] at this; omega
+      · rw [List.map_append, List.nodup_append]
+        refine ⟨ha.labels, by simp, ?_⟩
+        simp only [List.mem_map, List.mem_singleton]
+        rintro _ ⟨k, hk, rfl⟩ _ ⟨_, rfl, rfl⟩ e
+        exact han k hk e
+      · intro k hk
+        rcases List.mem_append.1 hk with hk | hk
+        · have := ha.bounds k hk; rw [hinc]; omega
+        · simp at hk; subst hk; simp only [hinc]; have := ha.le; omega
+      · intro k hk k' hk'
+        rcases List.mem_append.1 hk with hk | hk
+        · exact ha.fresh k hk k' hk'
+        · simp at hk; subst hk; exact hkn k' hk'
+      · rw [hinc]; have := ha.le; omega
+    · split at h
+      · split at h <;> simp at h
+      · exact ih _ _ _ _ ha h
+
 end o5s_registry.Invariant
