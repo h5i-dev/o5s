@@ -351,7 +351,7 @@ async fn compact_view(
         let work = cache.sync_append_only(&repo, &q.channel)?;
         let view = cache.content()?;
         Ok::<_, Refusal>(serde_json::json!({"files":view.files,"conflicts":view.conflicts,"executable":view.executable,
-            "binary":view.binary,"patch_count":cache.patch_count(),"work":work,"generation":repo.generation}))
+            "binary":view.binary,"symlinks":view.symlinks,"submodules":view.submodules,"patch_count":cache.patch_count(),"work":work,"generation":repo.generation}))
     })()
     .map_err(Failure::Refused))
 }

@@ -476,14 +476,27 @@ async fn workspace_import_records_snapshot_dependencies_without_altering_files()
             .0,
         StatusCode::UNPROCESSABLE_ENTITY
     );
-    let before = std::fs::read(dir.path().join("registry.log")).unwrap();
+    // A symlink is proposed as a link: its target, never the bytes behind it.
     let outside = dir.path().join("outside.txt");
     std::fs::write(&outside, "must not import\n").unwrap();
     std::os::unix::fs::symlink(&outside, path.join("link.txt")).unwrap();
-    let (status, refusal) = request(&s, 1, 1, "/api/worktree/propose", Some(body.clone())).await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refusal}");
-    assert!(refusal["error"].as_str().unwrap().contains("symlinks"));
+    let (status, linked) = request(&s, 1, 1, "/api/worktree/propose", Some(body.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{linked}");
+    let (_, detail) = request(
+        &s,
+        1,
+        1,
+        &format!("/api/patch?repo=import&id={}", linked["patch"]),
+        None,
+    )
+    .await;
+    let edits = detail["patch"]["edits"].as_array().unwrap();
+    let link = edits.iter().find(|e| e["path"] == "link.txt").unwrap();
+    assert_eq!(link["kind"], "symlink");
+    assert_eq!(link["content"], outside.to_str().unwrap());
+    assert!(!detail.to_string().contains("must not import"));
     std::fs::remove_file(path.join("link.txt")).unwrap();
+    let before = std::fs::read(dir.path().join("registry.log")).unwrap();
     std::fs::remove_file(path.join("a.txt")).unwrap();
     std::fs::create_dir(path.join("a.txt")).unwrap();
     let (status, refusal) = request(&s, 1, 1, "/api/worktree/propose", Some(body)).await;

@@ -797,7 +797,16 @@ async fn symlinks_and_submodules_round_trip_through_proposals_and_fetch() {
         tree.contains(&format!("160000 commit {commit}\tvendor/lib")),
         "{tree}"
     );
-    // Retargeting the link is a whole-file change of kind symlink.
+    // Check out the snapshot, then retarget the link: a whole-file change of
+    // kind symlink.
+    fs::remove_file(a.join("link")).unwrap();
+    fs::remove_file(a.join("target.txt")).unwrap();
+    git(&a, &["rm", "-q", "--cached", "vendor/lib"]);
+    git(&a, &["checkout", "-q", "--detach", "refs/o5s/main"]);
+    assert_eq!(
+        fs::read_link(a.join("link")).unwrap().to_str(),
+        Some("target.txt")
+    );
     fs::remove_file(a.join("link")).unwrap();
     std::os::unix::fs::symlink("elsewhere", a.join("link")).unwrap();
     let second = patch(f.ok(&a, 1, &["propose", "--intent", "retarget"]));
