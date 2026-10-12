@@ -1119,6 +1119,55 @@ theorem validate_tr (d : document.Doc) (H : Hist) (P : Patch) (dp : document.Pat
     intro e' he'
     cases he'
 
+theorem forall₂_mem_right {α β} {R : α → β → Prop} :
+    ∀ {l₁ : List α} {l₂ : List β}, List.Forall₂ R l₁ l₂ → ∀ b ∈ l₂, ∃ a ∈ l₁, R a b
+  | _, _, .nil, _, hb => absurd hb (by simp)
+  | a :: _, _ :: _, .cons h hs, b, hb => by
+    rcases List.mem_cons.mp hb with rfl | hb
+    · exact ⟨a, List.mem_cons_self .., h⟩
+    · obtain ⟨a', ha', h'⟩ := forall₂_mem_right hs b hb
+      exact ⟨a', List.mem_cons_of_mem _ ha', h'⟩
+
+theorem growth_eq (o : document.Op) :
+    DocKernel.growth o = (match o with | .Insert _ _ xs => xs.val.length + 2 | _ => 2) := by
+  cases o <;> rfl
+
+/-- The commit's room condition, from the adapter's bound and validation. -/
+theorem commitRoomL_of (d : document.Doc) (H : Hist) (P : Patch) (dp : document.Patch)
+    (hr : Rep d H) (hb : Built H) (ht : Tr H P dp) (hval : DocModel.validate H P = .ok ())
+    (hroom : CommitRoom d dp) : DocKernel.CommitRoomL (DocKernel.absD d) dp.ops.val := by
+  -- every translated operation comes from a validated model operation
+  have src : ∀ o' ∈ dp.ops.val, ∃ op, TrOp H op o' ∧ OpOK H op := by
+    intro o' ho'
+    obtain ⟨op, hop, htr⟩ := forall₂_mem_right ht.2 o' ho'
+    obtain ⟨k, hk, rfl⟩ := List.getElem_of_mem hop
+    obtain ⟨s0, s1, hv⟩ := validate_each_op H P hval (P.ops[k], k)
+      (List.mem_zipIdx_iff_getElem?.mpr (by simp [hk]))
+    exact ⟨_, htr, validOp_ok H P.id P.deps s0 s1 k _ hv⟩
+  refine ⟨?_, hroom.2.2, ?_, ?_⟩
+  · have h1 := hroom.1
+    have hg : (dp.ops.val.map DocKernel.growth) = dp.ops.val.map (fun o => match o with
+        | .Insert _ _ xs => xs.val.length + 2 | _ => 2) := by
+      apply List.map_congr_left; intro o _; exact growth_eq o
+    simp only [DocKernel.absD, List.length_map, hg]
+    omega
+  · intro r hm
+    obtain ⟨op, htr, hok⟩ := src _ hm
+    cases op <;> simp only [TrOp, OpOK] at htr hok
+    rw [htr.2]
+    have := congrArg List.length hr.restored
+    simp only [List.length_map] at this
+    rw [this]
+    exact idx_lt hok
+  · intro o hm
+    obtain ⟨op, htr, hok⟩ := src _ hm
+    cases op <;> simp only [TrOp, OpOK] at htr hok
+    rw [htr.2]
+    have := congrArg List.length hr.orders
+    simp only [List.length_map] at this
+    rw [this]
+    exact idx_lt hok
+
 /-- `Replayed` documents encode their history. -/
 theorem rep_replayed (d : document.Doc) (H : Hist) (h : Replayed d H) : Rep d H := by
   induction h with
@@ -1135,7 +1184,13 @@ theorem rep_replayed (d : document.Doc) (H : Hist) (h : Replayed d H) : Rep d H 
       by simp [DocKernel.emptyL, orderList, ops], by simp [DocKernel.emptyL, retractionsOf, ops]⟩
     intro a b
     simp [DocKernel.emptyL, Acked, ops]
-  | snoc hr' ht adm hval hc ih =>
-    sorry
+  | snoc hr' ht adm hval hroom hc ih =>
+    rename_i d d' H P dp
+    have hb := replayed_built hr'
+    have hspec := DocKernel.commit_spec d dp hroom.2.1 (commitRoomL_of d H P dp ih hb ht hval hroom)
+    have hd' := post_of_ok hspec hc
+    unfold Rep
+    rw [hd']
+    exact rep_commit' _ H P dp ih hb ht adm hval
 
 end o5s_kernel.DocRep

@@ -74,12 +74,22 @@ distinct known dependencies, at least one operation. -/
 def Admissible (H : Hist) (P : Patch) : Prop :=
   P.id ∉ ids H ∧ P.deps.Nodup ∧ P.id ∉ P.deps ∧ (∀ q ∈ P.deps, q ∈ ids H) ∧ P.ops ≠ []
 
+/-- The adapter keeps every table, grown by the patch, below the machine bound. -/
+def CommitRoom (d : document.Doc) (dp : document.Patch) : Prop :=
+  d.atoms.val.length + d.creator.val.length + d.edges.val.length + d.insertions.val.length +
+    d.deletions.val.length + d.restored.val.length + d.acked.val.length + d.orders.val.length +
+    d.retractions.val.length + (dp.ops.val.map fun
+      | .Insert _ _ xs => xs.val.length + 2 | _ => 2).sum + 2 < Usize.max ∧
+  d.deps.val.length + 1 < Usize.max ∧
+  ∀ ts, document.Op.Delete ts ∈ dp.ops.val → ts.val.length < Usize.max
+
 /-- `d` is the document the adapter holds after admitting `H` in order: each
 patch was admissible, validated, translated and committed. -/
 inductive Replayed : document.Doc → Hist → Prop
   | nil {d} : document.empty = ok d → Replayed d []
   | snoc {d d' H P dp} : Replayed d H → Tr H P dp → Admissible H P →
-      DocModel.validate H P = .ok () → document.commit d dp = ok d' → Replayed d' (H ++ [P])
+      DocModel.validate H P = .ok () → CommitRoom d dp → document.commit d dp = ok d' →
+      Replayed d' (H ++ [P])
 
 /-- Sizes stay below the machine bound (indices, edge and atom counts). -/
 def Room (d : document.Doc) (dp : document.Patch) : Prop :=
@@ -140,13 +150,14 @@ theorem validate_refines (d : document.Doc) (H : Hist) (P : Patch) (dp : documen
 /-- A validated patch commits. -/
 theorem commit_succeeds (d : document.Doc) (H : Hist) (P : Patch) (dp : document.Patch)
     (hr : Replayed d H) (ht : Tr H P dp) (adm : Admissible H P) (room : Room d dp)
-    (hv : DocModel.validate H P = .ok ()) :
+    (croom : CommitRoom d dp) (hv : DocModel.validate H P = .ok ()) :
     ∃ d', document.commit d dp = ok d' ∧ Replayed d' (H ++ [P]) := by sorry
 
 /-- What the adapter returns, given the kernel's answer (T1.1 at the level
 of `model::DocumentGraph::apply`). -/
 theorem apply_refines (d : document.Doc) (H : Hist) (P : Patch) (dp : document.Patch)
-    (hr : Replayed d H) (ht : Tr H P dp) (adm : Admissible H P) (room : Room d dp) :
+    (hr : Replayed d H) (ht : Tr H P dp) (adm : Admissible H P) (room : Room d dp)
+    (croom : CommitRoom d dp) :
     document.validate d dp ⦃ r =>
       (r.kind.val = 0 → ∃ d', document.commit d dp = ok d' ∧ Replayed d' (H ++ [P]) ∧
           applySpec H P = .ok (H ++ [P], .inserted)) ∧

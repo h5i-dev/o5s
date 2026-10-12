@@ -403,7 +403,7 @@ inductive Built : Hist → Prop
 theorem replayed_built {d : document.Doc} {H : Hist} (h : Replayed d H) : Built H := by
   induction h with
   | nil _ => exact .nil
-  | snoc _ _ adm hval _ ih => exact .snoc ih adm hval
+  | snoc _ _ adm hval _ _ ih => exact .snoc ih adm hval
 
 theorem anchorList_mono (H : Hist) (P : Patch) (a : Anchor) (h : a ∈ anchorList H) :
     a ∈ anchorList (H ++ [P]) := by
@@ -2465,7 +2465,7 @@ def prefixPatch (P : Patch) (j : Nat) : Patch := { P with ops := P.ops.take j }
 theorem replayed_valid {d : document.Doc} {H : Hist} (h : Replayed d H) : Valid H := by
   induction h with
   | nil _ => rfl
-  | @snoc d0 d1 H P dp0 hr0 ht0 adm hval hc ih =>
+  | @snoc d0 d1 H P dp0 hr0 ht0 adm hval hroom hc ih =>
     unfold Valid at ih ⊢
     rw [replay_append, ih]
     change replay H [P] = .ok (H ++ [P])
