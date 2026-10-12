@@ -615,6 +615,294 @@ theorem view_perm (hu : (ids H₁).Nodup) (h : H₁.Perm H₂) (V : View) :
 
 end Perm
 
+/-! ## Validation reads only the causal past -/
+
+section Local
+variable {H H' : Hist} {deps : List PId}
+
+/-- Every patch of `H'` that `deps` observes is in `H`. -/
+def PastIn (H H' : Hist) (deps : List PId) : Prop := ∀ Q ∈ H', Observed H' deps Q.id → Q ∈ H
+
+theorem anc_mono (sub : ∀ Q ∈ H, Q ∈ H') {a b : PId} (h : Anc H a b) : Anc H' a b :=
+  Relation.TransGen.mono (fun _ _ ⟨P, hP, e, hx⟩ => ⟨P, sub P hP, e, hx⟩) h
+
+theorem anc_local (past : PastIn H H' deps) {q d : PId} (hd : d ∈ deps) (h : Anc H' q d) :
+    Anc H q d := by
+  induction h using Relation.TransGen.head_induction_on with
+  | single hs =>
+    obtain ⟨P, hP, e, hx⟩ := hs
+    exact .single ⟨P, past P hP (by rw [e]; exact Or.inl hd), e, hx⟩
+  | head hs ht ih =>
+    obtain ⟨P, hP, e, hx⟩ := hs
+    have hobs : Observed H' deps P.id := by rw [e]; exact Or.inr ⟨d, hd, ht⟩
+    exact .head ⟨P, past P hP hobs, e, hx⟩ ih
+
+theorem observed_local (sub : ∀ Q ∈ H, Q ∈ H') (past : PastIn H H' deps) (q : PId) :
+    Observed H deps q ↔ Observed H' deps q := by
+  unfold Observed
+  constructor
+  · rintro (h | ⟨d, hd, ha⟩)
+    · exact Or.inl h
+    · exact Or.inr ⟨d, hd, anc_mono sub ha⟩
+  · rintro (h | ⟨d, hd, ha⟩)
+    · exact Or.inl h
+    · exact Or.inr ⟨d, hd, anc_local past hd ha⟩
+
+theorem ops_sub (sub : ∀ Q ∈ H, Q ∈ H') {x : OpId × Op} (h : x ∈ ops H) : x ∈ ops H' := by
+  unfold ops at h ⊢
+  obtain ⟨P, hP, hm⟩ := List.mem_flatMap.mp h
+  exact List.mem_flatMap.mpr ⟨P, sub P hP, hm⟩
+
+/-- An operation of `H'` from an observed patch is an operation of `H`. -/
+theorem op_local (past : PastIn H H' deps) {x : OpId × Op} (h : x ∈ ops H')
+    (hobs : Observed H' deps x.1.patch) : x ∈ ops H := by
+  obtain ⟨o, op⟩ := x
+  unfold ops at h ⊢
+  obtain ⟨P, hP, hm⟩ := List.mem_flatMap.mp h
+  have e := (mem_opsOf_iff.mp hm).1
+  exact List.mem_flatMap.mpr ⟨P, past P hP (e ▸ hobs), hm⟩
+
+theorem atoms_sub (sub : ∀ Q ∈ H, Q ∈ H') {x} (h : x ∈ atoms H) : x ∈ atoms H' := by
+  unfold atoms at h ⊢
+  obtain ⟨o, ho, hm⟩ := List.mem_flatMap.mp h
+  exact List.mem_flatMap.mpr ⟨o, ops_sub sub ho, hm⟩
+
+theorem atoms_local (past : PastIn H H' deps) {n : NodeId} {b} (h : (n, b) ∈ atoms H')
+    (hobs : Observed H' deps n.op.patch) : (n, b) ∈ atoms H := by
+  unfold atoms at h ⊢
+  obtain ⟨x, hx, hm⟩ := List.mem_flatMap.mp h
+  obtain ⟨l, r, xs, rfl, -⟩ := mem_atomsOf hm
+  exact List.mem_flatMap.mpr ⟨_, op_local past hx hobs, hm⟩
+
+theorem facts_sub (sub : ∀ Q ∈ H, Q ∈ H') {x} (h : x ∈ facts H) : x ∈ facts H' := by
+  unfold facts at h ⊢
+  obtain ⟨o, ho, hm⟩ := List.mem_flatMap.mp h
+  exact List.mem_flatMap.mpr ⟨o, ops_sub sub ho, hm⟩
+
+theorem facts_local (past : PastIn H H' deps) {u v : Anchor} {o : OpId} (h : (u, v, o) ∈ facts H')
+    (hobs : Observed H' deps o.patch) : (u, v, o) ∈ facts H := by
+  unfold facts at h ⊢
+  obtain ⟨oo, hoo, hm⟩ := List.mem_flatMap.mp h
+  obtain ⟨e, -, he⟩ := List.mem_map.mp hm
+  simp only [Prod.mk.injEq] at he
+  obtain ⟨-, -, rfl⟩ := he
+  exact List.mem_flatMap.mpr ⟨oo, op_local past hoo hobs, hm⟩
+
+theorem isAtom_local (sub : ∀ Q ∈ H, Q ∈ H') (past : PastIn H H' deps) {n : NodeId}
+    (hobs : Observed H' deps n.op.patch) : IsAtom H n ↔ IsAtom H' n := by
+  unfold IsAtom atom
+  rw [Ne, Ne, lookup_none, lookup_none]
+  constructor
+  · intro h1 h2; exact h1 (fun b hb => h2 b (atoms_sub sub hb))
+  · intro h1 h2; exact h1 (fun b hb => h2 b (atoms_local past hb hobs))
+
+theorem retracted_local (sub : ∀ Q ∈ H, Q ∈ H') (past : PastIn H H' deps) (o : OpId) :
+    RetractedBy H (Observed H deps) o ↔ RetractedBy H' (Observed H' deps) o := by
+  unfold RetractedBy
+  constructor
+  · rintro ⟨r, hr, ho⟩
+    exact ⟨r, ops_sub sub hr, (observed_local sub past _).mp ho⟩
+  · rintro ⟨r, hr, ho⟩
+    exact ⟨r, op_local past hr ho, (observed_local sub past _).mpr ho⟩
+
+theorem causalEdge_local (sub : ∀ Q ∈ H, Q ∈ H') (past : PastIn H H' deps) :
+    CausalEdge H deps = CausalEdge H' deps := by
+  funext own u v
+  apply propext
+  unfold CausalEdge
+  apply or_congr Iff.rfl (or_congr ?_ Iff.rfl)
+  constructor
+  · rintro ⟨o, hf, ho, hr, hown⟩
+    exact ⟨o, facts_sub sub hf, (observed_local sub past _).mp ho,
+      fun x => hr ((retracted_local sub past o).mpr x), hown⟩
+  · rintro ⟨o, hf, ho, hr, hown⟩
+    exact ⟨o, facts_local past hf ho, (observed_local sub past _).mpr ho,
+      fun x => hr ((retracted_local sub past o).mp x), hown⟩
+
+theorem reaches_local (sub : ∀ Q ∈ H, Q ∈ H') (past : PastIn H H' deps) :
+    Reaches H deps = Reaches H' deps := by
+  unfold Reaches
+  rw [causalEdge_local sub past]
+
+theorem findSome?_sub {α β} {l l' : List α} (f : α → Option β) (sub : ∀ x ∈ l, x ∈ l')
+    (back : ∀ x ∈ l', f x ≠ none → x ∈ l)
+    (u : ∀ x ∈ l', ∀ y ∈ l', ∀ b c, f x = some b → f y = some c → b = c) :
+    l.findSome? f = l'.findSome? f := by
+  rcases h1 : l.findSome? f with _ | b
+  · rcases h2 : l'.findSome? f with _ | c
+    · rfl
+    · obtain ⟨y, hy, hfy⟩ := List.exists_of_findSome?_eq_some h2
+      rw [List.findSome?_eq_none_iff] at h1
+      rw [h1 y (back y hy (by rw [hfy]; simp))] at hfy
+      cases hfy
+  · obtain ⟨x, hx, hfx⟩ := List.exists_of_findSome?_eq_some h1
+    rcases h2 : l'.findSome? f with _ | c
+    · rw [List.findSome?_eq_none_iff] at h2
+      rw [h2 x (sub x hx)] at hfx
+      cases hfx
+    · obtain ⟨y, hy, hfy⟩ := List.exists_of_findSome?_eq_some h2
+      rw [u x (sub x hx) y hy b c hfx hfy]
+
+theorem tag_local (sub : ∀ Q ∈ H, Q ∈ H') (past : PastIn H H' deps) (hu : (ids H').Nodup)
+    {d : OpId} (hobs : Observed H' deps d.patch) : tag H d = tag H' d := by
+  unfold tag
+  apply findSome?_sub _ (fun x hx => ops_sub sub hx)
+  · rintro ⟨o, op⟩ hx hf
+    cases op <;> simp at hf
+    subst hf
+    exact op_local past hx hobs
+  · rintro ⟨o₁, op₁⟩ h₁ ⟨o₂, op₂⟩ h₂ b c hb hc
+    cases op₁ <;> simp at hb
+    cases op₂ <;> simp at hc
+    obtain ⟨rfl, rfl⟩ := hb
+    obtain ⟨rfl, rfl⟩ := hc
+    have := op_unique hu h₁ h₂
+    simpa using this
+
+theorem insertionOf_local (sub : ∀ Q ∈ H, Q ∈ H') (past : PastIn H H' deps) (hu : (ids H').Nodup)
+    {i : OpId} (hobs : Observed H' deps i.patch) : insertionOf H i = insertionOf H' i := by
+  unfold insertionOf
+  apply findSome?_sub _ (fun x hx => ops_sub sub hx)
+  · rintro ⟨o, op⟩ hx hf
+    cases op <;> simp at hf
+    subst hf
+    exact op_local past hx hobs
+  · rintro ⟨o₁, op₁⟩ h₁ ⟨o₂, op₂⟩ h₂ b c hb hc
+    cases op₁ <;> simp at hb
+    cases op₂ <;> simp at hc
+    obtain ⟨rfl, rfl⟩ := hb
+    obtain ⟨rfl, rfl⟩ := hc
+    have := op_unique hu h₁ h₂
+    simp only [Op.insert.injEq] at this
+    obtain ⟨rfl, rfl, -⟩ := this
+    rfl
+
+theorem isOrder_local (sub : ∀ Q ∈ H, Q ∈ H') (past : PastIn H H' deps) {o : OpId}
+    (hobs : Observed H' deps o.patch) : IsOrder H o ↔ IsOrder H' o := by
+  unfold IsOrder
+  constructor
+  · rintro ⟨b, a, h⟩; exact ⟨b, a, ops_sub sub h⟩
+  · rintro ⟨b, a, h⟩; exact ⟨b, a, op_local past h hobs⟩
+
+theorem checkAnchor_local (sub : ∀ Q ∈ H, Q ∈ H') (past : PastIn H H' deps) (a : Anchor) :
+    checkAnchor H deps a = checkAnchor H' deps a := by
+  cases a with
+  | node n =>
+    unfold checkAnchor
+    by_cases ho : Observed H' deps n.op.patch
+    · have ho' := (observed_local sub past _).mpr ho
+      simp only [ho, ho', not_true_eq_false, if_false]
+      rw [isAtom_local sub past ho]
+    · have ho' : ¬ Observed H deps n.op.patch := fun x => ho ((observed_local sub past _).mp x)
+      simp [ho, ho']
+  | start => rfl
+  | stop => rfl
+
+theorem validOp_local (sub : ∀ Q ∈ H, Q ∈ H') (past : PastIn H H' deps) (hu : (ids H').Nodup)
+    (self : PId) (own : Own) (k : Nat) (op : Op) :
+    validOp H self deps own k op = validOp H' self deps own k op := by
+  have hc := checkAnchor_local sub past
+  have hr := reaches_local sub past
+  have ho := observed_local sub past
+  have hO : Observed H deps = Observed H' deps := funext fun q => propext (ho q)
+  cases op with
+  | insert l r xs => unfold validOp; simp only [hc]; rw [hr]
+  | delete ts => unfold validOp; simp only [hc]
+  | order b a => unfold validOp; simp only [hc]; rw [hr]
+  | restore d =>
+    dsimp only [validOp]
+    rw [hO]
+    by_cases hd : Observed H' deps d.patch
+    · rw [tag_local sub past hu hd]
+    · simp [hd]
+  | keep d i =>
+    dsimp only [validOp]
+    rw [hO]
+    by_cases hd : Observed H' deps d.patch
+    · by_cases hi : Observed H' deps i.patch
+      · rw [tag_local sub past hu hd, insertionOf_local sub past hu hi]
+      · simp [hd, hi]
+    · simp [hd]
+  | retract o =>
+    dsimp only [validOp]
+    rw [hO]
+    by_cases hd : Observed H' deps o.patch
+    · rw [isOrder_local sub past hd]
+    · simp [hd]
+
+end Local
+
+/-! ## Admission conditions -/
+
+theorem ids_append (H : Hist) (R : Patch) : ids (H ++ [R]) = ids H ++ [R.id] := by simp [ids]
+
+theorem ids_sub {H H' : Hist} (sub : ∀ Q ∈ H, Q ∈ H') {p : PId} (h : p ∈ ids H) : p ∈ ids H' := by
+  unfold ids at h ⊢
+  obtain ⟨Q, hQ, e⟩ := List.mem_map.mp h
+  exact List.mem_map.mpr ⟨Q, sub Q hQ, e⟩
+
+theorem find_none {H : Hist} {p : PId} (h : p ∉ ids H) : H.find? (fun x => decide (x.id = p)) = none := by
+  apply List.find?_eq_none.mpr
+  intro Q hQ e
+  simp only [decide_eq_true_eq] at e
+  exact h (e ▸ List.mem_map_of_mem hQ)
+
+theorem nodup_snoc {l : List PId} {x : PId} (h : l.Nodup) (hx : x ∉ l) : (l ++ [x]).Nodup := by
+  rw [List.nodup_append]
+  refine ⟨h, List.nodup_singleton x, ?_⟩
+  simp only [List.mem_singleton]
+  first
+    | (intro a ha b hb; subst hb; exact fun e => hx (e ▸ ha))
+    | (intro a ha hb; subst hb; exact hx ha)
+    | (simpa using hx)
+
+/-- What a successful admission checked. -/
+theorem applySpec_conds {H H' : Hist} {R : Patch} (h : applySpec H R = .ok (H', .inserted)) :
+    R.deps.Nodup ∧ (∀ d ∈ R.deps, d ∈ ids H) ∧ R.ops ≠ [] ∧ validate H R = .ok () := by
+  unfold applySpec at h
+  split at h
+  · split_ifs at h <;> simp at h
+  · by_cases h1 : ¬ R.deps.Nodup ∨ R.id ∈ R.deps
+    · rw [if_pos h1] at h; cases h
+    · rw [if_neg h1] at h
+      try dsimp only at h
+      by_cases h2 : R.deps.filter (· ∉ ids H) ≠ []
+      · rw [if_pos h2] at h; cases h
+      · rw [if_neg h2] at h
+        by_cases h3 : R.ops = []
+        · rw [if_pos h3] at h; cases h
+        · rw [if_neg h3] at h
+          refine ⟨Classical.not_not.mp (not_or.mp h1).1, ?_, h3, ?_⟩
+          · intro d hd
+            by_contra hn
+            exact h2 (List.ne_nil_of_mem (List.mem_filter.mpr ⟨hd, by simpa using hn⟩))
+          · cases hv : validate H R with
+            | error e => rw [hv] at h; simp [Except.map] at h
+            | ok u => rfl
+
+/-- The conditions under which a patch is admitted. -/
+theorem applySpec_inserted {H : Hist} {R : Patch} (hn : R.id ∉ ids H) (hd : R.deps.Nodup)
+    (hs : R.id ∉ R.deps) (hm : ∀ d ∈ R.deps, d ∈ ids H) (he : R.ops ≠ [])
+    (hv : validate H R = .ok ()) : applySpec H R = .ok (H ++ [R], .inserted) := by
+  unfold applySpec
+  rw [find_none hn]
+  dsimp only
+  rw [if_neg (by simp [hd, hs])]
+  have hmiss : ¬ (R.deps.filter (· ∉ ids H) ≠ []) := by
+    simp only [ne_eq, not_not, List.filter_eq_nil_iff, decide_eq_true_eq, not_not]
+    exact hm
+  rw [if_neg hmiss, if_neg he, hv]
+  rfl
+
+/-- A new patch is nobody's ancestor in a dependency-closed history. -/
+theorem anc_fresh {H : Hist} {R : Patch} (closed : ∀ Q ∈ H, ∀ d ∈ Q.deps, d ∈ ids H)
+    (hf : R.id ∉ ids H) (hs : R.id ∉ R.deps) (b : PId) : ¬ Anc (H ++ [R]) R.id b := by
+  intro h
+  obtain ⟨c, ⟨S, hS, -, hx⟩, -⟩ := Relation.TransGen.head'_iff.mp h
+  rcases List.mem_append.mp hS with hS | hS
+  · exact hf (closed S hS _ hx)
+  · simp at hS; subst hS; exact hs hx
+
 /-! ## Theorems to prove -/
 
 def Topological (l : List Patch) : Prop :=
@@ -716,15 +1004,57 @@ theorem view_unique (H : Hist) (V W : View) (hv : IsView H V) (hw : IsView H W) 
 /-- T1.4: validation reads only the patch's causal past. -/
 theorem validate_local (H H' : Hist) (P : Patch) (sub : ∀ Q ∈ H, Q ∈ H')
     (past : ∀ Q ∈ H', Observed H' P.deps Q.id → Q ∈ H)
-    (closed : ∀ Q ∈ H, ∀ d ∈ Q.deps, d ∈ ids H) :
-    validate H P = validate H' P := by sorry
+    (hu : (ids H').Nodup) :
+    validate H P = validate H' P := by
+  have : validOp H P.id P.deps = validOp H' P.id P.deps := by
+    funext own k op
+    exact validOp_local sub past hu P.id own k op
+  unfold validate
+  rw [this]
+
+/-- Appending a patch that `deps` cannot observe leaves validation unchanged. -/
+theorem validate_append {H : Hist} {R P : Patch} (closed : ∀ Q ∈ H, ∀ d ∈ Q.deps, d ∈ ids H)
+    (hf : R.id ∉ ids H) (hs : R.id ∉ R.deps) (hu : (ids H).Nodup) (hP : R.id ∉ P.deps) :
+    validate H P = validate (H ++ [R]) P := by
+  apply validate_local H (H ++ [R]) P (fun Q hQ => List.mem_append_left _ hQ)
+  · intro Q hQ ho
+    rcases List.mem_append.mp hQ with hQ | hQ
+    · exact hQ
+    · simp at hQ; subst hQ
+      rcases ho with ho | ⟨d, -, ha⟩
+      · exact absurd ho hP
+      · exact absurd ha (anc_fresh closed hf hs d)
+  · rw [ids_append]; exact nodup_snoc hu hf
 
 /-- T3.2: two independent admissions commute. -/
 theorem apply_comm (H H₁ H₂ : Hist) (P Q : Patch)
     (hp : applySpec H P = .ok (H₁, .inserted)) (hq : applySpec H₁ Q = .ok (H₂, .inserted))
-    (indep : P.id ∉ Q.deps) :
+    (indep : P.id ∉ Q.deps) (closed : ∀ R ∈ H, ∀ d ∈ R.deps, d ∈ ids H) (hu : (ids H).Nodup) :
     ∃ H₁' H₂', applySpec H Q = .ok (H₁', .inserted) ∧ applySpec H₁' P = .ok (H₂', .inserted) ∧
-      H₂.Perm H₂' := by sorry
+      H₂.Perm H₂' := by
+  have e1 := applySpec_ok hp
+  have e2 := applySpec_ok hq
+  obtain ⟨pf, ps⟩ := applySpec_fresh hp
+  obtain ⟨qf, qs⟩ := applySpec_fresh hq
+  obtain ⟨pn, pd, pe, pv⟩ := applySpec_conds hp
+  obtain ⟨qn, qd, qe, qv⟩ := applySpec_conds hq
+  subst e1 e2
+  rw [ids_append] at qf qd
+  have qfH : Q.id ∉ ids H := fun h => qf (List.mem_append_left _ h)
+  have hPQ : P.id ≠ Q.id := fun e => qf (by rw [← e]; simp)
+  have qdH : ∀ d ∈ Q.deps, d ∈ ids H := by
+    intro d hd
+    rcases List.mem_append.mp (qd d hd) with h | h
+    · exact h
+    · simp at h; subst h; exact absurd hd indep
+  have qv' : validate H Q = .ok () := by rw [validate_append closed pf ps hu indep]; exact qv
+  have pQ : Q.id ∉ P.deps := fun h => qfH (pd _ h)
+  have pv' : validate (H ++ [Q]) P = .ok () := by rw [← validate_append closed qfH qs hu pQ]; exact pv
+  refine ⟨H ++ [Q], H ++ [Q] ++ [P], applySpec_inserted qfH qn qs qdH qe qv', ?_, ?_⟩
+  · refine applySpec_inserted ?_ pn ps (fun d hd => ?_) pe pv'
+    · rw [ids_append]; simp only [List.mem_append, List.mem_singleton, not_or]; exact ⟨pf, hPQ⟩
+    · rw [ids_append]; exact List.mem_append_left _ (pd d hd)
+  · simpa using List.Perm.append_left H (List.Perm.swap Q P [])
 
 /-- T3.3: a patch refused for anything but missing dependencies is refused
 in every history it could be delivered to. -/
@@ -732,19 +1062,267 @@ theorem rejection_stable (H H' : Hist) (P : Patch) (e : Error)
     (h : applySpec H P = .error e) (notMissing : ∀ ms, e ≠ .missingDependencies ms)
     (notCollision : e ≠ .identityCollision)
     (sub : ∀ Q ∈ H, Q ∈ H') (past : ∀ Q ∈ H', Observed H' P.deps Q.id → Q ∈ H)
-    (closed : ∀ Q ∈ H, ∀ d ∈ Q.deps, d ∈ ids H) (fresh : P.id ∉ ids H') :
-    applySpec H' P = .error e := by sorry
+    (closed : ∀ Q ∈ H, ∀ d ∈ Q.deps, d ∈ ids H) (fresh : P.id ∉ ids H')
+    (hu : (ids H').Nodup) :
+    applySpec H' P = .error e := by
+  have freshH : P.id ∉ ids H := fun x => fresh (ids_sub sub x)
+  unfold applySpec at h ⊢
+  rw [find_none freshH] at h
+  rw [find_none fresh]
+  dsimp only at h ⊢
+  by_cases h1 : ¬ P.deps.Nodup ∨ P.id ∈ P.deps
+  · rw [if_pos h1] at h ⊢; exact h
+  · rw [if_neg h1] at h ⊢
+    by_cases h2 : P.deps.filter (· ∉ ids H) ≠ []
+    · rw [if_pos h2] at h; cases h; exact absurd rfl (notMissing _)
+    · have hdeps : ∀ d ∈ P.deps, d ∈ ids H := by
+        intro d hd
+        by_contra hn
+        exact h2 (List.ne_nil_of_mem (List.mem_filter.mpr ⟨hd, by simpa using hn⟩))
+      have h2' : ¬ P.deps.filter (· ∉ ids H') ≠ [] := by
+        intro hne
+        obtain ⟨d, hd⟩ := List.exists_mem_of_ne_nil _ hne
+        rw [List.mem_filter] at hd
+        simp only [decide_eq_true_eq] at hd
+        exact hd.2 (ids_sub sub (hdeps d hd.1))
+      rw [if_neg h2] at h
+      rw [if_neg h2']
+      by_cases h3 : P.ops = []
+      · rw [if_pos h3] at h ⊢; exact h
+      · rw [if_neg h3] at h ⊢
+        rw [← validate_local H H' P sub past hu]
+        cases hv : validate H P with
+        | error e' => rw [hv] at h; simpa [Except.map] using h
+        | ok u => rw [hv] at h; simp [Except.map] at h
+
+/-! ## What `replay` builds -/
+
+def Closed (H : Hist) : Prop := ∀ Q ∈ H, ∀ d ∈ Q.deps, d ∈ ids H
+
+theorem applySpec_present {H H' : Hist} {R : Patch}
+    (h : applySpec H R = .ok (H', .alreadyPresent)) : H' = H ∧ R ∈ H := by
+  unfold applySpec at h
+  split at h
+  · rename_i Q hQ
+    split_ifs at h with he
+    · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+      exact ⟨h.1.symm, he ▸ List.mem_of_find?_eq_some hQ⟩
+  · by_cases h1 : ¬ R.deps.Nodup ∨ R.id ∈ R.deps
+    · rw [if_pos h1] at h; cases h
+    · rw [if_neg h1] at h
+      try dsimp only at h
+      by_cases h2 : R.deps.filter (· ∉ ids H) ≠ []
+      · rw [if_pos h2] at h; cases h
+      · rw [if_neg h2] at h
+        by_cases h3 : R.ops = []
+        · rw [if_pos h3] at h; cases h
+        · rw [if_neg h3] at h
+          cases hv : validate H R <;> rw [hv] at h <;> simp [Except.map] at h
+
+theorem replay_append (H : Hist) (l m : List Patch) :
+    replay H (l ++ m) = (replay H l) >>= fun G => replay G m := by
+  induction l generalizing H with
+  | nil => rfl
+  | cons P ps ih =>
+    rw [List.cons_append, replay, replay]
+    cases applySpec H P with
+    | error e => rfl
+    | ok x =>
+      obtain ⟨H1, a⟩ := x
+      exact ih H1
+
+/-- A replayed history is dependency-closed with unique identities, holds
+exactly the delivered patches, and every patch it added was admitted to a
+closed sub-history. -/
+theorem replay_props {H H' : Hist} {l : List Patch} (h : replay H l = .ok H') (hc : Closed H)
+    (hu : (ids H).Nodup) :
+    Closed H' ∧ (ids H').Nodup ∧ (∀ Q ∈ H, Q ∈ H') ∧ (∀ P ∈ l, P ∈ H') ∧
+      (∀ Q ∈ H', Q ∈ H ∨ Q ∈ l) ∧
+      (∀ P ∈ H', P ∉ H → ∃ F, (∀ Q ∈ F, Q ∈ H') ∧ Closed F ∧ (ids F).Nodup ∧
+        applySpec F P = .ok (F ++ [P], .inserted)) := by
+  induction l generalizing H with
+  | nil =>
+    simp only [replay] at h
+    cases h
+    exact ⟨hc, hu, fun Q hQ => hQ, by simp, fun Q hQ => Or.inl hQ, fun P hP hn => absurd hP hn⟩
+  | cons P ps ih =>
+    rw [replay] at h
+    rcases ha : applySpec H P with e | ⟨H1, a⟩
+    · rw [ha] at h; cases h
+    · rw [ha] at h
+      change replay H1 ps = .ok H' at h
+      cases a with
+      | inserted =>
+        have e1 := applySpec_ok ha
+        obtain ⟨pf, -⟩ := applySpec_fresh ha
+        obtain ⟨-, pd, -, -⟩ := applySpec_conds ha
+        subst e1
+        have hc1 : Closed (H ++ [P]) := by
+          intro Q hQ d hd
+          rw [ids_append]
+          rcases List.mem_append.mp hQ with hQ | hQ
+          · exact List.mem_append_left _ (hc Q hQ d hd)
+          · simp at hQ; subst hQ; exact List.mem_append_left _ (pd d hd)
+        have hu1 : (ids (H ++ [P])).Nodup := by rw [ids_append]; exact nodup_snoc hu pf
+        obtain ⟨c', u', sub', all', back', rec'⟩ := ih h hc1 hu1
+        refine ⟨c', u', fun Q hQ => sub' Q (List.mem_append_left _ hQ), ?_, ?_, ?_⟩
+        · intro x hx
+          rcases List.mem_cons.mp hx with rfl | hx
+          · exact sub' x (by simp)
+          · exact all' x hx
+        · intro Q hQ
+          rcases back' Q hQ with hQ | hQ
+          · rcases List.mem_append.mp hQ with hQ | hQ
+            · exact Or.inl hQ
+            · simp at hQ; subst hQ; exact Or.inr (by simp)
+          · exact Or.inr (List.mem_cons_of_mem _ hQ)
+        · intro P' hP' hn
+          by_cases h1 : P' ∈ H ++ [P]
+          · rcases List.mem_append.mp h1 with h1 | h1
+            · exact absurd h1 hn
+            · simp at h1; subst h1
+              exact ⟨H, fun Q hQ => sub' Q (List.mem_append_left _ hQ), hc, hu, ha⟩
+          · exact rec' P' hP' h1
+      | alreadyPresent =>
+        obtain ⟨rfl, hP⟩ := applySpec_present ha
+        obtain ⟨c', u', sub', all', back', rec'⟩ := ih h hc hu
+        refine ⟨c', u', sub', ?_, ?_, rec'⟩
+        · intro x hx
+          rcases List.mem_cons.mp hx with rfl | hx
+          · exact sub' x hP
+          · exact all' x hx
+        · intro Q hQ
+          rcases back' Q hQ with hQ | hQ
+          · exact Or.inl hQ
+          · exact Or.inr (List.mem_cons_of_mem _ hQ)
+
+/-- In a history with unique identities, what `deps` observes lies inside any
+closed sub-history containing `deps`. -/
+theorem obs_ids {F U : Hist} (sub : ∀ Q ∈ F, Q ∈ U) (cF : Closed F) (hu : (ids U).Nodup)
+    {deps : List PId} (hd : ∀ d ∈ deps, d ∈ ids F) {q : PId} (h : Observed U deps q) :
+    q ∈ ids F := by
+  have key : ∀ y, y ∈ ids F → ∀ x, (∃ S ∈ U, S.id = y ∧ x ∈ S.deps) → x ∈ ids F := by
+    rintro y hy x ⟨S, hS, e, hx⟩
+    unfold ids at hy hu
+    obtain ⟨S', hS', e'⟩ := List.mem_map.mp hy
+    have : S = S' := List.inj_on_of_nodup_map hu hS (sub S' hS') (e.trans e'.symm)
+    subst this
+    exact cF S hS' x hx
+  rcases h with h | ⟨d, hd', ha⟩
+  · exact hd q h
+  · induction ha using Relation.TransGen.head_induction_on with
+    | single hs => exact key _ (hd _ hd') _ hs
+    | head hs _ ih => exact key _ ih _ hs
+
+theorem validate_closed {F U : Hist} {P : Patch} (sub : ∀ Q ∈ F, Q ∈ U) (cF : Closed F)
+    (hu : (ids U).Nodup) (hd : ∀ d ∈ P.deps, d ∈ ids F) : validate F P = validate U P := by
+  apply validate_local F U P sub _ hu
+  intro Q hQ ho
+  have hi := obs_ids sub cF hu hd ho
+  unfold ids at hi hu
+  obtain ⟨Q', hQ', e⟩ := List.mem_map.mp hi
+  have : Q' = Q := List.inj_on_of_nodup_map hu (sub Q' hQ') hQ e
+  exact this ▸ hQ'
+
+theorem topo_split {l pre post : List Patch} {x : Patch} (t : Topological l)
+    (e : l = pre ++ x :: post) : ∀ d ∈ x.deps, ∃ y ∈ pre, y.id = d := by
+  subst e
+  intro d hd
+  have hi : pre.length < (pre ++ x :: post).length := by simp
+  have hx : (pre ++ x :: post)[pre.length] = x := by simp
+  obtain ⟨j, hj, hjl, hjd⟩ := t pre.length hi d (by rw [hx]; exact hd)
+  refine ⟨pre[j], List.getElem_mem _, ?_⟩
+  rw [← hjd, List.getElem_append_left hj]
 
 /-- T3.3: admissibility does not depend on the delivery order. -/
 theorem admissible_any_order (l₁ l₂ : List Patch) (same : ∀ P, P ∈ l₁ ↔ P ∈ l₂)
     (t₂ : Topological l₂) (u : IdsInjective l₁) (H₁ : Hist) (h : replay [] l₁ = .ok H₁) :
-    ∃ H₂, replay [] l₂ = .ok H₂ ∧ ∀ P, P ∈ H₁ ↔ P ∈ H₂ := by sorry
+    ∃ H₂, replay [] l₂ = .ok H₂ ∧ ∀ P, P ∈ H₁ ↔ P ∈ H₂ := by
+  obtain ⟨-, u1, -, all1, back1, rec1⟩ := replay_props h (by simp [Closed]) (by simp [ids])
+  have inH₁ : ∀ P, P ∈ l₂ → P ∈ H₁ := fun P hP => all1 P ((same P).mpr hP)
+  have H₁in : ∀ P ∈ H₁, P ∈ l₂ := fun P hP => (same P).mp ((back1 P hP).resolve_left (by simp))
+  have inj : ∀ P ∈ H₁, ∀ Q ∈ H₁, P.id = Q.id → P = Q := by
+    intro P hP Q hQ e
+    unfold ids at u1
+    exact List.inj_on_of_nodup_map u1 hP hQ e
+  suffices key : ∀ post pre G, l₂ = pre ++ post → replay [] pre = .ok G → Closed G →
+      (ids G).Nodup → (∀ P, P ∈ G ↔ P ∈ pre) →
+      ∃ H₂, replay [] l₂ = .ok H₂ ∧ ∀ P, P ∈ H₂ ↔ P ∈ l₂ by
+    obtain ⟨H₂, h₂, m₂⟩ := key l₂ [] [] rfl rfl (by simp [Closed]) (by simp [ids]) (by simp)
+    exact ⟨H₂, h₂, fun P => ⟨fun hP => (m₂ P).mpr (H₁in P hP), fun hP => inH₁ P ((m₂ P).mp hP)⟩⟩
+  intro post
+  induction post with
+  | nil =>
+    intro pre G e hG _ _ hm
+    simp only [List.append_nil] at e
+    subst e
+    exact ⟨G, hG, hm⟩
+  | cons x post ih =>
+    intro pre G e hG cG uG hm
+    have hx2 : x ∈ l₂ := by rw [e]; simp
+    have hxH : x ∈ H₁ := inH₁ x hx2
+    have Gsub : ∀ Q ∈ G, Q ∈ H₁ := fun Q hQ =>
+      inH₁ Q (by rw [e]; exact List.mem_append_left _ ((hm Q).mp hQ))
+    have hdeps : ∀ d ∈ x.deps, d ∈ ids G := by
+      intro d hd
+      obtain ⟨y, hy, hyd⟩ := topo_split t₂ e d hd
+      exact hyd ▸ List.mem_map_of_mem ((hm y).mpr hy)
+    have step : ∃ G', replay G [x] = .ok G' ∧ Closed G' ∧ (ids G').Nodup ∧
+        ∀ P, P ∈ G' ↔ P ∈ pre ++ [x] := by
+      by_cases hxG : x ∈ G
+      · have hf : G.find? (fun y => decide (y.id = x.id)) = some x := by
+          rcases hf : G.find? (fun y => decide (y.id = x.id)) with _ | Q
+          · exact absurd (List.find?_eq_none.mp hf x hxG) (by simp)
+          · have hQ := List.mem_of_find?_eq_some hf
+            have eQ : Q.id = x.id := by simpa using List.find?_some hf
+            exact hf.trans (congrArg some (inj Q (Gsub Q hQ) x hxH eQ))
+        have ha : applySpec G x = .ok (G, .alreadyPresent) := by
+          unfold applySpec; rw [hf]; simp
+        refine ⟨G, by rw [replay, ha]; rfl, cG, uG, fun P => ?_⟩
+        rw [hm P]
+        constructor
+        · intro h; exact List.mem_append_left _ h
+        · intro h
+          rcases List.mem_append.mp h with h | h
+          · exact h
+          · simp at h; subst h; exact (hm P).mp hxG
+      · obtain ⟨F, Fsub, cF, uF, hF⟩ := rec1 x hxH (by simp)
+        obtain ⟨-, xs⟩ := applySpec_fresh hF
+        obtain ⟨xn, xd, xe, xv⟩ := applySpec_conds hF
+        have xfG : x.id ∉ ids G := by
+          intro hi
+          unfold ids at hi
+          obtain ⟨Q, hQ, eQ⟩ := List.mem_map.mp hi
+          exact hxG (inj Q (Gsub Q hQ) x hxH eQ ▸ hQ)
+        have hv : validate G x = .ok () := by
+          rw [validate_closed Gsub cG u1 hdeps, ← validate_closed Fsub cF u1 xd]
+          exact xv
+        have ha := applySpec_inserted xfG xn xs hdeps xe hv
+        refine ⟨G ++ [x], by rw [replay, ha]; rfl, ?_, ?_, ?_⟩
+        · intro Q hQ d hd
+          rw [ids_append]
+          rcases List.mem_append.mp hQ with hQ | hQ
+          · exact List.mem_append_left _ (cG Q hQ d hd)
+          · simp at hQ; subst hQ; exact List.mem_append_left _ (hdeps d hd)
+        · rw [ids_append]; exact nodup_snoc uG xfG
+        · intro P
+          simp only [List.mem_append, List.mem_singleton]
+          rw [hm P]
+    obtain ⟨G', hG', cG', uG', hm'⟩ := step
+    exact ih (pre ++ [x]) G' (by rw [e]; simp) (by rw [replay_append, hG]; exact hG') cG' uG' hm'
 
 /-- T3.4 (main): any two complete deliveries of the same patches have the
 same view. -/
 theorem view_converges (l₁ l₂ : List Patch) (same : ∀ P, P ∈ l₁ ↔ P ∈ l₂)
     (t₂ : Topological l₂) (u : IdsInjective l₁) (H₁ : Hist) (h₁ : replay [] l₁ = .ok H₁) :
-    ∃ H₂, replay [] l₂ = .ok H₂ ∧ ∀ V, IsView H₁ V ↔ IsView H₂ V := by sorry
+    ∃ H₂, replay [] l₂ = .ok H₂ ∧ ∀ V, IsView H₁ V ↔ IsView H₂ V := by
+  obtain ⟨H₂, h₂, m⟩ := admissible_any_order l₁ l₂ same t₂ u H₁ h₁
+  refine ⟨H₂, h₂, fun V => ?_⟩
+  obtain ⟨-, u1, -⟩ := replay_props h₁ (by simp [Closed]) (by simp [ids])
+  obtain ⟨-, u2, -⟩ := replay_props h₂ (by simp [Closed]) (by simp [ids])
+  have n1 : H₁.Nodup := List.Nodup.of_map (·.id) (show (H₁.map (·.id)).Nodup from u1)
+  have n2 : H₂.Nodup := List.Nodup.of_map (·.id) (show (H₂.map (·.id)).Nodup from u2)
+  exact view_perm u1 ((List.perm_ext_iff_of_nodup n1 n2).mpr m) V
 
 theorem snoc_chain {H : Hist} {p : List Anchor} {u v : Anchor} (hp : p.IsChain (Sum H))
     (hl : p.getLast? = some u) (s : Sum H u v) : (p ++ [v]).IsChain (Sum H) := by
@@ -1174,9 +1752,82 @@ theorem restore_clears (H H' : Hist) (R : Patch) (d : OpId)
   exact List.mem_append_right _ hk
 
 /-- T2.6: an acknowledgement is specific to its pair. -/
+theorem tag_some_mem {H : Hist} {d : OpId} {ts : List NodeId} (h : tag H d = some ts) :
+    d.patch ∈ ids H := by
+  unfold tag at h
+  obtain ⟨⟨o, op⟩, hm, hf⟩ := List.exists_of_findSome?_eq_some h
+  cases op <;> simp at hf
+  obtain ⟨rfl, -⟩ := hf
+  unfold ops at hm
+  obtain ⟨P, hP, hm⟩ := List.mem_flatMap.mp hm
+  exact List.mem_map.mpr ⟨P, hP, ((mem_opsOf_iff.mp hm).1).symm⟩
+
+theorem insertionOf_some_mem {H : Hist} {i : OpId} {x : Anchor × Anchor}
+    (h : insertionOf H i = some x) : i.patch ∈ ids H := by
+  unfold insertionOf at h
+  obtain ⟨⟨o, op⟩, hm, hf⟩ := List.exists_of_findSome?_eq_some h
+  cases op <;> simp at hf
+  obtain ⟨rfl, -⟩ := hf
+  unfold ops at hm
+  obtain ⟨P, hP, hm⟩ := List.mem_flatMap.mp hm
+  exact List.mem_map.mpr ⟨P, hP, ((mem_opsOf_iff.mp hm).1).symm⟩
+
+/-- Appending a fresh patch adds no ancestry between existing patches. -/
+theorem anc_append {H : Hist} {R : Patch} (closed : Closed H) (fresh : R.id ∉ ids H)
+    (self : R.id ∉ R.deps) {x y : PId} (hy : y ≠ R.id) : Anc (H ++ [R]) x y ↔ Anc H x y := by
+  constructor
+  · intro h
+    induction h with
+    | single hs =>
+      obtain ⟨P, hP, e, hx⟩ := hs
+      rcases List.mem_append.mp hP with hP | hP
+      · exact .single ⟨P, hP, e, hx⟩
+      · simp at hP; subst hP; exact absurd e.symm hy
+    | tail _ hs ih =>
+      obtain ⟨P, hP, e, hx⟩ := hs
+      rcases List.mem_append.mp hP with hP | hP
+      · have hb : _ ≠ R.id := fun e' => fresh (by rw [← e']; exact closed P hP _ hx)
+        exact .tail (ih hb) ⟨P, hP, e, hx⟩
+      · simp at hP; subst hP; exact absurd e.symm hy
+  · exact Relation.TransGen.mono (fun _ _ ⟨P, hP, e, hx⟩ => ⟨P, List.mem_append_left _ hP, e, hx⟩)
+
 theorem ack_pair_specific (H H' : Hist) (R : Patch) (d i : OpId)
-    (h : applySpec H R = .ok (H', .inserted)) (only : R.ops = [Op.keep d i]) :
-    ∀ d' i' A, (d', i') ≠ (d, i) → (DI H' d' i' A ↔ DI H d' i' A) := by sorry
+    (h : applySpec H R = .ok (H', .inserted)) (only : R.ops = [Op.keep d i])
+    (closed : Closed H) :
+    ∀ d' i' A, (d', i') ≠ (d, i) → (DI H' d' i' A ↔ DI H d' i' A) := by
+  intro d' i' A hne
+  obtain ⟨fresh, self⟩ := applySpec_fresh h
+  have hH := applySpec_ok h
+  subst hH
+  have ht : ∀ x, tag (H ++ [R]) x = tag H x := by
+    intro x; unfold tag; rw [ops_append, List.findSome?_append, opsOf_single only]; simp
+  have hi : ∀ x, insertionOf (H ++ [R]) x = insertionOf H x := by
+    intro x; unfold insertionOf; rw [ops_append, List.findSome?_append, opsOf_single only]; simp
+  have hr : ∀ x, Restored (H ++ [R]) x ↔ Restored H x := by
+    intro x; unfold Restored; simp [ops_append, opsOf_single only]
+  have ha : Acked (H ++ [R]) d' i' ↔ Acked H d' i' := by
+    unfold Acked
+    simp only [ops_append, opsOf_single only, List.mem_append, List.mem_singleton, Prod.mk.injEq,
+      Op.keep.injEq]
+    constructor
+    · rintro ⟨o, ho | ⟨-, rfl, rfl⟩⟩
+      · exact ⟨o, ho⟩
+      · exact absurd rfl hne
+    · rintro ⟨o, ho⟩
+      exact ⟨o, Or.inl ho⟩
+  unfold DI Concurrent
+  simp only [ht, hi, hr, ha]
+  constructor
+  · rintro ⟨ts, l, r, h1, h2, h3, h4, h5, ⟨hne', a1, a2⟩, h7⟩
+    have n1 : d'.patch ≠ R.id := fun e => fresh (e ▸ tag_some_mem h1)
+    have n2 : i'.patch ≠ R.id := fun e => fresh (e ▸ insertionOf_some_mem h3)
+    exact ⟨ts, l, r, h1, h2, h3, h4, h5, ⟨hne', fun x => a1 ((anc_append closed fresh self n2).mpr x),
+      fun x => a2 ((anc_append closed fresh self n1).mpr x)⟩, h7⟩
+  · rintro ⟨ts, l, r, h1, h2, h3, h4, h5, ⟨hne', a1, a2⟩, h7⟩
+    have n1 : d'.patch ≠ R.id := fun e => fresh (e ▸ tag_some_mem h1)
+    have n2 : i'.patch ≠ R.id := fun e => fresh (e ▸ insertionOf_some_mem h3)
+    exact ⟨ts, l, r, h1, h2, h3, h4, h5, ⟨hne', fun x => a1 ((anc_append closed fresh self n2).mp x),
+      fun x => a2 ((anc_append closed fresh self n1).mp x)⟩, h7⟩
 
 /-- `Tags.restore_other_cannot_revive`, lifted to the view: restoring one
 deletion never makes an atom another active deletion covers live. -/
