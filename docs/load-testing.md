@@ -36,7 +36,17 @@ The same three workloads, run back to back before (commit `0b73a23`) and after t
 
 There was no measurable change here. An uncontended proposal took 3.4 ms before and 3.5 ms after (`pg_latency`). With `synchronous_commit = off`, the adjacent-lines workload reached 219 proposals/s, so the WAL flush is not the limit either. Inside this container even `SELECT 1` takes 0.17–0.48 ms to execute, while a TCP connect to its port takes 0.06 ms. A hot repository is limited by the execution time of its dozen statements under the lock, not by roundtrips, so pipelining cannot help on this host. It matters where each roundtrip is long, as from a Worker through Hyperdrive to a hosted database.
 
-Raising a single repository's rate further needs fewer statements per command, for example multi-row writes or several commands per transaction. Unrelated repositories already scale with the connection pool.
+### Group commit
+
+Since October 12, 2026, commands that wait for one repository's lock run together in its next transaction, up to 32 per transaction ([storage](storage.md#postgresql)). The same three workloads, after pipelining (above) and with group commit:
+
+| Workload | Proposals/s before (p95) | Proposals/s grouped (p95) | Review pairs/s before | Review pairs/s grouped |
+|---|---:|---:|---:|---:|
+| Adjacent lines, one file | 208 (324 ms) | 427 (169 ms) | 178 | 312 |
+| One file each | 256 (272 ms) | 527 (139 ms) | 176 | 279 |
+| One repository each | 2,099 (58 ms) | 3,704 (41 ms) | 4,058 | 6,796 |
+
+In the adjacent-lines run, 3,016 commands committed in 116 transactions, about 26 per transaction, with no retries. Proposals still run the kernel one after another under the lock, so the gain comes from sharing `BEGIN`, the lock and `COMMIT`, and from the waiting commands' statements sharing flushes. The repository workload spreads the agents over 50 repositories, about 20 agents each, so grouping helps there too.
 
 ### Open-loop runs
 

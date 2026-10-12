@@ -268,7 +268,7 @@ struct Queued {
     principal: kernel::Principal,
     cmd: kernel::Command,
     idem: Option<(String, Vec<u8>)>,
-    encode: Box<dyn Fn(&kernel::Reply) -> Vec<u8> + Send>,
+    encode: Box<dyn Fn(&kernel::Reply) -> Vec<u8> + Send + Sync>,
     done: futures::channel::oneshot::Sender<Result<Outcome, DbError>>,
 }
 
@@ -439,7 +439,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         actor: &kernel::Principal,
         cmd: &kernel::Command,
         idem: Option<Idem<'_>>,
-        encode: impl Fn(&kernel::Reply) -> Vec<u8> + Send + 'static,
+        encode: impl Fn(&kernel::Reply) -> Vec<u8> + Send + Sync + 'static,
     ) -> Result<Outcome, DbError> {
         if !self.group_commit {
             return self.execute_one(actor, cmd, idem, &encode).await;
@@ -470,7 +470,9 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         loop {
             let batch: Vec<Queued> = {
                 let mut groups = self.groups.lock().unwrap();
-                let Some(entry) = groups.get_mut(&tid) else { return };
+                let Some(entry) = groups.get_mut(&tid) else {
+                    return;
+                };
                 if entry.1.is_empty() {
                     groups.remove(&tid);
                     return;
@@ -519,7 +521,9 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
                 key,
                 fingerprint: fingerprint.clone(),
             });
-            let r = self.execute_one(&q.principal, &q.cmd, idem, &q.encode).await;
+            let r = self
+                .execute_one(&q.principal, &q.cmd, idem, &q.encode)
+                .await;
             let _ = q.done.send(r);
         }
     }
@@ -593,7 +597,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         actor: &kernel::Principal,
         cmd: &kernel::Command,
         idem: Option<Idem<'_>>,
-        encode: &dyn Fn(&kernel::Reply) -> Vec<u8>,
+        encode: &(dyn Fn(&kernel::Reply) -> Vec<u8> + Sync),
     ) -> Result<Outcome, DbError> {
         let tid = tenant(actor.scope)?;
         for attempt in 0..self.max_attempts {
@@ -639,7 +643,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         actor: &kernel::Principal,
         cmd: &kernel::Command,
         idem: Option<&Idem<'_>>,
-        encode: &dyn Fn(&kernel::Reply) -> Vec<u8>,
+        encode: &(dyn Fn(&kernel::Reply) -> Vec<u8> + Sync),
     ) -> Result<Outcome, DbError> {
         // One flush: BEGIN and the lock, the idempotency lookup and the
         // command's loads. PostgreSQL runs them in order on this connection,
