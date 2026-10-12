@@ -19,5 +19,8 @@ pub async fn connect(url: &str, schema: &str, connections: usize) -> Result<PgBa
     }
     // Commands waiting for one repository share its next transaction.
     engine.group_commit = std::env::var("O5S_GROUP_COMMIT").map_or(true, |v| v != "0");
+    // Statements stay prepared on this server's own connections; set
+    // O5S_PREPARED=0 behind a transaction-mode pooler.
+    engine.prepared = std::env::var("O5S_PREPARED").map_or(true, |v| v != "0");
     Ok(o5s_pgwire::service::Service::new(engine))
 }

@@ -306,7 +306,7 @@ pub struct Engine<C: Connector, R: Runtime> {
     connector: C,
     runtime: R,
     schema: String,
-    idle: Mutex<Vec<Client>>,
+    idle: Mutex<Vec<Conn>>,
     permits: async_lock::Semaphore,
     pub max_attempts: u32,
     pub stats: Stats,
@@ -315,12 +315,81 @@ pub struct Engine<C: Connector, R: Runtime> {
     pub group_commit: bool,
     /// Per repository tenant: whether a leader is draining it, and the queue.
     groups: Mutex<std::collections::HashMap<i64, (bool, Vec<Queued>)>>,
+    /// Keep each connection's statements prepared (named), so PostgreSQL
+    /// parses and plans each statement shape once per connection instead of
+    /// on every execution. Off behind transaction-mode poolers (Hyperdrive),
+    /// which may run a later transaction on another server connection.
+    pub prepared: bool,
+}
+
+/// A pooled connection and, if enabled, its prepared statements by SQL text
+/// and parameter types.
+pub struct Conn {
+    client: Client,
+    prepared:
+        Option<Mutex<std::collections::HashMap<(String, Vec<Type>), tokio_postgres::Statement>>>,
+}
+
+impl std::ops::Deref for Conn {
+    type Target = Client;
+    fn deref(&self) -> &Client {
+        &self.client
+    }
+}
+
+impl Conn {
+    fn new(client: Client, prepared: bool) -> Self {
+        Self {
+            client,
+            prepared: prepared.then(Mutex::default),
+        }
+    }
+
+    /// Run `sql` with typed parameters: as a prepared statement when enabled
+    /// and already prepared, else unnamed. A statement is sent when the
+    /// returned future is first polled, so callers can pipeline it with
+    /// others in order (writes before `COMMIT`); on a miss it therefore runs
+    /// unnamed and is prepared alongside for later calls, never awaiting the
+    /// prepare first. A failure forgets the prepared statements, in case the
+    /// schema changed under them.
+    async fn query(
+        &self,
+        sql: &str,
+        params: &[(&(dyn ToSql + Sync), Type)],
+    ) -> Result<Vec<Row>, tokio_postgres::Error> {
+        let Some(cache) = &self.prepared else {
+            return self.client.query_typed(sql, params).await;
+        };
+        let types: Vec<Type> = params.iter().map(|(_, t)| t.clone()).collect();
+        let key = (sql.to_string(), types);
+        let known = cache.lock().unwrap().get(&key).cloned();
+        let Some(statement) = known else {
+            let (result, prepared) = futures::join!(
+                self.client.query_typed(sql, params),
+                self.client.prepare_typed(sql, &key.1)
+            );
+            match (&result, prepared) {
+                (Ok(_), Ok(s)) => {
+                    cache.lock().unwrap().insert(key, s);
+                }
+                (Err(_), _) => cache.lock().unwrap().clear(),
+                _ => {}
+            }
+            return result;
+        };
+        let values: Vec<&(dyn ToSql + Sync)> = params.iter().map(|(v, _)| *v).collect();
+        let result = self.client.query(&statement, &values).await;
+        if result.is_err() {
+            cache.lock().unwrap().clear();
+        }
+        result
+    }
 }
 
 /// A connection checked out of the engine; returned on drop unless closed.
 struct Lease<'a, C: Connector, R: Runtime> {
     engine: &'a Engine<C, R>,
-    client: Option<Client>,
+    client: Option<Conn>,
     _permit: async_lock::SemaphoreGuard<'a>,
 }
 
@@ -335,7 +404,7 @@ impl<C: Connector, R: Runtime> Drop for Lease<'_, C, R> {
 }
 
 impl<C: Connector, R: Runtime> Lease<'_, C, R> {
-    fn client(&self) -> &Client {
+    fn client(&self) -> &Conn {
         self.client.as_ref().expect("leased client")
     }
 }
@@ -359,6 +428,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
             stats: Stats::default(),
             group_commit: false,
             groups: Mutex::default(),
+            prepared: false,
         })
     }
 
@@ -367,7 +437,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         let idle = self.idle.lock().unwrap().pop();
         let client = match idle {
             Some(c) if !c.is_closed() => c,
-            _ => self.connector.connect().await?,
+            _ => Conn::new(self.connector.connect().await?, self.prepared),
         };
         Ok(Lease {
             engine: self,
@@ -567,7 +637,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
     /// command writes nothing; a database error rolls back all of them.
     async fn attempt_group(
         &self,
-        client: &Client,
+        client: &Conn,
         tid: i64,
         batch: &[Queued],
     ) -> Result<Vec<Result<Outcome, DbError>>, DbError> {
@@ -591,7 +661,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         for q in batch {
             if let Some((key, fingerprint)) = &q.idem {
                 let stored = client
-                    .query_typed(
+                    .query(
                         "SELECT fingerprint, reply FROM h5i_idempotency WHERE tenant_id = $1 AND key = $2",
                         &[(&tid, Type::INT8), (key, Type::TEXT)],
                     )
@@ -619,7 +689,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
                     if let Some((key, fingerprint)) = &q.idem {
                         let bytes = (q.encode)(&reply);
                         client
-                            .query_typed(
+                            .query(
                                 "INSERT INTO h5i_idempotency (tenant_id, key, fingerprint, reply) VALUES ($1, $2, $3, $4)",
                                 &[(&tid, Type::INT8), (key, Type::TEXT), (fingerprint, Type::BYTEA), (&bytes, Type::BYTEA)],
                             )
@@ -689,7 +759,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
 
     async fn attempt(
         &self,
-        client: &Client,
+        client: &Conn,
         tid: i64,
         actor: &kernel::Principal,
         cmd: &kernel::Command,
@@ -707,7 +777,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         let lookup = async {
             match idem {
                 Some(idem) => client
-                    .query_typed(
+                    .query(
                         "SELECT fingerprint, reply FROM h5i_idempotency WHERE tenant_id = $1 AND key = $2",
                         &[(&tid, Type::INT8), (&idem.key, Type::TEXT)],
                     )
@@ -746,7 +816,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
                 let record = async {
                     match idem {
                         Some(idem) => client
-                            .query_typed(
+                            .query(
                                 "INSERT INTO h5i_idempotency (tenant_id, key, fingerprint, reply) VALUES ($1, $2, $3, $4)",
                                 &[(&tid, Type::INT8), (&idem.key, Type::TEXT), (&idem.fingerprint, Type::BYTEA), (&bytes, Type::BYTEA)],
                             )
@@ -783,7 +853,7 @@ fn backoff(attempt: u32) -> Duration {
 
 /// One open transaction on one tenant: the row source of `service::load`.
 pub struct Tx<'a> {
-    client: &'a Client,
+    client: &'a Conn,
     tid: i64,
 }
 
@@ -807,7 +877,7 @@ impl Tx<'_> {
             .iter()
             .map(|c| c.kind)
             .collect();
-        let rows = self.client.query_typed(&sql, &typed(&vals)).await?;
+        let rows = self.client.query(&sql, &typed(&vals)).await?;
         rows.iter().map(|r| read_row(&kinds, r)).collect()
     }
 }
@@ -815,7 +885,7 @@ impl Tx<'_> {
 /// Plan (`h5i_app_sql::plan`), compile (`h5i_app_pgsql::compile`) and run each
 /// write in order. The statements are pipelined on the connection.
 /// Send `ws` as pipelined statements; returns how many.
-async fn store(client: &Client, tid: i64, ws: &Vec<Write>) -> Result<usize, DbError> {
+async fn store(client: &Conn, tid: i64, ws: &Vec<Write>) -> Result<usize, DbError> {
     let tables = tables();
     let mut statements = Vec::new();
     for stmt in h5i_app_sql::plan(ws) {
@@ -828,7 +898,7 @@ async fn store(client: &Client, tid: i64, ws: &Vec<Write>) -> Result<usize, DbEr
     }
     let pending = statements.iter().map(|(sql, vals)| async move {
         let params = typed(vals);
-        client.query_typed(sql, &params).await
+        client.query(sql, &params).await
     });
     for result in futures::future::join_all(pending).await {
         result?;

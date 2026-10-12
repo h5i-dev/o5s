@@ -97,8 +97,9 @@ On October 12, 2026, against a native server on the local PostgreSQL 17 containe
 | Chain | 5,000 | – → 25 | – → 11 | – → 81 | – → 241 |
 | Independent | 1,000 | 2.5 → 2.2 | 166 → 3.3 | 3,861 → 36 | 722 → 153 |
 | Independent | 2,000 | – → 4.8 | – → 5.4 | – → 52 | – → 261 |
+| Independent | 5,000 | – → 8.1 | – → 7.5 | – → 98 | – → 592 |
 
-Before, every graph proposal and document read resolved the document identity of every patch again, each export materialized the channel from an empty view, every causal search rebuilt the repository's dependency rows, and the native export started one Git process per file. Proposals, document reads and exports therefore grew with the square of the history: growing the chain to 1,000 patches took 197 s, against 17 s after, and the "before" runs stop at 1,000 because larger ones take hours. Admission and the channel view stayed at a few milliseconds throughout. Creating a workspace (export plus `git worktree add`) still writes every file, and a workspace proposal from independent patches depends on all of them, since each is a causal head.
+Before, every graph proposal and document read resolved the document identity of every patch again, each export materialized the channel from an empty view, every causal search rebuilt the repository's dependency rows, and the native export started one Git process per file. Proposals, document reads and exports therefore grew with the square of the history: growing the chain to 1,000 patches took 197 s, against 17 s after, and the "before" runs stop at 1,000 because larger ones take hours. Admitting one patch stays linear: its transaction loads every member row of the channel (the narrow load of `Merge`), 9.8 ms at 1,000 patches and 94 ms at 5,000. The channel view grows with the number of files (23 ms and a 134 KB reply for 5,000). Creating a workspace (export plus `git worktree add`) still writes every file, and a workspace proposal from independent patches depends on all of them, since each is a causal head.
 
 ## Python driver
 
