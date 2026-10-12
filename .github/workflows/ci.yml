@@ -91,10 +91,6 @@ jobs:
             lake-${{ hashFiles('**/lean-toolchain', '**/lakefile.lean', '**/lake-manifest.json') }}-
       - run: h5i app check .
       - run: h5i app check crates/registry
-      # The statements still to prove (`sorry`) must type-check against the
-      # extracted code.
-      - run: lake build Specs
-        working-directory: proofs
 
   # The committed proofs/generated/ must be what Charon and Aeneas extract
   # from the kernels today.

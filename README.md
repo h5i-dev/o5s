@@ -99,7 +99,7 @@ The registry kernel ([`crates/registry`](crates/registry)) makes every committed
 
 The kernels in [`proofs/`](proofs) prove admission, graph traversal, interval conflicts, checked rendering, frontiers and deletion tags. They also prove line merging: it never fails spuriously, and any order of the same concurrent edits merges to the same result (`LinesModel`).
 
-Graph documents, line ranges and causal head searches run on extracted kernels (`document`, `lines`, `causality`). Their refinement and convergence theorems are stated in [`specs/`](specs) against the extracted code, and are type-checked in CI but not yet proved ([proof scope](docs/proofs.md), [verification plan](docs/verification-plan.md)). Hashing, authentication and Git export are tested native code.
+Graph documents, line ranges and causal head searches run on extracted kernels (`document`, `lines`, `causality`). The extracted `document` kernel is proved against the document model: validation refuses exactly what the model refuses, a validated patch commits, and the decoded `materialize` result is the specified view, so replicas with the same patches converge ([proof scope](docs/proofs.md), [verification plan](docs/verification-plan.md)). Hashing, authentication and Git export are tested native code.
 
 ---
 

@@ -138,7 +138,7 @@ Completion requires an installation/upgrade guide, tested recovery commands, acc
 Done in the round of October 11, 2026:
 
 - **Kernels.** Graph documents (`document.rs`: validate-then-commit, materialization, order retraction), line merging (`lines.rs`) and causal head searches (`causality.rs`) are extracted, and the platform calls them. `LinesModel` proves that line merging is order independent and never fails spuriously.
-- **Specs.** Refinement, convergence and loader statements are written in `specs/` and `crates/registry/specs/`, and type-checked in CI.
+- **Specs.** Refinement, convergence and loader statements are written in `crates/registry/specs/` (the document statements, now proved, moved into `proofs/`), and type-checked in CI.
 - **Features.**
   - Worker agent workspaces and clone access in Artifacts; the JavaScript adapter is retired.
   - `o5s ci` runs checks on each proposal's snapshot.
@@ -151,14 +151,14 @@ Done in the round of October 12, 2026:
 
 - **Proofs.** The extracted `lines` and `causality` functions refine their models; the graph-document model (`DocModel`) is proved, including `view_converges`; the PostgreSQL loader serves narrow loads (`Served.pg_served`). All are gated in CI. The registry proofs cover repository roles on the `authz` branch.
 - **Kernel.** Acknowledged pairs are compared field by field, so the extracted kernel declares no axiom.
+- **Document kernel.** The extracted `document` functions are proved against `DocModel` and gated: validation refuses exactly what the model refuses (`DocRefine.validate_refines`), a validated patch commits (`commit_succeeds`), and the decoded `materialize` result is the specified view (`DocMatRefine.materialize_refines`), so replicas with the same patches converge (`extracted_view_converges`).
 
 Next:
 
-1. Prove the extracted `document` functions against `DocModel` (`specs/Document.lean`): helper specifications (`specs/DocKernel.lean`), then validation, commit and materialization.
-2. Run the new DDL (`o5s_roles`, revocation tables) on the deployed database, then merge and deploy the `authz` branch.
-3. Run the Worker workspace flow, the Artifacts clone and the pipelined engine against the live deployment.
-4. A single hot repository on PostgreSQL saturates near 500 proposals/s with group commit (`docs/load-testing.md`). Multi-row writes would cut the statements per group further.
-5. Multi-host and 10,000-client runs need more than one machine.
+1. Run the new DDL (`o5s_roles`, revocation tables) on the deployed database, then merge and deploy the `authz` branch.
+2. Run the Worker workspace flow, the Artifacts clone and the pipelined engine against the live deployment.
+3. A single hot repository on PostgreSQL saturates near 500 proposals/s with group commit (`docs/load-testing.md`). Multi-row writes would cut the statements per group further.
+4. Multi-host and 10,000-client runs need more than one machine.
 
 The local PostgreSQL 17 development container is `o5s-platform-pg`, bound to `127.0.0.1:15438`; `scripts/postgres.sh` starts an equivalent one.
 

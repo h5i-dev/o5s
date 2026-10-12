@@ -72,6 +72,17 @@ theorems = [
   "o5s_kernel.DocModel.ack_pair_specific",
   "o5s_kernel.DocModel.restore_other_cannot_revive",
   "o5s_kernel.DocModel.retract_breaks",
+  "o5s_kernel.DocRefine.validate_refines",
+  "o5s_kernel.DocRefine.commit_succeeds",
+  "o5s_kernel.DocRefine.apply_refines",
+  "o5s_kernel.DocKahn.KG.loop2_spec",
+  "o5s_kernel.DocKahn.materialize_kernel",
+  "o5s_kernel.DocMatModel.ax",
+  "o5s_kernel.DocBridge.bridge",
+  "o5s_kernel.DocDecode.isView_of",
+  "o5s_kernel.DocDecode.di_iff",
+  "o5s_kernel.DocMatRefine.materialize_refines",
+  "o5s_kernel.DocMatRefine.extracted_view_converges",
 ]
 
 [[mutant]]

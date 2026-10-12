@@ -18,10 +18,5 @@ lean_lib Generated where
 
 -- Hand-written spec and proofs.
 @[default_target] lean_lib Proofs where
-  roots := #[`Patch, `Projection, `Constructor, `Interval, `Splice, `Rendering, `Checked, `Components, `Indexed, `Boundary, `Coordinates, `Order, `Tags, `LinesModel, `Lines, `Causality, `DocModel]
-
--- Statements still to be proved (`sorry`), outside the gated directory and
--- not a default target: `lake build Specs` type-checks them.
-lean_lib Specs where
-  srcDir := "../specs"
-  roots := #[`Document]
+  roots := #[`Patch, `Projection, `Constructor, `Interval, `Splice, `Rendering, `Checked, `Components, `Indexed, `Boundary, `Coordinates, `Order, `Tags, `LinesModel, `Lines, `Causality, `DocModel,
+    `DocKernel, `DocKernelCommit, `Document, `DocRep, `DocCommit, `DocRefine, `DocMaterialize, `DocView, `DocKahn, `DocDepth, `DocLayers, `DocMatKernel, `DocMatModel, `DocBridge, `DocDecode, `DocMatRefine]
