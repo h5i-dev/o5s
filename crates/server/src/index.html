@@ -275,7 +275,7 @@ function renderPatch(patch, active, ready) {
   chips.append(
     el('span', patch.dependencies.length ? 'deps ' + patch.dependencies.map(id => '#' + id).join(' ') : 'no deps', 'tag'),
     el('span', patch.approvals.length ? 'approved' : 'unreviewed', 'tag' + (patch.approvals.length ? ' good' : '')),
-    el('span', patch.checks_passed ? 'checks pass' : 'no check', 'tag' + (patch.checks_passed ? ' good' : '')),
+    el('span', patch.checks_passed ? 'checks pass' : 'check not passing', 'tag' + (patch.checks_passed ? ' good' : '')),
     el('span', `${pathsOf(patch).length} file(s)${graph.length ? ' · graph' : ''}`, 'tag'));
   card.append(chips);
   const details = el('details'); details.append(el('summary', graph.length ? 'Graph operations & node IDs' : 'Edits'));
