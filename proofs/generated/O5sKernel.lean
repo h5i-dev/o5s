@@ -711,6 +711,130 @@ def causality.sole_head
     causality.sole_head_loop base near.queue ancestors ok1 0#usize
   ok (ok2, ancestors1.marks)
 
+/-- [o5s_kernel::causality::heads]: loop body 1:
+    Source: 'crates/kernel/src/causality.rs', lines 73:8-76:9
+    Visibility: public -/
+@[rust_loop_body]
+def causality.heads_loop0_loop0.body
+  (deps : alloc.vec.Vec Std.Usize) (covered : alloc.vec.Vec Bool)
+  (j : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Bool) × Std.Usize) (alloc.vec.Vec Bool))
+  := do
+  let i := alloc.vec.Vec.len deps
+  if j < i
+  then
+    let i1 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        deps j
+    let (_, index_mut_back) ←
+      alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Bool)
+        covered i1
+    let j1 ← j + 1#usize
+    let covered1 := index_mut_back true
+    ok (cont (covered1, j1))
+  else ok (done covered)
+
+/-- [o5s_kernel::causality::heads]: loop 1:
+    Source: 'crates/kernel/src/causality.rs', lines 73:8-76:9
+    Visibility: public -/
+@[rust_loop]
+def causality.heads_loop0_loop0
+  (covered : alloc.vec.Vec Bool) (deps : alloc.vec.Vec Std.Usize)
+  (j : Std.Usize) :
+  Result (alloc.vec.Vec Bool)
+  := do
+  loop
+    (fun (covered1, j1) => causality.heads_loop0_loop0.body deps covered1 j1)
+    (covered, j)
+
+/-- [o5s_kernel::causality::heads]: loop body 0:
+    Source: 'crates/kernel/src/causality.rs', lines 70:4-78:5
+    Visibility: public -/
+@[rust_loop_body]
+def causality.heads_loop0.body
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (members : alloc.vec.Vec Std.Usize) (covered : alloc.vec.Vec Bool)
+  (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Bool) × Std.Usize) (alloc.vec.Vec Bool))
+  := do
+  let i1 := alloc.vec.Vec.len members
+  if i < i1
+  then
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        members i
+    let deps ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
+        Std.Usize)) rows i2
+    let covered1 ← causality.heads_loop0_loop0 covered deps 0#usize
+    let i3 ← i + 1#usize
+    ok (cont (covered1, i3))
+  else ok (done covered)
+
+/-- [o5s_kernel::causality::heads]: loop 0:
+    Source: 'crates/kernel/src/causality.rs', lines 70:4-78:5
+    Visibility: public -/
+@[rust_loop]
+def causality.heads_loop0
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (members : alloc.vec.Vec Std.Usize) (covered : alloc.vec.Vec Bool)
+  (i : Std.Usize) :
+  Result (alloc.vec.Vec Bool)
+  := do
+  loop
+    (fun (covered1, i1) => causality.heads_loop0.body rows members covered1 i1)
+    (covered, i)
+
+/-- [o5s_kernel::causality::heads]: loop body 2:
+    Source: 'crates/kernel/src/causality.rs', lines 81:4-86:5
+    Visibility: public -/
+@[rust_loop_body]
+def causality.heads_loop1.body
+  (members : alloc.vec.Vec Std.Usize) (covered : alloc.vec.Vec Bool)
+  (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize) (alloc.vec.Vec
+    Std.Usize))
+  := do
+  let i1 := alloc.vec.Vec.len members
+  if i < i1
+  then
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        members i
+    let b ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool) covered
+        i2
+    let out1 ← if b
+                 then ok out
+                 else alloc.vec.Vec.push out i2
+    let i3 ← i + 1#usize
+    ok (cont (out1, i3))
+  else ok (done out)
+
+/-- [o5s_kernel::causality::heads]: loop 2:
+    Source: 'crates/kernel/src/causality.rs', lines 81:4-86:5
+    Visibility: public -/
+@[rust_loop]
+def causality.heads_loop1
+  (members : alloc.vec.Vec Std.Usize) (covered : alloc.vec.Vec Bool)
+  (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  loop
+    (fun (out1, i1) => causality.heads_loop1.body members covered out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::causality::heads]:
+    Source: 'crates/kernel/src/causality.rs', lines 67:0-88:1
+    Visibility: public -/
+def causality.heads
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (members : alloc.vec.Vec Std.Usize) (covered : alloc.vec.Vec Bool) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  let covered1 ← causality.heads_loop0 rows members covered 0#usize
+  causality.heads_loop1 members covered1 (alloc.vec.Vec.new Std.Usize) 0#usize
+
 /-- [o5s_kernel::coordinates::Scan]
     Source: 'crates/kernel/src/coordinates.rs', lines 5:0-8:1
     Visibility: public -/

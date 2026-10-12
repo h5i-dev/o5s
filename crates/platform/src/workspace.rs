@@ -19,7 +19,9 @@ pub const MAX_FILES: usize = 1024;
 pub const MAX_BYTES: usize = 4 * 1024 * 1024;
 
 /// The message of a projection commit: optionally its registry generation,
-/// then the hashes of the admitted patches in channel order.
+/// then the hashes of the snapshot's causal heads (`heads`), whose causal
+/// past is the admitted patch set. Older projections list every admitted
+/// patch; both read back as the same snapshot.
 pub fn message(generation: Option<u64>, hashes: &[&str]) -> String {
     let mut m = String::from(TITLE);
     if let Some(g) = generation {
@@ -56,32 +58,63 @@ pub fn parse(message: &str) -> Option<(Option<u64>, Vec<&str>)> {
     Some((generation, hashes))
 }
 
-/// The registry handles of a snapshot's patches, each of which must be a
-/// member of `channel`: a workspace proposal depends on exactly what it saw.
+/// The causal heads of a set of patches: the members no member depends on,
+/// ascending. Their causal past is the set's, so for a dependency-closed set
+/// such as a channel it is the set itself (`causality::heads`).
+pub fn heads(repo: &Repository, members: &[u64]) -> Result<Vec<u64>, Refusal> {
+    let corrupt = || Refusal("corrupt patch registry".into());
+    let mut members = members.to_vec();
+    members.sort_unstable();
+    members.dedup();
+    let len = members.last().map_or(0, |m| *m as usize + 1);
+    let mut rows = vec![Vec::new(); len];
+    for m in &members {
+        let p = repo.patches.get(m).ok_or_else(corrupt)?;
+        if p.dependencies.iter().any(|d| d >= m) {
+            return Err(corrupt());
+        }
+        rows[*m as usize] = p.dependencies.iter().map(|d| *d as usize).collect();
+    }
+    let dense: Vec<usize> = members.iter().map(|m| *m as usize).collect();
+    let heads = o5s_kernel::causality::heads(&rows, &dense, vec![false; len]);
+    Ok(heads.into_iter().map(|h| h as u64).collect())
+}
+
+/// The hashes a projection commit of the admitted set `patches` records.
+pub fn snapshot<'a>(repo: &'a Repository, patches: &[u64]) -> Result<Vec<&'a str>, Refusal> {
+    Ok(heads(repo, patches)?
+        .iter()
+        .map(|h| repo.patches[h].hash.as_str())
+        .collect())
+}
+
+/// The dependencies of a proposal from a snapshot: the causal heads of its
+/// recorded patches, each of which must be a member of `channel`. Their
+/// causal past is that of the recorded patches, so the proposal depends on
+/// exactly what it saw.
 pub fn dependencies(
     repo: &Repository,
     channel: &str,
     hashes: &[&str],
 ) -> Result<Vec<u64>, Refusal> {
-    let members = repo
+    let members: std::collections::HashSet<u64> = repo
         .channels
         .get(channel)
-        .ok_or_else(|| Refusal("channel not found".into()))?;
-    hashes
+        .ok_or_else(|| Refusal("channel not found".into()))?
         .iter()
-        .map(|h| {
-            let id = repo
-                .patches
-                .values()
-                .find(|p| p.hash == *h)
-                .map(|p| p.id)
-                .ok_or_else(|| Refusal("workspace patch identity not found".into()))?;
-            if !members.contains(&id) {
-                return Err(Refusal("workspace snapshot is outside this channel".into()));
-            }
-            Ok(id)
-        })
-        .collect()
+        .copied()
+        .collect();
+    let mut seen = Vec::with_capacity(hashes.len());
+    for h in hashes {
+        let id = repo
+            .handle(h)
+            .ok_or_else(|| Refusal("workspace patch identity not found".into()))?;
+        if !members.contains(&id) {
+            return Err(Refusal("workspace snapshot is outside this channel".into()));
+        }
+        seen.push(id);
+    }
+    heads(repo, &seen)
 }
 
 /// A changed file as a whole-file edit: UTF-8 as text, anything else as

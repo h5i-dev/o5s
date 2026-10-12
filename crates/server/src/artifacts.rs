@@ -153,11 +153,8 @@ pub fn export(
     let tree = tree.write(&path)?;
     let reference = format!("refs/heads/{channel}");
     let parent = git(&path, &["rev-parse", "--verify", &reference], &[]).ok();
-    let hashes: Vec<&str> = view
-        .patches
-        .iter()
-        .map(|id| repo.patches[id].hash.as_str())
-        .collect();
+    // The causal heads stand for the whole admitted set.
+    let hashes = workspace::snapshot(repo, &view.patches)?;
     if let Some(p) = &parent {
         // Unchanged when the files and the admitted patch set are the same
         // (equal bytes can still come from a different patch set).

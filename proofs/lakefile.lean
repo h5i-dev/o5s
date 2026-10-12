@@ -18,5 +18,5 @@ lean_lib Generated where
 
 -- Hand-written spec and proofs.
 @[default_target] lean_lib Proofs where
-  roots := #[`Patch, `Projection, `Constructor, `Interval, `Splice, `Rendering, `Checked, `Components, `Indexed, `Boundary, `Coordinates, `Order, `Tags, `LinesModel, `Lines, `Causality, `DocModel,
+  roots := #[`Patch, `Projection, `Constructor, `Interval, `Splice, `Rendering, `Checked, `Components, `Indexed, `Boundary, `Coordinates, `Order, `Tags, `LinesModel, `Lines, `Causality, `Heads, `DocModel,
     `DocKernel, `DocKernelCommit, `Document, `DocRep, `DocCommit, `DocRefine, `DocMaterialize, `DocView, `DocKahn, `DocDepth, `DocLayers, `DocMatKernel, `DocMatModel, `DocBridge, `DocDecode, `DocMatRefine]

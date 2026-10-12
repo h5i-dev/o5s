@@ -575,9 +575,46 @@ async fn workspace_edits_of_graph_documents_merge_by_line() {
             .is_none_or(Vec::is_empty),
         "{detail}"
     );
-    for p in proposals {
-        admit(p).await;
+    for p in &proposals {
+        admit(*p).await;
     }
+    // The next snapshot records only its causal heads, the two concurrent
+    // edits, and a proposal from it depends on just those.
+    let (_, workspace) = request(
+        &s,
+        5,
+        1,
+        "/api/worktree",
+        Some(serde_json::json!({"repo":"g"})),
+    )
+    .await;
+    let path = std::path::Path::new(workspace["path"].as_str().unwrap());
+    let log = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["log", "-1", "--format=%B"])
+        .output()
+        .unwrap();
+    let message = String::from_utf8(log.stdout).unwrap();
+    let recorded = message.split("Patch hashes:").nth(1).unwrap();
+    assert_eq!(recorded.split_whitespace().count(), 2, "{message}");
+    std::fs::write(path.join("a.txt"), "ONE\ntwo\nTHREE\nfour\n").unwrap();
+    let body = serde_json::json!({"repo":"g","commit":workspace["commit"],"intent":"append"});
+    let (status, proposed) = request(&s, 5, 1, "/api/worktree/propose", Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{proposed}");
+    let (_, detail) = request(
+        &s,
+        1,
+        1,
+        &format!("/api/patch?repo=g&id={}", proposed["patch"]),
+        None,
+    )
+    .await;
+    assert_eq!(
+        detail["patch"]["dependencies"],
+        serde_json::json!(proposals),
+        "{detail}"
+    );
     for (path, text) in [("a.txt", "ONE\ntwo\nTHREE\n"), ("new.txt", "new\n")] {
         let (status, doc) = request(
             &s,
