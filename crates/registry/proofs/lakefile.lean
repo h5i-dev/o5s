@@ -20,3 +20,9 @@ lean_lib Generated where
 @[default_target] lean_lib Proofs where
   roots := #[`Spec, `Apply, `Storage, `Helpers, `Commands, `Exact, `Model, `Writes, `Refine, `Guarantees, `Invariant, `Narrow]
 
+
+-- Statements still to be proved (`sorry`), outside the gated directory and
+-- not a default target: `lake build Specs` type-checks them.
+lean_lib Specs where
+  srcDir := "../specs"
+  roots := #[`Served]

@@ -17,7 +17,39 @@ set_option maxHeartbeats 1000000
 /- You can set the `maxRecDepth` value with the `-max-recdepth` CLI option -/
 set_option maxRecDepth 2048
 
+/- You can remove the following line by using the CLI option `-all-computable`: -/
+noncomputable section
+
 namespace o5s_kernel
+
+/-- [core::tuple::{impl core::cmp::PartialEq<(U, T)> for (U, T)}::eq]:
+    Source: '/rustc/library/core/src/tuple.rs', lines 30:16-30:55
+    Name pattern: [core::tuple::{core::cmp::PartialEq<(@U, @T), (@U, @T)>}::eq]
+    Visibility: public -/
+@[rust_fun "core::tuple::{core::cmp::PartialEq<(@U, @T), (@U, @T)>}::eq"]
+axiom Pair.Insts.CoreCmpPartialEqPair.eq
+  {U : Type} {T : Type} (cmpPartialEqInst : core.cmp.PartialEq U U)
+  (cmpPartialEqInst1 : core.cmp.PartialEq T T) :
+  (U × T) → (U × T) → Result Bool
+
+/-- Trait implementation: [core::tuple::{impl core::cmp::PartialEq<(U, T)> for (U, T)}]
+    Source: '/rustc/library/core/src/tuple.rs', lines 28:12-28:74
+    Name pattern: [core::cmp::PartialEq<(@U, @T), (@U, @T)>] -/
+@[reducible, rust_trait_impl "core::cmp::PartialEq<(@U, @T), (@U, @T)>"]
+def Pair.Insts.CoreCmpPartialEqPair {U : Type} {T : Type} (cmpPartialEqInst :
+  core.cmp.PartialEq U U) (cmpPartialEqInst1 : core.cmp.PartialEq T T) :
+  core.cmp.PartialEq (U × T) (U × T) := {
+  eq := Pair.Insts.CoreCmpPartialEqPair.eq cmpPartialEqInst cmpPartialEqInst1
+}
+
+/-- [h5i_app_std::bytes::eq]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/bytes.rs', lines 10:0-10:43
+    Name pattern: [h5i_app_std::bytes::eq]
+    Visibility: public -/
+@[rust_fun "h5i_app_std::bytes::eq"]
+def h5i_app_std.bytes.eq
+  (a : alloc.vec.Vec Std.U8) (b : alloc.vec.Vec Std.U8) : Result Bool := do
+  alloc.vec.partial_eq.PartialEqVec.eq core.cmp.PartialEqU8 a b
 
 /-- [h5i_app_std::bytes::slice]: loop body 0:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.1.1/src/bytes.rs', lines 46:4-49:5
@@ -416,6 +448,292 @@ def h5i_app_std.set.insert
   else let t ← corecloneCloneInst.clone x
        alloc.vec.Vec.push out t
 
+/-- [o5s_kernel::indexed::Traversal]
+    Source: 'crates/kernel/src/indexed.rs', lines 4:0-7:1
+    Visibility: public -/
+structure indexed.Traversal where
+  marks : alloc.vec.Vec Bool
+  queue : alloc.vec.Vec Std.Usize
+
+/-- [o5s_kernel::indexed::clear]: loop body 0:
+    Source: 'crates/kernel/src/indexed.rs', lines 24:4-27:5
+    Visibility: public -/
+@[rust_loop_body]
+def indexed.clear_loop.body
+  (state : indexed.Traversal) (i : Std.Usize) :
+  Result (ControlFlow (indexed.Traversal × Std.Usize) ((alloc.vec.Vec Bool) ×
+    (alloc.vec.Vec Std.Usize)))
+  := do
+  let i1 := alloc.vec.Vec.len state.queue
+  if i < i1
+  then
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        state.queue i
+    let (_, index_mut_back) ←
+      alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Bool)
+        state.marks i2
+    let i3 ← i + 1#usize
+    let v := index_mut_back false
+    ok (cont ({ state with marks := v }, i3))
+  else ok (done (state.marks, state.queue))
+
+/-- [o5s_kernel::indexed::clear]: loop 0:
+    Source: 'crates/kernel/src/indexed.rs', lines 24:4-27:5
+    Visibility: public -/
+@[rust_loop]
+def indexed.clear_loop
+  (state : indexed.Traversal) (i : Std.Usize) :
+  Result ((alloc.vec.Vec Bool) × (alloc.vec.Vec Std.Usize))
+  := do
+  loop
+    (fun (state1, i1) => indexed.clear_loop.body state1 i1)
+    (state, i)
+
+/-- [o5s_kernel::indexed::clear]:
+    Source: 'crates/kernel/src/indexed.rs', lines 22:0-29:1
+    Visibility: public -/
+def indexed.clear (state : indexed.Traversal) : Result indexed.Traversal := do
+  let (v, v1) ← indexed.clear_loop state 0#usize
+  ok { marks := v, queue := v1 }
+
+/-- [o5s_kernel::indexed::enqueue]: loop body 0:
+    Source: 'crates/kernel/src/indexed.rs', lines 11:4-18:5
+    Visibility: public -/
+@[rust_loop_body]
+def indexed.enqueue_loop.body
+  (neighbors : alloc.vec.Vec Std.Usize) (state : indexed.Traversal)
+  (i : Std.Usize) :
+  Result (ControlFlow (indexed.Traversal × Std.Usize) indexed.Traversal)
+  := do
+  let i1 := alloc.vec.Vec.len neighbors
+  if i < i1
+  then
+    let vertex ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        neighbors i
+    let b ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool)
+        state.marks vertex
+    let (v, v1) ←
+      if b
+      then ok (state.marks, state.queue)
+      else
+        do
+        let (_, index_mut_back) ←
+          alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Bool)
+            state.marks vertex
+        let v2 ← alloc.vec.Vec.push state.queue vertex
+        let v3 := index_mut_back true
+        ok (v3, v2)
+    let i2 ← i + 1#usize
+    ok (cont ({ marks := v, queue := v1 }, i2))
+  else ok (done state)
+
+/-- [o5s_kernel::indexed::enqueue]: loop 0:
+    Source: 'crates/kernel/src/indexed.rs', lines 11:4-18:5
+    Visibility: public -/
+@[rust_loop]
+def indexed.enqueue_loop
+  (state : indexed.Traversal) (neighbors : alloc.vec.Vec Std.Usize)
+  (i : Std.Usize) :
+  Result indexed.Traversal
+  := do
+  loop
+    (fun (state1, i1) => indexed.enqueue_loop.body neighbors state1 i1)
+    (state, i)
+
+/-- [o5s_kernel::indexed::enqueue]:
+    Source: 'crates/kernel/src/indexed.rs', lines 9:0-20:1
+    Visibility: public -/
+@[reducible]
+def indexed.enqueue
+  (state : indexed.Traversal) (neighbors : alloc.vec.Vec Std.Usize) :
+  Result indexed.Traversal
+  := do
+  indexed.enqueue_loop state neighbors 0#usize
+
+/-- [o5s_kernel::causality::frontier]: loop body 0:
+    Source: 'crates/kernel/src/causality.rs', lines 24:4-32:5
+    Visibility: public -/
+@[rust_loop_body]
+def causality.frontier_loop.body
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (stop : alloc.vec.Vec Bool)
+  (state : indexed.Traversal) (found : alloc.vec.Vec Std.Usize) (i : Std.Usize)
+  :
+  Result (ControlFlow (indexed.Traversal × (alloc.vec.Vec Std.Usize) ×
+    Std.Usize) ((alloc.vec.Vec Bool) × (alloc.vec.Vec Std.Usize) ×
+    (alloc.vec.Vec Std.Usize)))
+  := do
+  let i1 := alloc.vec.Vec.len state.queue
+  if i < i1
+  then
+    let v ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        state.queue i
+    let b ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool) stop v
+    let (state1, found1) ←
+      if b
+      then do
+           let found2 ← alloc.vec.Vec.push found v
+           ok (state, found2)
+      else
+        do
+        let v1 ←
+          alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+            (alloc.vec.Vec Std.Usize)) rows v
+        let state2 ← indexed.enqueue state v1
+        ok (state2, found)
+    let i2 ← i + 1#usize
+    ok (cont (state1, found1, i2))
+  else ok (done (state.marks, state.queue, found))
+
+/-- [o5s_kernel::causality::frontier]: loop 0:
+    Source: 'crates/kernel/src/causality.rs', lines 24:4-32:5
+    Visibility: public -/
+@[rust_loop]
+def causality.frontier_loop
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (stop : alloc.vec.Vec Bool)
+  (state : indexed.Traversal) (found : alloc.vec.Vec Std.Usize) (i : Std.Usize)
+  :
+  Result ((alloc.vec.Vec Bool) × (alloc.vec.Vec Std.Usize) × (alloc.vec.Vec
+    Std.Usize))
+  := do
+  loop
+    (fun (state1, found1, i1) => causality.frontier_loop.body rows stop state1
+      found1 i1)
+    (state, found, i)
+
+/-- [o5s_kernel::causality::frontier]:
+    Source: 'crates/kernel/src/causality.rs', lines 9:0-38:1
+    Visibility: public -/
+def causality.frontier
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (stop : alloc.vec.Vec Bool)
+  (roots : alloc.vec.Vec Std.Usize) (marks : alloc.vec.Vec Bool) :
+  Result indexed.Traversal
+  := do
+  let state ←
+    indexed.enqueue { marks, queue := (alloc.vec.Vec.new Std.Usize) } roots
+  let (v, v1, found) ←
+    causality.frontier_loop rows stop state (alloc.vec.Vec.new Std.Usize)
+      0#usize
+  let cleared ← indexed.clear { marks := v, queue := v1 }
+  ok { cleared with queue := found }
+
+/-- [o5s_kernel::indexed::reachable]: loop body 0:
+    Source: 'crates/kernel/src/indexed.rs', lines 40:4-44:5
+    Visibility: public -/
+@[rust_loop_body]
+def indexed.reachable_loop.body
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (state : indexed.Traversal)
+  (i : Std.Usize) :
+  Result (ControlFlow (indexed.Traversal × Std.Usize) ((alloc.vec.Vec Bool) ×
+    (alloc.vec.Vec Std.Usize)))
+  := do
+  let i1 := alloc.vec.Vec.len state.queue
+  if i < i1
+  then
+    let vertex ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        state.queue i
+    let v ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
+        Std.Usize)) rows vertex
+    let state1 ← indexed.enqueue state v
+    let i2 ← i + 1#usize
+    ok (cont (state1, i2))
+  else ok (done (state.marks, state.queue))
+
+/-- [o5s_kernel::indexed::reachable]: loop 0:
+    Source: 'crates/kernel/src/indexed.rs', lines 40:4-44:5
+    Visibility: public -/
+@[rust_loop]
+def indexed.reachable_loop
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (state : indexed.Traversal)
+  (i : Std.Usize) :
+  Result ((alloc.vec.Vec Bool) × (alloc.vec.Vec Std.Usize))
+  := do
+  loop
+    (fun (state1, i1) => indexed.reachable_loop.body rows state1 i1)
+    (state, i)
+
+/-- [o5s_kernel::indexed::reachable]:
+    Source: 'crates/kernel/src/indexed.rs', lines 31:0-46:1
+    Visibility: public -/
+def indexed.reachable
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (seeds : alloc.vec.Vec Std.Usize) (marks : alloc.vec.Vec Bool) :
+  Result indexed.Traversal
+  := do
+  let state ←
+    indexed.enqueue { marks, queue := (alloc.vec.Vec.new Std.Usize) } seeds
+  let (v, v1) ← indexed.reachable_loop rows state 0#usize
+  indexed.clear { marks := v, queue := v1 }
+
+/-- [o5s_kernel::causality::sole_head]: loop body 0:
+    Source: 'crates/kernel/src/causality.rs', lines 54:4-58:5
+    Visibility: public -/
+@[rust_loop_body]
+def causality.sole_head_loop.body
+  (base : Std.Usize) (v : alloc.vec.Vec Std.Usize)
+  (ancestors : indexed.Traversal) (ok1 : Bool) (i : Std.Usize) :
+  Result (ControlFlow (indexed.Traversal × Bool × Std.Usize)
+    (indexed.Traversal × Bool))
+  := do
+  let i1 := alloc.vec.Vec.len v
+  if i < i1
+  then
+    let q ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize) v i
+    let (ancestors1, ok2) ←
+      if ok1
+      then
+        if q = base
+        then ok (ancestors, true)
+        else
+          do
+          let ok3 ←
+            h5i_app_std.set.contains core.cmp.PartialEqUsize ancestors.queue q
+          ok (ancestors, ok3)
+      else ok (ancestors, false)
+    let i2 ← i + 1#usize
+    ok (cont (ancestors1, ok2, i2))
+  else ok (done (ancestors, ok1))
+
+/-- [o5s_kernel::causality::sole_head]: loop 0:
+    Source: 'crates/kernel/src/causality.rs', lines 54:4-58:5
+    Visibility: public -/
+@[rust_loop]
+def causality.sole_head_loop
+  (base : Std.Usize) (v : alloc.vec.Vec Std.Usize)
+  (ancestors : indexed.Traversal) (ok1 : Bool) (i : Std.Usize) :
+  Result (indexed.Traversal × Bool)
+  := do
+  loop
+    (fun (ancestors1, ok2, i1) => causality.sole_head_loop.body base v
+      ancestors1 ok2 i1)
+    (ancestors, ok1, i)
+
+/-- [o5s_kernel::causality::sole_head]:
+    Source: 'crates/kernel/src/causality.rs', lines 43:0-60:1
+    Visibility: public -/
+def causality.sole_head
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (edits : alloc.vec.Vec Bool)
+  (roots : alloc.vec.Vec Std.Usize) (base : Std.Usize)
+  (marks : alloc.vec.Vec Bool) :
+  Result (Bool × (alloc.vec.Vec Bool))
+  := do
+  let near ← causality.frontier rows edits roots marks
+  let v ←
+    alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
+      Std.Usize)) rows base
+  let ancestors ← indexed.reachable rows v near.marks
+  let ok1 ← h5i_app_std.set.contains core.cmp.PartialEqUsize near.queue base
+  let (ancestors1, ok2) ←
+    causality.sole_head_loop base near.queue ancestors ok1 0#usize
+  ok (ok2, ancestors1.marks)
+
 /-- [o5s_kernel::coordinates::Scan]
     Source: 'crates/kernel/src/coordinates.rs', lines 5:0-8:1
     Visibility: public -/
@@ -486,6 +804,2222 @@ def coordinates.line_boundaries
   then let i1 := alloc.vec.Vec.len bytes
        alloc.vec.Vec.push state.offsets i1
   else ok state.offsets
+
+/-- [o5s_kernel::document::NONE]
+    Source: 'crates/kernel/src/document.rs', lines 17:0-17:35
+    Visibility: public -/
+@[global_simps, irreducible]
+def document.NONE : Std.Usize := core.num.Usize.MAX
+
+/-- [o5s_kernel::document::START]
+    Source: 'crates/kernel/src/document.rs', lines 18:0-18:27
+    Visibility: public -/
+@[global_simps, irreducible] def document.START : Std.Usize := 0#usize
+
+/-- [o5s_kernel::document::END]
+    Source: 'crates/kernel/src/document.rs', lines 19:0-19:25
+    Visibility: public -/
+@[global_simps, irreducible] def document.END : Std.Usize := 1#usize
+
+/-- [o5s_kernel::document::UNOBSERVED_PATCH]
+    Source: 'crates/kernel/src/document.rs', lines 22:0-22:36
+    Visibility: public -/
+@[global_simps, irreducible] def document.UNOBSERVED_PATCH : Std.U64 := 1#u64
+
+/-- [o5s_kernel::document::UNKNOWN_ANCHOR]
+    Source: 'crates/kernel/src/document.rs', lines 23:0-23:34
+    Visibility: public -/
+@[global_simps, irreducible] def document.UNKNOWN_ANCHOR : Std.U64 := 2#u64
+
+/-- [o5s_kernel::document::INVALID_INSERTION]
+    Source: 'crates/kernel/src/document.rs', lines 24:0-24:37
+    Visibility: public -/
+@[global_simps, irreducible] def document.INVALID_INSERTION : Std.U64 := 3#u64
+
+/-- [o5s_kernel::document::UNORDERED_ANCHORS]
+    Source: 'crates/kernel/src/document.rs', lines 25:0-25:37
+    Visibility: public -/
+@[global_simps, irreducible] def document.UNORDERED_ANCHORS : Std.U64 := 4#u64
+
+/-- [o5s_kernel::document::EMPTY_DELETION]
+    Source: 'crates/kernel/src/document.rs', lines 26:0-26:34
+    Visibility: public -/
+@[global_simps, irreducible] def document.EMPTY_DELETION : Std.U64 := 5#u64
+
+/-- [o5s_kernel::document::DUPLICATE_TARGET]
+    Source: 'crates/kernel/src/document.rs', lines 27:0-27:36
+    Visibility: public -/
+@[global_simps, irreducible] def document.DUPLICATE_TARGET : Std.U64 := 6#u64
+
+/-- [o5s_kernel::document::UNKNOWN_DELETION]
+    Source: 'crates/kernel/src/document.rs', lines 28:0-28:36
+    Visibility: public -/
+@[global_simps, irreducible] def document.UNKNOWN_DELETION : Std.U64 := 7#u64
+
+/-- [o5s_kernel::document::UNKNOWN_INSERTION]
+    Source: 'crates/kernel/src/document.rs', lines 29:0-29:37
+    Visibility: public -/
+@[global_simps, irreducible] def document.UNKNOWN_INSERTION : Std.U64 := 8#u64
+
+/-- [o5s_kernel::document::INVALID_ACKNOWLEDGEMENT]
+    Source: 'crates/kernel/src/document.rs', lines 30:0-30:43
+    Visibility: public -/
+@[global_simps, irreducible]
+def document.INVALID_ACKNOWLEDGEMENT : Std.U64 := 9#u64
+
+/-- [o5s_kernel::document::CYCLE]
+    Source: 'crates/kernel/src/document.rs', lines 31:0-31:26
+    Visibility: public -/
+@[global_simps, irreducible] def document.CYCLE : Std.U64 := 10#u64
+
+/-- [o5s_kernel::document::Ref]
+    Source: 'crates/kernel/src/document.rs', lines 37:0-40:1
+    Visibility: public -/
+structure document.Ref where
+  patch : Std.Usize
+  index : Std.Usize
+
+/-- [o5s_kernel::document::Anchor]
+    Source: 'crates/kernel/src/document.rs', lines 43:0-48:1
+    Visibility: public -/
+@[discriminant isize]
+inductive document.Anchor where
+| Start : document.Anchor
+| End : document.Anchor
+| Node : document.Ref → document.Anchor
+
+/-- [o5s_kernel::document::Op]
+    Source: 'crates/kernel/src/document.rs', lines 51:0-65:1
+    Visibility: public -/
+@[discriminant isize]
+inductive document.Op where
+| Insert :
+  document.Anchor →
+  document.Anchor →
+  alloc.vec.Vec (alloc.vec.Vec Std.U8) →
+  document.Op
+| Delete : alloc.vec.Vec document.Ref → document.Op
+| Restore : document.Ref → document.Op
+| Order : document.Ref → document.Ref → document.Op
+| Keep : document.Ref → document.Ref → document.Op
+
+/-- [o5s_kernel::document::Patch]
+    Source: 'crates/kernel/src/document.rs', lines 68:0-72:1
+    Visibility: public -/
+structure document.Patch where
+  deps : alloc.vec.Vec Std.Usize
+  ops : alloc.vec.Vec document.Op
+
+/-- [o5s_kernel::document::Insertion]
+    Source: 'crates/kernel/src/document.rs', lines 75:0-79:1
+    Visibility: public -/
+structure document.Insertion where
+  patch : Std.Usize
+  left : Std.Usize
+  right : Std.Usize
+
+/-- [o5s_kernel::document::Deletion]
+    Source: 'crates/kernel/src/document.rs', lines 82:0-85:1
+    Visibility: public -/
+structure document.Deletion where
+  patch : Std.Usize
+  targets : alloc.vec.Vec Std.Usize
+
+/-- [o5s_kernel::document::Doc]
+    Source: 'crates/kernel/src/document.rs', lines 88:0-104:1
+    Visibility: public -/
+structure document.Doc where
+  deps : alloc.vec.Vec (alloc.vec.Vec Std.Usize)
+  creator : alloc.vec.Vec Std.Usize
+  atoms : alloc.vec.Vec (alloc.vec.Vec Std.U8)
+  edges : alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize)
+  insertions : alloc.vec.Vec document.Insertion
+  deletions : alloc.vec.Vec document.Deletion
+  restored : alloc.vec.Vec Bool
+  acked : alloc.vec.Vec (Std.Usize × Std.Usize)
+
+/-- [o5s_kernel::document::Refusal]
+    Source: 'crates/kernel/src/document.rs', lines 107:0-114:1
+    Visibility: public -/
+structure document.Refusal where
+  kind : Std.U64
+  op : Std.Usize
+  item : Std.Usize
+
+/-- [o5s_kernel::document::empty]:
+    Source: 'crates/kernel/src/document.rs', lines 117:0-136:1
+    Visibility: public -/
+def document.empty : Result document.Doc := do
+  let creator ←
+    alloc.vec.Vec.push (alloc.vec.Vec.new Std.Usize) document.NONE
+  let creator1 ← alloc.vec.Vec.push creator document.NONE
+  let atoms ←
+    alloc.vec.Vec.push (alloc.vec.Vec.new (alloc.vec.Vec Std.U8))
+      (alloc.vec.Vec.new Std.U8)
+  let atoms1 ← alloc.vec.Vec.push atoms (alloc.vec.Vec.new Std.U8)
+  let edges ←
+    alloc.vec.Vec.push (alloc.vec.Vec.new (Std.Usize × Std.Usize ×
+      Std.Usize)) (document.START, document.END, document.NONE)
+  ok
+    {
+      deps := (alloc.vec.Vec.new (alloc.vec.Vec Std.Usize)),
+      creator := creator1,
+      atoms := atoms1,
+      edges,
+      insertions := (alloc.vec.Vec.new document.Insertion),
+      deletions := (alloc.vec.Vec.new document.Deletion),
+      restored := (alloc.vec.Vec.new Bool),
+      acked := (alloc.vec.Vec.new (Std.Usize × Std.Usize))
+    }
+
+/-- [o5s_kernel::document::falses]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 142:4-145:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.falses_loop.body
+  (n : Std.Usize) (out : alloc.vec.Vec Bool) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Bool) × Std.Usize) (alloc.vec.Vec Bool))
+  := do
+  if i < n
+  then
+    let out1 ← alloc.vec.Vec.push out false
+    let i1 ← i + 1#usize
+    ok (cont (out1, i1))
+  else ok (done out)
+
+/-- [o5s_kernel::document::falses]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 142:4-145:5
+    Visibility: public -/
+@[rust_loop]
+def document.falses_loop
+  (n : Std.Usize) (out : alloc.vec.Vec Bool) (i : Std.Usize) :
+  Result (alloc.vec.Vec Bool)
+  := do
+  loop
+    (fun (out1, i1) => document.falses_loop.body n out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::document::falses]:
+    Source: 'crates/kernel/src/document.rs', lines 139:0-147:1
+    Visibility: public -/
+@[reducible]
+def document.falses (n : Std.Usize) : Result (alloc.vec.Vec Bool) := do
+  document.falses_loop n (alloc.vec.Vec.new Bool) 0#usize
+
+/-- [o5s_kernel::document::empty_rows]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 153:4-156:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.empty_rows_loop.body
+  (n : Std.Usize) (out : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec (alloc.vec.Vec Std.Usize)) × Std.Usize)
+    (alloc.vec.Vec (alloc.vec.Vec Std.Usize)))
+  := do
+  if i < n
+  then
+    let out1 ← alloc.vec.Vec.push out (alloc.vec.Vec.new Std.Usize)
+    let i1 ← i + 1#usize
+    ok (cont (out1, i1))
+  else ok (done out)
+
+/-- [o5s_kernel::document::empty_rows]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 153:4-156:5
+    Visibility: public -/
+@[rust_loop]
+def document.empty_rows_loop
+  (n : Std.Usize) (out : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (i : Std.Usize) :
+  Result (alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  := do
+  loop
+    (fun (out1, i1) => document.empty_rows_loop.body n out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::document::empty_rows]:
+    Source: 'crates/kernel/src/document.rs', lines 150:0-158:1
+    Visibility: public -/
+@[reducible]
+def document.empty_rows
+  (n : Std.Usize) : Result (alloc.vec.Vec (alloc.vec.Vec Std.Usize)) := do
+  document.empty_rows_loop n (alloc.vec.Vec.new (alloc.vec.Vec Std.Usize))
+    0#usize
+
+/-- [o5s_kernel::document::observed]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 166:4-169:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.observed_loop.body
+  (found : indexed.Traversal) (out : alloc.vec.Vec Bool) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Bool) × Std.Usize) (alloc.vec.Vec Bool))
+  := do
+  let i1 := alloc.vec.Vec.len found.queue
+  if i < i1
+  then
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        found.queue i
+    let (_, index_mut_back) ←
+      alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Bool) out
+        i2
+    let i3 ← i + 1#usize
+    let out1 := index_mut_back true
+    ok (cont (out1, i3))
+  else ok (done out)
+
+/-- [o5s_kernel::document::observed]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 166:4-169:5
+    Visibility: public -/
+@[rust_loop]
+def document.observed_loop
+  (found : indexed.Traversal) (out : alloc.vec.Vec Bool) (i : Std.Usize) :
+  Result (alloc.vec.Vec Bool)
+  := do
+  loop
+    (fun (out1, i1) => document.observed_loop.body found out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::document::observed]:
+    Source: 'crates/kernel/src/document.rs', lines 162:0-171:1
+    Visibility: public -/
+def document.observed
+  (deps : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (roots : alloc.vec.Vec Std.Usize) :
+  Result (alloc.vec.Vec Bool)
+  := do
+  let i := alloc.vec.Vec.len deps
+  let v ← document.falses i
+  let found ← indexed.reachable deps roots v
+  let i1 := alloc.vec.Vec.len deps
+  let out ← document.falses i1
+  document.observed_loop found out 0#usize
+
+/-- [o5s_kernel::document::add_edge]:
+    Source: 'crates/kernel/src/document.rs', lines 173:0-176:1 -/
+def document.add_edge
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) («from» : Std.Usize)
+  («to» : Std.Usize) :
+  Result (alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  := do
+  let (v, index_mut_back) ←
+    alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice
+      (alloc.vec.Vec Std.Usize)) rows «from»
+  let v1 ← alloc.vec.Vec.push v «to»
+  ok (index_mut_back v1)
+
+/-- [o5s_kernel::document::causal_rows]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 189:4-195:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.causal_rows_loop0.body
+  (edges : alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize))
+  (seen : alloc.vec.Vec Bool) (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec (alloc.vec.Vec Std.Usize)) × Std.Usize)
+    (alloc.vec.Vec (alloc.vec.Vec Std.Usize)))
+  := do
+  let i1 := alloc.vec.Vec.len edges
+  if i < i1
+  then
+    let (i2, i3, i4) ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Std.Usize ×
+        Std.Usize × Std.Usize)) edges i
+    let rows1 ←
+      if i4 = document.NONE
+      then document.add_edge rows i2 i3
+      else
+        let i5 := alloc.vec.Vec.len seen
+        if i4 < i5
+        then
+          do
+          let b ←
+            alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool)
+              seen i4
+          if b
+          then document.add_edge rows i2 i3
+          else ok rows
+        else ok rows
+    let i5 ← i + 1#usize
+    ok (cont (rows1, i5))
+  else ok (done rows)
+
+/-- [o5s_kernel::document::causal_rows]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 189:4-195:5
+    Visibility: public -/
+@[rust_loop]
+def document.causal_rows_loop0
+  (edges : alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize))
+  (seen : alloc.vec.Vec Bool) (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (i : Std.Usize) :
+  Result (alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  := do
+  loop
+    (fun (rows1, i1) => document.causal_rows_loop0.body edges seen rows1 i1)
+    (rows, i)
+
+/-- [o5s_kernel::document::causal_rows]: loop body 1:
+    Source: 'crates/kernel/src/document.rs', lines 197:4-200:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.causal_rows_loop1.body
+  (pending : alloc.vec.Vec (Std.Usize × Std.Usize))
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (j : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec (alloc.vec.Vec Std.Usize)) × Std.Usize)
+    (alloc.vec.Vec (alloc.vec.Vec Std.Usize)))
+  := do
+  let i := alloc.vec.Vec.len pending
+  if j < i
+  then
+    let (i1, i2) ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Std.Usize ×
+        Std.Usize)) pending j
+    let rows1 ← document.add_edge rows i1 i2
+    let j1 ← j + 1#usize
+    ok (cont (rows1, j1))
+  else ok (done rows)
+
+/-- [o5s_kernel::document::causal_rows]: loop 1:
+    Source: 'crates/kernel/src/document.rs', lines 197:4-200:5
+    Visibility: public -/
+@[rust_loop]
+def document.causal_rows_loop1
+  (pending : alloc.vec.Vec (Std.Usize × Std.Usize))
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (j : Std.Usize) :
+  Result (alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  := do
+  loop
+    (fun (rows1, j1) => document.causal_rows_loop1.body pending rows1 j1)
+    (rows, j)
+
+/-- [o5s_kernel::document::causal_rows]:
+    Source: 'crates/kernel/src/document.rs', lines 181:0-202:1
+    Visibility: public -/
+def document.causal_rows
+  (edges : alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize))
+  (seen : alloc.vec.Vec Bool)
+  (pending : alloc.vec.Vec (Std.Usize × Std.Usize)) (n : Std.Usize) :
+  Result (alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  := do
+  let rows ← document.empty_rows n
+  let rows1 ← document.causal_rows_loop0 edges seen rows 0#usize
+  document.causal_rows_loop1 pending rows1 0#usize
+
+/-- [o5s_kernel::document::reaches]:
+    Source: 'crates/kernel/src/document.rs', lines 205:0-210:1
+    Visibility: public -/
+def document.reaches
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) («from» : Std.Usize)
+  («to» : Std.Usize) :
+  Result Bool
+  := do
+  let seeds ← alloc.vec.Vec.push (alloc.vec.Vec.new Std.Usize) «from»
+  let i := alloc.vec.Vec.len rows
+  let v ← document.falses i
+  let found ← indexed.reachable rows seeds v
+  h5i_app_std.set.contains core.cmp.PartialEqUsize found.queue «to»
+
+/-- [o5s_kernel::document::Check]
+    Source: 'crates/kernel/src/document.rs', lines 213:0-220:1
+    Visibility: public -/
+structure document.Check where
+  refusal : document.Refusal
+  pending : alloc.vec.Vec (Std.Usize × Std.Usize)
+  created : Std.Usize
+
+/-- [o5s_kernel::document::refuse]:
+    Source: 'crates/kernel/src/document.rs', lines 222:0-224:1 -/
+def document.refuse
+  (kind : Std.U64) (op : Std.Usize) (item : Std.Usize) :
+  Result document.Refusal
+  := do
+  ok { kind, op, item }
+
+/-- [o5s_kernel::document::check_ref]:
+    Source: 'crates/kernel/src/document.rs', lines 228:0-236:1 -/
+def document.check_ref
+  (r : document.Ref) (seen : alloc.vec.Vec Bool) (count : Std.Usize)
+  (missing : Std.U64) :
+  Result Std.U64
+  := do
+  if r.patch = document.NONE
+  then ok document.UNOBSERVED_PATCH
+  else
+    let i := alloc.vec.Vec.len seen
+    if r.patch >= i
+    then ok document.UNOBSERVED_PATCH
+    else
+      let b ←
+        alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool) seen
+          r.patch
+      if b
+      then
+        if r.index = document.NONE
+        then ok missing
+        else if r.index >= count
+             then ok missing
+             else ok 0#u64
+      else ok document.UNOBSERVED_PATCH
+
+/-- [o5s_kernel::document::anchor_index]:
+    Source: 'crates/kernel/src/document.rs', lines 239:0-245:1
+    Visibility: public -/
+def document.anchor_index (a : document.Anchor) : Result Std.Usize := do
+  match a with
+  | document.Anchor.Start => ok document.START
+  | document.Anchor.End => ok document.END
+  | document.Anchor.Node r => ok r.index
+
+/-- [o5s_kernel::document::check_anchor]:
+    Source: 'crates/kernel/src/document.rs', lines 247:0-259:1 -/
+def document.check_anchor
+  (a : document.Anchor) (doc : document.Doc) (seen : alloc.vec.Vec Bool) :
+  Result Std.U64
+  := do
+  match a with
+  | document.Anchor.Start => ok 0#u64
+  | document.Anchor.End => ok 0#u64
+  | document.Anchor.Node r =>
+    let i := alloc.vec.Vec.len doc.atoms
+    let k ← document.check_ref r seen i document.UNKNOWN_ANCHOR
+    if k = 0#u64
+    then if r.index < 2#usize
+         then ok document.UNKNOWN_ANCHOR
+         else ok k
+    else ok k
+
+/-- [o5s_kernel::document::atoms_nonempty]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 264:4-267:5 -/
+@[rust_loop_body]
+def document.atoms_nonempty_loop.body
+  (atoms : alloc.vec.Vec (alloc.vec.Vec Std.U8)) (ok1 : Bool) (i : Std.Usize) :
+  Result (ControlFlow (Bool × Std.Usize) Bool)
+  := do
+  let i1 := alloc.vec.Vec.len atoms
+  if i < i1
+  then
+    let ok2 ←
+      if ok1
+      then
+        do
+        let v ←
+          alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+            (alloc.vec.Vec Std.U8)) atoms i
+        let i2 := alloc.vec.Vec.len v
+        ok (i2 > 0#usize)
+      else ok false
+    let i2 ← i + 1#usize
+    ok (cont (ok2, i2))
+  else ok (done ok1)
+
+/-- [o5s_kernel::document::atoms_nonempty]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 264:4-267:5 -/
+@[rust_loop]
+def document.atoms_nonempty_loop
+  (atoms : alloc.vec.Vec (alloc.vec.Vec Std.U8)) (ok1 : Bool) (i : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun (ok2, i1) => document.atoms_nonempty_loop.body atoms ok2 i1)
+    (ok1, i)
+
+/-- [o5s_kernel::document::atoms_nonempty]:
+    Source: 'crates/kernel/src/document.rs', lines 261:0-269:1 -/
+def document.atoms_nonempty
+  (atoms : alloc.vec.Vec (alloc.vec.Vec Std.U8)) : Result Bool := do
+  let i := alloc.vec.Vec.len atoms
+  document.atoms_nonempty_loop atoms (i > 0#usize) 0#usize
+
+/-- [o5s_kernel::document::chain]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 282:4-286:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.chain_loop.body
+  (first : Std.Usize) (n : Std.Usize)
+  (out : alloc.vec.Vec (Std.Usize × Std.Usize)) (previous : Std.Usize)
+  (k : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec (Std.Usize × Std.Usize)) × Std.Usize ×
+    Std.Usize) ((alloc.vec.Vec (Std.Usize × Std.Usize)) × Std.Usize))
+  := do
+  if k < n
+  then
+    let i ← first + k
+    let out1 ← alloc.vec.Vec.push out (previous, i)
+    let k1 ← k + 1#usize
+    ok (cont (out1, i, k1))
+  else ok (done (out, previous))
+
+/-- [o5s_kernel::document::chain]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 282:4-286:5
+    Visibility: public -/
+@[rust_loop]
+def document.chain_loop
+  (out : alloc.vec.Vec (Std.Usize × Std.Usize)) (first : Std.Usize)
+  (n : Std.Usize) (previous : Std.Usize) (k : Std.Usize) :
+  Result ((alloc.vec.Vec (Std.Usize × Std.Usize)) × Std.Usize)
+  := do
+  loop
+    (fun (out1, previous1, k1) => document.chain_loop.body first n out1
+      previous1 k1)
+    (out, previous, k)
+
+/-- [o5s_kernel::document::chain]:
+    Source: 'crates/kernel/src/document.rs', lines 273:0-289:1
+    Visibility: public -/
+def document.chain
+  (out : alloc.vec.Vec (Std.Usize × Std.Usize)) (left : Std.Usize)
+  (right : Std.Usize) (first : Std.Usize) (n : Std.Usize) :
+  Result (alloc.vec.Vec (Std.Usize × Std.Usize))
+  := do
+  let (out1, previous) ← document.chain_loop out first n left 0#usize
+  alloc.vec.Vec.push out1 (previous, right)
+
+/-- [o5s_kernel::document::check_insert]:
+    Source: 'crates/kernel/src/document.rs', lines 291:0-336:1 -/
+def document.check_insert
+  (state : document.Check) (doc : document.Doc) (seen : alloc.vec.Vec Bool)
+  (op : Std.Usize) (left : document.Anchor) (right : document.Anchor)
+  (atoms : alloc.vec.Vec (alloc.vec.Vec Std.U8)) :
+  Result document.Check
+  := do
+  let kl ← document.check_anchor left doc seen
+  let kr ← document.check_anchor right doc seen
+  let l ← document.anchor_index left
+  let r ← document.anchor_index right
+  if kl != 0#u64
+  then let r1 ← document.refuse kl op 0#usize
+       ok { state with refusal := r1 }
+  else
+    if kr != 0#u64
+    then
+      let r1 ← document.refuse kr op 1#usize
+      ok { state with refusal := r1 }
+    else
+      let b ← document.atoms_nonempty atoms
+      if b
+      then
+        if l = document.END
+        then
+          let r1 ← document.refuse document.INVALID_INSERTION op 0#usize
+          ok { state with refusal := r1 }
+        else
+          if r = document.START
+          then
+            let r1 ← document.refuse document.INVALID_INSERTION op 0#usize
+            ok { state with refusal := r1 }
+          else
+            if l = r
+            then
+              let r1 ← document.refuse document.INVALID_INSERTION op 0#usize
+              ok { state with refusal := r1 }
+            else
+              let i := alloc.vec.Vec.len doc.atoms
+              let n ← i + state.created
+              let rows ← document.causal_rows doc.edges seen state.pending n
+              let b1 ← document.reaches rows l r
+              if b1
+              then
+                let i1 := alloc.vec.Vec.len doc.atoms
+                let first ← i1 + state.created
+                let i2 := alloc.vec.Vec.len atoms
+                let v ← document.chain state.pending l r first i2
+                let i3 := alloc.vec.Vec.len atoms
+                let i4 ← state.created + i3
+                ok { state with pending := v, created := i4 }
+              else
+                let r1 ←
+                  document.refuse document.UNORDERED_ANCHORS op 0#usize
+                ok { state with refusal := r1 }
+      else
+        let r1 ← document.refuse document.INVALID_INSERTION op 0#usize
+        ok { state with refusal := r1 }
+
+/-- [o5s_kernel::document::check_delete]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 348:8-360:9 -/
+@[rust_loop_body]
+def document.check_delete_loop.body
+  (doc : document.Doc) (seen : alloc.vec.Vec Bool) (op : Std.Usize)
+  (targets : alloc.vec.Vec document.Ref) (refusal : document.Refusal)
+  (found : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
+  Result (ControlFlow (document.Refusal × (alloc.vec.Vec Std.Usize) ×
+    Std.Usize) document.Refusal)
+  := do
+  let i1 := alloc.vec.Vec.len targets
+  if i < i1
+  then
+    let (refusal1, found1) ←
+      if refusal.kind = 0#u64
+      then
+        do
+        let r ←
+          alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+            document.Ref) targets i
+        let k ← document.check_anchor (document.Anchor.Node r) doc seen
+        if k != 0#u64
+        then let refusal2 ← document.refuse k op i
+             ok (refusal2, found)
+        else
+          let b ←
+            h5i_app_std.set.contains core.cmp.PartialEqUsize found r.index
+          if b
+          then
+            let refusal2 ← document.refuse document.DUPLICATE_TARGET op i
+            ok (refusal2, found)
+          else
+            let found2 ← alloc.vec.Vec.push found r.index
+            ok (refusal, found2)
+      else ok (refusal, found)
+    let i2 ← i + 1#usize
+    ok (cont (refusal1, found1, i2))
+  else ok (done refusal)
+
+/-- [o5s_kernel::document::check_delete]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 348:8-360:9 -/
+@[rust_loop]
+def document.check_delete_loop
+  (doc : document.Doc) (seen : alloc.vec.Vec Bool) (op : Std.Usize)
+  (targets : alloc.vec.Vec document.Ref) (refusal : document.Refusal)
+  (found : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
+  Result document.Refusal
+  := do
+  loop
+    (fun (refusal1, found1, i1) => document.check_delete_loop.body doc seen op
+      targets refusal1 found1 i1)
+    (refusal, found, i)
+
+/-- [o5s_kernel::document::check_delete]:
+    Source: 'crates/kernel/src/document.rs', lines 338:0-363:1 -/
+def document.check_delete
+  (state : document.Check) (doc : document.Doc) (seen : alloc.vec.Vec Bool)
+  (op : Std.Usize) (targets : alloc.vec.Vec document.Ref) :
+  Result document.Check
+  := do
+  let i := alloc.vec.Vec.len targets
+  if i = 0#usize
+  then
+    let r ← document.refuse document.EMPTY_DELETION op 0#usize
+    ok { state with refusal := r }
+  else
+    let refusal ←
+      document.check_delete_loop doc seen op targets state.refusal
+        (alloc.vec.Vec.new Std.Usize) 0#usize
+    ok { state with refusal }
+
+/-- [o5s_kernel::document::check_restore]:
+    Source: 'crates/kernel/src/document.rs', lines 365:0-375:1 -/
+def document.check_restore
+  (state : document.Check) (doc : document.Doc) (seen : alloc.vec.Vec Bool)
+  (op : Std.Usize) (deletion : document.Ref) :
+  Result document.Check
+  := do
+  let i := alloc.vec.Vec.len doc.deletions
+  let k ← document.check_ref deletion seen i document.UNKNOWN_DELETION
+  if k != 0#u64
+  then let r ← document.refuse k op 0#usize
+       ok { state with refusal := r }
+  else ok state
+
+/-- [o5s_kernel::document::check_order]:
+    Source: 'crates/kernel/src/document.rs', lines 377:0-411:1 -/
+def document.check_order
+  (state : document.Check) (doc : document.Doc) (seen : alloc.vec.Vec Bool)
+  (op : Std.Usize) (before : document.Ref) (after : document.Ref) :
+  Result document.Check
+  := do
+  let kb ← document.check_anchor (document.Anchor.Node before) doc seen
+  let ka ← document.check_anchor (document.Anchor.Node after) doc seen
+  if kb != 0#u64
+  then let r ← document.refuse kb op 0#usize
+       ok { state with refusal := r }
+  else
+    if ka != 0#u64
+    then let r ← document.refuse ka op 1#usize
+         ok { state with refusal := r }
+    else
+      let i := alloc.vec.Vec.len doc.atoms
+      let n ← i + state.created
+      let rows ← document.causal_rows doc.edges seen state.pending n
+      let b ← document.reaches rows after.index before.index
+      if b
+      then
+        let r ← document.refuse document.CYCLE op 0#usize
+        ok { state with refusal := r }
+      else
+        let pending ←
+          alloc.vec.Vec.push state.pending (before.index, after.index)
+        ok { state with pending }
+
+/-- [o5s_kernel::document::check_keep]:
+    Source: 'crates/kernel/src/document.rs', lines 413:0-458:1 -/
+def document.check_keep
+  (state : document.Check) (doc : document.Doc) (seen : alloc.vec.Vec Bool)
+  (op : Std.Usize) (deletion : document.Ref) (insertion : document.Ref) :
+  Result document.Check
+  := do
+  let od ← document.check_ref deletion seen document.NONE 0#u64
+  let oi ← document.check_ref insertion seen document.NONE 0#u64
+  if od != 0#u64
+  then let r ← document.refuse od op 0#usize
+       ok { state with refusal := r }
+  else
+    if oi != 0#u64
+    then let r ← document.refuse oi op 1#usize
+         ok { state with refusal := r }
+    else
+      let i := alloc.vec.Vec.len doc.deletions
+      if deletion.index >= i
+      then
+        let r ← document.refuse document.UNKNOWN_DELETION op 0#usize
+        ok { state with refusal := r }
+      else
+        let i1 := alloc.vec.Vec.len doc.insertions
+        if insertion.index >= i1
+        then
+          let r ← document.refuse document.UNKNOWN_INSERTION op 1#usize
+          ok { state with refusal := r }
+        else
+          let d ←
+            alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+              document.Deletion) doc.deletions deletion.index
+          let ins ←
+            alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+              document.Insertion) doc.insertions insertion.index
+          let b ←
+            h5i_app_std.set.contains core.cmp.PartialEqUsize d.targets ins.left
+          if b
+          then ok state
+          else
+            let b1 ←
+              h5i_app_std.set.contains core.cmp.PartialEqUsize d.targets
+                ins.right
+            if b1
+            then ok state
+            else
+              let r ←
+                document.refuse document.INVALID_ACKNOWLEDGEMENT op 0#usize
+              ok { state with refusal := r }
+
+/-- [o5s_kernel::document::check_op]:
+    Source: 'crates/kernel/src/document.rs', lines 460:0-477:1 -/
+def document.check_op
+  (state : document.Check) (doc : document.Doc) (seen : alloc.vec.Vec Bool)
+  (op : Std.Usize) (o : document.Op) :
+  Result document.Check
+  := do
+  if state.refusal.kind != 0#u64
+  then ok state
+  else
+    match o with
+    | document.Op.Insert left right atoms =>
+      document.check_insert state doc seen op left right atoms
+    | document.Op.Delete targets =>
+      document.check_delete state doc seen op targets
+    | document.Op.Restore deletion =>
+      document.check_restore state doc seen op deletion
+    | document.Op.Order before after =>
+      document.check_order state doc seen op before after
+    | document.Op.Keep deletion insertion =>
+      document.check_keep state doc seen op deletion insertion
+
+/-- [o5s_kernel::document::validate]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 489:4-492:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.validate_loop.body
+  (v : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (v1 : alloc.vec.Vec Std.Usize)
+  (v2 : alloc.vec.Vec (alloc.vec.Vec Std.U8))
+  (v3 : alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize))
+  (v4 : alloc.vec.Vec document.Insertion)
+  (v5 : alloc.vec.Vec document.Deletion) (v6 : alloc.vec.Vec Bool)
+  (v7 : alloc.vec.Vec (Std.Usize × Std.Usize))
+  (v8 : alloc.vec.Vec document.Op) (seen : alloc.vec.Vec Bool)
+  (state : document.Check) (i : Std.Usize) :
+  Result (ControlFlow (document.Check × Std.Usize) document.Check)
+  := do
+  let i1 := alloc.vec.Vec.len v8
+  if i < i1
+  then
+    let o ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice document.Op)
+        v8 i
+    let state1 ←
+      document.check_op state
+        {
+          deps := v,
+          creator := v1,
+          atoms := v2,
+          edges := v3,
+          insertions := v4,
+          deletions := v5,
+          restored := v6,
+          acked := v7
+        } seen i o
+    let i2 ← i + 1#usize
+    ok (cont (state1, i2))
+  else ok (done state)
+
+/-- [o5s_kernel::document::validate]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 489:4-492:5
+    Visibility: public -/
+@[rust_loop]
+def document.validate_loop
+  (v : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (v1 : alloc.vec.Vec Std.Usize)
+  (v2 : alloc.vec.Vec (alloc.vec.Vec Std.U8))
+  (v3 : alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize))
+  (v4 : alloc.vec.Vec document.Insertion)
+  (v5 : alloc.vec.Vec document.Deletion) (v6 : alloc.vec.Vec Bool)
+  (v7 : alloc.vec.Vec (Std.Usize × Std.Usize))
+  (v8 : alloc.vec.Vec document.Op) (seen : alloc.vec.Vec Bool)
+  (state : document.Check) (i : Std.Usize) :
+  Result document.Check
+  := do
+  loop
+    (fun (state1, i1) => document.validate_loop.body v v1 v2 v3 v4 v5 v6 v7 v8
+      seen state1 i1)
+    (state, i)
+
+/-- [o5s_kernel::document::validate]:
+    Source: 'crates/kernel/src/document.rs', lines 481:0-494:1
+    Visibility: public -/
+def document.validate
+  (doc : document.Doc) (p : document.Patch) : Result document.Refusal := do
+  let seen ← document.observed doc.deps p.deps
+  let r ← document.refuse 0#u64 0#usize 0#usize
+  let state ←
+    document.validate_loop doc.deps doc.creator doc.atoms doc.edges
+      doc.insertions doc.deletions doc.restored doc.acked p.ops seen
+      {
+        refusal := r,
+        pending := (alloc.vec.Vec.new (Std.Usize × Std.Usize)),
+        created := 0#usize
+      } 0#usize
+  ok state.refusal
+
+/-- [o5s_kernel::document::commit_insert]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 505:4-510:5 -/
+@[rust_loop_body]
+def document.commit_insert_loop0.body
+  (patch : Std.Usize) (atoms : alloc.vec.Vec (alloc.vec.Vec Std.U8))
+  (v : alloc.vec.Vec Std.Usize) (v1 : alloc.vec.Vec (alloc.vec.Vec Std.U8))
+  (k : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × (alloc.vec.Vec
+    (alloc.vec.Vec Std.U8)) × Std.Usize) ((alloc.vec.Vec Std.Usize) ×
+    (alloc.vec.Vec (alloc.vec.Vec Std.U8))))
+  := do
+  let i := alloc.vec.Vec.len atoms
+  if k < i
+  then
+    let v2 ← alloc.vec.Vec.push v patch
+    let v3 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
+        Std.U8)) atoms k
+    let i1 := alloc.vec.Vec.len v3
+    let v4 ← h5i_app_std.bytes.slice v3 0#usize i1
+    let v5 ← alloc.vec.Vec.push v1 v4
+    let k1 ← k + 1#usize
+    ok (cont (v2, v5, k1))
+  else ok (done (v, v1))
+
+/-- [o5s_kernel::document::commit_insert]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 505:4-510:5 -/
+@[rust_loop]
+def document.commit_insert_loop0
+  (v : alloc.vec.Vec Std.Usize) (v1 : alloc.vec.Vec (alloc.vec.Vec Std.U8))
+  (patch : Std.Usize) (atoms : alloc.vec.Vec (alloc.vec.Vec Std.U8))
+  (k : Std.Usize) :
+  Result ((alloc.vec.Vec Std.Usize) × (alloc.vec.Vec (alloc.vec.Vec Std.U8)))
+  := do
+  loop
+    (fun (v2, v3, k1) => document.commit_insert_loop0.body patch atoms v2 v3
+      k1)
+    (v, v1, k)
+
+/-- [o5s_kernel::document::commit_insert]: loop body 1:
+    Source: 'crates/kernel/src/document.rs', lines 513:4-516:5 -/
+@[rust_loop_body]
+def document.commit_insert_loop1.body
+  (patch : Std.Usize) (links : alloc.vec.Vec (Std.Usize × Std.Usize))
+  (v : alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize)) (j : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize)) ×
+    Std.Usize) (alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize)))
+  := do
+  let i := alloc.vec.Vec.len links
+  if j < i
+  then
+    let (i1, i2) ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Std.Usize ×
+        Std.Usize)) links j
+    let v1 ← alloc.vec.Vec.push v (i1, i2, patch)
+    let j1 ← j + 1#usize
+    ok (cont (v1, j1))
+  else ok (done v)
+
+/-- [o5s_kernel::document::commit_insert]: loop 1:
+    Source: 'crates/kernel/src/document.rs', lines 513:4-516:5 -/
+@[rust_loop]
+def document.commit_insert_loop1
+  (v : alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize)) (patch : Std.Usize)
+  (links : alloc.vec.Vec (Std.Usize × Std.Usize)) (j : Std.Usize) :
+  Result (alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize))
+  := do
+  loop
+    (fun (v1, j1) => document.commit_insert_loop1.body patch links v1 j1)
+    (v, j)
+
+/-- [o5s_kernel::document::commit_insert]:
+    Source: 'crates/kernel/src/document.rs', lines 496:0-519:1 -/
+def document.commit_insert
+  (doc : document.Doc) (patch : Std.Usize) (left : Std.Usize)
+  (right : Std.Usize) (atoms : alloc.vec.Vec (alloc.vec.Vec Std.U8)) :
+  Result document.Doc
+  := do
+  let first := alloc.vec.Vec.len doc.atoms
+  let (v, v1) ←
+    document.commit_insert_loop0 doc.creator doc.atoms patch atoms 0#usize
+  let i := alloc.vec.Vec.len atoms
+  let links ←
+    document.chain (alloc.vec.Vec.new (Std.Usize × Std.Usize)) left right
+      first i
+  let v2 ← document.commit_insert_loop1 doc.edges patch links 0#usize
+  let v3 ←
+    alloc.vec.Vec.push doc.insertions ({ patch, left, right } :
+      document.Insertion)
+  ok { doc with creator := v, atoms := v1, edges := v2, insertions := v3 }
+
+/-- [o5s_kernel::document::ref_indices]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 524:4-527:5 -/
+@[rust_loop_body]
+def document.ref_indices_loop.body
+  (rs : alloc.vec.Vec document.Ref) (out : alloc.vec.Vec Std.Usize)
+  (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize) (alloc.vec.Vec
+    Std.Usize))
+  := do
+  let i1 := alloc.vec.Vec.len rs
+  if i < i1
+  then
+    let r ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice document.Ref)
+        rs i
+    let out1 ← alloc.vec.Vec.push out r.index
+    let i2 ← i + 1#usize
+    ok (cont (out1, i2))
+  else ok (done out)
+
+/-- [o5s_kernel::document::ref_indices]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 524:4-527:5 -/
+@[rust_loop]
+def document.ref_indices_loop
+  (rs : alloc.vec.Vec document.Ref) (out : alloc.vec.Vec Std.Usize)
+  (i : Std.Usize) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  loop
+    (fun (out1, i1) => document.ref_indices_loop.body rs out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::document::ref_indices]:
+    Source: 'crates/kernel/src/document.rs', lines 521:0-529:1 -/
+@[reducible]
+def document.ref_indices
+  (rs : alloc.vec.Vec document.Ref) : Result (alloc.vec.Vec Std.Usize) := do
+  document.ref_indices_loop rs (alloc.vec.Vec.new Std.Usize) 0#usize
+
+/-- [o5s_kernel::document::commit_op]:
+    Source: 'crates/kernel/src/document.rs', lines 531:0-560:1 -/
+def document.commit_op
+  (doc : document.Doc) (patch : Std.Usize) (o : document.Op) :
+  Result document.Doc
+  := do
+  match o with
+  | document.Op.Insert left right atoms =>
+    let i ← document.anchor_index left
+    let i1 ← document.anchor_index right
+    document.commit_insert doc patch i i1 atoms
+  | document.Op.Delete targets =>
+    let v ← document.ref_indices targets
+    let v1 ←
+      alloc.vec.Vec.push doc.deletions ({ patch, targets := v } :
+        document.Deletion)
+    let v2 ← alloc.vec.Vec.push doc.restored false
+    ok { doc with deletions := v1, restored := v2 }
+  | document.Op.Restore deletion =>
+    let (_, index_mut_back) ←
+      alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Bool)
+        doc.restored deletion.index
+    let v := index_mut_back true
+    ok { doc with restored := v }
+  | document.Op.Order before after =>
+    let v ← alloc.vec.Vec.push doc.edges (before.index, after.index, patch)
+    ok { doc with edges := v }
+  | document.Op.Keep deletion insertion =>
+    let v ←
+      h5i_app_std.set.insert (Pair.Insts.CoreCmpPartialEqPair
+        core.cmp.PartialEqUsize core.cmp.PartialEqUsize) (BuiltinClone
+        (Std.Usize × Std.Usize)) doc.acked (deletion.index, insertion.index)
+    ok { doc with acked := v }
+
+/-- [o5s_kernel::document::commit]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 567:4-570:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.commit_loop0.body
+  (p : document.Patch) (deps : alloc.vec.Vec Std.Usize) (d : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize) ((alloc.vec.Vec
+    document.Op) × (alloc.vec.Vec Std.Usize)))
+  := do
+  let i := alloc.vec.Vec.len p.deps
+  if d < i
+  then
+    let i1 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        p.deps d
+    let deps1 ← alloc.vec.Vec.push deps i1
+    let d1 ← d + 1#usize
+    ok (cont (deps1, d1))
+  else ok (done (p.ops, deps))
+
+/-- [o5s_kernel::document::commit]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 567:4-570:5
+    Visibility: public -/
+@[rust_loop]
+def document.commit_loop0
+  (p : document.Patch) (deps : alloc.vec.Vec Std.Usize) (d : Std.Usize) :
+  Result ((alloc.vec.Vec document.Op) × (alloc.vec.Vec Std.Usize))
+  := do
+  loop
+    (fun (deps1, d1) => document.commit_loop0.body p deps1 d1)
+    (deps, d)
+
+/-- [o5s_kernel::document::commit]: loop body 1:
+    Source: 'crates/kernel/src/document.rs', lines 573:4-576:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.commit_loop1.body
+  (v : alloc.vec.Vec document.Op) (patch : Std.Usize) (doc : document.Doc)
+  (i : Std.Usize) :
+  Result (ControlFlow (document.Doc × Std.Usize) document.Doc)
+  := do
+  let i1 := alloc.vec.Vec.len v
+  if i < i1
+  then
+    let o ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice document.Op) v
+        i
+    let doc1 ← document.commit_op doc patch o
+    let i2 ← i + 1#usize
+    ok (cont (doc1, i2))
+  else ok (done doc)
+
+/-- [o5s_kernel::document::commit]: loop 1:
+    Source: 'crates/kernel/src/document.rs', lines 573:4-576:5
+    Visibility: public -/
+@[rust_loop]
+def document.commit_loop1
+  (doc : document.Doc) (v : alloc.vec.Vec document.Op) (patch : Std.Usize)
+  (i : Std.Usize) :
+  Result document.Doc
+  := do
+  loop
+    (fun (doc1, i1) => document.commit_loop1.body v patch doc1 i1)
+    (doc, i)
+
+/-- [o5s_kernel::document::commit]:
+    Source: 'crates/kernel/src/document.rs', lines 563:0-578:1
+    Visibility: public -/
+def document.commit
+  (doc : document.Doc) (p : document.Patch) : Result document.Doc := do
+  let patch := alloc.vec.Vec.len doc.deps
+  let (v, deps) ←
+    document.commit_loop0 p (alloc.vec.Vec.new Std.Usize) 0#usize
+  let v1 ← alloc.vec.Vec.push doc.deps deps
+  document.commit_loop1 { doc with deps := v1 } v patch 0#usize
+
+/-- [o5s_kernel::document::concurrent]:
+    Source: 'crates/kernel/src/document.rs', lines 581:0-593:1
+    Visibility: public -/
+def document.concurrent
+  (deps : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (a : Std.Usize)
+  (b : Std.Usize) :
+  Result Bool
+  := do
+  if a = b
+  then ok false
+  else
+    let ra ← alloc.vec.Vec.push (alloc.vec.Vec.new Std.Usize) a
+    let rb ← alloc.vec.Vec.push (alloc.vec.Vec.new Std.Usize) b
+    let pa ← document.observed deps ra
+    let pb ← document.observed deps rb
+    let b1 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool) pa b
+    if b1
+    then ok false
+    else
+      let b2 ←
+        alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool) pb a
+      ok (¬ b2)
+
+/-- [o5s_kernel::document::DeleteInsert]
+    Source: 'crates/kernel/src/document.rs', lines 597:0-602:1
+    Visibility: public -/
+structure document.DeleteInsert where
+  deletion : Std.Usize
+  insertion : Std.Usize
+  anchors : alloc.vec.Vec Std.Usize
+
+/-- [o5s_kernel::document::shared_anchors]:
+    Source: 'crates/kernel/src/document.rs', lines 605:0-614:1
+    Visibility: public -/
+def document.shared_anchors
+  (targets : alloc.vec.Vec Std.Usize) (left : Std.Usize) (right : Std.Usize) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  let b ← h5i_app_std.set.contains core.cmp.PartialEqUsize targets left
+  let anchors ←
+    if b
+    then alloc.vec.Vec.push (alloc.vec.Vec.new Std.Usize) left
+    else ok (alloc.vec.Vec.new Std.Usize)
+  let b1 ← h5i_app_std.set.contains core.cmp.PartialEqUsize targets right
+  if b1
+  then alloc.vec.Vec.push anchors right
+  else ok anchors
+
+/-- [o5s_kernel::document::deletion_conflicts]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 620:4-637:5 -/
+@[rust_loop_body]
+def document.deletion_conflicts_loop.body
+  (v : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (v1 : alloc.vec.Vec document.Insertion)
+  (v2 : alloc.vec.Vec document.Deletion)
+  (v3 : alloc.vec.Vec (Std.Usize × Std.Usize)) (d : Std.Usize)
+  (patch : Std.Usize) (out : alloc.vec.Vec document.DeleteInsert)
+  (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec document.DeleteInsert) × Std.Usize)
+    (alloc.vec.Vec document.DeleteInsert))
+  := do
+  let i1 := alloc.vec.Vec.len v1
+  if i < i1
+  then
+    let d1 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+        document.Deletion) v2 d
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+        document.Insertion) v1 i
+    let anchors ← document.shared_anchors d1.targets i2.left i2.right
+    let i3 := alloc.vec.Vec.len anchors
+    let out1 ←
+      if i3 > 0#usize
+      then
+        do
+        let b ←
+          h5i_app_std.set.contains (Pair.Insts.CoreCmpPartialEqPair
+            core.cmp.PartialEqUsize core.cmp.PartialEqUsize) v3 (d, i)
+        if b
+        then ok out
+        else
+          let b1 ← document.concurrent v patch i2.patch
+          if b1
+          then
+            alloc.vec.Vec.push out ({ deletion := d, insertion := i, anchors }
+              : document.DeleteInsert)
+          else ok out
+      else ok out
+    let i4 ← i + 1#usize
+    ok (cont (out1, i4))
+  else ok (done out)
+
+/-- [o5s_kernel::document::deletion_conflicts]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 620:4-637:5 -/
+@[rust_loop]
+def document.deletion_conflicts_loop
+  (out : alloc.vec.Vec document.DeleteInsert)
+  (v : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (v1 : alloc.vec.Vec document.Insertion)
+  (v2 : alloc.vec.Vec document.Deletion)
+  (v3 : alloc.vec.Vec (Std.Usize × Std.Usize)) (d : Std.Usize)
+  (patch : Std.Usize) (i : Std.Usize) :
+  Result (alloc.vec.Vec document.DeleteInsert)
+  := do
+  loop
+    (fun (out1, i1) => document.deletion_conflicts_loop.body v v1 v2 v3 d patch
+      out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::document::deletion_conflicts]:
+    Source: 'crates/kernel/src/document.rs', lines 617:0-639:1 -/
+def document.deletion_conflicts
+  (out : alloc.vec.Vec document.DeleteInsert) (doc : document.Doc)
+  (d : Std.Usize) :
+  Result (alloc.vec.Vec document.DeleteInsert)
+  := do
+  let d1 ←
+    alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+      document.Deletion) doc.deletions d
+  document.deletion_conflicts_loop out doc.deps doc.insertions doc.deletions
+    doc.acked d d1.patch 0#usize
+
+/-- [o5s_kernel::document::delete_inserts]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 646:4-651:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.delete_inserts_loop.body
+  (doc : document.Doc) (out : alloc.vec.Vec document.DeleteInsert)
+  (d : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec document.DeleteInsert) × Std.Usize)
+    (alloc.vec.Vec document.DeleteInsert))
+  := do
+  let i := alloc.vec.Vec.len doc.deletions
+  if d < i
+  then
+    let b ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool)
+        doc.restored d
+    let out1 ← if b
+                 then ok out
+                 else document.deletion_conflicts out doc d
+    let d1 ← d + 1#usize
+    ok (cont (out1, d1))
+  else ok (done out)
+
+/-- [o5s_kernel::document::delete_inserts]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 646:4-651:5
+    Visibility: public -/
+@[rust_loop]
+def document.delete_inserts_loop
+  (doc : document.Doc) (out : alloc.vec.Vec document.DeleteInsert)
+  (d : Std.Usize) :
+  Result (alloc.vec.Vec document.DeleteInsert)
+  := do
+  loop
+    (fun (out1, d1) => document.delete_inserts_loop.body doc out1 d1)
+    (out, d)
+
+/-- [o5s_kernel::document::delete_inserts]:
+    Source: 'crates/kernel/src/document.rs', lines 643:0-653:1
+    Visibility: public -/
+@[reducible]
+def document.delete_inserts
+  (doc : document.Doc) : Result (alloc.vec.Vec document.DeleteInsert) := do
+  document.delete_inserts_loop doc (alloc.vec.Vec.new document.DeleteInsert)
+    0#usize
+
+/-- [o5s_kernel::tags::visible]: loop body 0:
+    Source: 'crates/kernel/src/tags.rs', lines 9:4-14:5
+    Visibility: public -/
+@[rust_loop_body]
+def tags.visible_loop.body
+  (covering : alloc.vec.Vec Std.Usize) (restored : alloc.vec.Vec Bool)
+  (visible : Bool) (i : Std.Usize) :
+  Result (ControlFlow (Bool × Std.Usize) Bool)
+  := do
+  let i1 := alloc.vec.Vec.len covering
+  if i < i1
+  then
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        covering i
+    let b ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool) restored
+        i2
+    let visible1 ← if b
+                     then ok visible
+                     else ok false
+    let i3 ← i + 1#usize
+    ok (cont (visible1, i3))
+  else ok (done visible)
+
+/-- [o5s_kernel::tags::visible]: loop 0:
+    Source: 'crates/kernel/src/tags.rs', lines 9:4-14:5
+    Visibility: public -/
+@[rust_loop]
+def tags.visible_loop
+  (covering : alloc.vec.Vec Std.Usize) (restored : alloc.vec.Vec Bool)
+  (visible : Bool) (i : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun (visible1, i1) => tags.visible_loop.body covering restored visible1
+      i1)
+    (visible, i)
+
+/-- [o5s_kernel::tags::visible]:
+    Source: 'crates/kernel/src/tags.rs', lines 6:0-16:1
+    Visibility: public -/
+@[reducible]
+def tags.visible
+  (covering : alloc.vec.Vec Std.Usize) (restored : alloc.vec.Vec Bool) :
+  Result Bool
+  := do
+  tags.visible_loop covering restored true 0#usize
+
+/-- [o5s_kernel::document::liveness]: loop body 1:
+    Source: 'crates/kernel/src/document.rs', lines 662:8-665:9
+    Visibility: public -/
+@[rust_loop_body]
+def document.liveness_loop0_loop0.body
+  (v : alloc.vec.Vec document.Deletion) (d : Std.Usize)
+  (covering : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (t : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec (alloc.vec.Vec Std.Usize)) × Std.Usize)
+    (alloc.vec.Vec (alloc.vec.Vec Std.Usize)))
+  := do
+  let d1 ←
+    alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+      document.Deletion) v d
+  let i := alloc.vec.Vec.len d1.targets
+  if t < i
+  then
+    let i1 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        d1.targets t
+    let covering1 ← document.add_edge covering i1 d
+    let t1 ← t + 1#usize
+    ok (cont (covering1, t1))
+  else ok (done covering)
+
+/-- [o5s_kernel::document::liveness]: loop 1:
+    Source: 'crates/kernel/src/document.rs', lines 662:8-665:9
+    Visibility: public -/
+@[rust_loop]
+def document.liveness_loop0_loop0
+  (v : alloc.vec.Vec document.Deletion)
+  (covering : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (d : Std.Usize)
+  (t : Std.Usize) :
+  Result (alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  := do
+  loop
+    (fun (covering1, t1) => document.liveness_loop0_loop0.body v d covering1
+      t1)
+    (covering, t)
+
+/-- [o5s_kernel::document::liveness]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 660:4-667:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.liveness_loop0.body
+  (v : alloc.vec.Vec document.Deletion)
+  (covering : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (d : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec (alloc.vec.Vec Std.Usize)) × Std.Usize)
+    (alloc.vec.Vec (alloc.vec.Vec Std.Usize)))
+  := do
+  let i := alloc.vec.Vec.len v
+  if d < i
+  then
+    let covering1 ← document.liveness_loop0_loop0 v covering d 0#usize
+    let d1 ← d + 1#usize
+    ok (cont (covering1, d1))
+  else ok (done covering)
+
+/-- [o5s_kernel::document::liveness]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 660:4-667:5
+    Visibility: public -/
+@[rust_loop]
+def document.liveness_loop0
+  (v : alloc.vec.Vec document.Deletion)
+  (covering : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (d : Std.Usize) :
+  Result (alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  := do
+  loop
+    (fun (covering1, d1) => document.liveness_loop0.body v covering1 d1)
+    (covering, d)
+
+/-- [o5s_kernel::document::liveness]: loop body 2:
+    Source: 'crates/kernel/src/document.rs', lines 670:4-673:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.liveness_loop1.body
+  (v : alloc.vec.Vec (alloc.vec.Vec Std.U8)) (v1 : alloc.vec.Vec Bool)
+  (covering : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (live : alloc.vec.Vec Bool) (a : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Bool) × Std.Usize) (alloc.vec.Vec Bool))
+  := do
+  let i := alloc.vec.Vec.len v
+  if a < i
+  then
+    if a >= 2#usize
+    then
+      let v2 ←
+        alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+          (alloc.vec.Vec Std.Usize)) covering a
+      let b ← tags.visible v2 v1
+      let live1 ← alloc.vec.Vec.push live b
+      let a1 ← a + 1#usize
+      ok (cont (live1, a1))
+    else
+      let live1 ← alloc.vec.Vec.push live false
+      let a1 ← a + 1#usize
+      ok (cont (live1, a1))
+  else ok (done live)
+
+/-- [o5s_kernel::document::liveness]: loop 2:
+    Source: 'crates/kernel/src/document.rs', lines 670:4-673:5
+    Visibility: public -/
+@[rust_loop]
+def document.liveness_loop1
+  (v : alloc.vec.Vec (alloc.vec.Vec Std.U8)) (v1 : alloc.vec.Vec Bool)
+  (covering : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (live : alloc.vec.Vec Bool) (a : Std.Usize) :
+  Result (alloc.vec.Vec Bool)
+  := do
+  loop
+    (fun (live1, a1) => document.liveness_loop1.body v v1 covering live1 a1)
+    (live, a)
+
+/-- [o5s_kernel::document::liveness]:
+    Source: 'crates/kernel/src/document.rs', lines 657:0-675:1
+    Visibility: public -/
+def document.liveness (doc : document.Doc) : Result (alloc.vec.Vec Bool) := do
+  let i := alloc.vec.Vec.len doc.atoms
+  let covering ← document.empty_rows i
+  let covering1 ← document.liveness_loop0 doc.deletions covering 0#usize
+  document.liveness_loop1 doc.atoms doc.restored covering1 (alloc.vec.Vec.new
+    Bool) 0#usize
+
+/-- [o5s_kernel::document::all_rows]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 681:4-684:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.all_rows_loop.body
+  (v : alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize))
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec (alloc.vec.Vec Std.Usize)) × Std.Usize)
+    (alloc.vec.Vec (alloc.vec.Vec Std.Usize)))
+  := do
+  let i1 := alloc.vec.Vec.len v
+  if i < i1
+  then
+    let (i2, i3, _) ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Std.Usize ×
+        Std.Usize × Std.Usize)) v i
+    let rows1 ← document.add_edge rows i2 i3
+    let i4 ← i + 1#usize
+    ok (cont (rows1, i4))
+  else ok (done rows)
+
+/-- [o5s_kernel::document::all_rows]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 681:4-684:5
+    Visibility: public -/
+@[rust_loop]
+def document.all_rows_loop
+  (v : alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize))
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (i : Std.Usize) :
+  Result (alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  := do
+  loop
+    (fun (rows1, i1) => document.all_rows_loop.body v rows1 i1)
+    (rows, i)
+
+/-- [o5s_kernel::document::all_rows]:
+    Source: 'crates/kernel/src/document.rs', lines 678:0-686:1
+    Visibility: public -/
+def document.all_rows
+  (doc : document.Doc) : Result (alloc.vec.Vec (alloc.vec.Vec Std.Usize)) := do
+  let i := alloc.vec.Vec.len doc.atoms
+  let rows ← document.empty_rows i
+  document.all_rows_loop doc.edges rows 0#usize
+
+/-- [o5s_kernel::document::dead_rows]: loop body 1:
+    Source: 'crates/kernel/src/document.rs', lines 698:12-701:13
+    Visibility: public -/
+@[rust_loop_body]
+def document.dead_rows_loop0_loop0.body
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (a : Std.Usize)
+  (row : alloc.vec.Vec Std.Usize) (k : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize) (alloc.vec.Vec
+    Std.Usize))
+  := do
+  let v ←
+    alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
+      Std.Usize)) rows a
+  let i := alloc.vec.Vec.len v
+  if k < i
+  then
+    let i1 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize) v k
+    let row1 ← alloc.vec.Vec.push row i1
+    let k1 ← k + 1#usize
+    ok (cont (row1, k1))
+  else ok (done row)
+
+/-- [o5s_kernel::document::dead_rows]: loop 1:
+    Source: 'crates/kernel/src/document.rs', lines 698:12-701:13
+    Visibility: public -/
+@[rust_loop]
+def document.dead_rows_loop0_loop0
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (a : Std.Usize)
+  (row : alloc.vec.Vec Std.Usize) (k : Std.Usize) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  loop
+    (fun (row1, k1) => document.dead_rows_loop0_loop0.body rows a row1 k1)
+    (row, k)
+
+/-- [o5s_kernel::document::dead_rows]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 692:4-705:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.dead_rows_loop0.body
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (live : alloc.vec.Vec Bool)
+  (out : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (a : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec (alloc.vec.Vec Std.Usize)) × Std.Usize)
+    (alloc.vec.Vec (alloc.vec.Vec Std.Usize)))
+  := do
+  let i := alloc.vec.Vec.len rows
+  if a < i
+  then
+    let b ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool) live a
+    if b
+    then
+      let out1 ← alloc.vec.Vec.push out (alloc.vec.Vec.new Std.Usize)
+      let a1 ← a + 1#usize
+      ok (cont (out1, a1))
+    else
+      let row ←
+        document.dead_rows_loop0_loop0 rows a (alloc.vec.Vec.new Std.Usize)
+          0#usize
+      let out1 ← alloc.vec.Vec.push out row
+      let a1 ← a + 1#usize
+      ok (cont (out1, a1))
+  else ok (done out)
+
+/-- [o5s_kernel::document::dead_rows]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 692:4-705:5
+    Visibility: public -/
+@[rust_loop]
+def document.dead_rows_loop0
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (live : alloc.vec.Vec Bool)
+  (out : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (a : Std.Usize) :
+  Result (alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  := do
+  loop
+    (fun (out1, a1) => document.dead_rows_loop0.body rows live out1 a1)
+    (out, a)
+
+/-- [o5s_kernel::document::dead_rows]:
+    Source: 'crates/kernel/src/document.rs', lines 689:0-707:1
+    Visibility: public -/
+@[reducible]
+def document.dead_rows
+  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (live : alloc.vec.Vec Bool)
+  :
+  Result (alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  := do
+  document.dead_rows_loop0 rows live (alloc.vec.Vec.new (alloc.vec.Vec
+    Std.Usize)) 0#usize
+
+/-- [o5s_kernel::document::View]
+    Source: 'crates/kernel/src/document.rs', lines 710:0-721:1
+    Visibility: public -/
+structure document.View where
+  layers : alloc.vec.Vec (alloc.vec.Vec Std.Usize)
+  blocked : alloc.vec.Vec Std.Usize
+  delete_inserts : alloc.vec.Vec document.DeleteInsert
+  bytes : alloc.vec.Vec Std.U8
+  clean : Bool
+
+/-- [o5s_kernel::document::Kahn]
+    Source: 'crates/kernel/src/document.rs', lines 724:0-732:1
+    Visibility: public -/
+structure document.Kahn where
+  indegree : alloc.vec.Vec Std.Usize
+  remaining : alloc.vec.Vec Bool
+  left : Std.Usize
+  ready : alloc.vec.Vec Std.Usize
+  layers : alloc.vec.Vec (alloc.vec.Vec Std.Usize)
+  bytes : alloc.vec.Vec Std.U8
+  blocked : Bool
+
+/-- [o5s_kernel::interval::append_range]: loop body 0:
+    Source: 'crates/kernel/src/interval.rs', lines 27:4-30:5
+    Visibility: public -/
+@[rust_loop_body]
+def interval.append_range_loop.body
+  (bytes : alloc.vec.Vec Std.U8) («end» : Std.Usize)
+  (out : alloc.vec.Vec Std.U8) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.U8) × Std.Usize) (alloc.vec.Vec
+    Std.U8))
+  := do
+  if i < «end»
+  then
+    let i1 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) bytes
+        i
+    let out1 ← alloc.vec.Vec.push out i1
+    let i2 ← i + 1#usize
+    ok (cont (out1, i2))
+  else ok (done out)
+
+/-- [o5s_kernel::interval::append_range]: loop 0:
+    Source: 'crates/kernel/src/interval.rs', lines 27:4-30:5
+    Visibility: public -/
+@[rust_loop]
+def interval.append_range_loop
+  (out : alloc.vec.Vec Std.U8) (bytes : alloc.vec.Vec Std.U8)
+  («end» : Std.Usize) (i : Std.Usize) :
+  Result (alloc.vec.Vec Std.U8)
+  := do
+  loop
+    (fun (out1, i1) => interval.append_range_loop.body bytes «end» out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::interval::append_range]:
+    Source: 'crates/kernel/src/interval.rs', lines 25:0-32:1
+    Visibility: public -/
+@[reducible]
+def interval.append_range
+  (out : alloc.vec.Vec Std.U8) (bytes : alloc.vec.Vec Std.U8)
+  (start : Std.Usize) («end» : Std.Usize) :
+  Result (alloc.vec.Vec Std.U8)
+  := do
+  interval.append_range_loop out bytes «end» start
+
+/-- [o5s_kernel::document::emit]: loop body 1:
+    Source: 'crates/kernel/src/document.rs', lines 744:8-751:9 -/
+@[rust_loop_body]
+def document.emit_loop0_loop0.body
+  (boundaries : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (s : Std.Usize)
+  (v : alloc.vec.Vec Std.Usize) (next : alloc.vec.Vec Std.Usize)
+  (t : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × (alloc.vec.Vec Std.Usize)
+    × Std.Usize) ((alloc.vec.Vec Std.Usize) × (alloc.vec.Vec Std.Usize)))
+  := do
+  let v1 ←
+    alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
+      Std.Usize)) boundaries s
+  let i := alloc.vec.Vec.len v1
+  if t < i
+  then
+    let v2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize) v1
+        t
+    let (i1, index_mut_back) ←
+      alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        v v2
+    let i2 ← i1 - 1#usize
+    let v3 := index_mut_back i2
+    let i3 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize) v3
+        v2
+    let next1 ← if i3 = 0#usize
+                  then alloc.vec.Vec.push next v2
+                  else ok next
+    let t1 ← t + 1#usize
+    ok (cont (v3, next1, t1))
+  else ok (done (v, next))
+
+/-- [o5s_kernel::document::emit]: loop 1:
+    Source: 'crates/kernel/src/document.rs', lines 744:8-751:9 -/
+@[rust_loop]
+def document.emit_loop0_loop0
+  (v : alloc.vec.Vec Std.Usize)
+  (boundaries : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (next : alloc.vec.Vec Std.Usize) (s : Std.Usize) (t : Std.Usize) :
+  Result ((alloc.vec.Vec Std.Usize) × (alloc.vec.Vec Std.Usize))
+  := do
+  loop
+    (fun (v1, next1, t1) => document.emit_loop0_loop0.body boundaries s v1
+      next1 t1)
+    (v, next, t)
+
+/-- [o5s_kernel::document::emit]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 738:4-753:5 -/
+@[rust_loop_body]
+def document.emit_loop0.body
+  (doc : document.Doc) (boundaries : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (frontier : alloc.vec.Vec Std.Usize) (v : alloc.vec.Vec Std.Usize)
+  (v1 : alloc.vec.Vec Bool) (i : Std.Usize) (v2 : alloc.vec.Vec Std.U8)
+  (next : alloc.vec.Vec Std.Usize) (i1 : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × (alloc.vec.Vec Bool) ×
+    Std.Usize × (alloc.vec.Vec Std.U8) × (alloc.vec.Vec Std.Usize) ×
+    Std.Usize) ((alloc.vec.Vec Std.Usize) × (alloc.vec.Vec Bool) × Std.Usize
+    × (alloc.vec.Vec Std.U8) × (alloc.vec.Vec Std.Usize)))
+  := do
+  let i2 := alloc.vec.Vec.len frontier
+  if i1 < i2
+  then
+    let s ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        frontier i1
+    let (_, index_mut_back) ←
+      alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Bool) v1 s
+    let i3 ← i - 1#usize
+    let v3 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
+        Std.U8)) doc.atoms s
+    let i4 := alloc.vec.Vec.len v3
+    let v4 ← interval.append_range v2 v3 0#usize i4
+    let v5 := index_mut_back false
+    let (v6, next1) ← document.emit_loop0_loop0 v boundaries next s 0#usize
+    let i5 ← i1 + 1#usize
+    ok (cont (v6, v5, i3, v4, next1, i5))
+  else ok (done (v, v1, i, v2, next))
+
+/-- [o5s_kernel::document::emit]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 738:4-753:5 -/
+@[rust_loop]
+def document.emit_loop0
+  (v : alloc.vec.Vec Std.Usize) (v1 : alloc.vec.Vec Bool) (i : Std.Usize)
+  (v2 : alloc.vec.Vec Std.U8) (doc : document.Doc)
+  (boundaries : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (frontier : alloc.vec.Vec Std.Usize) (next : alloc.vec.Vec Std.Usize)
+  (i1 : Std.Usize) :
+  Result ((alloc.vec.Vec Std.Usize) × (alloc.vec.Vec Bool) × Std.Usize ×
+    (alloc.vec.Vec Std.U8) × (alloc.vec.Vec Std.Usize))
+  := do
+  loop
+    (fun (v3, v4, i2, v5, next1, i3) => document.emit_loop0.body doc boundaries
+      frontier v3 v4 i2 v5 next1 i3)
+    (v, v1, i, v2, next, i1)
+
+/-- [o5s_kernel::document::emit]:
+    Source: 'crates/kernel/src/document.rs', lines 734:0-757:1 -/
+def document.emit
+  (k : document.Kahn) (doc : document.Doc)
+  (boundaries : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) :
+  Result document.Kahn
+  := do
+  let (v, v1, i, v2, next) ←
+    document.emit_loop0 k.indegree k.remaining k.left k.bytes doc boundaries
+      k.ready (alloc.vec.Vec.new Std.Usize) 0#usize
+  let v3 ← alloc.vec.Vec.push k.layers k.ready
+  ok
+    {
+      k
+        with
+        indegree := v,
+        remaining := v1,
+        left := i,
+        ready := next,
+        layers := v3,
+        bytes := v2
+    }
+
+/-- [o5s_kernel::order::frontier_counts]: loop body 0:
+    Source: 'crates/kernel/src/order.rs', lines 42:4-48:5
+    Visibility: public -/
+@[rust_loop_body]
+def order.frontier_counts_loop.body
+  (indegree : alloc.vec.Vec Std.Usize) (remaining : alloc.vec.Vec Std.Usize)
+  (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize) (alloc.vec.Vec
+    Std.Usize))
+  := do
+  let i1 := alloc.vec.Vec.len remaining
+  if i < i1
+  then
+    let vertex ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        remaining i
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        indegree vertex
+    let out1 ← if i2 = 0#usize
+                 then alloc.vec.Vec.push out vertex
+                 else ok out
+    let i3 ← i + 1#usize
+    ok (cont (out1, i3))
+  else ok (done out)
+
+/-- [o5s_kernel::order::frontier_counts]: loop 0:
+    Source: 'crates/kernel/src/order.rs', lines 42:4-48:5
+    Visibility: public -/
+@[rust_loop]
+def order.frontier_counts_loop
+  (indegree : alloc.vec.Vec Std.Usize) (remaining : alloc.vec.Vec Std.Usize)
+  (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  loop
+    (fun (out1, i1) => order.frontier_counts_loop.body indegree remaining out1
+      i1)
+    (out, i)
+
+/-- [o5s_kernel::order::frontier_counts]:
+    Source: 'crates/kernel/src/order.rs', lines 39:0-50:1
+    Visibility: public -/
+@[reducible]
+def order.frontier_counts
+  (indegree : alloc.vec.Vec Std.Usize) (remaining : alloc.vec.Vec Std.Usize) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  order.frontier_counts_loop indegree remaining (alloc.vec.Vec.new Std.Usize)
+    0#usize
+
+/-- [o5s_kernel::indexed::keep_live]: loop body 0:
+    Source: 'crates/kernel/src/indexed.rs', lines 52:4-58:5
+    Visibility: public -/
+@[rust_loop_body]
+def indexed.keep_live_loop.body
+  (nodes : alloc.vec.Vec Std.Usize) (live : alloc.vec.Vec Bool)
+  (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize) (alloc.vec.Vec
+    Std.Usize))
+  := do
+  let i1 := alloc.vec.Vec.len nodes
+  if i < i1
+  then
+    let vertex ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        nodes i
+    let b ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool) live
+        vertex
+    let out1 ← if b
+                 then alloc.vec.Vec.push out vertex
+                 else ok out
+    let i2 ← i + 1#usize
+    ok (cont (out1, i2))
+  else ok (done out)
+
+/-- [o5s_kernel::indexed::keep_live]: loop 0:
+    Source: 'crates/kernel/src/indexed.rs', lines 52:4-58:5
+    Visibility: public -/
+@[rust_loop]
+def indexed.keep_live_loop
+  (nodes : alloc.vec.Vec Std.Usize) (live : alloc.vec.Vec Bool)
+  (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  loop
+    (fun (out1, i1) => indexed.keep_live_loop.body nodes live out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::indexed::keep_live]:
+    Source: 'crates/kernel/src/indexed.rs', lines 49:0-60:1
+    Visibility: public -/
+@[reducible]
+def indexed.keep_live
+  (nodes : alloc.vec.Vec Std.Usize) (live : alloc.vec.Vec Bool) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  indexed.keep_live_loop nodes live (alloc.vec.Vec.new Std.Usize) 0#usize
+
+/-- [o5s_kernel::indexed::boundary]:
+    Source: 'crates/kernel/src/indexed.rs', lines 64:0-73:1
+    Visibility: public -/
+def indexed.boundary
+  (dead_rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (successors : alloc.vec.Vec Std.Usize) (live : alloc.vec.Vec Bool)
+  (marks : alloc.vec.Vec Bool) :
+  Result indexed.Traversal
+  := do
+  let state ← indexed.reachable dead_rows successors marks
+  let v ← indexed.keep_live state.queue live
+  ok { state with queue := v }
+
+/-- [o5s_kernel::document::materialize]: loop body 0:
+    Source: 'crates/kernel/src/document.rs', lines 771:4-774:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.materialize_loop0.body
+  (n : Std.Usize) (indegree : alloc.vec.Vec Std.Usize) (a : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize) (alloc.vec.Vec
+    Std.Usize))
+  := do
+  if a < n
+  then
+    let indegree1 ← alloc.vec.Vec.push indegree 0#usize
+    let a1 ← a + 1#usize
+    ok (cont (indegree1, a1))
+  else ok (done indegree)
+
+/-- [o5s_kernel::document::materialize]: loop 0:
+    Source: 'crates/kernel/src/document.rs', lines 771:4-774:5
+    Visibility: public -/
+@[rust_loop]
+def document.materialize_loop0
+  (n : Std.Usize) (indegree : alloc.vec.Vec Std.Usize) (a : Std.Usize) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  loop
+    (fun (indegree1, a1) => document.materialize_loop0.body n indegree1 a1)
+    (indegree, a)
+
+/-- [o5s_kernel::document::materialize]: loop body 2:
+    Source: 'crates/kernel/src/document.rs', lines 783:12-786:13
+    Visibility: public -/
+@[rust_loop_body]
+def document.materialize_loop1_loop0.body
+  (v : alloc.vec.Vec Std.Usize) (indegree : alloc.vec.Vec Std.Usize)
+  (j : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize) (alloc.vec.Vec
+    Std.Usize))
+  := do
+  let i := alloc.vec.Vec.len v
+  if j < i
+  then
+    let i1 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize) v j
+    let (i2, index_mut_back) ←
+      alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        indegree i1
+    let i3 ← i2 + 1#usize
+    let j1 ← j + 1#usize
+    let indegree1 := index_mut_back i3
+    ok (cont (indegree1, j1))
+  else ok (done indegree)
+
+/-- [o5s_kernel::document::materialize]: loop 2:
+    Source: 'crates/kernel/src/document.rs', lines 783:12-786:13
+    Visibility: public -/
+@[rust_loop]
+def document.materialize_loop1_loop0
+  (indegree : alloc.vec.Vec Std.Usize) (v : alloc.vec.Vec Std.Usize)
+  (j : Std.Usize) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  loop
+    (fun (indegree1, j1) => document.materialize_loop1_loop0.body v indegree1
+      j1)
+    (indegree, j)
+
+/-- [o5s_kernel::document::materialize]: loop body 1:
+    Source: 'crates/kernel/src/document.rs', lines 778:4-794:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.materialize_loop1.body
+  (live : alloc.vec.Vec Bool) (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (dead : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (n : Std.Usize)
+  (marks : alloc.vec.Vec Bool)
+  (boundaries : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (indegree : alloc.vec.Vec Std.Usize) (remaining : alloc.vec.Vec Std.Usize)
+  (left : Std.Usize) (s : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Bool) × (alloc.vec.Vec (alloc.vec.Vec
+    Std.Usize)) × (alloc.vec.Vec Std.Usize) × (alloc.vec.Vec Std.Usize) ×
+    Std.Usize × Std.Usize) ((alloc.vec.Vec (alloc.vec.Vec Std.Usize)) ×
+    (alloc.vec.Vec Std.Usize) × (alloc.vec.Vec Std.Usize) × Std.Usize))
+  := do
+  if s < n
+  then
+    let b ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool) live s
+    if b
+    then
+      let v ←
+        alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+          (alloc.vec.Vec Std.Usize)) rows s
+      let t ← indexed.boundary dead v live marks
+      let indegree1 ←
+        document.materialize_loop1_loop0 indegree t.queue 0#usize
+      let boundaries1 ← alloc.vec.Vec.push boundaries t.queue
+      let remaining1 ← alloc.vec.Vec.push remaining s
+      let left1 ← left + 1#usize
+      let s1 ← s + 1#usize
+      ok (cont (t.marks, boundaries1, indegree1, remaining1, left1, s1))
+    else
+      let boundaries1 ←
+        alloc.vec.Vec.push boundaries (alloc.vec.Vec.new Std.Usize)
+      let s1 ← s + 1#usize
+      ok (cont (marks, boundaries1, indegree, remaining, left, s1))
+  else ok (done (boundaries, indegree, remaining, left))
+
+/-- [o5s_kernel::document::materialize]: loop 1:
+    Source: 'crates/kernel/src/document.rs', lines 778:4-794:5
+    Visibility: public -/
+@[rust_loop]
+def document.materialize_loop1
+  (live : alloc.vec.Vec Bool) (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (dead : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (n : Std.Usize)
+  (marks : alloc.vec.Vec Bool)
+  (boundaries : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
+  (indegree : alloc.vec.Vec Std.Usize) (remaining : alloc.vec.Vec Std.Usize)
+  (left : Std.Usize) (s : Std.Usize) :
+  Result ((alloc.vec.Vec (alloc.vec.Vec Std.Usize)) × (alloc.vec.Vec
+    Std.Usize) × (alloc.vec.Vec Std.Usize) × Std.Usize)
+  := do
+  loop
+    (fun (marks1, boundaries1, indegree1, remaining1, left1, s1) =>
+      document.materialize_loop1.body live rows dead n marks1 boundaries1
+      indegree1 remaining1 left1 s1)
+    (marks, boundaries, indegree, remaining, left, s)
+
+/-- [o5s_kernel::document::materialize]: loop body 3:
+    Source: 'crates/kernel/src/document.rs', lines 805:4-811:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.materialize_loop2.body
+  (v : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (v1 : alloc.vec.Vec Std.Usize)
+  (v2 : alloc.vec.Vec (alloc.vec.Vec Std.U8))
+  (v3 : alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize))
+  (v4 : alloc.vec.Vec document.Insertion)
+  (v5 : alloc.vec.Vec document.Deletion) (v6 : alloc.vec.Vec Bool)
+  (v7 : alloc.vec.Vec (Std.Usize × Std.Usize))
+  (boundaries : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (k : document.Kahn) :
+  Result (ControlFlow document.Kahn ((alloc.vec.Vec Bool) × (alloc.vec.Vec
+    (alloc.vec.Vec Std.Usize)) × (alloc.vec.Vec Std.U8) × Bool))
+  := do
+  if k.left > 0#usize
+  then
+    if k.blocked
+    then ok (done (k.remaining, k.layers, k.bytes, true))
+    else
+      let i := alloc.vec.Vec.len k.ready
+      if i = 0#usize
+      then ok (cont { k with blocked := true })
+      else
+        let k1 ←
+          document.emit k
+            {
+              deps := v,
+              creator := v1,
+              atoms := v2,
+              edges := v3,
+              insertions := v4,
+              deletions := v5,
+              restored := v6,
+              acked := v7
+            } boundaries
+        ok (cont k1)
+  else ok (done (k.remaining, k.layers, k.bytes, k.blocked))
+
+/-- [o5s_kernel::document::materialize]: loop 3:
+    Source: 'crates/kernel/src/document.rs', lines 805:4-811:5
+    Visibility: public -/
+@[rust_loop]
+def document.materialize_loop2
+  (v : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (v1 : alloc.vec.Vec Std.Usize)
+  (v2 : alloc.vec.Vec (alloc.vec.Vec Std.U8))
+  (v3 : alloc.vec.Vec (Std.Usize × Std.Usize × Std.Usize))
+  (v4 : alloc.vec.Vec document.Insertion)
+  (v5 : alloc.vec.Vec document.Deletion) (v6 : alloc.vec.Vec Bool)
+  (v7 : alloc.vec.Vec (Std.Usize × Std.Usize))
+  (boundaries : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (k : document.Kahn) :
+  Result ((alloc.vec.Vec Bool) × (alloc.vec.Vec (alloc.vec.Vec Std.Usize)) ×
+    (alloc.vec.Vec Std.U8) × Bool)
+  := do
+  loop
+    (fun k1 => document.materialize_loop2.body v v1 v2 v3 v4 v5 v6 v7
+      boundaries k1)
+    k
+
+/-- [o5s_kernel::document::materialize]: loop body 4:
+    Source: 'crates/kernel/src/document.rs', lines 814:4-819:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.materialize_loop3.body
+  (n : Std.Usize) (v : alloc.vec.Vec Bool) (b : Bool)
+  (blocked : alloc.vec.Vec Std.Usize) (b1 : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize) (alloc.vec.Vec
+    Std.Usize))
+  := do
+  if b1 < n
+  then
+    let blocked1 ←
+      if b
+      then
+        do
+        let b2 ←
+          alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool) v b1
+        if b2
+        then alloc.vec.Vec.push blocked b1
+        else ok blocked
+      else ok blocked
+    let b2 ← b1 + 1#usize
+    ok (cont (blocked1, b2))
+  else ok (done blocked)
+
+/-- [o5s_kernel::document::materialize]: loop 4:
+    Source: 'crates/kernel/src/document.rs', lines 814:4-819:5
+    Visibility: public -/
+@[rust_loop]
+def document.materialize_loop3
+  (n : Std.Usize) (v : alloc.vec.Vec Bool) (b : Bool)
+  (blocked : alloc.vec.Vec Std.Usize) (b1 : Std.Usize) :
+  Result (alloc.vec.Vec Std.Usize)
+  := do
+  loop
+    (fun (blocked1, b2) => document.materialize_loop3.body n v b blocked1 b2)
+    (blocked, b1)
+
+/-- [o5s_kernel::document::materialize]: loop body 5:
+    Source: 'crates/kernel/src/document.rs', lines 822:4-825:5
+    Visibility: public -/
+@[rust_loop_body]
+def document.materialize_loop4.body
+  (v : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (ordered : Bool)
+  (l : Std.Usize) :
+  Result (ControlFlow (Bool × Std.Usize) Bool)
+  := do
+  let i := alloc.vec.Vec.len v
+  if l < i
+  then
+    let ordered1 ←
+      if ordered
+      then
+        do
+        let v1 ←
+          alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+            (alloc.vec.Vec Std.Usize)) v l
+        let i1 := alloc.vec.Vec.len v1
+        ok (i1 = 1#usize)
+      else ok false
+    let l1 ← l + 1#usize
+    ok (cont (ordered1, l1))
+  else ok (done ordered)
+
+/-- [o5s_kernel::document::materialize]: loop 5:
+    Source: 'crates/kernel/src/document.rs', lines 822:4-825:5
+    Visibility: public -/
+@[rust_loop]
+def document.materialize_loop4
+  (v : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (ordered : Bool)
+  (l : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun (ordered1, l1) => document.materialize_loop4.body v ordered1 l1)
+    (ordered, l)
+
+/-- [o5s_kernel::document::materialize]:
+    Source: 'crates/kernel/src/document.rs', lines 761:0-834:1
+    Visibility: public -/
+def document.materialize (doc : document.Doc) : Result document.View := do
+  let delete_inserts ← document.delete_inserts doc
+  let live ← document.liveness doc
+  let rows ← document.all_rows doc
+  let dead ← document.dead_rows rows live
+  let n := alloc.vec.Vec.len doc.atoms
+  let marks ← document.falses n
+  let indegree ←
+    document.materialize_loop0 n (alloc.vec.Vec.new Std.Usize) 0#usize
+  let (boundaries, indegree1, remaining, left) ←
+    document.materialize_loop1 live rows dead n marks (alloc.vec.Vec.new
+      (alloc.vec.Vec Std.Usize)) indegree (alloc.vec.Vec.new Std.Usize) 0#usize
+      0#usize
+  let ready ← order.frontier_counts indegree1 remaining
+  let v ← alloc.vec.CloneVec.clone core.clone.CloneBool live
+  let (v1, v2, v3, b) ←
+    document.materialize_loop2 doc.deps doc.creator doc.atoms doc.edges
+      doc.insertions doc.deletions doc.restored doc.acked boundaries
+      {
+        indegree := indegree1,
+        remaining := v,
+        left,
+        ready,
+        layers := (alloc.vec.Vec.new (alloc.vec.Vec Std.Usize)),
+        bytes := (alloc.vec.Vec.new Std.U8),
+        blocked := false
+      }
+  let blocked ←
+    document.materialize_loop3 n v1 b (alloc.vec.Vec.new Std.Usize) 0#usize
+  let ordered ← document.materialize_loop4 v2 true 0#usize
+  if ordered
+  then
+    if b
+    then
+      ok { layers := v2, blocked, delete_inserts, bytes := v3, clean := false }
+    else
+      let i := alloc.vec.Vec.len delete_inserts
+      ok
+        {
+          layers := v2,
+          blocked,
+          delete_inserts,
+          bytes := v3,
+          clean := (i = 0#usize)
+        }
+  else
+    ok { layers := v2, blocked, delete_inserts, bytes := v3, clean := false }
 
 /-- [o5s_kernel::graph::reachable]:
     Source: 'crates/kernel/src/graph.rs', lines 3:0-5:1
@@ -756,223 +3290,6 @@ def graph.weak_component
   let v ← graph.weak_edges edges
   graph.reachable v seeds
 
-/-- [o5s_kernel::indexed::Traversal]
-    Source: 'crates/kernel/src/indexed.rs', lines 4:0-7:1
-    Visibility: public -/
-structure indexed.Traversal where
-  marks : alloc.vec.Vec Bool
-  queue : alloc.vec.Vec Std.Usize
-
-/-- [o5s_kernel::indexed::enqueue]: loop body 0:
-    Source: 'crates/kernel/src/indexed.rs', lines 11:4-18:5
-    Visibility: public -/
-@[rust_loop_body]
-def indexed.enqueue_loop.body
-  (neighbors : alloc.vec.Vec Std.Usize) (state : indexed.Traversal)
-  (i : Std.Usize) :
-  Result (ControlFlow (indexed.Traversal × Std.Usize) indexed.Traversal)
-  := do
-  let i1 := alloc.vec.Vec.len neighbors
-  if i < i1
-  then
-    let vertex ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
-        neighbors i
-    let b ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool)
-        state.marks vertex
-    let (v, v1) ←
-      if b
-      then ok (state.marks, state.queue)
-      else
-        do
-        let (_, index_mut_back) ←
-          alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Bool)
-            state.marks vertex
-        let v2 ← alloc.vec.Vec.push state.queue vertex
-        let v3 := index_mut_back true
-        ok (v3, v2)
-    let i2 ← i + 1#usize
-    ok (cont ({ marks := v, queue := v1 }, i2))
-  else ok (done state)
-
-/-- [o5s_kernel::indexed::enqueue]: loop 0:
-    Source: 'crates/kernel/src/indexed.rs', lines 11:4-18:5
-    Visibility: public -/
-@[rust_loop]
-def indexed.enqueue_loop
-  (state : indexed.Traversal) (neighbors : alloc.vec.Vec Std.Usize)
-  (i : Std.Usize) :
-  Result indexed.Traversal
-  := do
-  loop
-    (fun (state1, i1) => indexed.enqueue_loop.body neighbors state1 i1)
-    (state, i)
-
-/-- [o5s_kernel::indexed::enqueue]:
-    Source: 'crates/kernel/src/indexed.rs', lines 9:0-20:1
-    Visibility: public -/
-@[reducible]
-def indexed.enqueue
-  (state : indexed.Traversal) (neighbors : alloc.vec.Vec Std.Usize) :
-  Result indexed.Traversal
-  := do
-  indexed.enqueue_loop state neighbors 0#usize
-
-/-- [o5s_kernel::indexed::clear]: loop body 0:
-    Source: 'crates/kernel/src/indexed.rs', lines 24:4-27:5
-    Visibility: public -/
-@[rust_loop_body]
-def indexed.clear_loop.body
-  (state : indexed.Traversal) (i : Std.Usize) :
-  Result (ControlFlow (indexed.Traversal × Std.Usize) ((alloc.vec.Vec Bool) ×
-    (alloc.vec.Vec Std.Usize)))
-  := do
-  let i1 := alloc.vec.Vec.len state.queue
-  if i < i1
-  then
-    let i2 ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
-        state.queue i
-    let (_, index_mut_back) ←
-      alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Bool)
-        state.marks i2
-    let i3 ← i + 1#usize
-    let v := index_mut_back false
-    ok (cont ({ state with marks := v }, i3))
-  else ok (done (state.marks, state.queue))
-
-/-- [o5s_kernel::indexed::clear]: loop 0:
-    Source: 'crates/kernel/src/indexed.rs', lines 24:4-27:5
-    Visibility: public -/
-@[rust_loop]
-def indexed.clear_loop
-  (state : indexed.Traversal) (i : Std.Usize) :
-  Result ((alloc.vec.Vec Bool) × (alloc.vec.Vec Std.Usize))
-  := do
-  loop
-    (fun (state1, i1) => indexed.clear_loop.body state1 i1)
-    (state, i)
-
-/-- [o5s_kernel::indexed::clear]:
-    Source: 'crates/kernel/src/indexed.rs', lines 22:0-29:1
-    Visibility: public -/
-def indexed.clear (state : indexed.Traversal) : Result indexed.Traversal := do
-  let (v, v1) ← indexed.clear_loop state 0#usize
-  ok { marks := v, queue := v1 }
-
-/-- [o5s_kernel::indexed::reachable]: loop body 0:
-    Source: 'crates/kernel/src/indexed.rs', lines 40:4-44:5
-    Visibility: public -/
-@[rust_loop_body]
-def indexed.reachable_loop.body
-  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (state : indexed.Traversal)
-  (i : Std.Usize) :
-  Result (ControlFlow (indexed.Traversal × Std.Usize) ((alloc.vec.Vec Bool) ×
-    (alloc.vec.Vec Std.Usize)))
-  := do
-  let i1 := alloc.vec.Vec.len state.queue
-  if i < i1
-  then
-    let vertex ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
-        state.queue i
-    let v ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
-        Std.Usize)) rows vertex
-    let state1 ← indexed.enqueue state v
-    let i2 ← i + 1#usize
-    ok (cont (state1, i2))
-  else ok (done (state.marks, state.queue))
-
-/-- [o5s_kernel::indexed::reachable]: loop 0:
-    Source: 'crates/kernel/src/indexed.rs', lines 40:4-44:5
-    Visibility: public -/
-@[rust_loop]
-def indexed.reachable_loop
-  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize)) (state : indexed.Traversal)
-  (i : Std.Usize) :
-  Result ((alloc.vec.Vec Bool) × (alloc.vec.Vec Std.Usize))
-  := do
-  loop
-    (fun (state1, i1) => indexed.reachable_loop.body rows state1 i1)
-    (state, i)
-
-/-- [o5s_kernel::indexed::reachable]:
-    Source: 'crates/kernel/src/indexed.rs', lines 31:0-46:1
-    Visibility: public -/
-def indexed.reachable
-  (rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
-  (seeds : alloc.vec.Vec Std.Usize) (marks : alloc.vec.Vec Bool) :
-  Result indexed.Traversal
-  := do
-  let state ←
-    indexed.enqueue { marks, queue := (alloc.vec.Vec.new Std.Usize) } seeds
-  let (v, v1) ← indexed.reachable_loop rows state 0#usize
-  indexed.clear { marks := v, queue := v1 }
-
-/-- [o5s_kernel::indexed::keep_live]: loop body 0:
-    Source: 'crates/kernel/src/indexed.rs', lines 52:4-58:5
-    Visibility: public -/
-@[rust_loop_body]
-def indexed.keep_live_loop.body
-  (nodes : alloc.vec.Vec Std.Usize) (live : alloc.vec.Vec Bool)
-  (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
-  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize) (alloc.vec.Vec
-    Std.Usize))
-  := do
-  let i1 := alloc.vec.Vec.len nodes
-  if i < i1
-  then
-    let vertex ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
-        nodes i
-    let b ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool) live
-        vertex
-    let out1 ← if b
-                 then alloc.vec.Vec.push out vertex
-                 else ok out
-    let i2 ← i + 1#usize
-    ok (cont (out1, i2))
-  else ok (done out)
-
-/-- [o5s_kernel::indexed::keep_live]: loop 0:
-    Source: 'crates/kernel/src/indexed.rs', lines 52:4-58:5
-    Visibility: public -/
-@[rust_loop]
-def indexed.keep_live_loop
-  (nodes : alloc.vec.Vec Std.Usize) (live : alloc.vec.Vec Bool)
-  (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
-  Result (alloc.vec.Vec Std.Usize)
-  := do
-  loop
-    (fun (out1, i1) => indexed.keep_live_loop.body nodes live out1 i1)
-    (out, i)
-
-/-- [o5s_kernel::indexed::keep_live]:
-    Source: 'crates/kernel/src/indexed.rs', lines 49:0-60:1
-    Visibility: public -/
-@[reducible]
-def indexed.keep_live
-  (nodes : alloc.vec.Vec Std.Usize) (live : alloc.vec.Vec Bool) :
-  Result (alloc.vec.Vec Std.Usize)
-  := do
-  indexed.keep_live_loop nodes live (alloc.vec.Vec.new Std.Usize) 0#usize
-
-/-- [o5s_kernel::indexed::boundary]:
-    Source: 'crates/kernel/src/indexed.rs', lines 64:0-73:1
-    Visibility: public -/
-def indexed.boundary
-  (dead_rows : alloc.vec.Vec (alloc.vec.Vec Std.Usize))
-  (successors : alloc.vec.Vec Std.Usize) (live : alloc.vec.Vec Bool)
-  (marks : alloc.vec.Vec Bool) :
-  Result indexed.Traversal
-  := do
-  let state ← indexed.reachable dead_rows successors marks
-  let v ← indexed.keep_live state.queue live
-  ok { state with queue := v }
-
 /-- [o5s_kernel::interval::conflict]:
     Source: 'crates/kernel/src/interval.rs', lines 4:0-12:1
     Visibility: public -/
@@ -1006,50 +3323,6 @@ def interval.splice
   let after ← h5i_app_std.bytes.slice bytes «end» i
   let «prefix» ← h5i_app_std.bytes.concat before replacement
   h5i_app_std.bytes.concat «prefix» after
-
-/-- [o5s_kernel::interval::append_range]: loop body 0:
-    Source: 'crates/kernel/src/interval.rs', lines 27:4-30:5
-    Visibility: public -/
-@[rust_loop_body]
-def interval.append_range_loop.body
-  (bytes : alloc.vec.Vec Std.U8) («end» : Std.Usize)
-  (out : alloc.vec.Vec Std.U8) (i : Std.Usize) :
-  Result (ControlFlow ((alloc.vec.Vec Std.U8) × Std.Usize) (alloc.vec.Vec
-    Std.U8))
-  := do
-  if i < «end»
-  then
-    let i1 ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) bytes
-        i
-    let out1 ← alloc.vec.Vec.push out i1
-    let i2 ← i + 1#usize
-    ok (cont (out1, i2))
-  else ok (done out)
-
-/-- [o5s_kernel::interval::append_range]: loop 0:
-    Source: 'crates/kernel/src/interval.rs', lines 27:4-30:5
-    Visibility: public -/
-@[rust_loop]
-def interval.append_range_loop
-  (out : alloc.vec.Vec Std.U8) (bytes : alloc.vec.Vec Std.U8)
-  («end» : Std.Usize) (i : Std.Usize) :
-  Result (alloc.vec.Vec Std.U8)
-  := do
-  loop
-    (fun (out1, i1) => interval.append_range_loop.body bytes «end» out1 i1)
-    (out, i)
-
-/-- [o5s_kernel::interval::append_range]:
-    Source: 'crates/kernel/src/interval.rs', lines 25:0-32:1
-    Visibility: public -/
-@[reducible]
-def interval.append_range
-  (out : alloc.vec.Vec Std.U8) (bytes : alloc.vec.Vec Std.U8)
-  (start : Std.Usize) («end» : Std.Usize) :
-  Result (alloc.vec.Vec Std.U8)
-  := do
-  interval.append_range_loop out bytes «end» start
 
 /-- [o5s_kernel::interval::render_chunks]: loop body 0:
     Source: 'crates/kernel/src/interval.rs', lines 40:4-46:5
@@ -1199,6 +3472,306 @@ def interval.checked_render
        ok (some v)
   else ok none
 
+/-- [o5s_kernel::lines::same]:
+    Source: 'crates/kernel/src/lines.rs', lines 17:0-19:1
+    Visibility: public -/
+def lines.same
+  (a : (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8)))
+  (b : (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8))) :
+  Result Bool
+  := do
+  let (i, i1, v) := a
+  let (i2, i3, v1) := b
+  if i = i2
+  then if i1 = i3
+       then h5i_app_std.bytes.eq v v1
+       else ok false
+  else ok false
+
+/-- [o5s_kernel::lines::key_le]:
+    Source: 'crates/kernel/src/lines.rs', lines 22:0-24:1
+    Visibility: public -/
+def lines.key_le
+  (a : (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8)))
+  (b : (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8))) :
+  Result Bool
+  := do
+  let (i, i1, _) := a
+  let (i2, i3, _) := b
+  if i < i2
+  then ok true
+  else if i = i2
+       then ok (i1 <= i3)
+       else ok false
+
+/-- [o5s_kernel::lines::sorted]: loop body 0:
+    Source: 'crates/kernel/src/lines.rs', lines 30:4-33:5
+    Visibility: public -/
+@[rust_loop_body]
+def lines.sorted_loop.body
+  (rs : alloc.vec.Vec (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8)))
+  (ok1 : Bool) (i : Std.Usize) :
+  Result (ControlFlow (Bool × Std.Usize) Bool)
+  := do
+  let i1 := alloc.vec.Vec.len rs
+  if i < i1
+  then
+    let ok2 ←
+      if ok1
+      then
+        do
+        let i2 ← i - 1#usize
+        let t ←
+          alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Std.U64
+            × Std.U64 × (alloc.vec.Vec Std.U8))) rs i2
+        let t1 ←
+          alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Std.U64
+            × Std.U64 × (alloc.vec.Vec Std.U8))) rs i
+        lines.key_le t t1
+      else ok false
+    let i2 ← i + 1#usize
+    ok (cont (ok2, i2))
+  else ok (done ok1)
+
+/-- [o5s_kernel::lines::sorted]: loop 0:
+    Source: 'crates/kernel/src/lines.rs', lines 30:4-33:5
+    Visibility: public -/
+@[rust_loop]
+def lines.sorted_loop
+  (rs : alloc.vec.Vec (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8)))
+  (ok1 : Bool) (i : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun (ok2, i1) => lines.sorted_loop.body rs ok2 i1)
+    (ok1, i)
+
+/-- [o5s_kernel::lines::sorted]:
+    Source: 'crates/kernel/src/lines.rs', lines 27:0-35:1
+    Visibility: public -/
+@[reducible]
+def lines.sorted
+  (rs : alloc.vec.Vec (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8))) :
+  Result Bool
+  := do
+  lines.sorted_loop rs true 1#usize
+
+/-- [o5s_kernel::lines::Merge]
+    Source: 'crates/kernel/src/lines.rs', lines 37:0-40:1
+    Visibility: public -/
+structure lines.Merge where
+  ok : Bool
+  kept : alloc.vec.Vec Std.Usize
+
+/-- [o5s_kernel::lines::merge_step]:
+    Source: 'crates/kernel/src/lines.rs', lines 44:0-71:1 -/
+def lines.merge_step
+  (state : lines.Merge)
+  (rs : alloc.vec.Vec (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8)))
+  (i : Std.Usize) :
+  Result lines.Merge
+  := do
+  if state.ok
+  then
+    let (i1, i2, v) ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Std.U64 ×
+        Std.U64 × (alloc.vec.Vec Std.U8))) rs i
+    if i1 > i2
+    then ok { state with ok := false }
+    else
+      let i3 := alloc.vec.Vec.len state.kept
+      if i3 = 0#usize
+      then let kept ← alloc.vec.Vec.push state.kept i
+           ok { ok := true, kept }
+      else
+        let i4 := alloc.vec.Vec.len state.kept
+        let i5 ← i4 - 1#usize
+        let i6 ←
+          alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+            state.kept i5
+        let last ←
+          alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Std.U64
+            × Std.U64 × (alloc.vec.Vec Std.U8))) rs i6
+        let t := (i1, i2, v)
+        let b ← lines.same last t
+        if b
+        then ok state
+        else
+          let (i7, i8, _) := last
+          let b1 ← interval.conflict i7 i8 i1 i2
+          if b1
+          then ok { state with ok := false }
+          else
+            let kept ← alloc.vec.Vec.push state.kept i
+            ok { ok := true, kept }
+  else ok state
+
+/-- [o5s_kernel::lines::merge]: loop body 0:
+    Source: 'crates/kernel/src/lines.rs', lines 82:4-85:5
+    Visibility: public -/
+@[rust_loop_body]
+def lines.merge_loop.body
+  (rs : alloc.vec.Vec (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8)))
+  (state : lines.Merge) (i : Std.Usize) :
+  Result (ControlFlow (lines.Merge × Std.Usize) lines.Merge)
+  := do
+  let i1 := alloc.vec.Vec.len rs
+  if i < i1
+  then
+    let state1 ← lines.merge_step state rs i
+    let i2 ← i + 1#usize
+    ok (cont (state1, i2))
+  else ok (done state)
+
+/-- [o5s_kernel::lines::merge]: loop 0:
+    Source: 'crates/kernel/src/lines.rs', lines 82:4-85:5
+    Visibility: public -/
+@[rust_loop]
+def lines.merge_loop
+  (rs : alloc.vec.Vec (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8)))
+  (state : lines.Merge) (i : Std.Usize) :
+  Result lines.Merge
+  := do
+  loop
+    (fun (state1, i1) => lines.merge_loop.body rs state1 i1)
+    (state, i)
+
+/-- [o5s_kernel::lines::merge]:
+    Source: 'crates/kernel/src/lines.rs', lines 76:0-87:1
+    Visibility: public -/
+def lines.merge
+  (rs : alloc.vec.Vec (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8))) :
+  Result (Option (alloc.vec.Vec Std.Usize))
+  := do
+  let state ←
+    lines.merge_loop rs { ok := true, kept := (alloc.vec.Vec.new Std.Usize) }
+      0#usize
+  if state.ok
+  then ok (some state.kept)
+  else ok none
+
+/-- [o5s_kernel::lines::ranges_valid]:
+    Source: 'crates/kernel/src/lines.rs', lines 91:0-100:1
+    Visibility: public -/
+def lines.ranges_valid
+  (rs : alloc.vec.Vec (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8))) :
+  Result Bool
+  := do
+  let b ← lines.sorted rs
+  if b
+  then
+    let o ← lines.merge rs
+    match o with
+    | none => ok false
+    | some kept =>
+      let i := alloc.vec.Vec.len kept
+      let i1 := alloc.vec.Vec.len rs
+      ok (i = i1)
+  else ok false
+
+/-- [o5s_kernel::lines::chunks]: loop body 0:
+    Source: 'crates/kernel/src/lines.rs', lines 113:4-123:5
+    Visibility: public -/
+@[rust_loop_body]
+def lines.chunks_loop.body
+  (boundaries : alloc.vec.Vec Std.Usize)
+  (rs : alloc.vec.Vec (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8)))
+  (kept : alloc.vec.Vec Std.Usize)
+  (out : alloc.vec.Vec (Std.Usize × Std.Usize × (alloc.vec.Vec Std.U8)))
+  (ok1 : Bool) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec (Std.Usize × Std.Usize × (alloc.vec.Vec
+    Std.U8))) × Bool × Std.Usize) ((alloc.vec.Vec (Std.Usize × Std.Usize ×
+    (alloc.vec.Vec Std.U8))) × Bool))
+  := do
+  let i1 := alloc.vec.Vec.len kept
+  if i < i1
+  then
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
+        kept i
+    let r ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Std.U64 ×
+        Std.U64 × (alloc.vec.Vec Std.U8))) rs i2
+    let (out1, ok2) ←
+      if ok1
+      then
+        let (i3, i4, v) := r
+        if i3 <= i4
+        then
+          do
+          let i5 := alloc.vec.Vec.len boundaries
+          let i6 ← lift (UScalar.cast .U64 i5)
+          if i4 < i6
+          then
+            let i7 ← lift (UScalar.cast .Usize i3)
+            let start ←
+              alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+                Std.Usize) boundaries i7
+            let i8 ← lift (UScalar.cast .Usize i4)
+            let «end» ←
+              alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+                Std.Usize) boundaries i8
+            let i9 := alloc.vec.Vec.len v
+            let v1 ← h5i_app_std.bytes.slice v 0#usize i9
+            let out2 ← alloc.vec.Vec.push out (start, «end», v1)
+            ok (out2, true)
+          else ok (out, false)
+        else ok (out, false)
+      else ok (out, false)
+    let i3 ← i + 1#usize
+    ok (cont (out1, ok2, i3))
+  else ok (done (out, ok1))
+
+/-- [o5s_kernel::lines::chunks]: loop 0:
+    Source: 'crates/kernel/src/lines.rs', lines 113:4-123:5
+    Visibility: public -/
+@[rust_loop]
+def lines.chunks_loop
+  (boundaries : alloc.vec.Vec Std.Usize)
+  (rs : alloc.vec.Vec (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8)))
+  (kept : alloc.vec.Vec Std.Usize)
+  (out : alloc.vec.Vec (Std.Usize × Std.Usize × (alloc.vec.Vec Std.U8)))
+  (ok1 : Bool) (i : Std.Usize) :
+  Result ((alloc.vec.Vec (Std.Usize × Std.Usize × (alloc.vec.Vec Std.U8))) ×
+    Bool)
+  := do
+  loop
+    (fun (out1, ok2, i1) => lines.chunks_loop.body boundaries rs kept out1 ok2
+      i1)
+    (out, ok1, i)
+
+/-- [o5s_kernel::lines::chunks]:
+    Source: 'crates/kernel/src/lines.rs', lines 105:0-125:1
+    Visibility: public -/
+def lines.chunks
+  (boundaries : alloc.vec.Vec Std.Usize)
+  (rs : alloc.vec.Vec (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8)))
+  (kept : alloc.vec.Vec Std.Usize) :
+  Result (Option (alloc.vec.Vec (Std.Usize × Std.Usize × (alloc.vec.Vec
+    Std.U8))))
+  := do
+  let (out, ok1) ←
+    lines.chunks_loop boundaries rs kept (alloc.vec.Vec.new (Std.Usize ×
+      Std.Usize × (alloc.vec.Vec Std.U8))) true 0#usize
+  if ok1
+  then ok (some out)
+  else ok none
+
+/-- [o5s_kernel::lines::render]:
+    Source: 'crates/kernel/src/lines.rs', lines 129:0-135:1
+    Visibility: public -/
+def lines.render
+  (original : alloc.vec.Vec Std.U8)
+  (rs : alloc.vec.Vec (Std.U64 × Std.U64 × (alloc.vec.Vec Std.U8)))
+  (kept : alloc.vec.Vec Std.Usize) :
+  Result (Option (alloc.vec.Vec Std.U8))
+  := do
+  let boundaries ← coordinates.line_boundaries original
+  let o ← lines.chunks boundaries rs kept
+  match o with
+  | none => ok none
+  | some c => interval.checked_render original c
+
 /-- [o5s_kernel::order::predecessors]: loop body 0:
     Source: 'crates/kernel/src/order.rs', lines 7:4-12:5
     Visibility: public -/
@@ -1307,57 +3880,6 @@ def order.frontier
   := do
   order.frontier_loop edges remaining (alloc.vec.Vec.new Std.U64) 0#usize
 
-/-- [o5s_kernel::order::frontier_counts]: loop body 0:
-    Source: 'crates/kernel/src/order.rs', lines 42:4-48:5
-    Visibility: public -/
-@[rust_loop_body]
-def order.frontier_counts_loop.body
-  (indegree : alloc.vec.Vec Std.Usize) (remaining : alloc.vec.Vec Std.Usize)
-  (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
-  Result (ControlFlow ((alloc.vec.Vec Std.Usize) × Std.Usize) (alloc.vec.Vec
-    Std.Usize))
-  := do
-  let i1 := alloc.vec.Vec.len remaining
-  if i < i1
-  then
-    let vertex ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
-        remaining i
-    let i2 ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
-        indegree vertex
-    let out1 ← if i2 = 0#usize
-                 then alloc.vec.Vec.push out vertex
-                 else ok out
-    let i3 ← i + 1#usize
-    ok (cont (out1, i3))
-  else ok (done out)
-
-/-- [o5s_kernel::order::frontier_counts]: loop 0:
-    Source: 'crates/kernel/src/order.rs', lines 42:4-48:5
-    Visibility: public -/
-@[rust_loop]
-def order.frontier_counts_loop
-  (indegree : alloc.vec.Vec Std.Usize) (remaining : alloc.vec.Vec Std.Usize)
-  (out : alloc.vec.Vec Std.Usize) (i : Std.Usize) :
-  Result (alloc.vec.Vec Std.Usize)
-  := do
-  loop
-    (fun (out1, i1) => order.frontier_counts_loop.body indegree remaining out1
-      i1)
-    (out, i)
-
-/-- [o5s_kernel::order::frontier_counts]:
-    Source: 'crates/kernel/src/order.rs', lines 39:0-50:1
-    Visibility: public -/
-@[reducible]
-def order.frontier_counts
-  (indegree : alloc.vec.Vec Std.Usize) (remaining : alloc.vec.Vec Std.Usize) :
-  Result (alloc.vec.Vec Std.Usize)
-  := do
-  order.frontier_counts_loop indegree remaining (alloc.vec.Vec.new Std.Usize)
-    0#usize
-
 /-- [o5s_kernel::patch::MergeError]
     Source: 'crates/kernel/src/patch.rs', lines 8:0-12:1
     Visibility: public -/
@@ -1390,54 +3912,5 @@ def patch.merge
       else ok (core.result.Result.Err patch.MergeError.MissingDependency)
     else ok (core.result.Result.Err patch.MergeError.ChecksFailed)
   else ok (core.result.Result.Err patch.MergeError.Unapproved)
-
-/-- [o5s_kernel::tags::visible]: loop body 0:
-    Source: 'crates/kernel/src/tags.rs', lines 9:4-14:5
-    Visibility: public -/
-@[rust_loop_body]
-def tags.visible_loop.body
-  (covering : alloc.vec.Vec Std.Usize) (restored : alloc.vec.Vec Bool)
-  (visible : Bool) (i : Std.Usize) :
-  Result (ControlFlow (Bool × Std.Usize) Bool)
-  := do
-  let i1 := alloc.vec.Vec.len covering
-  if i < i1
-  then
-    let i2 ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.Usize)
-        covering i
-    let b ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Bool) restored
-        i2
-    let visible1 ← if b
-                     then ok visible
-                     else ok false
-    let i3 ← i + 1#usize
-    ok (cont (visible1, i3))
-  else ok (done visible)
-
-/-- [o5s_kernel::tags::visible]: loop 0:
-    Source: 'crates/kernel/src/tags.rs', lines 9:4-14:5
-    Visibility: public -/
-@[rust_loop]
-def tags.visible_loop
-  (covering : alloc.vec.Vec Std.Usize) (restored : alloc.vec.Vec Bool)
-  (visible : Bool) (i : Std.Usize) :
-  Result Bool
-  := do
-  loop
-    (fun (visible1, i1) => tags.visible_loop.body covering restored visible1
-      i1)
-    (visible, i)
-
-/-- [o5s_kernel::tags::visible]:
-    Source: 'crates/kernel/src/tags.rs', lines 6:0-16:1
-    Visibility: public -/
-@[reducible]
-def tags.visible
-  (covering : alloc.vec.Vec Std.Usize) (restored : alloc.vec.Vec Bool) :
-  Result Bool
-  := do
-  tags.visible_loop covering restored true 0#usize
 
 end o5s_kernel

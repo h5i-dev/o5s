@@ -109,6 +109,21 @@ enum Action {
     },
     /// Independently approve an immutable proposal.
     Approve { patch: u64 },
+    /// Run a check command on the snapshot each proposal defines (the
+    /// proposal and its causal past, in a fresh directory) and report the
+    /// result. Run it under a check reporter's profile, never the author's.
+    Ci {
+        /// Shell command run in the snapshot directory; exit status 0 passes.
+        #[arg(long)]
+        command: String,
+        /// Only this proposal; otherwise every proposal without a passing
+        /// report that this runner has not run yet.
+        #[arg(long)]
+        patch: Option<u64>,
+        /// Seconds before the command is killed and the check fails.
+        #[arg(long, default_value_t = 1800)]
+        timeout: u64,
+    },
     /// Report an independently executed check result (does not run CI).
     Check {
         patch: u64,
@@ -141,6 +156,186 @@ enum Action {
         from: String,
     },
 }
+/// Patches this runner has run, kept with the connection metadata.
+#[derive(Default, Serialize, Deserialize)]
+struct CiLog {
+    runs: BTreeMap<u64, bool>,
+}
+
+/// Write a snapshot reply (`GET /api/snapshot`) into `dir`.
+fn write_snapshot(dir: &Path, snapshot: &Value) -> Result<()> {
+    let files = snapshot["files"]
+        .as_object()
+        .ok_or_else(|| error("snapshot has no files"))?;
+    if snapshot["conflicts"]
+        .as_object()
+        .is_some_and(|c| !c.is_empty())
+    {
+        return Err(error("the snapshot has conflicts"));
+    }
+    let set = |k: &str| -> BTreeSet<String> {
+        snapshot[k]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let (binary, executable) = (set("binary"), set("executable"));
+    let (symlinks, submodules) = (set("symlinks"), set("submodules"));
+    for path in files.keys() {
+        if path
+            .split('/')
+            .any(|c| c.is_empty() || c == "." || c == ".." || c == ".git")
+        {
+            return Err(error(format!("unsafe snapshot path {path}")));
+        }
+        // Nothing is written through a symlink.
+        for (i, c) in path.char_indices() {
+            if c == '/' && symlinks.contains(&path[..i]) {
+                return Err(error(format!("{path} is below a symlink")));
+            }
+        }
+    }
+    // Regular files first, then submodules (empty directories), then links.
+    for (path, content) in files {
+        let text = content
+            .as_str()
+            .ok_or_else(|| error("invalid snapshot file"))?;
+        let target = dir.join(path);
+        fs::create_dir_all(target.parent().unwrap())?;
+        if submodules.contains(path) {
+            fs::create_dir_all(&target)?;
+            continue;
+        }
+        if symlinks.contains(path) {
+            continue;
+        }
+        let bytes = if binary.contains(path) {
+            base64_decode(text).ok_or_else(|| error("invalid base64 in snapshot"))?
+        } else {
+            text.as_bytes().to_vec()
+        };
+        fs::write(&target, bytes)?;
+        #[cfg(unix)]
+        if executable.contains(path) {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&target, fs::Permissions::from_mode(0o755))?;
+        }
+    }
+    #[cfg(unix)]
+    for path in &symlinks {
+        let to = files[path]
+            .as_str()
+            .ok_or_else(|| error("invalid symlink"))?;
+        std::os::unix::fs::symlink(to, dir.join(path))?;
+    }
+    Ok(())
+}
+
+/// Run `command` in `dir` with a timeout; whether it exited successfully.
+fn run_command(command: &str, dir: &Path, timeout: u64) -> Result<bool> {
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .env("O5S_SNAPSHOT", dir)
+        .spawn()?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(timeout);
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status.success());
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            eprintln!("o5s ci: timed out after {timeout} s");
+            return Ok(false);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// `o5s ci`: execute checks on patch snapshots and report them.
+fn run_checks(
+    api: &Api,
+    git: &Git,
+    repo: &str,
+    command: &str,
+    only: Option<u64>,
+    timeout: u64,
+) -> Result<Value> {
+    let path = git.common.join("o5s/ci.json");
+    let mut log: CiLog = match fs::read(&path) {
+        Ok(b) => serde_json::from_slice(&b)?,
+        Err(_) => CiLog::default(),
+    };
+    let candidates = match only {
+        Some(p) => vec![p],
+        None => {
+            let mut out = Vec::new();
+            let mut after = 0u64;
+            loop {
+                let page = api.request(
+                    "/api/patches",
+                    &[
+                        ("repo", repo),
+                        ("after", &after.to_string()),
+                        ("limit", "100"),
+                    ],
+                    None,
+                )?;
+                for p in page["patches"].as_array().into_iter().flatten() {
+                    let id = p["id"].as_u64().unwrap_or(0);
+                    if p["checks_passed"] != json!(true) && !log.runs.contains_key(&id) {
+                        out.push(id);
+                    }
+                }
+                match page["next_after"].as_u64() {
+                    Some(n) => after = n,
+                    None => break,
+                }
+            }
+            out
+        }
+    };
+    let mut results = Vec::new();
+    for patch in candidates {
+        let snapshot = api.request(
+            "/api/snapshot",
+            &[("repo", repo), ("patch", &patch.to_string())],
+            None,
+        )?;
+        let dir = std::env::temp_dir().join(format!(
+            "o5s-ci-{}-{patch}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir)?;
+        let passed = match write_snapshot(&dir, &snapshot) {
+            Ok(()) => run_command(command, &dir, timeout)?,
+            Err(e) => {
+                eprintln!("o5s ci: patch {patch}: {e}");
+                false
+            }
+        };
+        let _ = fs::remove_dir_all(&dir);
+        api.command(
+            repo,
+            json!({"cmd": "check", "patch": patch, "passed": passed}),
+        )?;
+        log.runs.insert(patch, passed);
+        save(&path, &log)?;
+        results.push(json!({"patch": patch, "hash": snapshot["hash"], "snapshot": snapshot["hashes"], "passed": passed}));
+    }
+    Ok(json!({"checked": results}))
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct Profiles {
     profiles: BTreeMap<String, Profile>,
@@ -369,19 +564,21 @@ impl Git {
                     .ok_or("Malformed Git tree")?,
             );
             let fields: Vec<&str> = std::str::from_utf8(meta)?.split_whitespace().collect();
-            if fields.len() != 3 || fields[1] != "blob" || !matches!(fields[0], "100644" | "100755")
-            {
-                return Err(error(
-                    "Only regular files are supported; symlinks and submodules are refused",
-                ));
-            }
-            files.insert(
-                std::str::from_utf8(&path[1..])?.into(),
-                FileData::from_bytes(
-                    self.run(&["cat-file", "blob", fields[2]], None)?,
+            let name: String = std::str::from_utf8(&path[1..])?.into();
+            let data = match fields[..] {
+                ["100644" | "100755", "blob", id] => FileData::from_bytes(
+                    self.run(&["cat-file", "blob", id], None)?,
                     fields[0] == "100755",
                 ),
-            );
+                ["120000", "blob", id] => FileData::special(
+                    String::from_utf8(self.run(&["cat-file", "blob", id], None)?)
+                        .map_err(|_| error(format!("Symlink target is not UTF-8: {name}")))?,
+                    Kind::Symlink,
+                ),
+                ["160000", "commit", id] => FileData::special(id.into(), Kind::Submodule),
+                _ => return Err(error(format!("Unsupported Git tree entry: {name}"))),
+            };
+            files.insert(name, data);
         }
         Ok(files)
     }
@@ -396,22 +593,55 @@ impl Git {
             ],
             None,
         )?;
+        // Submodules are gitlinks in the index; their staged commit is the content.
+        let mut gitlinks = BTreeMap::new();
+        for entry in self
+            .run(&["ls-files", "-s", "-z"], None)?
+            .split(|b| *b == 0)
+        {
+            let entry = String::from_utf8_lossy(entry);
+            if let Some((meta, name)) = entry.split_once('\t')
+                && let [mode, commit, _] = meta.split(' ').collect::<Vec<_>>()[..]
+                && mode == "160000"
+            {
+                gitlinks.insert(name.to_string(), commit.to_string());
+            }
+        }
         let mut files = BTreeMap::new();
         for path in paths.split(|b| *b == 0).filter(|b| !b.is_empty()) {
             let relative = std::str::from_utf8(path)?;
             if !valid_path(relative) {
                 return Err(error(format!("Unsupported Git path: {relative}")));
             }
+            if let Some(commit) = gitlinks.get(relative) {
+                files.insert(
+                    relative.into(),
+                    FileData::special(commit.clone(), Kind::Submodule),
+                );
+                continue;
+            }
             let mut full = self.root.clone();
             let mut missing = false;
-            for component in Path::new(relative).components() {
+            let mut link = None;
+            let last = Path::new(relative).components().count() - 1;
+            for (k, component) in Path::new(relative).components().enumerate() {
                 let std::path::Component::Normal(part) = component else {
                     return Err(error("Invalid Git path"));
                 };
                 full.push(part);
                 match fs::symlink_metadata(&full) {
                     Ok(meta) if meta.file_type().is_symlink() => {
-                        return Err(error(format!("Symlink unsupported: {relative}")));
+                        if k != last {
+                            return Err(error(format!("Path below a symlink: {relative}")));
+                        }
+                        link = Some(
+                            fs::read_link(&full)?
+                                .into_os_string()
+                                .into_string()
+                                .map_err(|_| {
+                                    error(format!("Symlink target is not UTF-8: {relative}"))
+                                })?,
+                        );
                     }
                     Ok(_) => {}
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -422,6 +652,10 @@ impl Git {
                 }
             }
             if missing {
+                continue;
+            }
+            if let Some(target) = link {
+                files.insert(relative.into(), FileData::special(target, Kind::Symlink));
                 continue;
             }
             if fs::metadata(&full)?.len() > 4 * 1024 * 1024 {
@@ -462,13 +696,22 @@ impl Git {
             )?)
         };
         let (executable, binary) = (set("executable")?, set("binary")?);
+        let (symlinks, submodules) = (set("symlinks")?, set("submodules")?);
         let files: Files = texts
             .into_iter()
             .map(|(path, text)| {
+                let kind = if symlinks.contains(&path) {
+                    Kind::Symlink
+                } else if submodules.contains(&path) {
+                    Kind::Submodule
+                } else {
+                    Kind::File
+                };
                 let data = FileData {
                     executable: executable.contains(&path),
                     binary: binary.contains(&path),
                     text,
+                    kind,
                 };
                 (path, data)
             })
@@ -504,8 +747,28 @@ impl Git {
             if !valid_path(&path) {
                 return Err(error("Server supplied an unsafe file path"));
             }
-            let hash = text(self.run(&["hash-object", "-w", "--stdin"], Some(&content.bytes()?))?)?;
-            entries.insert(path, (hash, content.executable));
+            let entry = match content.kind {
+                Kind::Submodule => {
+                    if content.text.len() != 40
+                        || !content.text.bytes().all(|b| b.is_ascii_hexdigit())
+                    {
+                        return Err(error("Server supplied an invalid submodule commit"));
+                    }
+                    ("160000 commit", content.text.clone())
+                }
+                kind => {
+                    let mode = match (kind, content.executable) {
+                        (Kind::Symlink, _) => "120000 blob",
+                        (_, true) => "100755 blob",
+                        _ => "100644 blob",
+                    };
+                    let hash = text(
+                        self.run(&["hash-object", "-w", "--stdin"], Some(&content.bytes()?))?,
+                    )?;
+                    (mode, hash)
+                }
+            };
+            entries.insert(path, (entry.1, entry.0));
         }
         let tree = self.write_tree(&entries)?;
         let mut args = vec!["commit-tree", tree.as_str()];
@@ -543,17 +806,17 @@ impl Git {
         )?;
         Ok(json!({"ref":reference,"commit":commit,"patches":patches,"unchanged":false}))
     }
-    fn write_tree(&self, files: &BTreeMap<String, (String, bool)>) -> Result<String> {
-        let mut dirs: BTreeMap<String, BTreeMap<String, (String, bool)>> = BTreeMap::new();
+    /// `files` maps a path to its object id and `"<mode> <type>"`.
+    fn write_tree(&self, files: &BTreeMap<String, (String, &'static str)>) -> Result<String> {
+        let mut dirs: BTreeMap<String, BTreeMap<String, (String, &'static str)>> = BTreeMap::new();
         let mut leaves: BTreeMap<String, String> = BTreeMap::new();
-        for (path, (hash, executable)) in files {
+        for (path, (hash, mode)) in files {
             if let Some((dir, rest)) = path.split_once('/') {
                 dirs.entry(dir.into())
                     .or_default()
-                    .insert(rest.into(), (hash.clone(), *executable));
+                    .insert(rest.into(), (hash.clone(), *mode));
             } else {
-                let mode = if *executable { "100755" } else { "100644" };
-                leaves.insert(path.clone(), format!("{mode} blob {hash}\t{path}\0"));
+                leaves.insert(path.clone(), format!("{mode} {hash}\t{path}\0"));
             }
         }
         for (dir, files) in dirs {
@@ -566,12 +829,21 @@ impl Git {
         )?)
     }
 }
+/// What a path holds: an ordinary file, a symlink (`text` is its target)
+/// or a submodule (`text` is the commit id).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    File,
+    Symlink,
+    Submodule,
+}
 /// A file's content and Git mode. Non-UTF-8 content is carried as base64.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct FileData {
     text: String,
     executable: bool,
     binary: bool,
+    kind: Kind,
 }
 impl FileData {
     fn from_bytes(bytes: Vec<u8>, executable: bool) -> Self {
@@ -580,12 +852,22 @@ impl FileData {
                 text,
                 executable,
                 binary: false,
+                kind: Kind::File,
             },
             Err(e) => Self {
                 text: base64_encode(e.as_bytes()),
                 executable,
                 binary: true,
+                kind: Kind::File,
             },
+        }
+    }
+    fn special(text: String, kind: Kind) -> Self {
+        Self {
+            text,
+            executable: false,
+            binary: false,
+            kind,
         }
     }
     fn bytes(&self) -> Result<Vec<u8>> {
@@ -694,6 +976,11 @@ fn edit_json(path: &str, file: Option<&FileData>) -> Value {
         if f.binary {
             edit["base64"] = json!(true);
         }
+        match f.kind {
+            Kind::File => {}
+            Kind::Symlink => edit["kind"] = json!("symlink"),
+            Kind::Submodule => edit["kind"] = json!("submodule"),
+        }
     }
     edit
 }
@@ -764,7 +1051,12 @@ fn line_changes(
         let path = edit["path"].as_str()?;
         let (original, updated) = (before.get(path)?, after.get(path)?);
         // Line ranges change text only; binary content and mode changes are whole-file edits.
-        if original.binary || updated.binary || original.executable != updated.executable {
+        if original.binary
+            || updated.binary
+            || original.executable != updated.executable
+            || original.kind != Kind::File
+            || updated.kind != Kind::File
+        {
             return None;
         }
         let (original, updated) = (&original.text, &updated.text);
@@ -916,8 +1208,10 @@ fn automatic_graph_edits(
     for edit in changes {
         let path = edit["path"].as_str().ok_or("Missing edited path")?;
         let updated = after.get(path);
+        // Binary files, symlinks and submodules are whole-file edits.
         let legacy = legacy_paths.contains(path)
-            || (!graph_paths.contains(path) && updated.is_some_and(|f| f.binary));
+            || (!graph_paths.contains(path)
+                && updated.is_some_and(|f| f.binary || f.kind != Kind::File));
         if legacy {
             files.push(edit.clone());
             continue;
@@ -926,9 +1220,9 @@ fn automatic_graph_edits(
             graph_edits.push(json!({"path":path,"operations":[],"remove":true}));
             continue;
         };
-        if updated.binary {
+        if updated.binary || updated.kind != Kind::File {
             return Err(error(format!(
-                "{path} is a text graph document; binary content needs a new path"
+                "{path} is a text graph document; binary content, a symlink or a submodule needs a new path"
             )));
         }
         let document = api.request(
@@ -1229,6 +1523,11 @@ fn execute(cli: &Cli) -> Result<Value> {
                 .ok_or_else(|| error("Server returned an invalid proposal response"))
         }
         Action::Approve { patch } => api.command(repo, json!({"cmd": "approve", "patch": patch})),
+        Action::Ci {
+            command,
+            patch,
+            timeout,
+        } => run_checks(&api, &git, repo, command, *patch, *timeout),
         Action::Check { patch, pass, .. } => api.command(
             repo,
             json!({

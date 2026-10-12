@@ -65,23 +65,46 @@ impl Object {
     }
 }
 
-/// A file: its bytes and whether it is executable (mode 100755).
-pub type File = (Vec<u8>, bool);
+/// A tree entry's mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// 100644
+    Regular,
+    /// 100755
+    Executable,
+    /// 120000: the bytes are the link target.
+    Symlink,
+    /// 160000: the bytes are the 20-byte commit id; no object is written.
+    Gitlink,
+}
+
+impl Mode {
+    fn git(self) -> &'static str {
+        match self {
+            Mode::Regular => "100644",
+            Mode::Executable => "100755",
+            Mode::Symlink => "120000",
+            Mode::Gitlink => "160000",
+        }
+    }
+}
+
+/// A tree entry: its bytes and mode.
+pub type File = (Vec<u8>, Mode);
 
 /// The objects of a tree of `files` (paths separated by `/`), and its id.
 /// Objects are deduplicated by id.
 pub fn tree(files: &BTreeMap<String, File>) -> Result<(Oid, Vec<Object>), String> {
     #[derive(Default)]
     struct Dir {
-        files: BTreeMap<String, (Oid, bool)>,
+        files: BTreeMap<String, (Oid, Mode)>,
         dirs: BTreeMap<String, Dir>,
     }
     fn write(dir: &Dir, out: &mut BTreeMap<Oid, Object>) -> Oid {
         // Git orders entries by name, comparing a directory as `name/`.
         let mut entries: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-        for (name, (oid, exec)) in &dir.files {
-            let mode = if *exec { "100755" } else { "100644" };
-            entries.push((name.as_bytes().to_vec(), entry(mode, name, oid)));
+        for (name, (oid, mode)) in &dir.files {
+            entries.push((name.as_bytes().to_vec(), entry(mode.git(), name, oid)));
         }
         for (name, sub) in &dir.dirs {
             let oid = write(sub, out);
@@ -105,7 +128,7 @@ pub fn tree(files: &BTreeMap<String, File>) -> Result<(Oid, Vec<Object>), String
     }
     let mut root = Dir::default();
     let mut objects = BTreeMap::new();
-    for (path, (bytes, exec)) in files {
+    for (path, (bytes, mode)) in files {
         let parts: Vec<&str> = path.split('/').collect();
         if parts
             .iter()
@@ -113,12 +136,20 @@ pub fn tree(files: &BTreeMap<String, File>) -> Result<(Oid, Vec<Object>), String
         {
             return Err(format!("invalid path {path:?}"));
         }
-        let blob = Object {
-            kind: Kind::Blob,
-            data: bytes.clone(),
+        let oid = if *mode == Mode::Gitlink {
+            bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| format!("{path:?}: a submodule needs a 20-byte commit id"))?
+        } else {
+            let blob = Object {
+                kind: Kind::Blob,
+                data: bytes.clone(),
+            };
+            let oid = blob.id();
+            objects.insert(oid, blob);
+            oid
         };
-        let oid = blob.id();
-        objects.insert(oid, blob);
         let mut dir = &mut root;
         for part in &parts[..parts.len() - 1] {
             if dir.files.contains_key(*part) {
@@ -130,7 +161,7 @@ pub fn tree(files: &BTreeMap<String, File>) -> Result<(Oid, Vec<Object>), String
         if dir.dirs.contains_key(name) {
             return Err(format!("{path:?} is also a directory"));
         }
-        dir.files.insert(name.to_string(), (oid, *exec));
+        dir.files.insert(name.to_string(), (oid, *mode));
     }
     let oid = write(&root, &mut objects);
     Ok((oid, objects.into_values().collect()))

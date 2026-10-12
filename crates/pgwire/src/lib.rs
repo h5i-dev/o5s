@@ -466,48 +466,73 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         idem: Option<&Idem<'_>>,
         encode: &impl Fn(&kernel::Reply) -> Vec<u8>,
     ) -> Result<Outcome, DbError> {
-        client
-            .batch_execute(&format!(
-                "BEGIN ISOLATION LEVEL READ COMMITTED; SET LOCAL search_path TO {}; SELECT pg_advisory_xact_lock({tid})",
-                ident(&self.schema)?
-            ))
-            .await?;
-        if let Some(idem) = idem {
-            let stored = client
-                .query_typed(
-                    "SELECT fingerprint, reply FROM h5i_idempotency WHERE tenant_id = $1 AND key = $2",
-                    &[(&tid, Type::INT8), (&idem.key, Type::TEXT)],
-                )
-                .await?;
-            if let Some(row) = stored.first() {
-                let fp: Vec<u8> = row.try_get(0)?;
-                if fp != idem.fingerprint {
-                    let _ = client.batch_execute("ROLLBACK").await;
-                    return Err(DbError::IdempotencyConflict);
-                }
-                let bytes: Vec<u8> = row.try_get(1)?;
-                client.batch_execute("COMMIT").await?;
-                return Ok(Outcome::Replayed(bytes));
+        // One flush: BEGIN and the lock, the idempotency lookup and the
+        // command's loads. PostgreSQL runs them in order on this connection,
+        // so every read happens under the lock.
+        let begin = format!(
+            "BEGIN ISOLATION LEVEL READ COMMITTED; SET LOCAL search_path TO {}; SELECT pg_advisory_xact_lock({tid})",
+            ident(&self.schema)?
+        );
+        let tx = Tx { client, tid };
+        let lookup = async {
+            match idem {
+                Some(idem) => client
+                    .query_typed(
+                        "SELECT fingerprint, reply FROM h5i_idempotency WHERE tenant_id = $1 AND key = $2",
+                        &[(&tid, Type::INT8), (&idem.key, Type::TEXT)],
+                    )
+                    .await
+                    .map(Some),
+                None => Ok(None),
             }
+        };
+        let (begun, stored, snap) = futures::join!(
+            client.batch_execute(&begin),
+            lookup,
+            service::load(&tx, cmd)
+        );
+        begun?;
+        if let (Some(idem), Some(row)) = (idem, stored?.as_ref().and_then(|r| r.first())) {
+            let fp: Vec<u8> = row.try_get(0)?;
+            if fp != idem.fingerprint {
+                let _ = client.batch_execute("ROLLBACK").await;
+                return Err(DbError::IdempotencyConflict);
+            }
+            let bytes: Vec<u8> = row.try_get(1)?;
+            client.batch_execute("COMMIT").await?;
+            return Ok(Outcome::Replayed(bytes));
         }
-        let snap = service::load(&Tx { client, tid }, cmd).await?;
-        match kernel::transition(actor, &snap, cmd) {
+        match kernel::transition(actor, &snap?, cmd) {
             Err(refusal) => {
                 client.batch_execute("ROLLBACK").await?;
                 Ok(Outcome::Done(Err(refusal)))
             }
             Ok((ws, reply)) => {
-                store(client, tid, &kernel::sql_writes(&ws)).await?;
-                if let Some(idem) = idem {
-                    let bytes = encode(&reply);
-                    client
-                        .query_typed(
-                            "INSERT INTO h5i_idempotency (tenant_id, key, fingerprint, reply) VALUES ($1, $2, $3, $4)",
-                            &[(&tid, Type::INT8), (&idem.key, Type::TEXT), (&idem.fingerprint, Type::BYTEA), (&bytes, Type::BYTEA)],
-                        )
-                        .await?;
-                }
-                client.batch_execute("COMMIT").await.map_err(commit_error)?;
+                // One flush: the writes, the idempotency record and COMMIT.
+                // If a write fails, PostgreSQL turns the COMMIT into a
+                // rollback, and the write's error is what is returned.
+                let bytes = encode(&reply);
+                let writes = kernel::sql_writes(&ws);
+                let record = async {
+                    match idem {
+                        Some(idem) => client
+                            .query_typed(
+                                "INSERT INTO h5i_idempotency (tenant_id, key, fingerprint, reply) VALUES ($1, $2, $3, $4)",
+                                &[(&tid, Type::INT8), (&idem.key, Type::TEXT), (&idem.fingerprint, Type::BYTEA), (&bytes, Type::BYTEA)],
+                            )
+                            .await
+                            .map(|_| ()),
+                        None => Ok(()),
+                    }
+                };
+                let (stored, recorded, committed) = futures::join!(
+                    store(client, tid, &writes),
+                    record,
+                    client.batch_execute("COMMIT")
+                );
+                stored?;
+                recorded?;
+                committed.map_err(commit_error)?;
                 Ok(Outcome::Done(Ok(reply)))
             }
         }

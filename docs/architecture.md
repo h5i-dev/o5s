@@ -14,7 +14,7 @@ flowchart LR
     V --> E[Local bare Git export]
 ```
 
-The local UI and API work without Cloudflare. The edge adapter forwards ordinary requests to axum and calls Artifacts only after resolving identity and repository membership through axum. A deployment needs a reachable HTTPS axum origin and an Artifacts binding. The edge integration is the JavaScript Worker in `cloudflare/`.
+The local UI and API work without Cloudflare. On Cloudflare, the Rust Worker in `crates/worker` serves the same API over PostgreSQL through Hyperdrive. It keeps Git projections and agent workspaces in Cloudflare Artifacts, and resolves the caller's organization and repository before it touches Artifacts.
 
 ## Model
 

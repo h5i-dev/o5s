@@ -1,8 +1,12 @@
 //! Immutable block operations and conflict materialization for one document.
 //!
-//! Native validation and dense-index construction surround the extracted
-//! live-boundary traversal. The outer adapter and complete operation semantics
-//! do not yet have Lean proofs.
+//! The decisions are made by the extracted kernel `document`: validating and
+//! committing a patch, and materializing the live text with its conflicts.
+//! This adapter interns replicated identities (patch hashes, operation and
+//! node ids) as dense indices in arrival order, translates references,
+//! checks what only identities can decide (identity collisions, duplicate or
+//! missing dependencies), and sorts diagnostics by identity so that they do
+//! not depend on arrival order.
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -53,6 +57,9 @@ pub enum Operation {
         deletion: OperationId,
         insertion: OperationId,
     },
+    /// Withdraw an observed order operation's edge, for example to break a
+    /// cycle that concurrent order resolutions created. Other orders stand.
+    Retract { order: OperationId },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,6 +87,7 @@ pub enum Error {
     UnknownInsertion(OperationId),
     InvalidAcknowledgement,
     Cycle,
+    UnknownOrder(OperationId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,40 +122,70 @@ pub struct Materialized {
     pub bytes: Option<Vec<u8>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct Insertion {
-    left: Anchor,
-    right: Anchor,
+/// What an interned operation created.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Created {
+    Insertion(usize),
+    Deletion(usize),
+    Order(usize),
+    Other,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct DocumentGraph {
-    patches: BTreeMap<PatchId, Patch>,
-    atoms: BTreeMap<NodeId, Vec<u8>>,
-    edges: BTreeMap<Anchor, BTreeSet<Anchor>>,
-    edge_sources: BTreeMap<(Anchor, Anchor), BTreeSet<OperationId>>,
-    insertions: BTreeMap<OperationId, Insertion>,
-    insertions_at: BTreeMap<NodeId, BTreeSet<OperationId>>,
-    deletions: BTreeMap<OperationId, BTreeSet<NodeId>>,
-    restored: BTreeSet<OperationId>,
-    acknowledged: BTreeSet<(OperationId, OperationId)>,
+    /// Patches by identity, with their dense index.
+    patches: BTreeMap<PatchId, (usize, Patch)>,
+    /// Dense patch index to identity.
+    ids: Vec<PatchId>,
+    /// Atom identity to anchor index, and back (sentinels are not nodes).
+    nodes: BTreeMap<NodeId, usize>,
+    anchors: Vec<Anchor>,
+    operations: BTreeMap<OperationId, Created>,
+    /// Dense insertion, deletion and order numbers to operation identity.
+    insertion_ids: Vec<OperationId>,
+    deletion_ids: Vec<OperationId>,
+    order_ids: Vec<OperationId>,
+    doc: document::Doc,
 }
 
 impl Default for DocumentGraph {
     fn default() -> Self {
         Self {
             patches: BTreeMap::new(),
-            atoms: BTreeMap::new(),
-            edges: BTreeMap::from([(Anchor::Start, BTreeSet::from([Anchor::End]))]),
-            edge_sources: BTreeMap::new(),
-            insertions: BTreeMap::new(),
-            insertions_at: BTreeMap::new(),
-            deletions: BTreeMap::new(),
-            restored: BTreeSet::new(),
-            acknowledged: BTreeSet::new(),
+            ids: Vec::new(),
+            nodes: BTreeMap::new(),
+            anchors: vec![Anchor::Start, Anchor::End],
+            operations: BTreeMap::new(),
+            insertion_ids: Vec::new(),
+            deletion_ids: Vec::new(),
+            order_ids: Vec::new(),
+            doc: document::empty(),
         }
     }
 }
+
+/// The state with every dense index replaced by its identity, so two
+/// replicas that admitted the same patches in different orders compare equal.
+#[derive(Debug, PartialEq, Eq)]
+struct Canonical {
+    patches: BTreeMap<PatchId, Patch>,
+    atoms: BTreeMap<NodeId, Vec<u8>>,
+    edges: BTreeSet<(Anchor, Anchor, Option<PatchId>)>,
+    insertions: BTreeMap<OperationId, (Anchor, Anchor)>,
+    deletions: BTreeMap<OperationId, BTreeSet<NodeId>>,
+    restored: BTreeSet<OperationId>,
+    acknowledged: BTreeSet<(OperationId, OperationId)>,
+    retracted: BTreeSet<(OperationId, PatchId)>,
+}
+
+impl PartialEq for DocumentGraph {
+    fn eq(&self, other: &Self) -> bool {
+        self.canonical() == other.canonical()
+    }
+}
+impl Eq for DocumentGraph {}
+
+use crate::document;
 
 impl DocumentGraph {
     pub fn patch_count(&self) -> usize {
@@ -155,13 +193,218 @@ impl DocumentGraph {
     }
 
     pub fn atom(&self, id: NodeId) -> Option<&[u8]> {
-        self.atoms.get(&id).map(Vec::as_slice)
+        self.nodes.get(&id).map(|a| self.doc.atoms[*a].as_slice())
+    }
+
+    fn node(&self, anchor: usize) -> NodeId {
+        match self.anchors[anchor] {
+            Anchor::Node(n) => n,
+            _ => unreachable!("sentinels are never live atoms"),
+        }
+    }
+
+    fn canonical(&self) -> Canonical {
+        let patch = |p: usize| (p != document::NONE).then(|| self.ids[p]);
+        Canonical {
+            patches: self
+                .patches
+                .iter()
+                .map(|(k, (_, p))| (*k, p.clone()))
+                .collect(),
+            atoms: self
+                .nodes
+                .iter()
+                .map(|(n, a)| (*n, self.doc.atoms[*a].clone()))
+                .collect(),
+            edges: self
+                .doc
+                .edges
+                .iter()
+                .map(|(u, v, p)| (self.anchors[*u], self.anchors[*v], patch(*p)))
+                .collect(),
+            insertions: self
+                .doc
+                .insertions
+                .iter()
+                .enumerate()
+                .map(|(i, x)| {
+                    (
+                        self.insertion_ids[i],
+                        (self.anchors[x.left], self.anchors[x.right]),
+                    )
+                })
+                .collect(),
+            deletions: self
+                .doc
+                .deletions
+                .iter()
+                .enumerate()
+                .map(|(d, x)| {
+                    (
+                        self.deletion_ids[d],
+                        x.targets.iter().map(|t| self.node(*t)).collect(),
+                    )
+                })
+                .collect(),
+            restored: (0..self.doc.restored.len())
+                .filter(|d| self.doc.restored[*d])
+                .map(|d| self.deletion_ids[d])
+                .collect(),
+            acknowledged: self
+                .doc
+                .acked
+                .iter()
+                .map(|(d, i)| (self.deletion_ids[*d], self.insertion_ids[*i]))
+                .collect(),
+            retracted: self
+                .doc
+                .retractions
+                .iter()
+                .map(|(e, p)| {
+                    let order = self
+                        .doc
+                        .orders
+                        .iter()
+                        .position(|x| x == e)
+                        .expect("order edge");
+                    (self.order_ids[order], self.ids[*p])
+                })
+                .collect(),
+        }
+    }
+
+    fn patch_index(&self, id: PatchId) -> usize {
+        self.patches.get(&id).map_or(document::NONE, |(i, _)| *i)
+    }
+
+    fn node_ref(&self, n: NodeId) -> document::Ref {
+        document::Ref {
+            patch: self.patch_index(n.insertion.patch),
+            index: self.nodes.get(&n).copied().unwrap_or(document::NONE),
+        }
+    }
+
+    /// A reference to operation `o` as the `want`ed kind of object.
+    fn op_ref(&self, o: OperationId, want: fn(Created) -> Option<usize>) -> document::Ref {
+        let index = self
+            .operations
+            .get(&o)
+            .and_then(|c| want(*c))
+            .unwrap_or(document::NONE);
+        document::Ref {
+            patch: self.patch_index(o.patch),
+            index,
+        }
+    }
+
+    fn anchor_ref(&self, a: Anchor) -> document::Anchor {
+        match a {
+            Anchor::Start => document::Anchor::Start,
+            Anchor::End => document::Anchor::End,
+            Anchor::Node(n) => document::Anchor::Node(self.node_ref(n)),
+        }
+    }
+
+    fn dense(&self, patch: &Patch) -> document::Patch {
+        document::Patch {
+            deps: patch
+                .dependencies
+                .iter()
+                .map(|d| self.patch_index(*d))
+                .collect(),
+            ops: patch
+                .operations
+                .iter()
+                .map(|o| match o {
+                    Operation::Insert { left, right, atoms } => document::Op::Insert {
+                        left: self.anchor_ref(*left),
+                        right: self.anchor_ref(*right),
+                        atoms: atoms.clone(),
+                    },
+                    Operation::Delete { targets } => document::Op::Delete {
+                        targets: targets.iter().map(|t| self.node_ref(*t)).collect(),
+                    },
+                    Operation::Restore { deletion } => document::Op::Restore {
+                        deletion: self.op_ref(*deletion, |c| match c {
+                            Created::Deletion(d) => Some(d),
+                            _ => None,
+                        }),
+                    },
+                    Operation::Order { before, after } => document::Op::Order {
+                        before: self.node_ref(*before),
+                        after: self.node_ref(*after),
+                    },
+                    Operation::KeepInsertion {
+                        deletion,
+                        insertion,
+                    } => document::Op::Keep {
+                        deletion: self.op_ref(*deletion, |c| match c {
+                            Created::Deletion(d) => Some(d),
+                            _ => None,
+                        }),
+                        insertion: self.op_ref(*insertion, |c| match c {
+                            Created::Insertion(i) => Some(i),
+                            _ => None,
+                        }),
+                    },
+                    Operation::Retract { order } => document::Op::Retract {
+                        order: self.op_ref(*order, |c| match c {
+                            Created::Order(o) => Some(o),
+                            _ => None,
+                        }),
+                    },
+                })
+                .collect(),
+        }
+    }
+
+    /// The `Error` a kernel refusal stands for, with the identities it names.
+    fn error(patch: &Patch, r: document::Refusal) -> Error {
+        let op = &patch.operations[r.op];
+        let node = |n: &NodeId| Anchor::Node(*n);
+        // The reference the refusal points at, as an anchor and its patch.
+        let anchor = match (op, r.item) {
+            (Operation::Insert { left, .. }, 0) => *left,
+            (Operation::Insert { right, .. }, _) => *right,
+            (Operation::Delete { targets }, k) => node(&targets[k]),
+            (Operation::Order { before, .. }, 0) => node(before),
+            (Operation::Order { after, .. }, _) => node(after),
+            _ => Anchor::Start,
+        };
+        let operation = match (op, r.item) {
+            (Operation::Restore { deletion }, _) => Some(*deletion),
+            (Operation::KeepInsertion { deletion, .. }, 0) => Some(*deletion),
+            (Operation::KeepInsertion { insertion, .. }, _) => Some(*insertion),
+            (Operation::Retract { order }, _) => Some(*order),
+            _ => None,
+        };
+        match r.kind {
+            document::UNOBSERVED_PATCH => Error::UnobservedPatch(match (operation, anchor) {
+                (Some(o), _) => o.patch,
+                (None, Anchor::Node(n)) => n.insertion.patch,
+                _ => unreachable!("sentinels are always observed"),
+            }),
+            document::UNKNOWN_ANCHOR => Error::UnknownAnchor(anchor),
+            document::INVALID_INSERTION => Error::InvalidInsertion,
+            document::UNORDERED_ANCHORS => Error::UnorderedAnchors,
+            document::EMPTY_DELETION => Error::EmptyDeletion,
+            document::DUPLICATE_TARGET => match anchor {
+                Anchor::Node(n) => Error::DuplicateTarget(n),
+                _ => unreachable!(),
+            },
+            document::UNKNOWN_DELETION => Error::UnknownDeletion(operation.expect("deletion")),
+            document::UNKNOWN_INSERTION => Error::UnknownInsertion(operation.expect("insertion")),
+            document::INVALID_ACKNOWLEDGEMENT => Error::InvalidAcknowledgement,
+            document::CYCLE => Error::Cycle,
+            document::UNKNOWN_ORDER => Error::UnknownOrder(operation.expect("order")),
+            k => unreachable!("unknown refusal kind {k}"),
+        }
     }
 
     /// Reject missing prerequisites without changing state. The exchange layer
     /// can retain the returned IDs and retry after those patches arrive.
     pub fn apply(&mut self, patch: Patch) -> Result<Applied, Error> {
-        if let Some(existing) = self.patches.get(&patch.id) {
+        if let Some((_, existing)) = self.patches.get(&patch.id) {
             return if existing == &patch {
                 Ok(Applied::AlreadyPresent)
             } else {
@@ -183,441 +426,117 @@ impl DocumentGraph {
         if patch.operations.is_empty() {
             return Err(Error::EmptyPatch);
         }
-        if patch.operations.len() > u32::MAX as usize {
+        if patch.operations.len() > u32::MAX as usize
+            || patch.operations.iter().any(
+                |o| matches!(o, Operation::Insert { atoms, .. } if atoms.len() > u32::MAX as usize),
+            )
+        {
             return Err(Error::TooManyOperations);
         }
-        let observed = self.dependency_closure(&patch.dependencies);
-        // References cannot use this patch's content hash; order evidence from
-        // earlier operations in the patch is nevertheless causal. Build once.
-        let mut causal_edges = observed.clone();
-        causal_edges.insert(patch.id);
-        // Validators refuse before mutation. Journal successful operations and
-        // reverse only their additions if a later operation is refused.
-        let mut journal = Vec::with_capacity(patch.operations.len());
+        let dense = self.dense(&patch);
+        let refusal = document::validate(&self.doc, &dense);
+        if refusal.kind != 0 {
+            return Err(Self::error(&patch, refusal));
+        }
+        // Mirror the numbering `commit` assigns.
+        let index = self.ids.len();
         for (ordinal, operation) in patch.operations.iter().enumerate() {
             let id = OperationId {
                 patch: patch.id,
                 ordinal: ordinal as u32,
             };
-            let changed = match operation {
-                Operation::Restore { deletion } => !self.restored.contains(deletion),
-                Operation::KeepInsertion {
-                    deletion,
-                    insertion,
-                } => !self.acknowledged.contains(&(*deletion, *insertion)),
-                _ => true,
+            let created = match operation {
+                Operation::Insert { atoms, .. } => {
+                    for k in 0..atoms.len() {
+                        let node = NodeId {
+                            insertion: id,
+                            ordinal: k as u32,
+                        };
+                        self.nodes.insert(node, self.anchors.len());
+                        self.anchors.push(Anchor::Node(node));
+                    }
+                    self.insertion_ids.push(id);
+                    Created::Insertion(self.insertion_ids.len() - 1)
+                }
+                Operation::Delete { .. } => {
+                    self.deletion_ids.push(id);
+                    Created::Deletion(self.deletion_ids.len() - 1)
+                }
+                Operation::Order { .. } => {
+                    self.order_ids.push(id);
+                    Created::Order(self.order_ids.len() - 1)
+                }
+                _ => Created::Other,
             };
-            if let Err(error) = self.apply_operation(id, operation, &observed, &causal_edges) {
-                for (id, operation, changed) in journal.into_iter().rev() {
-                    self.rollback_operation(id, operation, changed);
-                }
-                return Err(error);
-            }
-            journal.push((id, operation, changed));
+            self.operations.insert(id, created);
         }
-        self.patches.insert(patch.id, patch);
+        self.doc = document::commit(std::mem::replace(&mut self.doc, document::empty()), &dense);
+        debug_assert_eq!(self.doc.atoms.len(), self.anchors.len());
+        self.ids.push(patch.id);
+        self.patches.insert(patch.id, (index, patch));
         Ok(Applied::Inserted)
-    }
-
-    fn dependency_closure(&self, roots: &[PatchId]) -> BTreeSet<PatchId> {
-        let mut found = BTreeSet::new();
-        let mut stack = roots.to_vec();
-        while let Some(id) = stack.pop() {
-            if found.insert(id) {
-                if let Some(patch) = self.patches.get(&id) {
-                    stack.extend(patch.dependencies.iter().copied());
-                }
-            }
-        }
-        found
-    }
-
-    fn observe(id: PatchId, observed: &BTreeSet<PatchId>) -> Result<(), Error> {
-        if observed.contains(&id) {
-            Ok(())
-        } else {
-            Err(Error::UnobservedPatch(id))
-        }
-    }
-
-    fn anchor(&self, anchor: Anchor, observed: &BTreeSet<PatchId>) -> Result<(), Error> {
-        if let Anchor::Node(node) = anchor {
-            Self::observe(node.insertion.patch, observed)?;
-            if !self.atoms.contains_key(&node) {
-                return Err(Error::UnknownAnchor(anchor));
-            }
-        }
-        Ok(())
     }
 
     #[cfg(test)]
     fn reachable(&self, from: Anchor, to: Anchor) -> bool {
-        self.reachable_in(from, to, None)
+        let index = |a: Anchor| match a {
+            Anchor::Start => document::START,
+            Anchor::End => document::END,
+            Anchor::Node(n) => self.nodes[&n],
+        };
+        document::reaches(&document::all_rows(&self.doc), index(from), index(to))
     }
 
-    fn reachable_in(&self, from: Anchor, to: Anchor, observed: Option<&BTreeSet<PatchId>>) -> bool {
-        let mut seen = BTreeSet::new();
-        let mut stack = vec![from];
-        while let Some(at) = stack.pop() {
-            if at == to {
-                return true;
-            }
-            if seen.insert(at) {
-                if let Some(next) = self.edges.get(&at) {
-                    // Common insertion anchors retain a direct causal edge.
-                    // Check it before visiting unrelated concurrent branches.
-                    let allowed = |next: &Anchor| {
-                        observed.is_none_or(|known| {
-                            (at == Anchor::Start && *next == Anchor::End)
-                                || self.edge_sources.get(&(at, *next)).is_some_and(|sources| {
-                                    sources.iter().any(|id| known.contains(&id.patch))
-                                })
-                        })
-                    };
-                    if next.contains(&to) && allowed(&to) {
-                        return true;
-                    }
-                    stack.extend(next.iter().filter(|next| allowed(next)).copied());
-                }
-            }
-        }
-        false
-    }
-
-    fn edge(&mut self, from: Anchor, to: Anchor, source: OperationId) {
-        self.edges.entry(from).or_default().insert(to);
-        self.edge_sources
-            .entry((from, to))
-            .or_default()
-            .insert(source);
-    }
-
-    fn rollback_edge(&mut self, from: Anchor, to: Anchor, source: OperationId) {
-        let sources = self
-            .edge_sources
-            .get_mut(&(from, to))
-            .expect("journaled edge");
-        assert!(sources.remove(&source));
-        if sources.is_empty() {
-            self.edge_sources.remove(&(from, to));
-            // The sentinel edge exists independently of operation evidence.
-            if (from, to) != (Anchor::Start, Anchor::End) {
-                let row = self.edges.get_mut(&from).expect("journaled row");
-                assert!(row.remove(&to));
-                if row.is_empty() {
-                    self.edges.remove(&from);
-                }
-            }
-        }
-    }
-
-    fn rollback_operation(&mut self, id: OperationId, operation: &Operation, changed: bool) {
-        match operation {
-            Operation::Insert { left, right, atoms } => {
-                let mut previous = *left;
-                for ordinal in 0..atoms.len() {
-                    let node = NodeId {
-                        insertion: id,
-                        ordinal: ordinal as u32,
-                    };
-                    self.rollback_edge(previous, Anchor::Node(node), id);
-                    self.atoms.remove(&node);
-                    previous = Anchor::Node(node);
-                }
-                self.rollback_edge(previous, *right, id);
-                self.insertions.remove(&id);
-                for anchor in [left, right] {
-                    if let Anchor::Node(node) = anchor {
-                        let users = self.insertions_at.get_mut(node).expect("journaled anchor");
-                        assert!(users.remove(&id));
-                        if users.is_empty() {
-                            self.insertions_at.remove(node);
-                        }
-                    }
-                }
-            }
-            Operation::Delete { .. } => {
-                self.deletions.remove(&id);
-            }
-            Operation::Restore { deletion } => {
-                if changed {
-                    self.restored.remove(deletion);
-                }
-            }
-            Operation::Order { before, after } => {
-                self.rollback_edge(Anchor::Node(*before), Anchor::Node(*after), id);
-            }
-            Operation::KeepInsertion {
-                deletion,
-                insertion,
-            } => {
-                if changed {
-                    self.acknowledged.remove(&(*deletion, *insertion));
-                }
-            }
-        }
-    }
-
-    fn apply_operation(
-        &mut self,
-        id: OperationId,
-        operation: &Operation,
-        observed: &BTreeSet<PatchId>,
-        causal_edges: &BTreeSet<PatchId>,
-    ) -> Result<(), Error> {
-        match operation {
-            Operation::Insert { left, right, atoms } => {
-                self.anchor(*left, observed)?;
-                self.anchor(*right, observed)?;
-                if atoms.is_empty()
-                    || atoms.len() > u32::MAX as usize
-                    || atoms.iter().any(Vec::is_empty)
-                    || *left == Anchor::End
-                    || *right == Anchor::Start
-                    || left == right
-                {
-                    return Err(Error::InvalidInsertion);
-                }
-                if !self.reachable_in(*left, *right, Some(causal_edges)) {
-                    return Err(Error::UnorderedAnchors);
-                }
-                let mut previous = *left;
-                for (ordinal, bytes) in atoms.iter().enumerate() {
-                    let node = NodeId {
-                        insertion: id,
-                        ordinal: ordinal as u32,
-                    };
-                    self.atoms.insert(node, bytes.clone());
-                    self.edge(previous, Anchor::Node(node), id);
-                    previous = Anchor::Node(node);
-                }
-                self.edge(previous, *right, id);
-                self.insertions.insert(
-                    id,
-                    Insertion {
-                        left: *left,
-                        right: *right,
-                    },
-                );
-                for anchor in [left, right] {
-                    if let Anchor::Node(node) = anchor {
-                        self.insertions_at.entry(*node).or_default().insert(id);
-                    }
-                }
-            }
-            Operation::Delete { targets } => {
-                if targets.is_empty() {
-                    return Err(Error::EmptyDeletion);
-                }
-                let mut unique = BTreeSet::new();
-                for target in targets {
-                    self.anchor(Anchor::Node(*target), observed)?;
-                    if !unique.insert(*target) {
-                        return Err(Error::DuplicateTarget(*target));
-                    }
-                }
-                self.deletions.insert(id, unique);
-            }
-            Operation::Restore { deletion } => {
-                Self::observe(deletion.patch, observed)?;
-                if !self.deletions.contains_key(deletion) {
-                    return Err(Error::UnknownDeletion(*deletion));
-                }
-                self.restored.insert(*deletion);
-            }
-            Operation::Order { before, after } => {
-                self.anchor(Anchor::Node(*before), observed)?;
-                self.anchor(Anchor::Node(*after), observed)?;
-                if self.reachable_in(
-                    Anchor::Node(*after),
-                    Anchor::Node(*before),
-                    Some(causal_edges),
-                ) {
-                    return Err(Error::Cycle);
-                }
-                self.edge(Anchor::Node(*before), Anchor::Node(*after), id);
-            }
-            Operation::KeepInsertion {
-                deletion,
-                insertion,
-            } => {
-                Self::observe(deletion.patch, observed)?;
-                Self::observe(insertion.patch, observed)?;
-                let deleted = self
-                    .deletions
-                    .get(deletion)
-                    .ok_or(Error::UnknownDeletion(*deletion))?;
-                let inserted = self
-                    .insertions
-                    .get(insertion)
-                    .ok_or(Error::UnknownInsertion(*insertion))?;
-                if ![inserted.left, inserted.right]
-                    .iter()
-                    .any(|a| matches!(a, Anchor::Node(n) if deleted.contains(n)))
-                {
-                    return Err(Error::InvalidAcknowledgement);
-                }
-                self.acknowledged.insert((*deletion, *insertion));
-            }
-        }
-        Ok(())
-    }
-
-    fn concurrent(&self, a: PatchId, b: PatchId) -> bool {
-        a != b
-            && !self.dependency_closure(&[a]).contains(&b)
-            && !self.dependency_closure(&[b]).contains(&a)
-    }
-
-    /// Reconstruct the live partial order by traversing the full history.
-    /// Deleted atoms remain anchors and contribute ordering paths.
+    /// The live text and its conflicts. Diagnostics are sorted by identity.
     pub fn materialize(&self) -> Materialized {
-        let mut conflicts = Vec::new();
-        for (deletion, targets) in &self.deletions {
-            if self.restored.contains(deletion) {
-                continue;
-            }
-            let candidates: BTreeSet<_> = targets
-                .iter()
-                .filter_map(|target| self.insertions_at.get(target))
-                .flat_map(|insertions| insertions.iter())
-                .copied()
-                .collect();
-            for insertion in candidates {
-                let inserted = &self.insertions[&insertion];
-                if !self.concurrent(deletion.patch, insertion.patch)
-                    || self.acknowledged.contains(&(*deletion, insertion))
-                {
-                    continue;
-                }
-                let anchors: BTreeSet<_> = [inserted.left, inserted.right]
-                    .iter()
-                    .filter_map(|a| match a {
-                        Anchor::Node(n) if targets.contains(n) => Some(*n),
-                        _ => None,
-                    })
-                    .collect();
-                if !anchors.is_empty() {
-                    conflicts.push(Conflict::DeleteInsert {
-                        deletion: *deletion,
-                        insertion,
-                        anchors: anchors.into_iter().collect(),
-                    });
-                }
-            }
-        }
-        // Every graph anchor gets one dense index. Indices are derived here and
-        // never enter replicated patch identities. Both sentinels are dead.
-        let anchors: Vec<_> = std::iter::once(Anchor::Start)
-            .chain(self.atoms.keys().copied().map(Anchor::Node))
-            .chain(std::iter::once(Anchor::End))
-            .collect();
-        let indices: BTreeMap<_, _> = anchors
+        let view = document::materialize(&self.doc);
+        let mut delete_inserts: Vec<_> = view
+            .delete_inserts
             .iter()
-            .copied()
-            .enumerate()
-            .map(|(i, a)| (a, i))
-            .collect();
-        let rows: Vec<Vec<usize>> = anchors
-            .iter()
-            .map(|anchor| {
-                self.edges
-                    .get(anchor)
-                    .into_iter()
-                    .flat_map(|row| row.iter())
-                    .map(|a| indices[a])
-                    .collect()
+            .map(|c| {
+                let anchors: BTreeSet<_> = c.anchors.iter().map(|a| self.node(*a)).collect();
+                (
+                    self.deletion_ids[c.deletion],
+                    self.insertion_ids[c.insertion],
+                    anchors,
+                )
             })
             .collect();
-        // Dense deletion IDs are local projection indices, never replicated IDs.
-        // Every covering entry indexes the flag appended for that deletion.
-        let mut covering = vec![Vec::new(); anchors.len()];
-        let mut restored = Vec::with_capacity(self.deletions.len());
-        for (tag, (deletion, targets)) in self.deletions.iter().enumerate() {
-            restored.push(self.restored.contains(deletion));
-            for node in targets {
-                covering[indices[&Anchor::Node(*node)]].push(tag);
-            }
-        }
-        let live: Vec<bool> = anchors
-            .iter()
-            .enumerate()
-            .map(|(index, anchor)| {
-                matches!(anchor, Anchor::Node(_))
-                    && crate::tags::visible(&covering[index], &restored)
-            })
-            .collect();
-        let dead_rows = rows
-            .iter()
-            .zip(&live)
-            .map(|(row, alive)| if *alive { Vec::new() } else { row.clone() })
-            .collect();
-        let mut marks = vec![false; anchors.len()];
-        let mut boundaries = vec![Vec::new(); anchors.len()];
-        let mut indegree = vec![0usize; anchors.len()];
-        let mut remaining = BTreeSet::new();
-        for source in 0..anchors.len() {
-            if !live[source] {
-                continue;
-            }
-            remaining.insert(source);
-            let traversal = crate::indexed::boundary(&dead_rows, &rows[source], &live, marks);
-            marks = traversal.marks;
-            boundaries[source] = traversal.queue;
-            for target in &boundaries[source] {
-                indegree[*target] += 1;
-            }
-        }
-        let remaining_indices = remaining.iter().copied().collect();
-        let mut ready: BTreeSet<_> = crate::order::frontier_counts(&indegree, &remaining_indices)
+        delete_inserts.sort();
+        let mut conflicts: Vec<_> = delete_inserts
             .into_iter()
+            .map(|(deletion, insertion, anchors)| Conflict::DeleteInsert {
+                deletion,
+                insertion,
+                anchors: anchors.into_iter().collect(),
+            })
             .collect();
-        let mut layers = Vec::new();
-        let mut output = Vec::new();
-        while !remaining.is_empty() {
-            if ready.is_empty() {
-                let blocked = remaining
-                    .iter()
-                    .map(|i| match anchors[*i] {
-                        Anchor::Node(n) => n,
-                        _ => unreachable!(),
-                    })
-                    .collect();
-                conflicts.push(Conflict::Cycle { blocked });
-                break;
-            }
-            let frontier_indices: Vec<_> = std::mem::take(&mut ready).into_iter().collect();
-            let frontier: Vec<_> = frontier_indices
-                .iter()
-                .map(|i| match anchors[*i] {
-                    Anchor::Node(n) => n,
-                    _ => unreachable!(),
-                })
-                .collect();
-            if frontier.len() > 1 {
+        let layers: Vec<Vec<NodeId>> = view
+            .layers
+            .iter()
+            .map(|layer| {
+                let mut nodes: Vec<_> = layer.iter().map(|a| self.node(*a)).collect();
+                nodes.sort();
+                nodes
+            })
+            .collect();
+        for layer in &layers {
+            if layer.len() > 1 {
                 conflicts.push(Conflict::Order {
-                    frontier: frontier.clone(),
+                    frontier: layer.clone(),
                 });
             }
-            for source in frontier_indices {
-                remaining.remove(&source);
-                if let Anchor::Node(node) = anchors[source] {
-                    output.extend_from_slice(&self.atoms[&node]);
-                }
-                for target in &boundaries[source] {
-                    indegree[*target] -= 1;
-                    if indegree[*target] == 0 {
-                        ready.insert(*target);
-                    }
-                }
-            }
-            layers.push(frontier);
         }
-        let bytes = conflicts.is_empty().then_some(output);
+        if !view.blocked.is_empty() {
+            let mut blocked: Vec<_> = view.blocked.iter().map(|a| self.node(*a)).collect();
+            blocked.sort();
+            conflicts.push(Conflict::Cycle { blocked });
+        }
+        debug_assert_eq!(view.clean, conflicts.is_empty());
         Materialized {
             layers,
+            bytes: view.clean.then_some(view.bytes),
             conflicts,
-            bytes,
         }
     }
 }
@@ -880,6 +799,35 @@ mod tests {
         assert!(
             matches!(&view.conflicts[0], Conflict::Cycle { blocked } if blocked.contains(&node(2, 0)) && blocked.contains(&node(3, 0)))
         );
+    }
+
+    #[test]
+    fn retracting_one_order_recovers_from_a_cycle() {
+        let mut a = base();
+        a.apply(middle(2, "x\n")).unwrap();
+        a.apply(middle(3, "y\n")).unwrap();
+        let order = |v: u8, before: NodeId, after: NodeId| {
+            patch(v, &[2, 3], vec![Operation::Order { before, after }])
+        };
+        a.apply(order(4, node(2, 0), node(3, 0))).unwrap();
+        a.apply(order(5, node(3, 0), node(2, 0))).unwrap();
+        assert!(a.materialize().bytes.is_none());
+        let mut b = a.clone();
+        // Retracting y-before-x leaves x before y.
+        let retract = patch(6, &[4, 5], vec![Operation::Retract { order: op(5) }]);
+        a.apply(retract.clone()).unwrap();
+        assert_eq!(a.materialize().bytes, Some(b"a\nx\ny\nb\nc\n".to_vec()));
+        // Only order operations retract, and only observed ones.
+        assert_eq!(
+            b.apply(patch(7, &[4, 5], vec![Operation::Retract { order: op(2) }])),
+            Err(Error::UnknownOrder(op(2)))
+        );
+        assert_eq!(
+            b.apply(patch(8, &[2], vec![Operation::Retract { order: op(5) }])),
+            Err(Error::UnobservedPatch(id(5)))
+        );
+        b.apply(retract).unwrap();
+        assert_eq!(a, b);
     }
 
     #[test]

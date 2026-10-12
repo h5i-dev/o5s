@@ -71,6 +71,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/repositories", get(repositories))
         .route("/api/state", get(repo_state))
         .route("/api/view", get(compact_view))
+        .route("/api/snapshot", get(patch_snapshot))
         .route("/api/document", get(document_view))
         .route("/api/patches", get(queries::patches))
         .route("/api/patch", get(queries::patch))
@@ -287,6 +288,33 @@ async fn compact_view(
         let view = cache.content()?;
         Ok(serde_json::json!({"files":view.files,"conflicts":view.conflicts,"executable":view.executable,"binary":view.binary,"patch_count":cache.patch_count(),"work":work,"generation":repo.generation}))
     })
+    .await
+}
+
+#[derive(Deserialize)]
+struct SnapshotQuery {
+    repo: String,
+    patch: u64,
+}
+
+/// The files of the snapshot a patch defines (the patch and its causal past),
+/// for executed checks.
+async fn patch_snapshot(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<SnapshotQuery>,
+) -> Response {
+    let (_, repo) = match load(&s, &headers, &q.repo).await {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
+    blocking(
+        move || {
+            let view = repo.materialize_patch(q.patch)?;
+            Ok(o5s_platform::snapshot_json(&repo, q.patch, &view))
+        },
+        "snapshot",
+    )
     .await
 }
 

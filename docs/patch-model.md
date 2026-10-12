@@ -25,6 +25,7 @@ References to a patch's own identity are rejected. Hashing an envelope that cont
 | `Restore { deletion }` | Cancel one observed deletion tag | Unknown deletion or a tag outside the causal context |
 | `Order { before, after }` | Add order evidence for two observed atoms | Unknown or unobserved atom, or an order edge closing a cycle already visible to the author |
 | `KeepInsertion { deletion, insertion }` | Acknowledge retention of one insertion anchored on an atom covered by one named deletion | Unknown or unobserved operations, or a deletion that covers neither insertion anchor |
+| `Retract { order }` | Withdraw one observed `Order` operation's edge | Unobserved patch, or an operation that is not an `Order` (`UnknownOrder`) |
 
 All operations in a patch apply atomically for returned validation errors. Each operation validates before mutating. A journal records successful additions and reverses them if a later operation is refused, including edge provenance, reverse anchor indices and newly inserted restoration or acknowledgement entries. Entries that existed before the patch remain present. The patch record is published only after all operations succeed. The native journal has refusal tests but no Lean proof; durable storage still requires a transaction with the same failure behavior.
 
@@ -40,13 +41,13 @@ This is observed-tag restoration. It does not remove a patch, rewrite dependenci
 
 ## Order conflicts and materialization
 
-Materialization assigns temporary dense indices to all anchors, constructs adjacency rows and marks live content atoms. For each live source it calls `indexed::boundary` with outgoing edges from dead vertices. The returned live-boundary edges preserve ordering paths through deleted atoms. Sentinels do not become output bytes.
+Materialization is the extracted `document::materialize` (`crates/kernel/src/document.rs`). The document holds dense indices assigned in arrival order: anchor 0 is the start, anchor 1 the end, and atoms follow in creation order. It constructs adjacency rows and marks live content atoms. For each live source it calls `indexed::boundary` with outgoing edges from dead vertices. The returned live-boundary edges preserve ordering paths through deleted atoms. Sentinels do not become output bytes.
 
-The materializer counts incoming boundary edges and selects its initial frontier with `order::frontier_counts`, a linear scan over the remaining dense indices. Native Kahn updates decrement successor counts as each frontier is removed. A frontier containing multiple atoms records an `Order` conflict. Its diagnostic layer lists those identities in their canonical ID order; that list does not choose an output order. `Materialized::bytes` remains absent whenever any conflict exists.
+The materializer counts incoming boundary edges and selects its initial frontier with `order::frontier_counts`, a linear scan over the remaining dense indices. Its Kahn loop decrements successor counts as each frontier is removed. A frontier containing multiple atoms records an `Order` conflict. The native adapter sorts each layer by node identity, so diagnostics do not depend on arrival order; that list does not choose an output order. `Materialized::bytes` remains absent whenever any conflict exists.
 
 An `Order` operation can establish order between known concurrent insertions. An insertion arriving afterward remains ambiguous unless existing edges already determine its position. Concurrent reviewers can also introduce opposite order edges. Both records remain present, and materialization reports a `Cycle` containing atoms still blocked after all available frontiers have been removed. That blocked set can include atoms downstream of the cycle; it is not a minimal cycle witness.
 
-The current operation set cannot retract order evidence. Recovering from a cycle requires a specified replacement or cancellation operation before this subset can serve general review workflows. Hiding all cycle members through explicit deletions can remove them from output, but that is not a substitute for order-edge cancellation.
+A cycle is recovered by retracting one of the order operations on it: `Retract { order }` withdraws that operation's edge, and the remaining order stands. Retractions form a set, like deletion tags, so their delivery order does not matter. When validating a later patch, only retractions by patches it observed count, so validation still reads only the patch's causal past. Materialization counts every retraction.
 
 ## Minimal histories
 
@@ -64,6 +65,7 @@ Each insertion below names the initial patch as its dependency unless stated oth
 | Restore both deletions covering `b` | `b` becomes visible |
 | Resolve `x` before `y`, then receive concurrent `z` at the original gap | New order conflict involving `z` |
 | Concurrently resolve `x` before `y` and `y` before `x` | Cycle conflict; no output bytes |
+| Then retract `y` before `x` | `x` before `y`; the cycle is gone |
 | Receive a patch before its dependency | No mutation; retryable missing-dependency result |
 | Valid deletion followed by an invalid order in one patch | Entire patch rejected; deletion has no effect |
 
@@ -74,10 +76,11 @@ A path is either a graph document or a legacy whole-file/line document, for its 
 - **Graph documents.** Every graph edit states whether the file exists (`"remove": true` removes it) and whether it is executable. These states form a causal register per path. A patch supersedes the nearest earlier edits of the path in its causal past, and concurrent heads that disagree, such as a removal and an edit, are an explicit conflict. A later patch observing both resolves it. An edit without operations creates an empty document, removes one, or changes only its mode. Removal keeps the graph, so restoring the file can continue from its atoms. Atoms are UTF-8.
 - **Whole-file edits.** `{"path","content","executable","base64"}`. A `null` content removes the file. With `"base64": true` the content is standard padded base64 of arbitrary bytes. Concurrent edits conflict when content, mode or encoding differ. Line edits apply only to text files and keep the base's mode.
 - **Mixed proposals.** `propose_graph` accepts `files` (whole-file edits) beside graph edits, so a proposal can carry text documents and binary files together. A path cannot be both in one proposal.
+- **Symbolic links and submodules.** A whole-file edit with `"kind": "symlink"` holds the link target: non-empty, at most 4,096 bytes, no NUL. One with `"kind": "submodule"` holds a 40-digit lowercase commit id. Neither may be executable or base64. Both are registers like any whole-file edit, so a concurrent retarget conflicts. Line edits and graph documents are text only.
 - **Identity.** The new fields appear in a patch body only when set, and mixed proposals use the body tag `o5s-mixed-patch-v1`. Every earlier patch keeps its SHA-256 identity.
-- **Not supported.** Symbolic links, submodules and identity-preserving renames are refused rather than approximated.
+- **Renames.** A rename is a removal and an addition, as in Git; atom identities do not move with it.
 
-Views list executable paths in `executable` and base64 paths in `binary`. Git export and `o5s fetch` write modes 100755/100644 and the decoded bytes.
+Views list executable paths in `executable`, base64 paths in `binary`, links in `symlinks` and submodules in `submodules`. Git export (native and Cloudflare Artifacts) and `o5s fetch` write modes 100644, 100755, 120000 (link target blob) and 160000 (gitlink to the commit; no object). The CLI reads links with `readlink` and submodules from the index's gitlinks, and refuses any path that passes through a symlink.
 
 ## Evidence and remaining work
 

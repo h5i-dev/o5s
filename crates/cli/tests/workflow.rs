@@ -358,19 +358,39 @@ async fn staged_unstaged_untracked_and_deleted_files_are_proposed_without_index_
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn binary_executable_and_removed_files_round_trip_and_symlinks_are_refused() {
+async fn binary_executable_and_removed_files_round_trip_and_paths_below_symlinks_are_refused() {
     use std::os::unix::fs::{PermissionsExt, symlink};
     let f = Fixture::new().await;
     let a = f.repo("content");
     f.ok(&a, 1, &["connect", "content"]);
-    symlink("/etc/passwd", a.join("link")).unwrap();
+    // A path below a symlink is never read through it.
+    fs::create_dir(a.join("real")).unwrap();
+    fs::write(a.join("real/file"), "x").unwrap();
+    symlink("real", a.join("dir")).unwrap();
+    git(&a, &["add", "real/file"]);
+    let index = a.join(".git/index");
+    let before = fs::read(&index).unwrap();
+    std::process::Command::new("git")
+        .args([
+            "-C",
+            a.to_str().unwrap(),
+            "update-index",
+            "--add",
+            "--cacheinfo",
+        ])
+        .arg("100644,e69de29bb2d1d6434b8b29ae775ad8c2e48c5391,dir/through")
+        .status()
+        .unwrap();
     f.fail(
         &a,
         1,
-        &["propose", "--intent", "symlink"],
-        "Symlink unsupported",
+        &["propose", "--intent", "through"],
+        "below a symlink",
     );
-    fs::remove_file(a.join("link")).unwrap();
+    fs::write(&index, before).unwrap();
+    fs::remove_file(a.join("dir")).unwrap();
+    git(&a, &["rm", "-q", "--cached", "real/file"]);
+    fs::remove_dir_all(a.join("real")).unwrap();
     assert!(
         f.ok(&a, 1, &["log"])["patches"]
             .as_array()
@@ -703,4 +723,84 @@ async fn native_graph_worktrees_keep_causal_anchors_after_other_agents_merge() {
     f.admit(&b, removed);
     f.ok(&b, 2, &["fetch"]);
     assert!(!git(&b, &["ls-tree", "-r", "--name-only", "refs/o5s/main"]).contains("file.txt"));
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ci_runs_checks_on_each_proposal_snapshot_and_reports_them() {
+    let f = Fixture::new().await;
+    let a = f.repo("ci");
+    f.ok(&a, 1, &["connect", "ci"]);
+    fs::write(a.join("value"), "ok\n").unwrap();
+    let good = f.legacy(&a, "ci", &["value"], "good");
+    fs::write(a.join("value"), "broken\n").unwrap();
+    let bad = f.legacy(&a, "ci", &["value"], "bad");
+    // The check sees exactly the proposal's snapshot.
+    let command = "test \"$(cat value)\" = ok && test \"$O5S_SNAPSHOT\" = \"$PWD\"";
+    let run = f.ok(&a, 91, &["ci", "--command", command]);
+    let results: Vec<(u64, bool)> = run["checked"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (r["patch"].as_u64().unwrap(), r["passed"].as_bool().unwrap()))
+        .collect();
+    assert_eq!(results, vec![(good, true), (bad, false)]);
+    let show = |p: u64| f.ok(&a, 91, &["show", &p.to_string()]);
+    assert_eq!(show(good)["checks_passed"], true);
+    assert_eq!(show(bad)["checks_passed"], false);
+    // Already run: nothing to do. An author cannot check their own proposal.
+    assert_eq!(
+        f.ok(&a, 91, &["ci", "--command", "true"])["checked"],
+        serde_json::json!([])
+    );
+    f.fail(
+        &a,
+        1,
+        &["ci", "--command", "true", "--patch", &good.to_string()],
+        "independent",
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn symlinks_and_submodules_round_trip_through_proposals_and_fetch() {
+    let f = Fixture::new().await;
+    let a = f.repo("special");
+    f.ok(&a, 1, &["connect", "special"]);
+    fs::write(a.join("target.txt"), "t\n").unwrap();
+    std::os::unix::fs::symlink("target.txt", a.join("link")).unwrap();
+    // A gitlink in the index, as `git submodule add` leaves it.
+    let commit = "0123456789abcdef0123456789abcdef01234567";
+    git(
+        &a,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{commit},vendor/lib"),
+        ],
+    );
+    let first = patch(f.ok(&a, 1, &["propose", "--intent", "special files"]));
+    f.admit(&a, first);
+    let view = f.ok(&a, 2, &["view"]);
+    assert_eq!(view["files"]["link"], "target.txt");
+    assert_eq!(view["symlinks"], serde_json::json!(["link"]));
+    assert_eq!(view["files"]["vendor/lib"], commit);
+    assert_eq!(view["submodules"], serde_json::json!(["vendor/lib"]));
+    f.ok(&a, 1, &["fetch"]);
+    let tree = git(&a, &["ls-tree", "-r", "refs/o5s/main"]);
+    assert!(
+        tree.contains("120000 blob") && tree.contains("\tlink"),
+        "{tree}"
+    );
+    assert!(
+        tree.contains(&format!("160000 commit {commit}\tvendor/lib")),
+        "{tree}"
+    );
+    // Retargeting the link is a whole-file change of kind symlink.
+    fs::remove_file(a.join("link")).unwrap();
+    std::os::unix::fs::symlink("elsewhere", a.join("link")).unwrap();
+    let second = patch(f.ok(&a, 1, &["propose", "--intent", "retarget"]));
+    f.admit(&a, second);
+    assert_eq!(f.ok(&a, 2, &["view"])["files"]["link"], "elsewhere");
 }

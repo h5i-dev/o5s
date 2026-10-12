@@ -21,26 +21,47 @@ pub struct GraphEdit {
 /// Whether a graph document exists and is executable, as one register value.
 pub type FileState = (bool, bool);
 
+/// Dense dependency rows of a repository: row `h` lists patch `h`'s
+/// dependencies (handles are dense and every dependency is older).
+pub(crate) fn rows(repo: &Repository) -> Vec<Vec<usize>> {
+    let n = repo
+        .patches
+        .keys()
+        .next_back()
+        .map_or(0, |h| *h as usize + 1);
+    let mut rows = vec![Vec::new(); n];
+    for (h, p) in &repo.patches {
+        rows[*h as usize] = p.dependencies.iter().map(|d| *d as usize).collect();
+    }
+    rows
+}
+
+/// The nearest patches satisfying `stop` on each causal path from `initial`
+/// (the extracted `causality::frontier`), in ascending order.
+fn nearest_by(
+    repo: &Repository,
+    initial: &[u64],
+    stop: impl Fn(&Patch) -> bool,
+) -> Result<Vec<u64>, Refusal> {
+    let rows = rows(repo);
+    if initial.iter().any(|h| !repo.patches.contains_key(h)) {
+        return Err(Refusal("unknown graph dependency".into()));
+    }
+    let stops = (0..rows.len())
+        .map(|h| repo.patches.get(&(h as u64)).is_some_and(&stop))
+        .collect();
+    let roots = initial.iter().map(|h| *h as usize).collect();
+    let found = o5s_kernel::causality::frontier(&rows, &stops, &roots, vec![false; rows.len()]);
+    let mut out: Vec<u64> = found.queue.into_iter().map(|h| h as u64).collect();
+    out.sort_unstable();
+    Ok(out)
+}
+
 /// The handles of the nearest patches editing `path` on each causal path from `initial`.
 pub fn nearest(repo: &Repository, initial: &[u64], path: &str) -> Result<Vec<u64>, Refusal> {
-    let mut pending = initial.to_vec();
-    let mut visited = BTreeSet::new();
-    let mut result = BTreeSet::new();
-    while let Some(id) = pending.pop() {
-        if !visited.insert(id) {
-            continue;
-        }
-        let patch = repo
-            .patches
-            .get(&id)
-            .ok_or_else(|| Refusal("unknown graph dependency".into()))?;
-        if patch.graph_edits.iter().any(|edit| edit.path == path) {
-            result.insert(id);
-        } else {
-            pending.extend(patch.dependencies.iter().copied());
-        }
-    }
-    Ok(result.into_iter().collect())
+    nearest_by(repo, initial, |p| {
+        p.graph_edits.iter().any(|e| e.path == path)
+    })
 }
 
 pub fn identity(hash: &str) -> Result<PatchId, Refusal> {
@@ -56,32 +77,21 @@ pub fn identity(hash: &str) -> Result<PatchId, Refusal> {
 }
 
 // Stop at the first operation patch on each causal path. Its own graph
-// dependencies carry the rest of that path's observed history.
+// dependencies carry the rest of that path's observed history. Edits without
+// operations (empty files, removal, mode) add nothing to the graph; their
+// causal past carries its history.
 fn dependencies(repo: &Repository, initial: &[u64], path: &str) -> Result<Vec<PatchId>, Refusal> {
-    let mut pending = initial.to_vec();
-    let mut visited = BTreeSet::new();
-    let mut result = BTreeSet::new();
-    while let Some(id) = pending.pop() {
-        if !visited.insert(id) {
-            continue;
-        }
-        let patch = repo
-            .patches
-            .get(&id)
-            .ok_or_else(|| Refusal("unknown graph dependency".into()))?;
-        // Edits without operations (empty files, removal, mode) add nothing
-        // to the graph; their causal past carries its history.
-        if patch
-            .graph_edits
+    let near = nearest_by(repo, initial, |p| {
+        p.graph_edits
             .iter()
-            .any(|edit| edit.path == path && !edit.operations.is_empty())
-        {
-            result.insert(identity(&patch.hash)?);
-        } else {
-            pending.extend(patch.dependencies.iter().copied());
-        }
-    }
-    Ok(result.into_iter().collect())
+            .any(|e| e.path == path && !e.operations.is_empty())
+    })?;
+    let mut ids = near
+        .iter()
+        .map(|h| identity(&repo.patches[h].hash))
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.sort();
+    Ok(ids)
 }
 
 pub fn apply_graph_patch(
@@ -190,6 +200,7 @@ pub(crate) fn render_output(
                 content: if *present { text.clone() } else { None },
                 executable: *executable,
                 base64: false,
+                kind: crate::Kind::File,
             })
             .collect()
     };
@@ -200,6 +211,7 @@ pub(crate) fn render_output(
                 text: text.clone(),
                 executable: *executable,
                 base64: false,
+                kind: crate::Kind::File,
             })),
             None => Ok(crate::PathOutput::Conflict(alternatives())),
         },
@@ -252,6 +264,7 @@ pub(crate) fn overlay_outputs(
                     content: content.clone(),
                     executable,
                     base64,
+                    kind: crate::Kind::File,
                 })
                 .collect(),
         );

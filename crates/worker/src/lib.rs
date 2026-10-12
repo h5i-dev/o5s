@@ -2,12 +2,12 @@
 //! narrow loads and repository views are the same crates the native server
 //! runs (`o5s_pgwire::service`); this crate binds them to Hyperdrive and to
 //! the Workers fetch handler. Git export pushes snapshots to Cloudflare
-//! Artifacts (`artifacts.rs`); agent workspaces need a filesystem and are
-//! not served here.
+//! Artifacts (`artifacts.rs`), where agent workspaces live as well.
 
 pub mod artifacts;
 #[path = "../../server/src/auth.rs"]
 pub mod auth;
+pub mod workspace;
 
 use axum::{
     Router,
@@ -114,13 +114,15 @@ fn router(env: Env, ctx: Context) -> Router {
         .route("/api/repositories", get(repositories))
         .route("/api/state", get(repo_state))
         .route("/api/view", get(compact_view))
+        .route("/api/snapshot", get(patch_snapshot))
         .route("/api/document", get(document_view))
         .route("/api/patches", get(patches))
         .route("/api/patch", get(patch))
         .route("/api/command", post(command))
         .route("/api/export", post(export))
-        .route("/api/worktree", post(no_filesystem))
-        .route("/api/worktree/propose", post(no_filesystem))
+        .route("/api/artifacts", get(artifacts_access))
+        .route("/api/worktree", post(worktree))
+        .route("/api/worktree/propose", post(worktree_propose))
         .with_state(AppState {
             env: Arc::new(env),
             ctx: Arc::new(ctx),
@@ -252,19 +254,13 @@ async fn export_channel(
     let view = view_repo.materialize(channel).map_err(Failure::Refused)?;
     artifacts::export(
         &s.env,
-        &format!("{}-{}", a.tenant, repo),
+        &artifact_name(a, repo, None),
         channel,
         &view_repo,
         &view,
     )
     .await
-    .map_err(|e| {
-        if e.contains("conflicts") {
-            Failure::Refused(Refusal(e))
-        } else {
-            Failure::Unavailable(e)
-        }
-    })
+    .map_err(unavailable)
 }
 
 #[worker::send]
@@ -358,6 +354,30 @@ async fn compact_view(
             "binary":view.binary,"patch_count":cache.patch_count(),"work":work,"generation":repo.generation}))
     })()
     .map_err(Failure::Refused))
+}
+
+#[derive(Deserialize)]
+struct SnapshotQuery {
+    repo: String,
+    patch: u64,
+}
+
+/// The files of the snapshot a patch defines, for executed checks.
+#[worker::send]
+async fn patch_snapshot(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<SnapshotQuery>,
+) -> Response {
+    let repo = match load(&s, &headers, &q.repo).await {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    reply(
+        repo.materialize_patch(q.patch)
+            .map(|view| o5s_platform::snapshot_json(&repo, q.patch, &view))
+            .map_err(Failure::Refused),
+    )
 }
 
 #[derive(Deserialize)]
@@ -475,9 +495,166 @@ async fn patch(
     )
 }
 
-async fn no_filesystem() -> Response {
-    json(
-        StatusCode::NOT_IMPLEMENTED,
-        serde_json::json!({"error":"agent workspaces need a filesystem; use the native server or `o5s fetch`"}),
-    )
+fn unavailable(e: String) -> Failure {
+    if e.contains("conflicts") {
+        Failure::Refused(Refusal(e))
+    } else {
+        Failure::Unavailable(e)
+    }
+}
+
+/// The Artifacts repository of `repo`'s projections, or of `user`'s workspace.
+fn artifact_name(a: &Actor, repo: &str, user: Option<u64>) -> String {
+    match user {
+        None => format!("{}-{}", a.tenant, repo),
+        Some(u) => format!("{}-{}.{}", a.tenant, repo, u),
+    }
+}
+
+/// Clone access (remote and a one-hour read token) to a repository's Git
+/// projection, for members of its organization.
+#[worker::send]
+async fn artifacts_access(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<RepoQuery>,
+) -> Response {
+    let a = match s.actor(&headers) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let r = async {
+        // Only a repository the caller's organization has.
+        s.registry()?.repository(&a, &q.repo).await?;
+        artifacts::access(&s.env, &artifact_name(&a, &q.repo, None))
+            .await
+            .map_err(unavailable)
+    }
+    .await;
+    match r {
+        Ok(v) => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "application/json"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            out(v).to_bytes(),
+        )
+            .into_response(),
+        Err(f) => reply(Err(f)),
+    }
+}
+
+/// The caller's workspace: the channel's snapshot on `o5s/<channel>` of an
+/// Artifacts repository only this user is given write tokens for.
+#[worker::send]
+async fn worktree(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    let a = match s.actor(&headers) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let q: RepoQuery = match serde_json::from_slice(&body) {
+        Ok(q) => q,
+        Err(e) => {
+            return json(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({"error":e.to_string()}),
+            );
+        }
+    };
+    if !o5s_platform::valid_name(&q.channel) {
+        return reply(Err(Failure::Refused(Refusal(
+            "invalid channel name".into(),
+        ))));
+    }
+    let r = async {
+        let repo = s.registry()?.repository(&a, &q.repo).await?;
+        let view = repo.materialize(&q.channel).map_err(Failure::Refused)?;
+        let name = artifact_name(&a, &q.repo, Some(a.user));
+        let mut v = artifacts::workspace(&s.env, &name, &q.channel, &repo, &view)
+            .await
+            .map_err(unavailable)?;
+        v["agent"] = a.user.into();
+        v["push"] = "work".into();
+        Ok(v)
+    }
+    .await;
+    match r {
+        Ok(v) => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "application/json"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            out(v).to_bytes(),
+        )
+            .into_response(),
+        Err(f) => reply(Err(f)),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceProposal {
+    repo: String,
+    #[serde(default = "main_channel")]
+    channel: String,
+    intent: String,
+    /// The branch the agent pushed its commits to.
+    #[serde(default = "work_branch")]
+    branch: String,
+    /// If given, the snapshot commit the changes must start from.
+    #[serde(default)]
+    commit: Option<String>,
+}
+
+fn work_branch() -> String {
+    "work".into()
+}
+
+/// Propose what the caller's workspace branch changes since its snapshot.
+#[worker::send]
+async fn worktree_propose(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    let a = match s.actor(&headers) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let key = match idempotency_key(&headers) {
+        Ok(k) => k,
+        Err(e) => return e,
+    };
+    let q: WorkspaceProposal = match serde_json::from_slice(&body) {
+        Ok(q) => q,
+        Err(e) => {
+            return json(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({"error":e.to_string()}),
+            );
+        }
+    };
+    if !o5s_platform::valid_name(&q.channel) || !artifacts::valid_branch(&q.branch) {
+        return reply(Err(Failure::Refused(Refusal(
+            "invalid channel or branch name".into(),
+        ))));
+    }
+    let r = async {
+        let registry = s.registry()?;
+        let repo = registry.repository(&a, &q.repo).await?;
+        let name = artifact_name(&a, &q.repo, Some(a.user));
+        let (base, message, edits) = artifacts::changes(&s.env, &name, &q.branch)
+            .await
+            .map_err(Failure::Refused)?;
+        if q.commit.as_ref().is_some_and(|c| *c != base) {
+            return Err(Failure::Refused(Refusal(
+                "the branch does not start from that snapshot".into(),
+            )));
+        }
+        let command = o5s_platform::workspace::proposal(
+            &q.repo, &q.channel, &q.intent, &message, &repo, edits,
+        )
+        .map_err(Failure::Refused)?;
+        registry.execute(&a, command, key.as_deref()).await
+    }
+    .await;
+    reply(r)
 }

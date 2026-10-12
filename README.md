@@ -132,7 +132,7 @@ Set `O5S_TEST_DATABASE_URL` (for example from `scripts/postgres.sh`) to include 
 - [Storage and transactions](docs/storage.md), [load testing](docs/load-testing.md) and [scaling](docs/scaling.md)
 - [Proof scope](docs/proofs.md) and [verification plan](docs/verification-plan.md)
 - [Status](docs/status.md) and [roadmap](docs/roadmap.md)
-- [Cloudflare Worker](crates/worker/README.md) and [Artifacts adapter](cloudflare/README.md)
+- [Cloudflare Worker](crates/worker/README.md), with Git projections and agent workspaces in Artifacts
 
 ---
 

@@ -56,39 +56,104 @@ fn val<T: h5i_app_sql::Column>(x: &T) -> Val {
     h5i_app_sql::Column::to_val(x)
 }
 
-async fn rows_where(
-    tx: &Tx<'_>,
+/// The table of `Rows` a query fills.
+#[derive(Clone, Copy)]
+enum Field {
+    Repository,
+    Patches,
+    Dependencies,
+    Approvals,
+    Checks,
+    Channels,
+    Members,
+    Paths,
+    Events,
+    Bodies,
+    Listings,
+}
+
+fn field(rows: &mut kernel::Rows, f: Field) -> &mut Vec<Vec<Val>> {
+    match f {
+        Field::Repository => &mut rows.repository,
+        Field::Patches => &mut rows.patches,
+        Field::Dependencies => &mut rows.dependencies,
+        Field::Approvals => &mut rows.approvals,
+        Field::Checks => &mut rows.checks,
+        Field::Channels => &mut rows.channels,
+        Field::Members => &mut rows.members,
+        Field::Paths => &mut rows.paths,
+        Field::Events => &mut rows.events,
+        Field::Bodies => &mut rows.bodies,
+        Field::Listings => &mut rows.listings,
+    }
+}
+
+/// One `SELECT`: a table, an optional `column = value` filter, the field
+/// its rows go to, and whether rows already loaded are skipped
+/// (`rows_where`) or the result replaces the field (a whole table).
+struct Query {
+    field: Field,
     table: u32,
-    column: u32,
-    value: Val,
-    out: &mut Vec<Vec<Val>>,
-) -> Result<(), DbError> {
-    for row in tx.rows(table, Some((column, value))).await? {
-        if !out.contains(&row) {
-            out.push(row);
+    filter: Option<(u32, Val)>,
+    dedup: bool,
+}
+
+fn whole(field: Field, table: u32) -> Query {
+    Query {
+        field,
+        table,
+        filter: None,
+        dedup: false,
+    }
+}
+
+fn point(field: Field, table: u32, column: u32, value: Val) -> Query {
+    Query {
+        field,
+        table,
+        filter: Some((column, value)),
+        dedup: true,
+    }
+}
+
+/// Send every query at once (one roundtrip; PostgreSQL runs them in order on
+/// the connection) and merge the results in query order, exactly as running
+/// them one after another would.
+async fn run(tx: &Tx<'_>, queries: Vec<Query>, rows: &mut kernel::Rows) -> Result<(), DbError> {
+    let results =
+        futures::future::join_all(queries.iter().map(|q| tx.rows(q.table, q.filter.clone()))).await;
+    for (q, result) in queries.iter().zip(results) {
+        let out = field(rows, q.field);
+        if !q.dedup {
+            *out = result?;
+            continue;
+        }
+        for row in result? {
+            if !out.contains(&row) {
+                out.push(row);
+            }
         }
     }
     Ok(())
 }
 
-async fn members_of_named(
-    tx: &Tx<'_>,
-    rows: &mut kernel::Rows,
-    label: &[u8],
-) -> Result<(), DbError> {
+/// The members query of the channel named `label`, once channels are loaded.
+fn members_of_named(rows: &kernel::Rows, label: &[u8]) -> Result<Vec<Query>, DbError> {
     let channels = kernel::Channel::from_rows(&rows.channels)
         .ok_or_else(|| DbError::Decode("stored channel rows do not decode".into()))?;
-    if let Some(c) = channels.iter().find(|c| c.label == label) {
-        rows_where(
-            tx,
-            kernel::Member::TABLE,
-            kernel::registry_tables::Member::channel,
-            val(&c.id),
-            &mut rows.members,
-        )
-        .await?;
-    }
-    Ok(())
+    Ok(channels
+        .iter()
+        .find(|c| c.label == label)
+        .map(|c| {
+            point(
+                Field::Members,
+                kernel::Member::TABLE,
+                kernel::registry_tables::Member::channel,
+                val(&c.id),
+            )
+        })
+        .into_iter()
+        .collect())
 }
 
 /// The rows a command can read, and no others. Every lookup the kernel makes
@@ -98,51 +163,57 @@ async fn members_of_named(
 /// events, bodies or listings; approve and check read one patch; a proposal
 /// reads the patches with its identity or dependency handles and the paths
 /// it names; a merge reads the named channel, its members and the facts of
-/// the batch.
+/// the batch. All queries but the members of a named channel go out in one
+/// roundtrip.
 pub async fn load(tx: &Tx<'_>, cmd: &kernel::Command) -> Result<kernel::Snapshot, DbError> {
     use kernel::Command as C;
     use kernel::registry_tables as col;
-    let mut rows = kernel::Rows::default();
-    let all = |t| tx.rows(t, None);
+    let mut q = Vec::new();
+    let repository = || whole(Field::Repository, kernel::Repository::TABLE);
     match cmd {
         C::Register { name, repo } => {
-            rows_where(
-                tx,
+            q.push(point(
+                Field::Listings,
                 kernel::Listing::TABLE,
                 col::Listing::label,
                 val(name),
-                &mut rows.listings,
-            )
-            .await?;
-            rows_where(
-                tx,
+            ));
+            q.push(point(
+                Field::Listings,
                 kernel::Listing::TABLE,
                 col::Listing::repo,
                 val(repo),
-                &mut rows.listings,
-            )
-            .await?;
+            ));
         }
-        C::List => rows.listings = all(kernel::Listing::TABLE).await?,
-        C::Probe | C::Create { .. } => rows.repository = all(kernel::Repository::TABLE).await?,
+        C::List => q.push(whole(Field::Listings, kernel::Listing::TABLE)),
+        C::Probe | C::Create { .. } => q.push(repository()),
         C::ReadBody { patch } => {
-            rows.repository = all(kernel::Repository::TABLE).await?;
-            rows.bodies = tx
-                .rows(kernel::Body::TABLE, Some((col::Body::patch, val(patch))))
-                .await?;
+            q.push(repository());
+            q.push(Query {
+                dedup: false,
+                ..point(
+                    Field::Bodies,
+                    kernel::Body::TABLE,
+                    col::Body::patch,
+                    val(patch),
+                )
+            });
         }
         C::ReadEvents => {
-            rows.repository = all(kernel::Repository::TABLE).await?;
-            rows.events = all(kernel::Event::TABLE).await?;
+            q.push(repository());
+            q.push(whole(Field::Events, kernel::Event::TABLE));
         }
         C::Approve { patch, .. } | C::Check { patch, .. } => {
-            rows.repository = all(kernel::Repository::TABLE).await?;
-            rows.patches = tx
-                .rows(
+            q.push(repository());
+            q.push(Query {
+                dedup: false,
+                ..point(
+                    Field::Patches,
                     kernel::PatchRow::TABLE,
-                    Some((col::PatchRow::id, val(patch))),
+                    col::PatchRow::id,
+                    val(patch),
                 )
-                .await?;
+            });
         }
         C::Propose {
             hash,
@@ -150,133 +221,123 @@ pub async fn load(tx: &Tx<'_>, cmd: &kernel::Command) -> Result<kernel::Snapshot
             paths,
             ..
         } => {
-            rows.repository = all(kernel::Repository::TABLE).await?;
+            q.push(repository());
             if dependencies.len() > POINT_LOADS {
-                rows.patches = all(kernel::PatchRow::TABLE).await?;
+                q.push(whole(Field::Patches, kernel::PatchRow::TABLE));
             } else {
-                rows_where(
-                    tx,
+                q.push(point(
+                    Field::Patches,
                     kernel::PatchRow::TABLE,
                     col::PatchRow::hash,
                     val(hash),
-                    &mut rows.patches,
-                )
-                .await?;
+                ));
                 for d in dependencies {
-                    rows_where(
-                        tx,
+                    q.push(point(
+                        Field::Patches,
                         kernel::PatchRow::TABLE,
                         col::PatchRow::id,
                         val(d),
-                        &mut rows.patches,
-                    )
-                    .await?;
+                    ));
                 }
             }
             if paths.len() > POINT_LOADS {
-                rows.paths = all(kernel::PathKind::TABLE).await?;
+                q.push(whole(Field::Paths, kernel::PathKind::TABLE));
             } else {
                 for p in paths {
-                    rows_where(
-                        tx,
+                    q.push(point(
+                        Field::Paths,
                         kernel::PathKind::TABLE,
                         col::PathKind::path,
                         val(&p.path),
-                        &mut rows.paths,
-                    )
-                    .await?;
+                    ));
                 }
             }
         }
         C::Fork {
             source, channel, ..
         } => {
-            rows.repository = all(kernel::Repository::TABLE).await?;
-            rows_where(
-                tx,
+            q.push(repository());
+            q.push(point(
+                Field::Channels,
                 kernel::Channel::TABLE,
                 col::Channel::label,
                 val(channel),
-                &mut rows.channels,
-            )
-            .await?;
-            rows_where(
-                tx,
+            ));
+            q.push(point(
+                Field::Channels,
                 kernel::Channel::TABLE,
                 col::Channel::label,
                 val(source),
-                &mut rows.channels,
-            )
-            .await?;
-            members_of_named(tx, &mut rows, source).await?;
+            ));
         }
         C::Merge {
             channel, patches, ..
         } => {
-            rows.repository = all(kernel::Repository::TABLE).await?;
-            rows_where(
-                tx,
+            q.push(repository());
+            q.push(point(
+                Field::Channels,
                 kernel::Channel::TABLE,
                 col::Channel::label,
                 val(channel),
-                &mut rows.channels,
-            )
-            .await?;
-            members_of_named(tx, &mut rows, channel).await?;
+            ));
             if patches.len() > POINT_LOADS {
-                rows.patches = all(kernel::PatchRow::TABLE).await?;
-                rows.dependencies = all(kernel::Dependency::TABLE).await?;
-                rows.approvals = all(kernel::Approval::TABLE).await?;
-                rows.checks = all(kernel::CheckReport::TABLE).await?;
+                q.push(whole(Field::Patches, kernel::PatchRow::TABLE));
+                q.push(whole(Field::Dependencies, kernel::Dependency::TABLE));
+                q.push(whole(Field::Approvals, kernel::Approval::TABLE));
+                q.push(whole(Field::Checks, kernel::CheckReport::TABLE));
             } else {
                 for p in patches {
                     let id = val(p);
-                    rows_where(
-                        tx,
+                    q.push(point(
+                        Field::Patches,
                         kernel::PatchRow::TABLE,
                         col::PatchRow::id,
                         id.clone(),
-                        &mut rows.patches,
-                    )
-                    .await?;
-                    rows_where(
-                        tx,
+                    ));
+                    q.push(point(
+                        Field::Dependencies,
                         kernel::Dependency::TABLE,
                         col::Dependency::patch,
                         id.clone(),
-                        &mut rows.dependencies,
-                    )
-                    .await?;
-                    rows_where(
-                        tx,
+                    ));
+                    q.push(point(
+                        Field::Approvals,
                         kernel::Approval::TABLE,
                         col::Approval::patch,
                         id.clone(),
-                        &mut rows.approvals,
-                    )
-                    .await?;
-                    rows_where(
-                        tx,
+                    ));
+                    q.push(point(
+                        Field::Checks,
                         kernel::CheckReport::TABLE,
                         col::CheckReport::patch,
                         id,
-                        &mut rows.checks,
-                    )
-                    .await?;
+                    ));
                 }
             }
         }
         C::Inspect => {
-            rows.repository = all(kernel::Repository::TABLE).await?;
-            rows.patches = all(kernel::PatchRow::TABLE).await?;
-            rows.dependencies = all(kernel::Dependency::TABLE).await?;
-            rows.approvals = all(kernel::Approval::TABLE).await?;
-            rows.checks = all(kernel::CheckReport::TABLE).await?;
-            rows.channels = all(kernel::Channel::TABLE).await?;
-            rows.members = all(kernel::Member::TABLE).await?;
-            rows.paths = all(kernel::PathKind::TABLE).await?;
-            rows.events = all(kernel::Event::TABLE).await?;
+            q.push(repository());
+            q.push(whole(Field::Patches, kernel::PatchRow::TABLE));
+            q.push(whole(Field::Dependencies, kernel::Dependency::TABLE));
+            q.push(whole(Field::Approvals, kernel::Approval::TABLE));
+            q.push(whole(Field::Checks, kernel::CheckReport::TABLE));
+            q.push(whole(Field::Channels, kernel::Channel::TABLE));
+            q.push(whole(Field::Members, kernel::Member::TABLE));
+            q.push(whole(Field::Paths, kernel::PathKind::TABLE));
+            q.push(whole(Field::Events, kernel::Event::TABLE));
         }
+    }
+    let mut rows = kernel::Rows::default();
+    run(tx, q, &mut rows).await?;
+    // Members of the named channel need its id first.
+    let label = match cmd {
+        C::Fork { source, .. } => Some(source),
+        C::Merge { channel, .. } => Some(channel),
+        _ => None,
+    };
+    if let Some(label) = label {
+        let members = members_of_named(&rows, label)?;
+        run(tx, members, &mut rows).await?;
     }
     kernel::decode(&rows).ok_or_else(|| DbError::Decode("stored rows do not decode".into()))
 }
