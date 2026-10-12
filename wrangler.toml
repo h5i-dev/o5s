@@ -36,3 +36,8 @@ namespace = "default"
 # ran: the `scheduled` handler exports what `o5s_export_pending` still holds.
 [triggers]
 crons = ["*/5 * * * *"]
+
+# The token signing key must be a Worker secret (`scripts/worker-secrets.sh`):
+# deploys fail without it, instead of serving `503 secret not configured`.
+[secrets]
+required = ["H5I_APP_SECRET"]

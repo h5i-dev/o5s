@@ -34,11 +34,11 @@ Create the tables as the database owner, and run it again before deploying a ver
 
 ```sh
 O5S_DATABASE_SCHEMA=o5s o5s-server ddl | psql "$OWNER_URL"
-npx wrangler secret put H5I_APP_SECRET
+H5I_APP_SECRET=... CLOUDFLARE_API_TOKEN=... scripts/worker-secrets.sh   # as an encrypted secret
 npx wrangler deploy           # from the repository root; runs crates/worker/build.sh: rustup, wasm target and worker-build if missing
 ```
 
-The root `wrangler.toml` binds the Hyperdrive configuration used by the earlier calculator deployment (`09738769027849ffb2cd540155d430c9`) and places the Worker near it. Tokens issued with `o5s-server token TENANT USER` under the same secret work on both deployments. 
+`wrangler.toml` lists `H5I_APP_SECRET` under `[secrets] required`, so a deploy without it fails instead of serving `503 secret not configured`. Set it as a secret, never as a dashboard text variable: `wrangler deploy`, which Workers Builds runs, removes text variables the configuration does not list. The root `wrangler.toml` binds the Hyperdrive configuration used by the earlier calculator deployment (`09738769027849ffb2cd540155d430c9`) and places the Worker near it. Tokens issued with `o5s-server token TENANT USER` under the same secret work on both deployments. 
 ## Deployment
 
 Workers Builds deploys `main` as the `o5s` Worker at `https://o5s.koukyosyumei.workers.dev`, against PlanetScale Postgres (`us-east-1`) through Hyperdrive. The `o5s` schema was created with `o5s-server ddl` as the database owner, and `H5I_APP_SECRET` is set as a Worker secret.
