@@ -89,7 +89,7 @@ def Room (d : document.Doc) (dp : document.Patch) : Prop :=
   d.insertions.val.length + dp.ops.val.length < Usize.max
 
 /-- The error a refusal stands for, as the adapter maps it (`model.rs`). -/
-def errorOf (P : Patch) (r : document.Refusal) : Option Error :=
+def errorOf (P : Patch) (r : document.Refusal) : Option DocModel.Error :=
   match P.ops[r.op.val]? with
   | none => none
   | some o =>
@@ -150,8 +150,8 @@ theorem apply_refines (d : document.Doc) (H : Hist) (P : Patch) (dp : document.P
 def nodeAt (H : Hist) (a : Nat) : Option NodeId :=
   match (anchorList H)[a]? with | some (.node n) => some n | _ => none
 
-def nodes (H : Hist) (as : List Usize) : Finset NodeId :=
-  (as.filterMap fun a => nodeAt H a.val).toFinset
+def nodes (H : Hist) (xs : List Usize) : Finset NodeId :=
+  (xs.filterMap fun a => nodeAt H a.val).toFinset
 
 /-- The view a kernel result stands for, in identities. -/
 noncomputable def decode (H : Hist) (v : document.View) : View where

@@ -27,6 +27,9 @@ pub struct Work {
     pub spacing: u64,
     /// Propose through this `o5s` CLI in per-agent Git repositories.
     pub cli: Option<std::path::PathBuf>,
+    /// Open loop: proposals arrive at this rate (per second) whatever the
+    /// server's latency, instead of `concurrency` closed-loop clients.
+    pub rate: Option<f64>,
 }
 
 impl Work {
@@ -104,6 +107,47 @@ impl Samples {
             "per_second": self.ms.len() as f64 / seconds, "p50_ms": p(0.5), "p95_ms": p(0.95),
             "p99_ms": p(0.99), "max_ms": p(1.0)})
     }
+}
+
+/// Open loop: job `k` is sent at `k / rate` seconds, whatever earlier jobs
+/// are doing, and its latency counts from that scheduled time, so time spent
+/// queueing behind an overloaded server is measured, not hidden.
+async fn open_phase<F, Fut>(rate: f64, jobs: Vec<u64>, f: F) -> (Samples, f64, Vec<Value>)
+where
+    F: Fn(u64) -> Fut,
+    Fut: std::future::Future<Output = Result<Value, String>>,
+{
+    let started = tokio::time::Instant::now();
+    let results: Vec<(Duration, Result<Value, String>)> = stream::iter(jobs.into_iter().enumerate())
+        .map(|(k, j)| {
+            let at = started + Duration::from_secs_f64(k as f64 / rate);
+            let fut = f(j);
+            async move {
+                tokio::time::sleep_until(at).await;
+                let r = fut.await;
+                (at.elapsed(), r)
+            }
+        })
+        .buffer_unordered(100_000)
+        .collect()
+        .await;
+    let mut s = Samples::default();
+    let mut values = Vec::new();
+    for (d, r) in results {
+        match r {
+            Ok(v) => {
+                s.ms.push(d.as_secs_f64() * 1000.0);
+                values.push(v);
+            }
+            Err(e) => {
+                s.failed += 1;
+                if s.failed <= 3 {
+                    eprintln!("request failed: {e}");
+                }
+            }
+        }
+    }
+    (s, started.elapsed().as_secs_f64(), values)
 }
 
 /// Run `jobs` with at most `n` in flight; time each.
@@ -244,7 +288,7 @@ async fn o5s(w: &Work, url: &str, tenant: u64) -> Value {
         .await;
     }
     let started = Instant::now();
-    let (mut proposals, proposal_s, replies) = phase(w.concurrency, (0..w.agents).collect(), |i| {
+    let propose_one = |i: u64| {
         let c = c.clone();
         let r = repo(i);
         let base_id = bases.get(&r).copied();
@@ -276,7 +320,11 @@ async fn o5s(w: &Work, url: &str, tenant: u64) -> Value {
             let v: Value = serde_json::from_str(&out).map_err(|e| e.to_string())?;
             Ok(json!({"repo":r,"patch":v["patch"]}))
         }
-    }).await;
+    };
+    let (mut proposals, proposal_s, replies) = match w.rate {
+        Some(rate) => open_phase(rate, (0..w.agents).collect(), propose_one).await,
+        None => phase(w.concurrency, (0..w.agents).collect(), propose_one).await,
+    };
     if w.cli.is_some() {
         let _ = std::fs::remove_dir_all(std::env::temp_dir().join(format!("o5s-cli-{run}")));
     }
@@ -376,6 +424,7 @@ async fn o5s(w: &Work, url: &str, tenant: u64) -> Value {
         "system": "o5s", "transport": "HTTP over loopback",
         "proposals_from": if w.cli.is_some() { "o5s CLI processes in per-agent Git repositories" } else { "HTTP API" },
         "pipeline": "propose; independent approve and check report; merge_batch",
+        "offered_proposals_per_second": w.rate,
         "propose": proposals.report(proposal_s), "approve_and_check": reviews.report(review_s),
         "merge_batch": merges.report(merge_s),
         "integrated": if failed == 0 { ids.len() } else { 0 },
@@ -446,6 +495,7 @@ async fn main() {
         batch: 100,
         spacing: 1,
         cli: None,
+        rate: None,
     };
     let (mut url, mut tenant, mut dir) = ("http://127.0.0.1:3000".to_string(), 1u64, None);
     for pair in v.chunks(2) {
@@ -460,6 +510,7 @@ async fn main() {
             "--tenant" => tenant = value.parse().expect("--tenant N"),
             "--dir" => dir = Some(std::path::PathBuf::from(value)),
             "--cli" => w.cli = Some(std::fs::canonicalize(value).expect("--cli PATH")),
+            "--rate" => w.rate = Some(value.parse().expect("--rate PROPOSALS_PER_SECOND")),
             other => panic!("unknown argument {other}"),
         }
     }
@@ -474,7 +525,7 @@ async fn main() {
         std::env::temp_dir().join(format!("o5s-git-baseline-{}", std::process::id()))
     });
     let settings = json!({"workload": w.workload, "agents": w.agents, "concurrency": w.concurrency,
-        "batch": w.batch, "spacing": w.spacing, "cli": w.cli.is_some()});
+        "batch": w.batch, "spacing": w.spacing, "cli": w.cli.is_some(), "rate": w.rate});
     let report = match mode.as_str() {
         "o5s" => json!({"settings": settings, "o5s": o5s(&w, &url, tenant).await}),
         "git" => json!({"settings": settings, "git": git::run(&w, &dir).await}),
