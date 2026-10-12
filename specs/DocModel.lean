@@ -313,20 +313,297 @@ structure IsView (H : Hist) (V : View) : Prop where
   bytes_some : ∀ b, V.bytes = some b →
     b = (V.layers.flatMap fun L => L.toList).flatMap fun n => (atom H n).getD []
 
+/-! ## Admission facts -/
+
+theorem applySpec_ok {H H' : Hist} {R : Patch} (h : applySpec H R = .ok (H', .inserted)) :
+    H' = H ++ [R] := by
+  unfold applySpec at h
+  split at h
+  · split_ifs at h <;> simp at h
+  · by_cases h1 : ¬ R.deps.Nodup ∨ R.id ∈ R.deps
+    · rw [if_pos h1] at h; cases h
+    · rw [if_neg h1] at h
+      try dsimp only at h
+      by_cases h2 : R.deps.filter (· ∉ ids H) ≠ []
+      · rw [if_pos h2] at h; cases h
+      · rw [if_neg h2] at h
+        by_cases h3 : R.ops = []
+        · rw [if_pos h3] at h; cases h
+        · rw [if_neg h3] at h
+          cases hv : validate H R <;> simp [hv, Except.map] at h
+          exact h.symm
+
+theorem ops_append (H : Hist) (R : Patch) : ops (H ++ [R]) = ops H ++ opsOf R := by
+  simp [ops, List.flatMap_append]
+
+theorem mem_opsOf {R : Patch} {op : Op} (h : op ∈ R.ops) : ∃ k, (⟨R.id, k⟩, op) ∈ opsOf R := by
+  obtain ⟨k, hk, rfl⟩ := List.getElem_of_mem h
+  refine ⟨k, ?_⟩
+  unfold opsOf
+  rw [List.mem_map]
+  refine ⟨(R.ops[k], k), ?_, rfl⟩
+  have hk' : k < R.ops.zipIdx.length := by simpa using hk
+  have := List.getElem_mem hk'
+  simpa [List.getElem_zipIdx] using this
+
+theorem opsOf_single {R : Patch} {op : Op} (hr : R.ops = [op]) :
+    opsOf R = [(⟨R.id, 0⟩, op)] := by
+  simp [opsOf, hr]
+
+/-! ## Invariance under permutation
+
+Every definition reads the history through membership, except the
+first-match lookups `tag`, `insertionOf` and `atom`. Those agree across
+permutations because patch identities are unique in any admitted history. -/
+
+section Perm
+variable {H₁ H₂ : Hist}
+
+theorem mem_opsOf_iff {P : Patch} {o : OpId} {op : Op} :
+    (o, op) ∈ opsOf P ↔ o.patch = P.id ∧ P.ops[o.ordinal]? = some op := by
+  obtain ⟨p, k⟩ := o
+  constructor
+  · intro h
+    unfold opsOf at h
+    obtain ⟨⟨x, j⟩, hm, he⟩ := List.mem_map.mp h
+    dsimp only at he
+    simp only [Prod.mk.injEq, OpId.mk.injEq] at he
+    obtain ⟨⟨rfl, rfl⟩, rfl⟩ := he
+    exact ⟨rfl, List.mem_zipIdx_iff_getElem?.mp hm⟩
+  · rintro ⟨h1, h2⟩
+    unfold opsOf
+    refine List.mem_map.mpr ⟨(op, k), List.mem_zipIdx_iff_getElem?.mpr h2, ?_⟩
+    simp only at h1
+    simp [h1]
+
+theorem op_unique {H : Hist} (hu : (ids H).Nodup) {o : OpId} {op₁ op₂ : Op}
+    (h₁ : (o, op₁) ∈ ops H) (h₂ : (o, op₂) ∈ ops H) : op₁ = op₂ := by
+  unfold ops at h₁ h₂
+  obtain ⟨P, hP, h₁⟩ := List.mem_flatMap.mp h₁
+  obtain ⟨Q, hQ, h₂⟩ := List.mem_flatMap.mp h₂
+  rw [mem_opsOf_iff] at h₁ h₂
+  unfold ids at hu
+  have hPQ : P = Q := List.inj_on_of_nodup_map hu hP hQ (h₁.1.symm.trans h₂.1)
+  subst hPQ
+  exact Option.some.inj (h₁.2.symm.trans h₂.2)
+
+theorem findSome?_perm_unique {α β} {l₁ l₂ : List α} (p : l₁.Perm l₂) (f : α → Option β)
+    (u : ∀ x ∈ l₁, ∀ y ∈ l₁, ∀ b c, f x = some b → f y = some c → b = c) :
+    l₁.findSome? f = l₂.findSome? f := by
+  rcases h1 : l₁.findSome? f with _ | b
+  · rcases h2 : l₂.findSome? f with _ | c
+    · rfl
+    · obtain ⟨y, hy, hfy⟩ := List.exists_of_findSome?_eq_some h2
+      rw [List.findSome?_eq_none_iff] at h1
+      rw [h1 y (p.symm.subset hy)] at hfy
+      cases hfy
+  · obtain ⟨x, hx, hfx⟩ := List.exists_of_findSome?_eq_some h1
+    rcases h2 : l₂.findSome? f with _ | c
+    · rw [List.findSome?_eq_none_iff] at h2
+      rw [h2 x (p.subset hx)] at hfx
+      cases hfx
+    · obtain ⟨y, hy, hfy⟩ := List.exists_of_findSome?_eq_some h2
+      rw [u x hx y (p.symm.subset hy) b c hfx hfy]
+
+theorem ids_nodup_perm (h : H₁.Perm H₂) (hu : (ids H₁).Nodup) : (ids H₂).Nodup :=
+  (h.map _).nodup_iff.mp hu
+
+theorem ops_perm (h : H₁.Perm H₂) : (ops H₁).Perm (ops H₂) := by
+  unfold ops; exact List.Perm.flatMap_right _ h
+
+theorem facts_perm (h : H₁.Perm H₂) : (facts H₁).Perm (facts H₂) := by
+  unfold facts; exact List.Perm.flatMap_right _ (ops_perm h)
+
+theorem atoms_perm (h : H₁.Perm H₂) : (atoms H₁).Perm (atoms H₂) := by
+  unfold atoms; exact List.Perm.flatMap_right _ (ops_perm h)
+
+theorem tag_perm (hu : (ids H₁).Nodup) (h : H₁.Perm H₂) (d : OpId) : tag H₁ d = tag H₂ d := by
+  unfold tag
+  apply findSome?_perm_unique (ops_perm h)
+  rintro ⟨o₁, op₁⟩ h₁ ⟨o₂, op₂⟩ h₂ b c hb hc
+  cases op₁ <;> simp at hb
+  cases op₂ <;> simp at hc
+  obtain ⟨rfl, rfl⟩ := hb
+  obtain ⟨rfl, rfl⟩ := hc
+  have := op_unique hu h₁ h₂
+  simpa using this
+
+theorem insertionOf_perm (hu : (ids H₁).Nodup) (h : H₁.Perm H₂) (i : OpId) :
+    insertionOf H₁ i = insertionOf H₂ i := by
+  unfold insertionOf
+  apply findSome?_perm_unique (ops_perm h)
+  rintro ⟨o₁, op₁⟩ h₁ ⟨o₂, op₂⟩ h₂ b c hb hc
+  cases op₁ <;> simp at hb
+  cases op₂ <;> simp at hc
+  obtain ⟨rfl, rfl⟩ := hb
+  obtain ⟨rfl, rfl⟩ := hc
+  have := op_unique hu h₁ h₂
+  simp only [Op.insert.injEq] at this
+  obtain ⟨rfl, rfl, -⟩ := this
+  rfl
+
+theorem lookup_some_mem {l : List (NodeId × List UInt8)} {n : NodeId} {b : List UInt8}
+    (h : l.lookup n = some b) : (n, b) ∈ l := by
+  induction l with
+  | nil => simp [List.lookup] at h
+  | cons p l ih =>
+    obtain ⟨m, c⟩ := p
+    by_cases hm : n = m
+    · subst hm; simp [List.lookup] at h; simp [h]
+    · have : (n == m) = false := by simpa using hm
+      simp only [List.lookup, this] at h
+      exact List.mem_cons_of_mem _ (ih h)
+
+theorem lookup_none {l : List (NodeId × List UInt8)} {n : NodeId} :
+    l.lookup n = none ↔ ∀ b, (n, b) ∉ l := by
+  induction l with
+  | nil => simp [List.lookup]
+  | cons p l ih =>
+    obtain ⟨m, c⟩ := p
+    by_cases hm : n = m
+    · subst hm
+      constructor
+      · intro h; simp [List.lookup] at h
+      · intro h; exact absurd (by simp) (h c)
+    · have : (n == m) = false := by simpa using hm
+      simp [List.lookup, this, ih, hm]
+
+theorem mem_atomsOf {x : OpId × Op} {n : NodeId} {b : List UInt8} (h : (n, b) ∈ atomsOf x) :
+    ∃ l r xs, x = (n.op, Op.insert l r xs) ∧ xs[n.ordinal]? = some b := by
+  obtain ⟨o, op⟩ := x
+  cases op with
+  | insert l r xs =>
+    unfold atomsOf at h
+    obtain ⟨⟨b', k⟩, hm, he⟩ := List.mem_map.mp h
+    dsimp only at he
+    simp only [Prod.mk.injEq] at he
+    obtain ⟨rfl, rfl⟩ := he
+    exact ⟨l, r, xs, rfl, List.mem_zipIdx_iff_getElem?.mp hm⟩
+  | _ => simp [atomsOf] at h
+
+theorem atom_unique {H : Hist} (hu : (ids H).Nodup) {n : NodeId} {b₁ b₂ : List UInt8}
+    (h₁ : (n, b₁) ∈ atoms H) (h₂ : (n, b₂) ∈ atoms H) : b₁ = b₂ := by
+  unfold atoms at h₁ h₂
+  obtain ⟨x, hx, hx1⟩ := List.mem_flatMap.mp h₁
+  obtain ⟨y, hy, hy1⟩ := List.mem_flatMap.mp h₂
+  obtain ⟨l, r, xs, rfl, e1⟩ := mem_atomsOf hx1
+  obtain ⟨l', r', xs', rfl, e2⟩ := mem_atomsOf hy1
+  have := op_unique hu hx hy
+  simp only [Op.insert.injEq] at this
+  obtain ⟨-, -, rfl⟩ := this
+  rw [e1] at e2
+  exact Option.some.inj e2
+
+theorem atom_perm (hu : (ids H₁).Nodup) (h : H₁.Perm H₂) (n : NodeId) :
+    atom H₁ n = atom H₂ n := by
+  unfold atom
+  rcases h1 : (atoms H₁).lookup n with _ | b
+  · symm
+    rw [lookup_none] at h1 ⊢
+    intro b hb
+    exact h1 b ((atoms_perm h).symm.subset hb)
+  · have m1 := lookup_some_mem h1
+    rcases h2 : (atoms H₂).lookup n with _ | c
+    · rw [lookup_none] at h2
+      exact absurd ((atoms_perm h).subset m1) (h2 b)
+    · have m2 := (atoms_perm h).symm.subset (lookup_some_mem h2)
+      rw [atom_unique hu m1 m2]
+
+theorem isAtom_perm (h : H₁.Perm H₂) (n : NodeId) : IsAtom H₁ n ↔ IsAtom H₂ n := by
+  unfold IsAtom atom
+  rw [Ne, Ne, lookup_none, lookup_none]
+  simp only [(atoms_perm h).mem_iff]
+
+theorem retracted_perm (h : H₁.Perm H₂) (o : OpId) :
+    RetractedBy H₁ (fun _ => True) o ↔ RetractedBy H₂ (fun _ => True) o := by
+  unfold RetractedBy; simp only [(ops_perm h).mem_iff]
+
+theorem restored_perm (h : H₁.Perm H₂) (d : OpId) : Restored H₁ d ↔ Restored H₂ d := by
+  unfold Restored; simp only [(ops_perm h).mem_iff]
+
+theorem acked_perm (h : H₁.Perm H₂) (d i : OpId) : Acked H₁ d i ↔ Acked H₂ d i := by
+  unfold Acked; simp only [(ops_perm h).mem_iff]
+
+theorem anc_perm (h : H₁.Perm H₂) : Anc H₁ = Anc H₂ := by
+  funext a b
+  unfold Anc
+  simp only [h.mem_iff]
+
+theorem mem_E_perm (h : H₁.Perm H₂) (x : Anchor × Anchor) : x ∈ E H₁ ↔ x ∈ E H₂ := by
+  unfold E
+  simp only [List.mem_cons, List.mem_map, List.mem_filter, (facts_perm h).mem_iff,
+    decide_eq_true_eq, retracted_perm h]
+
+/-- T3.1: everything the view is made of depends on the patch set only. -/
+theorem live_perm (hu : (ids H₁).Nodup) (h : H₁.Perm H₂) (a : Anchor) :
+    Live H₁ a ↔ Live H₂ a := by
+  cases a with
+  | node n =>
+    unfold Live
+    simp only [isAtom_perm h, tag_perm hu h, restored_perm h]
+  | _ => simp [Live]
+
+theorem seg_perm (hu : (ids H₁).Nodup) (h : H₁.Perm H₂) {u v : Anchor} (hs : Seg H₁ u v) :
+    Seg H₂ u v := by
+  induction hs with
+  | edge he => exact .edge ((mem_E_perm h _).mp he)
+  | step he hl _ ih =>
+    exact .step ((mem_E_perm h _).mp he) (fun x => hl ((live_perm hu h _).mpr x)) ih
+
+theorem sum_perm (hu : (ids H₁).Nodup) (h : H₁.Perm H₂) (u v : Anchor) :
+    Sum H₁ u v ↔ Sum H₂ u v := by
+  have hu₂ := ids_nodup_perm h hu
+  unfold Sum
+  rw [live_perm hu h, live_perm hu h]
+  exact and_congr_right fun _ => and_congr_right fun _ =>
+    ⟨seg_perm hu h, seg_perm hu₂ h.symm⟩
+
+theorem di_perm (hu : (ids H₁).Nodup) (h : H₁.Perm H₂) (d i A) : DI H₁ d i A ↔ DI H₂ d i A := by
+  unfold DI Concurrent
+  simp only [tag_perm hu h, insertionOf_perm hu h, restored_perm h, acked_perm h, anc_perm h]
+
+/-- `IsView` with the history's ingredients as parameters. -/
+structure IsViewOf (lay : Nat → Set NodeId) (live blocked : Anchor → Prop)
+    (di : OpId → OpId → Finset NodeId → Prop) (atm : NodeId → Option (List UInt8))
+    (V : View) : Prop where
+  layers : ∀ k (hk : k < V.layers.length), ↑(V.layers[k]) = lay k
+  layers_all : ∀ n, live (.node n) → ¬ blocked (.node n) → ∃ k < V.layers.length, n ∈ V.layers[k]!
+  layers_nonempty : ∀ L ∈ V.layers, L.Nonempty
+  cycle : ∀ B, Conflict.cycle B ∈ V.conflicts ↔
+    (∃ c, blocked c) ∧ ∀ n, n ∈ B ↔ live (.node n) ∧ blocked (.node n)
+  order : ∀ F, Conflict.order F ∈ V.conflicts ↔ F ∈ V.layers ∧ 2 ≤ F.card
+  deleteInsert : ∀ d i A, Conflict.deleteInsert d i A ∈ V.conflicts ↔ di d i A
+  bytes_none : V.bytes = none ↔ V.conflicts.Nonempty
+  bytes_some : ∀ b, V.bytes = some b →
+    b = (V.layers.flatMap fun L => L.toList).flatMap fun n => (atm n).getD []
+
+theorem isView_iff (H : Hist) (V : View) :
+    IsView H V ↔ IsViewOf (layer H) (Live H) (Blocked H) (DI H) (atom H) V :=
+  ⟨fun h => ⟨h.1, h.2, h.3, h.4, h.5, h.6, h.7, h.8⟩,
+   fun h => ⟨h.1, h.2, h.3, h.4, h.5, h.6, h.7, h.8⟩⟩
+
+theorem view_perm (hu : (ids H₁).Nodup) (h : H₁.Perm H₂) (V : View) :
+    IsView H₁ V ↔ IsView H₂ V := by
+  have hs : Sum H₁ = Sum H₂ := by funext u v; exact propext (sum_perm hu h u v)
+  have hl : Live H₁ = Live H₂ := by funext a; exact propext (live_perm hu h a)
+  have hd : DI H₁ = DI H₂ := by funext d i A; exact propext (di_perm hu h d i A)
+  have ha : atom H₁ = atom H₂ := by funext n; exact atom_perm hu h n
+  have hb : Blocked H₁ = Blocked H₂ := by
+    funext v; unfold Blocked Prec; rw [hs]
+  have hdp : Depth H₁ = Depth H₂ := by
+    funext v k; unfold Depth; rw [hs]
+  have hly : layer H₁ = layer H₂ := by
+    funext k; unfold layer; rw [hl, hb, hdp]
+  rw [isView_iff, isView_iff, hly, hl, hb, hd, ha]
+
+end Perm
+
 /-! ## Theorems to prove -/
 
 def Topological (l : List Patch) : Prop :=
   ∀ i (h : i < l.length), ∀ d ∈ l[i].deps, ∃ j < i, ∃ hj : j < l.length, l[j].id = d
 
 def IdsInjective (l : List Patch) : Prop := ∀ P ∈ l, ∀ Q ∈ l, P.id = Q.id → P = Q
-
-/-- T3.1: everything the view is made of depends on the patch set only. -/
-theorem live_perm {H₁ H₂ : Hist} (h : H₁.Perm H₂) (a : Anchor) : Live H₁ a ↔ Live H₂ a := by sorry
-theorem sum_perm {H₁ H₂ : Hist} (h : H₁.Perm H₂) (u v : Anchor) : Sum H₁ u v ↔ Sum H₂ u v := by
-  sorry
-theorem di_perm {H₁ H₂ : Hist} (h : H₁.Perm H₂) (d i A) : DI H₁ d i A ↔ DI H₂ d i A := by sorry
-theorem view_perm {H₁ H₂ : Hist} (h : H₁.Perm H₂) (V : View) : IsView H₁ V ↔ IsView H₂ V := by
-  sorry
 
 /-- Retracting an order on a cycle removes that cycle's edge: if every other
 edge of the cycle stays, the atoms it blocked are no longer blocked by it. -/
@@ -339,8 +616,56 @@ theorem retract_breaks (H H' : Hist) (R : Patch) (o : OpId) (b a : NodeId)
 
 /-- The view exists and is unique (layers are a function of `H`). -/
 theorem view_exists (H : Hist) : ∃ V, IsView H V := by sorry
+theorem depth_unique {H : Hist} {v : Anchor} {k m : Nat} (hk : Depth H v k) (hm : Depth H v m) :
+    k = m := by
+  obtain ⟨⟨p, hp, hl, hc⟩, hall⟩ := hk
+  obtain ⟨⟨q, hq, hl', hc'⟩, hall'⟩ := hm
+  have h1 := hall q hl' hc'
+  have h2 := hall' p hl hc
+  omega
+
+/-- Every view has a layer at each depth of an unblocked live atom. -/
+theorem layers_cover {H : Hist} {V W : View} (hv : IsView H V) (hw : IsView H W)
+    (hlt : V.layers.length < W.layers.length) : False := by
+  obtain ⟨n, hn⟩ := hw.layers_nonempty _ (List.getElem_mem hlt)
+  have hn' : n ∈ (↑(W.layers[V.layers.length]) : Set NodeId) := hn
+  rw [hw.layers _ hlt] at hn'
+  obtain ⟨hl, hb, hd⟩ := hn'
+  obtain ⟨k, hk, hnk⟩ := hv.layers_all n hl hb
+  rw [getElem!_pos V.layers k hk] at hnk
+  have hnk' : n ∈ (↑(V.layers[k]) : Set NodeId) := hnk
+  rw [hv.layers k hk] at hnk'
+  have := depth_unique hnk'.2.2 hd
+  omega
+
 theorem view_unique (H : Hist) (V W : View) (hv : IsView H V) (hw : IsView H W) : V = W := by
-  sorry
+  have hlen : V.layers.length = W.layers.length := by
+    rcases Nat.lt_trichotomy V.layers.length W.layers.length with h | h | h
+    · exact (layers_cover hv hw h).elim
+    · exact h
+    · exact (layers_cover hw hv h).elim
+  have hlay : V.layers = W.layers := List.ext_getElem hlen fun k h1 h2 => by
+    apply Finset.coe_injective
+    rw [hv.layers k h1, hw.layers k h2]
+  have hconf : V.conflicts = W.conflicts := by
+    ext c
+    cases c with
+    | cycle B => rw [hv.cycle, hw.cycle]
+    | order F => rw [hv.order, hw.order, hlay]
+    | deleteInsert d i A => rw [hv.deleteInsert, hw.deleteInsert]
+  have hbytes : V.bytes = W.bytes := by
+    rcases h1 : V.bytes with _ | b
+    · symm
+      rw [hw.bytes_none, ← hconf, ← hv.bytes_none]
+      exact h1
+    · rcases h2 : W.bytes with _ | c
+      · rw [hw.bytes_none, ← hconf, ← hv.bytes_none, h1] at h2
+        cases h2
+      · rw [hv.bytes_some b h1, hw.bytes_some c h2, hlay]
+  cases V; cases W
+  simp only at hlay hconf hbytes
+  subst hlay hconf hbytes
+  rfl
 
 /-- T1.4: validation reads only the patch's causal past. -/
 theorem validate_local (H H' : Hist) (P : Patch) (sub : ∀ Q ∈ H, Q ∈ H')
@@ -390,12 +715,21 @@ theorem bytes_order (H : Hist) (V : View) (hv : IsView H V) (b : List UInt8)
 /-- R2.3: a cycle made only of deleted atoms blocks nothing: whatever is
 blocked is downstream of a cycle through a live atom. -/
 theorem dead_cycle_harmless (H : Hist) (v : Anchor) (hv : Blocked H v) :
-    ∃ c, Live H c ∧ Prec H c c := by sorry
+    ∃ c, Live H c ∧ Prec H c c := by
+  obtain ⟨c, hc, -⟩ := hv
+  obtain ⟨b, hb, -⟩ := Relation.TransGen.head'_iff.mp hc
+  exact ⟨c, hb.1, hc⟩
 
 /-- T2.6: restoring a deletion removes exactly its conflicts. -/
 theorem restore_clears (H H' : Hist) (R : Patch) (d : OpId)
     (h : applySpec H R = .ok (H', .inserted)) (hr : Op.restore d ∈ R.ops) :
-    ∀ i A, ¬ DI H' d i A := by sorry
+    ∀ i A, ¬ DI H' d i A := by
+  rintro i A ⟨ts, l, r, -, nr, -⟩
+  apply nr
+  obtain ⟨k, hk⟩ := mem_opsOf hr
+  refine ⟨⟨R.id, k⟩, ?_⟩
+  rw [applySpec_ok h, ops_append]
+  exact List.mem_append_right _ hk
 
 /-- T2.6: an acknowledgement is specific to its pair. -/
 theorem ack_pair_specific (H H' : Hist) (R : Patch) (d i : OpId)
@@ -407,6 +741,18 @@ deletion never makes an atom another active deletion covers live. -/
 theorem restore_other_cannot_revive (H H' : Hist) (R : Patch) (d d' : OpId) (n : NodeId)
     (ts : List NodeId) (h : applySpec H R = .ok (H', .inserted)) (hr : R.ops = [Op.restore d])
     (ht : tag H d' = some ts) (hn : n ∈ ts) (active : ¬ Restored H d') (ne : d ≠ d') :
-    ¬ Live H' (.node n) := by sorry
+    ¬ Live H' (.node n) := by
+  rintro ⟨-, hl⟩
+  have ht' : tag H' d' = some ts := by
+    rw [applySpec_ok h]
+    unfold tag at ht ⊢
+    rw [ops_append, List.findSome?_append, ht]
+    rfl
+  obtain ⟨o, ho⟩ := hl d' ts ht' hn
+  rw [applySpec_ok h, ops_append, opsOf_single hr] at ho
+  rcases List.mem_append.mp ho with ho | ho
+  · exact active ⟨o, ho⟩
+  · simp at ho
+    exact ne ho.2.symm
 
 end o5s_kernel.DocModel
