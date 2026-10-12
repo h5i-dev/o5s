@@ -5,7 +5,7 @@ import Mathlib.Data.Finset.Card
 import Mathlib.Data.List.Chain
 import Mathlib.Data.Nat.Find
 /-!
-# Graph documents: the model (M0, statements to prove)
+# Graph documents: the model (M0)
 
 A pure model of one graph document, over replicated identities: no dense
 indices, no arrival order. `applySpec` mirrors `model::DocumentGraph::apply`
@@ -14,7 +14,7 @@ and `document::commit`), operation by operation and error by error.
 `materializeSpec` gives the live text and conflicts as functions of the
 *set* of admitted patches.
 
-The main results to prove:
+The main results:
 - `materializeSpec_perm`: the view depends only on the set of patches.
 - `apply_comm`, `admissible_any_order`: independent admissions commute.
 - `view_converges`: any two complete topological deliveries of the same

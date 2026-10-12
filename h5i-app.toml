@@ -57,6 +57,21 @@ theorems = [
   "o5s_kernel.Causality.frontier_spec",
   "o5s_kernel.Causality.frontier_covers",
   "o5s_kernel.Causality.sole_head_spec",
+  "o5s_kernel.DocModel.validate_local",
+  "o5s_kernel.DocModel.apply_comm",
+  "o5s_kernel.DocModel.rejection_stable",
+  "o5s_kernel.DocModel.admissible_any_order",
+  "o5s_kernel.DocModel.view_converges",
+  "o5s_kernel.DocModel.view_perm",
+  "o5s_kernel.DocModel.view_exists",
+  "o5s_kernel.DocModel.view_unique",
+  "o5s_kernel.DocModel.clean_iff",
+  "o5s_kernel.DocModel.bytes_order",
+  "o5s_kernel.DocModel.dead_cycle_harmless",
+  "o5s_kernel.DocModel.restore_clears",
+  "o5s_kernel.DocModel.ack_pair_specific",
+  "o5s_kernel.DocModel.restore_other_cannot_revive",
+  "o5s_kernel.DocModel.retract_breaks",
 ]
 
 [[mutant]]

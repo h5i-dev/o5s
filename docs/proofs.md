@@ -2,7 +2,7 @@
 
 Every function named here is Rust in the subset Charon and Aeneas translate to Lean 4. `h5i app extract` writes the translation to `proofs/generated/` (kernels) and `crates/registry/proofs/generated/` (registry), and CI checks that the committed Lean is exactly what the current Rust extracts to. `h5i app check` builds the proofs and refuses any `sorry`, `native_decide` or `axiom`. It also refuses a theorem that depends on anything beyond `propext`, `Classical.choice` and `Quot.sound`.
 
-Statements still to be proved live in `specs/` and `crates/registry/specs/`. They are type-checked against the extracted code (`lake build Specs` in each proof project) but are outside the gate. When one is proved, it moves into the gated directory and its theorems are added to `h5i-app.toml`.
+Statements still to be proved live in `specs/`. They are type-checked against the extracted code (`lake build Specs` in `proofs/`) but are outside the gate. When one is proved, it moves into the gated directory and its theorems are added to `h5i-app.toml`.
 
 ## What runs extracted code
 
@@ -29,6 +29,7 @@ Statements still to be proved live in `specs/` and `crates/registry/specs/`. The
 | A repository is visible only to its own organization | `isolation`, `scopes_separate` |
 | A per-command partial load computes what the whole repository specifies | `frame`, `Narrow.narrow_load` |
 | The store holds what committing computes | `Storage.stored` |
+| The PostgreSQL loader (`pgLoad`, a model of `service.rs::load` branch by branch) returns narrow loads, so `narrow_load` holds for what PostgreSQL actually returns. It needs dependency rows stored in key order, which the native `prepare` ensures and the kernel does not yet require | `Served.pg_load_narrow`, `pg_served` |
 
 **Kernels** (`proofs`, 210 theorems in 14 modules), among them:
 
@@ -39,20 +40,18 @@ Statements still to be proved live in `specs/` and `crates/registry/specs/`. The
 | Interval conflicts, splices and checked multi-range rendering | `Interval.conflict_spec`, `Splice.extracted_disjoint_commutes`, `Checked.checked_render_spec` |
 | Line boundaries, Kahn frontiers, deletion tags | `Coordinates.line_boundaries_ordered`, `Order.frontier_counts_exact`, `Tags.visible_iff_no_active_tag` |
 | Line merging: success means no reversed range and no two different ranges conflict, failure is never spurious, and any two sorted arrangements of the same ranges merge identically | `LinesModel.merge_ok`, `merge_fails`, `merge_order_independent` |
-
-`LinesModel` is the model of `lines::merge`. The theorem that the extracted function computes it (`specs/Lines.lean: merge_spec`) is stated, not yet proved.
+| The extracted `lines` functions compute that model: `sorted`, `merge`, `ranges_valid` (exactly sorted, no reversed range, no two conflicting ranges), `chunks` and `render`; a successful merge of sorted, in-bounds ranges always renders | `Lines.merge_spec`, `merge_correct`, `merge_order_independent`, `ranges_valid_spec`, `render_spec`, `merged_renders` |
+| `causality::frontier` returns exactly the nearest stopping patches; `sole_head` decides that a base is the file's only causal head | `Causality.frontier_spec`, `frontier_covers`, `sole_head_spec` |
+| Graph documents, on an identity-based model (`DocModel`): validation reads only the patch's causal past; independent admissions commute; a refusal other than a missing dependency is refused in every history; admissibility does not depend on the delivery order; any two complete topological deliveries of the same patches have the same view | `DocModel.validate_local`, `apply_comm`, `rejection_stable`, `admissible_any_order`, `view_converges` |
+| The specified view depends only on the patch set, always exists and is unique; bytes exist exactly when the live atoms are totally ordered and no delete/insert conflict is open, and follow `Prec`; a cycle of deleted atoms blocks nothing; restoring and acknowledging are specific; retracting an order removes exactly its edge | `view_perm`, `view_exists`, `view_unique`, `clean_iff`, `bytes_order`, `dead_cycle_harmless`, `restore_clears`, `ack_pair_specific`, `restore_other_cannot_revive`, `retract_breaks` |
 
 ## Stated, not yet proved (`specs/`)
 
 | File | Statements |
 |---|---|
-| `specs/Lines.lean` | The extracted `sorted`, `merge`, `ranges_valid`, `chunks` and `render` compute the model; a successful merge of in-bounds ranges always renders |
-| `specs/DocModel.lean` | An identity-based model of graph documents. `applySpec` mirrors validation error by error, and `IsView` specifies layers, cycle, order and delete/insert conflicts, and bytes. Statements: the view depends only on the patch set; independent admissions commute; admissibility and rejection do not depend on delivery order; `view_converges`; bytes exist exactly when the live atoms are totally ordered and no delete/insert conflict is open; restoring and acknowledging are specific; retracting an order removes its edge |
-| `specs/Document.lean` | The extracted `validate` accepts exactly what the model accepts, with the same error; a validated patch always commits; the decoded `materialize` result is the specified view; two replicas with the same patches in different orders materialize the same view (`extracted_view_converges`) |
-| `specs/Causality.lean` | `frontier` returns exactly the nearest stopping patches; `sole_head` decides that a base is the file's only causal head |
-| `crates/registry/specs/Served.lean` | A model of the PostgreSQL loader (`pgLoad`, mirroring `service.rs::load` branch by branch) satisfies `Narrow`, so `narrow_load` holds for what PostgreSQL actually returns (`pg_served`). It needs dependency rows stored in key order, which the native `prepare` ensures and the kernel does not yet require |
+| `specs/Document.lean` | The extracted `validate` accepts exactly what the model accepts, with the same error; a validated patch always commits; the decoded `materialize` result is the specified view; two replicas with the same patches in different orders materialize the same view (`extracted_view_converges`, proved from `materialize_refines` and the model) |
 
-Their assumptions are explicit: patch identities are injective (SHA-256 collision resistance), the adapter's sizes stay below `Usize.max`, and PostgreSQL's `ORDER BY` and `WHERE` behave as specified.
+Their assumptions are explicit: patch identities are unique in a history (SHA-256 collision resistance), histories are dependency-closed (the adapter refuses missing dependencies), the adapter's sizes stay below `Usize.max`, and PostgreSQL's `ORDER BY` and `WHERE` behave as specified. `DocModel`'s theorems take the first two as hypotheses; `replay` establishes both.
 
 ## Native and trusted
 
