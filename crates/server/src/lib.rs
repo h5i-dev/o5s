@@ -6,6 +6,7 @@ pub mod local;
 pub mod metrics;
 pub mod pg;
 mod queries;
+pub mod revocation;
 
 pub use backend::{Backend, Failure};
 pub use local::Store;
@@ -40,11 +41,19 @@ pub struct AppState {
     pub metrics: Arc<metrics::Metrics>,
     /// Print one JSON line per request to stderr.
     pub log_requests: bool,
+    pub revocations: Arc<revocation::Store>,
+    pub rate: Arc<o5s_platform::limits::RateLimiter>,
 }
 
 impl AppState {
     pub fn new(backend: Backend, auth: auth::HmacAuth, root: PathBuf) -> Self {
+        let revocations = Arc::new(match &backend {
+            Backend::Postgres(pg) => revocation::Store::postgres(pg.clone()),
+            Backend::Local(_) => revocation::Store::file(root.join(revocation::FILE)),
+        });
         Self {
+            revocations,
+            rate: Arc::default(),
             backend,
             auth: Arc::new(auth),
             root,
@@ -79,7 +88,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/export", post(export))
         .route("/api/worktree", post(worktree))
         .route("/api/worktree/propose", post(worktree_propose))
+        .route("/api/tokens/revoke", post(revoke_token))
         .route("/metrics", get(metrics::endpoint))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            revocation::guard,
+        ))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             metrics::observe,
@@ -125,7 +139,60 @@ fn out(v: serde_json::Value) -> Value {
     }
 }
 
-fn json(status: StatusCode, value: serde_json::Value) -> Response {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RevokeRequest {
+    /// Also every other token of the caller that expires no later.
+    #[serde(default)]
+    all: bool,
+}
+
+/// Revoke the presented token, or with `all`, every token of the caller
+/// expiring no later than it.
+async fn revoke_token(State(s): State<AppState>, headers: HeaderMap, bytes: Bytes) -> Response {
+    let now = h5i_app_core::Timestamp::now().secs();
+    let token = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .unwrap_or_default()
+        .to_owned();
+    let (tenant, user, exp) = match s.auth.claims(&token, now) {
+        Ok(c) => c,
+        Err(e) => return json(StatusCode::UNAUTHORIZED, serde_json::json!({"error":e.0})),
+    };
+    let q: RevokeRequest = if bytes.is_empty() {
+        RevokeRequest { all: false }
+    } else {
+        match serde_json::from_slice(&bytes) {
+            Ok(q) => q,
+            Err(e) => {
+                return json(
+                    StatusCode::BAD_REQUEST,
+                    serde_json::json!({"error":e.to_string()}),
+                );
+            }
+        }
+    };
+    let r = if q.all {
+        o5s_pgwire::revoke::Revocation::User {
+            tenant,
+            user,
+            not_after: exp,
+        }
+    } else {
+        o5s_pgwire::revoke::Revocation::Token {
+            digest: o5s_pgwire::revoke::digest(&token),
+            expires: exp,
+        }
+    };
+    match s.revocations.revoke(&r, now).await {
+        Ok(()) => json(StatusCode::OK, serde_json::json!({"revoked":r})),
+        Err(f) => failure(f),
+    }
+}
+
+pub(crate) fn json(status: StatusCode, value: serde_json::Value) -> Response {
     (
         status,
         [(header::CONTENT_TYPE, "application/json")],
@@ -134,7 +201,7 @@ fn json(status: StatusCode, value: serde_json::Value) -> Response {
         .into_response()
 }
 
-fn failure(f: Failure) -> Response {
+pub(crate) fn failure(f: Failure) -> Response {
     match f {
         Failure::Refused(e) => json(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -186,7 +253,28 @@ async fn command(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> 
             );
         }
     };
+    if let Err(e) = admit(&s, &a, &c).await {
+        return e;
+    }
     reply(s.backend.execute(a, c, key).await)
+}
+
+/// The operator's rate limit and repository quota (`o5s_platform::limits`).
+async fn admit(s: &AppState, a: &Actor, c: &Command) -> Result<(), Response> {
+    let now = h5i_app_core::Timestamp::now().micros() / 1000;
+    if !s.rate.allow(a, now) {
+        return Err(json(
+            StatusCode::TOO_MANY_REQUESTS,
+            serde_json::json!({"error":"too many commands; retry later"}),
+        ));
+    }
+    if matches!(c, Command::Create { .. }) && o5s_platform::limits::get().max_repositories.is_some()
+    {
+        let count = s.backend.repositories(a).await.map_err(failure)?.len();
+        o5s_platform::limits::check_repositories(count)
+            .map_err(|e| failure(Failure::Refused(e)))?;
+    }
+    Ok(())
 }
 
 async fn repositories(State(s): State<AppState>, headers: HeaderMap) -> Response {

@@ -125,6 +125,10 @@ pub struct Repository {
     /// The committed kernel event counter: changes with every commit.
     #[serde(default)]
     pub generation: u64,
+    /// Access levels of a restricted repository; empty when it is open to
+    /// its organization.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub roles: BTreeMap<u64, u64>,
     #[serde(skip)]
     channel_names: BTreeMap<u64, String>,
     #[serde(skip)]
@@ -193,6 +197,34 @@ pub enum Command {
         channel: String,
         patch: u64,
     },
+    /// Set a user's access to the repository: `none`, `read`, `write`,
+    /// `review` or `admin`. The first grant restricts an open repository.
+    Grant {
+        repo: String,
+        user: u64,
+        role: String,
+    },
+}
+/// A role's level, as the kernel's `READ`..`ADMIN`.
+pub fn role_level(role: &str) -> Option<u64> {
+    Some(match role {
+        "none" => 0,
+        "read" => kernel::READ,
+        "write" => kernel::WRITE,
+        "review" => kernel::REVIEW,
+        "admin" => kernel::ADMIN,
+        _ => return None,
+    })
+}
+/// The name of a level.
+pub fn role_name(level: u64) -> &'static str {
+    match level {
+        0 => "none",
+        kernel::READ => "read",
+        kernel::WRITE => "write",
+        kernel::REVIEW => "review",
+        _ => "admin",
+    }
 }
 impl Command {
     pub fn repo(&self) -> &str {
@@ -205,7 +237,8 @@ impl Command {
             | Self::Approve { repo, .. }
             | Self::Check { repo, .. }
             | Self::Merge { repo, .. }
-            | Self::MergeBatch { repo, .. } => repo,
+            | Self::MergeBatch { repo, .. }
+            | Self::Grant { repo, .. } => repo,
         }
     }
     /// Proposals are prepared against the repository's immutable patches.
@@ -267,6 +300,9 @@ pub fn describe(error: kernel::Error) -> &'static str {
         E::MissingDependency => "dependency not integrated",
         E::Exhausted => "identifier space exhausted",
         E::ReadOnly => "read-only load",
+        E::Forbidden => "your role does not allow this",
+        E::InvalidLevel => "invalid role",
+        E::OwnLevel => "users cannot change their own role",
     }
 }
 
@@ -314,6 +350,7 @@ enum Shape {
     Check(u64, bool),
     Batch(Vec<u64>, String),
     Merge(u64, String),
+    Grant(u64, String),
 }
 impl Plan {
     /// The API reply for the kernel replies of `steps`, in order.
@@ -343,6 +380,7 @@ impl Plan {
             (Shape::Merge(patch, channel), _) => {
                 serde_json::json!({"patch":patch,"channel":channel})
             }
+            (Shape::Grant(user, role), _) => serde_json::json!({"user":user,"role":role}),
             (Shape::Proposal(_), _) => serde_json::json!({}),
         }
     }
@@ -394,6 +432,17 @@ pub fn plan(actor: &Actor, view: Option<&Repository>, command: Command) -> Resul
             })],
             Shape::Channel(channel),
         ),
+        Command::Grant { repo, user, role } => {
+            let level = role_level(&role).ok_or_else(|| refuse("invalid role"))?;
+            (
+                vec![at(kernel::Command::Grant {
+                    repo: bytes(&repo),
+                    user,
+                    level,
+                })],
+                Shape::Grant(user, role),
+            )
+        }
         Command::Approve { repo, patch } => (
             vec![at(kernel::Command::Approve {
                 repo: bytes(&repo),
@@ -476,6 +525,7 @@ impl Repository {
     /// canonical body. Registry facts (existence, identity, path models) are
     /// decided by the kernel.
     pub fn prepare(&self, author: u64, command: Command) -> Result<Prepared, Refusal> {
+        limits::check_patches(self.patches.len())?;
         let (repo, intent, mut dependencies, mut edits, line_edits, graph_edits) = match command {
             Command::Propose {
                 repo,
@@ -657,6 +707,9 @@ impl Repository {
                         channel,
                     });
                 }
+                W::PutRole(r) => {
+                    self.roles.insert(r.user, r.level);
+                }
                 W::PutPath(_) | W::PutListing(_) => {}
             }
         }
@@ -679,6 +732,7 @@ fn action_name(action: u64) -> &'static str {
         kernel::APPROVE => "approve",
         kernel::CHECK => "check",
         kernel::MERGE => "merge",
+        kernel::GRANT => "grant",
         _ => "unknown",
     }
 }
@@ -755,6 +809,11 @@ pub fn delta(old: &kernel::Snapshot, new: &kernel::Snapshot) -> Vec<kernel::Writ
             .into_iter()
             .map(W::PutListing),
     );
+    out.extend(
+        fresh(&old.roles, &new.roles, |r| r.user)
+            .into_iter()
+            .map(W::PutRole),
+    );
     if old.repository != new.repository {
         out.push(W::SetRepository(new.repository.clone()));
     }
@@ -830,11 +889,7 @@ impl Database {
     pub fn repo(&self, actor: &Actor, name: &str) -> Result<&Repository, Refusal> {
         let scope = repository_key(actor.tenant, name);
         let visible = self.registry.get(&scope).is_some_and(|s| {
-            kernel::visible(
-                &principal(actor, scope),
-                &s.repository,
-                &name.as_bytes().to_vec(),
-            )
+            kernel::readable(&principal(actor, scope), s, &name.as_bytes().to_vec())
         });
         if !visible {
             return Err(refuse("repository not found"));
@@ -1494,3 +1549,5 @@ pub mod lines;
 pub mod documents;
 
 pub mod workspace;
+
+pub mod limits;

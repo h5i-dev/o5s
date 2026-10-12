@@ -70,6 +70,7 @@ enum Field {
     Events,
     Bodies,
     Listings,
+    Roles,
 }
 
 fn field(rows: &mut kernel::Rows, f: Field) -> &mut Vec<Vec<Val>> {
@@ -85,6 +86,7 @@ fn field(rows: &mut kernel::Rows, f: Field) -> &mut Vec<Vec<Val>> {
         Field::Events => &mut rows.events,
         Field::Bodies => &mut rows.bodies,
         Field::Listings => &mut rows.listings,
+        Field::Roles => &mut rows.roles,
     }
 }
 
@@ -170,6 +172,11 @@ pub async fn load(tx: &Tx<'_>, cmd: &kernel::Command) -> Result<kernel::Snapshot
     use kernel::registry_tables as col;
     let mut q = Vec::new();
     let repository = || whole(Field::Repository, kernel::Repository::TABLE);
+    // Every repository command reads the whole (small) role table: an empty
+    // one means the repository is open to its organization.
+    if !matches!(cmd, C::Register { .. } | C::List | C::Create { .. }) {
+        q.push(whole(Field::Roles, kernel::Role::TABLE));
+    }
     match cmd {
         C::Register { name, repo } => {
             q.push(point(
@@ -315,6 +322,7 @@ pub async fn load(tx: &Tx<'_>, cmd: &kernel::Command) -> Result<kernel::Snapshot
                 }
             }
         }
+        C::Grant { .. } => q.push(repository()),
         C::Inspect => {
             q.push(repository());
             q.push(whole(Field::Patches, kernel::PatchRow::TABLE));
@@ -490,12 +498,13 @@ impl<C: Connector, R: Runtime> Service<C, R> {
             .snapshot(scope, &kernel::Command::Probe)
             .await
             .map_err(unavailable)?;
-        if !kernel::visible(&p, &probe.repository, &label) {
+        if !kernel::readable(&p, &probe, &label) {
             return Err(not_found());
         }
         let cached = self.cache.lock().unwrap().get(&scope).cloned();
         if let Some(c) = &cached
             && c.rows.repository == probe.repository
+            && c.rows.roles == probe.roles
         {
             return Ok(c.view.clone());
         }
@@ -504,7 +513,7 @@ impl<C: Connector, R: Runtime> Service<C, R> {
             .snapshot(scope, &kernel::Command::Inspect)
             .await
             .map_err(unavailable)?;
-        if !kernel::visible(&p, &rows.repository, &label) {
+        if !kernel::readable(&p, &rows, &label) {
             return Err(not_found());
         }
         let (old, mut view) = match &cached {

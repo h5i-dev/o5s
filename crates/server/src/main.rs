@@ -41,20 +41,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let secret = std::env::var("H5I_APP_SECRET")
         .map_err(|_| "Set H5I_APP_SECRET (scripts/dev.sh creates a local secret)")?;
-    if args.get(1).map(String::as_str) == Some("token") {
-        let tenant: u64 = args.get(2).ok_or("token TENANT USER")?.parse()?;
-        let user: u64 = args.get(3).ok_or("token TENANT USER")?.parse()?;
-        println!(
-            "{}",
-            HmacAuth::new(secret).issue(
+    let root = PathBuf::from(std::env::var("O5S_DATA").unwrap_or(".o5s".into()));
+    o5s_platform::limits::set(o5s_platform::limits::Limits::from_lookup(|k| {
+        std::env::var(k).ok()
+    })?);
+    if matches!(args.get(1).map(String::as_str), Some("token" | "revoke")) {
+        let usage = "token TENANT USER | revoke TENANT USER [NOT_AFTER]";
+        let tenant: u64 = args.get(2).ok_or(usage)?.parse()?;
+        let user: u64 = args.get(3).ok_or(usage)?.parse()?;
+        let now = h5i_app_core::Timestamp::now().secs();
+        let pg = match std::env::var("O5S_DATABASE_URL") {
+            Ok(url) => {
+                let schema = std::env::var("O5S_DATABASE_SCHEMA").unwrap_or("o5s".into());
+                Some(o5s_server::pg::connect(&url, &schema, 1).await?)
+            }
+            Err(_) => None,
+        };
+        let file = root.join(o5s_server::revocation::FILE);
+        if args[1] == "revoke" {
+            // By default every token `token` issued so far (they last a
+            // day); give NOT_AFTER for longer-lived ones.
+            let not_after = match args.get(4) {
+                Some(n) => n.parse()?,
+                None => now + 86400,
+            };
+            let r = o5s_pgwire::revoke::Revocation::User {
                 tenant,
                 user,
-                h5i_app_core::Timestamp::now().secs() + 86400
-            )
-        );
+                not_after,
+            };
+            match &pg {
+                Some(pg) => pg.engine.revoke(&r).await?,
+                None => {
+                    o5s_server::revocation::write(&file, &r, now).map_err(|e| format!("{e:?}"))?
+                }
+            }
+            println!("revoked tokens of {tenant}/{user} expiring at or before {not_after}");
+            return Ok(());
+        }
+        // A new token must expire after any revocation of this user.
+        let floor = match &pg {
+            Some(pg) => pg
+                .engine
+                .not_after(tenant, user)
+                .await?
+                .map_or(0, |n| n + 1),
+            None => o5s_server::revocation::read(&file)
+                .map_err(|e| format!("{e:?}"))?
+                .first_valid_expiry(tenant, user),
+        };
+        let exp = (now + 86400).max(floor);
+        println!("{}", HmacAuth::new(secret).issue(tenant, user, exp));
         return Ok(());
     }
-    let root = PathBuf::from(std::env::var("O5S_DATA").unwrap_or(".o5s".into()));
     std::fs::create_dir_all(&root)?;
     let backend = match std::env::var("O5S_DATABASE_URL") {
         Ok(url) => {

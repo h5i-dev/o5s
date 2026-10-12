@@ -149,6 +149,14 @@ enum Action {
         #[arg(long, default_value = "main")]
         channel: String,
     },
+    /// Set a user's access: none, read, write (propose), review (approve,
+    /// check, merge) or admin. The first grant restricts an open repository
+    /// to the users granted and makes you its administrator.
+    Grant {
+        user: u64,
+        #[arg(value_parser = ["none", "read", "write", "review", "admin"])]
+        role: String,
+    },
     /// Fork patch membership (Git branches/worktrees still use ordinary Git commands).
     Channel {
         name: String,
@@ -1540,6 +1548,9 @@ fn execute(cli: &Cli) -> Result<Value> {
                 "cmd": "merge_batch", "channel": channel, "patches": patches
             }),
         ),
+        Action::Grant { user, role } => {
+            api.command(repo, json!({"cmd": "grant", "user": user, "role": role}))
+        }
         Action::Channel { name, from } => api.command(
             repo,
             json!({
