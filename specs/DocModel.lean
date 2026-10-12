@@ -2,6 +2,7 @@ import Mathlib.Data.List.Basic
 import Mathlib.Logic.Relation
 import Mathlib.Data.Finset.Basic
 import Mathlib.Data.Finset.Card
+import Mathlib.Data.List.Chain
 /-!
 # Graph documents: the model (M0, statements to prove)
 
@@ -333,6 +334,21 @@ theorem applySpec_ok {H H' : Hist} {R : Patch} (h : applySpec H R = .ok (H', .in
           cases hv : validate H R <;> simp [hv, Except.map] at h
           exact h.symm
 
+theorem applySpec_fresh {H H' : Hist} {R : Patch} (h : applySpec H R = .ok (H', .inserted)) :
+    R.id ∉ ids H ∧ R.id ∉ R.deps := by
+  unfold applySpec at h
+  split at h
+  · split_ifs at h <;> simp at h
+  · rename_i hf
+    by_cases h1 : ¬ R.deps.Nodup ∨ R.id ∈ R.deps
+    · rw [if_pos h1] at h; cases h
+    · refine ⟨?_, fun e => h1 (Or.inr e)⟩
+      intro hm
+      unfold ids at hm
+      obtain ⟨P, hP, e⟩ := List.mem_map.mp hm
+      have := List.find?_eq_none.mp hf P hP
+      simp [e] at this
+
 theorem ops_append (H : Hist) (R : Patch) : ops (H ++ [R]) = ops H ++ opsOf R := by
   simp [ops, List.flatMap_append]
 
@@ -612,7 +628,37 @@ theorem retract_breaks (H H' : Hist) (R : Patch) (o : OpId) (b a : NodeId)
     (ho : (o, Op.order b a) ∈ ops H) :
     ((Anchor.node b, Anchor.node a) ∈ E H' ↔
       ∃ o', o' ≠ o ∧ (Anchor.node b, Anchor.node a, o') ∈ facts H ∧
-        ¬ RetractedBy H (fun _ => True) o') := by sorry
+        ¬ RetractedBy H (fun _ => True) o') := by
+  have hH := applySpec_ok h
+  subst hH
+  have hf : facts (H ++ [R]) = facts H := by
+    simp [facts, ops_append, opsOf_single hr, edgesOf]
+  have hrt : ∀ o', RetractedBy (H ++ [R]) (fun _ => True) o' ↔
+      RetractedBy H (fun _ => True) o' ∨ o' = o := by
+    intro o'
+    unfold RetractedBy
+    simp only [ops_append, opsOf_single hr, List.mem_append, List.mem_singleton, Prod.mk.injEq,
+      Op.retract.injEq, and_true, true_and]
+    constructor
+    · rintro ⟨r, hr' | ⟨-, e⟩⟩
+      · exact Or.inl ⟨r, hr'⟩
+      · exact Or.inr e
+    · rintro (⟨r, hr'⟩ | e)
+      · exact ⟨r, Or.inl hr'⟩
+      · exact ⟨_, Or.inr ⟨rfl, e⟩⟩
+  unfold E
+  simp only [List.mem_cons, List.mem_map, List.mem_filter, hf, decide_eq_true_eq, hrt]
+  constructor
+  · rintro (e | ⟨⟨u, w, o'⟩, ⟨hm, hn⟩, e⟩)
+    · simp at e
+    · simp only [Prod.mk.injEq] at e
+      obtain ⟨rfl, rfl⟩ := e
+      exact ⟨o', fun x => hn (Or.inr x), hm, fun x => hn (Or.inl x)⟩
+  · rintro ⟨o', hne, hm, hn⟩
+    refine Or.inr ⟨⟨_, _, o'⟩, ⟨hm, ?_⟩, rfl⟩
+    rintro (x | x)
+    · exact hn x
+    · exact hne x
 
 /-- The view exists and is unique (layers are a function of `H`). -/
 theorem view_exists (H : Hist) : ∃ V, IsView H V := by sorry
@@ -706,11 +752,48 @@ theorem clean_iff (H : Hist) (V : View) (hv : IsView H V) :
     V.bytes.isSome ↔ (∀ d i A, ¬ DI H d i A) ∧ (∀ a, ¬ Blocked H a) ∧
       ∀ u v, Live H u → Live H v → u ≠ v → Prec H u v ∨ Prec H v u := by sorry
 
+theorem snoc_chain {H : Hist} {p : List Anchor} {u v : Anchor} (hp : p.IsChain (Sum H))
+    (hl : p.getLast? = some u) (s : Sum H u v) : (p ++ [v]).IsChain (Sum H) := by
+  apply hp.append (List.isChain_singleton v)
+  intro x hx y hy
+  rw [hl] at hx
+  simp at hx hy
+  subst hx; subst hy
+  exact s
+
+/-- A `Sum` path from the end of a chain extends it. -/
+theorem extend_chain {H : Hist} {p : List Anchor} {u v : Anchor} (hp : p.IsChain (Sum H))
+    (hl : p.getLast? = some u) (huv : Prec H u v) :
+    ∃ q : List Anchor, q.IsChain (Sum H) ∧ q.getLast? = some v ∧ p.length < q.length := by
+  induction huv with
+  | single s => exact ⟨p ++ [_], snoc_chain hp hl s, by simp, by simp⟩
+  | tail _ s ih =>
+    obtain ⟨q, hq, hql, hlen⟩ := ih
+    exact ⟨q ++ [_], snoc_chain hq hql s, by simp, by simp; omega⟩
+
+theorem in_layer {H : Hist} {V : View} (hv : IsView H V) {k : Nat} {n : NodeId}
+    (h : n ∈ V.layers[k]!) : k < V.layers.length ∧ n ∈ layer H k := by
+  by_cases hk : k < V.layers.length
+  · rw [getElem!_pos V.layers k hk] at h
+    have : n ∈ (↑(V.layers[k]) : Set NodeId) := h
+    rw [hv.layers k hk] at this
+    exact ⟨hk, this⟩
+  · rw [getElem!_neg V.layers k hk] at h
+    first
+      | exact (Finset.notMem_empty n h).elim
+      | exact (Finset.not_mem_empty n h).elim
+
 /-- T2.7: clean bytes list every live atom once, in `Prec` order. -/
 theorem bytes_order (H : Hist) (V : View) (hv : IsView H V) (b : List UInt8)
     (hb : V.bytes = some b) :
     ∀ (k₁ k₂ : Nat) (n₁ n₂ : NodeId), n₁ ∈ V.layers[k₁]! → n₂ ∈ V.layers[k₂]! →
-      Prec H (.node n₁) (.node n₂) → k₁ < k₂ := by sorry
+      Prec H (.node n₁) (.node n₂) → k₁ < k₂ := by
+  intro k₁ k₂ n₁ n₂ h₁ h₂ hp
+  obtain ⟨-, -, -, ⟨p, hpl, hpl', hpc⟩, -⟩ := in_layer hv h₁
+  obtain ⟨-, -, -, -, hmax⟩ := in_layer hv h₂
+  obtain ⟨q, hq, hql, hlen⟩ := extend_chain hpc hpl' hp
+  have := hmax q hql hq
+  omega
 
 /-- R2.3: a cycle made only of deleted atoms blocks nothing: whatever is
 blocked is downstream of a cycle through a live atom. -/
