@@ -71,13 +71,26 @@ impl Backend {
             Backend::Postgres(pg) => {
                 use std::sync::atomic::Ordering::Relaxed;
                 let s = &pg.engine.stats;
-                format!(
-                    "# TYPE o5s_pg_attempts_total counter\no5s_pg_attempts_total {}\n# TYPE o5s_pg_retries_total counter\no5s_pg_retries_total {}\n# TYPE o5s_pg_commits_total counter\no5s_pg_commits_total {}\n# TYPE o5s_pg_replays_total counter\no5s_pg_replays_total {}\n",
-                    s.attempts.load(Relaxed),
-                    s.retries.load(Relaxed),
-                    s.commits.load(Relaxed),
-                    s.replays.load(Relaxed)
-                )
+                let mut groups = format!(
+                    "# TYPE o5s_pg_groups_total counter\no5s_pg_groups_total {}\n# TYPE o5s_pg_grouped_commands_total counter\no5s_pg_grouped_commands_total {}\n# TYPE o5s_pg_group_write_statements_total counter\no5s_pg_group_write_statements_total {}\n# TYPE o5s_pg_group_seconds_total counter\n",
+                    s.groups.load(Relaxed),
+                    s.grouped.load(Relaxed),
+                    s.group_writes.load(Relaxed)
+                );
+                for (phase, us) in o5s_pgwire::GROUP_PHASES.iter().zip(&s.group_us) {
+                    groups.push_str(&format!(
+                        "o5s_pg_group_seconds_total{{phase=\"{phase}\"}} {}\n",
+                        us.load(Relaxed) as f64 / 1e6
+                    ));
+                }
+                groups
+                    + &format!(
+                        "# TYPE o5s_pg_attempts_total counter\no5s_pg_attempts_total {}\n# TYPE o5s_pg_retries_total counter\no5s_pg_retries_total {}\n# TYPE o5s_pg_commits_total counter\no5s_pg_commits_total {}\n# TYPE o5s_pg_replays_total counter\no5s_pg_replays_total {}\n",
+                        s.attempts.load(Relaxed),
+                        s.retries.load(Relaxed),
+                        s.commits.load(Relaxed),
+                        s.replays.load(Relaxed)
+                    )
             }
         }
     }

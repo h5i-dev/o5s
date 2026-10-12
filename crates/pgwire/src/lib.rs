@@ -121,6 +121,10 @@ pub trait Connector {
 /// Sleeping between retries: tokio natively, `worker::Delay` on Workers.
 pub trait Runtime {
     fn sleep(&self, d: Duration) -> impl Future<Output = ()>;
+    /// Microseconds on a monotonic clock, for `Stats`; 0 where there is none.
+    fn now_us(&self) -> u64 {
+        0
+    }
 }
 
 /// The registry's tables, numbered like `schema!`'s `TABLE` constants. A
@@ -253,7 +257,27 @@ pub struct Stats {
     pub retries: AtomicU64,
     pub commits: AtomicU64,
     pub replays: AtomicU64,
+    /// Grouped transactions that committed, and the commands in them.
+    pub groups: AtomicU64,
+    pub grouped: AtomicU64,
+    /// Where a committed group's time went, in microseconds: `BEGIN` and
+    /// the lock, idempotency lookups, loads, kernel transitions, writes,
+    /// idempotency records and `COMMIT`. All but the first hold the lock.
+    pub group_us: [AtomicU64; 7],
+    /// Write statements sent by committed groups.
+    pub group_writes: AtomicU64,
 }
+
+/// The phases of `Stats::group_us`, in order.
+pub const GROUP_PHASES: [&str; 7] = [
+    "begin_lock",
+    "idempotency_lookup",
+    "load",
+    "kernel",
+    "write",
+    "idempotency_record",
+    "commit",
+];
 
 /// What a stored idempotency key protects.
 pub struct Idem<'a> {
@@ -547,12 +571,21 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         tid: i64,
         batch: &[Queued],
     ) -> Result<Vec<Result<Outcome, DbError>>, DbError> {
+        let mut us = [0u64; 7];
+        let mut writes = 0u64;
+        let mut mark = self.runtime.now_us();
+        let mut lap = |phase: usize, us: &mut [u64; 7]| {
+            let now = self.runtime.now_us();
+            us[phase] += now.saturating_sub(mark);
+            mark = now;
+        };
         client
             .batch_execute(&format!(
                 "BEGIN ISOLATION LEVEL READ COMMITTED; SET LOCAL search_path TO {}; SELECT pg_advisory_xact_lock({tid})",
                 ident(&self.schema)?
             ))
             .await?;
+        lap(0, &mut us);
         let tx = Tx { client, tid };
         let mut out = Vec::with_capacity(batch.len());
         for q in batch {
@@ -563,6 +596,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
                         &[(&tid, Type::INT8), (key, Type::TEXT)],
                     )
                     .await?;
+                lap(1, &mut us);
                 if let Some(row) = stored.first() {
                     let fp: Vec<u8> = row.try_get(0)?;
                     out.push(if &fp != fingerprint {
@@ -574,10 +608,14 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
                 }
             }
             let snap = service::load(&tx, &q.cmd).await?;
-            match kernel::transition(&q.principal, &snap, &q.cmd) {
+            lap(2, &mut us);
+            let decided = kernel::transition(&q.principal, &snap, &q.cmd);
+            lap(3, &mut us);
+            match decided {
                 Err(refusal) => out.push(Ok(Outcome::Done(Err(refusal)))),
                 Ok((ws, reply)) => {
-                    store(client, tid, &kernel::sql_writes(&ws)).await?;
+                    writes += store(client, tid, &kernel::sql_writes(&ws)).await? as u64;
+                    lap(4, &mut us);
                     if let Some((key, fingerprint)) = &q.idem {
                         let bytes = (q.encode)(&reply);
                         client
@@ -586,12 +624,22 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
                                 &[(&tid, Type::INT8), (key, Type::TEXT), (fingerprint, Type::BYTEA), (&bytes, Type::BYTEA)],
                             )
                             .await?;
+                        lap(5, &mut us);
                     }
                     out.push(Ok(Outcome::Done(Ok(reply))));
                 }
             }
         }
         client.batch_execute("COMMIT").await.map_err(commit_error)?;
+        lap(6, &mut us);
+        self.stats.groups.fetch_add(1, Ordering::Relaxed);
+        self.stats
+            .grouped
+            .fetch_add(batch.len() as u64, Ordering::Relaxed);
+        self.stats.group_writes.fetch_add(writes, Ordering::Relaxed);
+        for (total, add) in self.stats.group_us.iter().zip(us) {
+            total.fetch_add(add, Ordering::Relaxed);
+        }
         Ok(out)
     }
 
@@ -766,7 +814,8 @@ impl Tx<'_> {
 
 /// Plan (`h5i_app_sql::plan`), compile (`h5i_app_pgsql::compile`) and run each
 /// write in order. The statements are pipelined on the connection.
-async fn store(client: &Client, tid: i64, ws: &Vec<Write>) -> Result<(), DbError> {
+/// Send `ws` as pipelined statements; returns how many.
+async fn store(client: &Client, tid: i64, ws: &Vec<Write>) -> Result<usize, DbError> {
     let tables = tables();
     let mut statements = Vec::new();
     for stmt in h5i_app_sql::plan(ws) {
@@ -784,7 +833,7 @@ async fn store(client: &Client, tid: i64, ws: &Vec<Write>) -> Result<(), DbError
     for result in futures::future::join_all(pending).await {
         result?;
     }
-    Ok(())
+    Ok(statements.len())
 }
 
 /// A column value as the driver sends it.
@@ -908,6 +957,13 @@ pub mod native {
     impl Runtime for Tokio {
         async fn sleep(&self, d: Duration) {
             tokio::time::sleep(d).await
+        }
+        fn now_us(&self) -> u64 {
+            static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+            START
+                .get_or_init(std::time::Instant::now)
+                .elapsed()
+                .as_micros() as u64
         }
     }
 
