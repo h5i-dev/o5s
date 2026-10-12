@@ -114,6 +114,12 @@ theorem liveness_inner_spec (dels : alloc.vec.Vec document.Deletion) (d : Usize)
       h5i_step
       all_goals first
         | (simp_all; done)
+        | (refine ⟨?_, ?_⟩
+           · unfold coverStep
+             exact rowsV_add cov covering1 _ d (by omega) (fun i hi ho => covering1_post1 i (by omega))
+           · intro i h1
+             have := hrow i h1
+             split_ifs <;> simp <;> omega)
         | (trace_state; sorry)
     · h5i_step
       all_goals first
@@ -251,7 +257,7 @@ theorem liveness_outer_spec (dels : alloc.vec.Vec document.Deletion) (n : Nat)
       all_goals first
         | (simp_all; done)
         | (apply WP.spec_bind (liveness_inner_spec dels j hjd cov
-              (fun t ht => by rw [hcovl]; exact hb _ (List.getElem_mem _) t ht) hrow)
+              (fun t ht => by rw [hcovl]; exact hb _ (List.getElem_mem _) t ht) (fun i h => hrow i (by omega)))
            rintro cov1 ⟨h1, h2⟩
            h5i_step
            all_goals first
@@ -262,6 +268,9 @@ theorem liveness_outer_spec (dels : alloc.vec.Vec document.Deletion) (n : Nat)
                   unfold coverUpTo
                   rw [List.range_succ, List.foldl_append]
                   simp [List.getElem?_eq_getElem hjd])
+             | (unfold coverUpTo
+                rw [List.range_succ, List.foldl_append]
+                simp [List.getElem?_eq_getElem hjd])
              | (trace_state; sorry))
         | (trace_state; sorry)
     · h5i_step
@@ -292,7 +301,54 @@ theorem liveness_last_spec (atoms : alloc.vec.Vec (alloc.vec.Vec U8)) (restored 
     h5i_step
     all_goals first
       | (simp_all [FoldStep, liveM]; done)
+      | (intro tag htag; exact hb _ (List.getElem_mem _) tag htag)
+      | (refine ⟨by scalar_tac, ?_⟩
+         have hac : a.val < covering.val.length := by scalar_tac
+         apply Bool.eq_iff_iff.mpr
+         rw [b_post]
+         simp only [liveM, rowsV, List.getElem?_map, List.getElem?_eq_getElem hac, Option.map_some,
+           Option.getD_some, Bool.and_eq_true, decide_eq_true_eq, List.all_eq_true, List.mem_map,
+           Tags.restoredTag, forall_exists_index, and_imp, forall_apply_eq_imp_iff₂]
+         constructor
+         · intro h; exact ⟨by omega, h⟩
+         · intro h; exact h.2)
       | (trace_state; sorry)
+
+theorem coverUpTo_mem_lt (dels : List document.Deletion) (n j a : Nat) (ha : a < n) (x : Nat)
+    (hx : x ∈ (coverUpTo dels n j)[a]'(by rw [coverUpTo_length]; exact ha)) : x < dels.length := by
+  obtain ⟨-, hd, -⟩ := (mem_coverUpTo dels n j a ha x).mp hx
+  exact hd
+
+/-- `liveness`: atom `a` is live when it is not a sentinel and every deletion
+covering it was restored. -/
+theorem liveness_spec (doc : document.Doc)
+    (hb : ∀ x ∈ doc.deletions.val, ∀ t ∈ x.targets.val, t.val < doc.atoms.val.length)
+    (room : (doc.deletions.val.map (·.targets.val.length)).sum < Usize.max)
+    (hres : doc.restored.val.length = doc.deletions.val.length) :
+    document.liveness doc ⦃ live =>
+      live.val = (List.range doc.atoms.val.length).map
+        (liveM (coverUpTo doc.deletions.val doc.atoms.val.length doc.deletions.val.length) doc.restored.val) ⦄ := by
+  unfold document.liveness
+  apply WP.spec_bind (empty_rows_spec doc.atoms.len)
+  intro covering hcov
+  apply WP.spec_bind (liveness_outer_spec doc.deletions doc.atoms.val.length hb room covering
+    (by simp [rowsV, hcov]))
+  rintro covering1 ⟨h1, h2⟩
+  apply WP.spec_mono (liveness_last_spec doc.atoms doc.restored covering1 h2 ?_)
+  · intro live hl
+    rw [hl, h1]
+  · intro r hr t ht
+    obtain ⟨k, hk, rfl⟩ := List.getElem_of_mem hr
+    have hk' : k < doc.atoms.val.length := by omega
+    have := congrArg (fun l => l[k]?) h1
+    simp only [rowsV, List.getElem?_map, List.getElem?_eq_getElem hk, Option.map_some,
+      List.getElem?_eq_getElem (by rw [coverUpTo_length]; exact hk' : k < (coverUpTo doc.deletions.val
+        doc.atoms.val.length doc.deletions.val.length).length), Option.some.injEq] at this
+    have htm : t.val ∈ (coverUpTo doc.deletions.val doc.atoms.val.length doc.deletions.val.length)[k]'(by
+        rw [coverUpTo_length]; exact hk') := by
+      rw [← this]; exact List.mem_map.mpr ⟨t, ht, rfl⟩
+    rw [hres]
+    exact coverUpTo_mem_lt _ _ _ _ hk' _ htm
 
 /-! ## Delete–insert conflicts -/
 
@@ -398,8 +454,9 @@ theorem all_rows_loop_spec (edges : alloc.vec.Vec (Usize × Usize × Usize)) (of
          rintro ⟨h, ho⟩
          rw [List.getElem?_eq_getElem (by scalar_tac)] at ho
          simp_all)
-      | (rw [← e_post]
-         obtain ⟨x1, x2, x3⟩ := e
+      | (rw [← rows1_post]
+         obtain ⟨x1, x2, x3⟩ := rows1
+         have e_post := rows1_post
          h5i_step
          all_goals (try simp only [Indexed.FoldInvStep, List.getElem_range, List.length_range])
          all_goals first
@@ -425,6 +482,68 @@ theorem all_rows_loop_spec (edges : alloc.vec.Vec (Usize × Usize × Usize)) (of
                 have := hinv.2 _ (List.getElem_mem (by omega : k < o.val.length))
                 split_ifs <;> simp <;> omega)
            | (trace_state; sorry))
+      | (trace_state; sorry)
+
+/-! ## Rows of dead atoms -/
+
+theorem dead_rows_inner_spec (rows : alloc.vec.Vec (alloc.vec.Vec Usize)) (a : Usize)
+    (ha : a.val < rows.val.length) :
+    document.dead_rows_loop0_loop0 rows a (alloc.vec.Vec.new Usize) 0#usize ⦃ r =>
+      r.val = (rows.val[a.val]).val ⦄ := by
+  unfold document.dead_rows_loop0_loop0
+  apply WP.spec_mono (loop_fold (rows.val[a.val]).val (fun r : alloc.vec.Vec Usize => r.val)
+    (fun acc x => acc ++ [x]) (fun r j => r.val.length = j)
+    (fun st => document.dead_rows_loop0_loop0.body rows a st.1 st.2) ?_ _ 0#usize (by simp) (by simp))
+  · intro r h
+    rw [h, show ((0#usize : Usize).val) = 0 by simp, List.drop_zero, foldl_snoc]
+    simp
+  · intro row k hk hinv
+    unfold document.dead_rows_loop0_loop0.body
+    h5i_step
+    all_goals first
+      | (simp_all [FoldStep]; done)
+      | (simp only [FoldStep]; refine ⟨by scalar_tac, by simp_all, by scalar_tac, by simp_all⟩)
+      | (trace_state; sorry)
+
+/-- Rows of dead atoms, by index: empty for a live atom, its row otherwise. -/
+def deadRow (rows : List (alloc.vec.Vec Usize)) (live : List Bool) (a : Nat) : List Usize :=
+  if live[a]?.getD false then [] else (rows[a]?.map (·.val)).getD []
+
+theorem dead_rows_spec (rows : alloc.vec.Vec (alloc.vec.Vec Usize)) (live : alloc.vec.Vec Bool)
+    (hl : live.val.length = rows.val.length) :
+    document.dead_rows rows live ⦃ out =>
+      out.val.map (·.val) = (List.range rows.val.length).map (deadRow rows.val live.val) ⦄ := by
+  unfold document.dead_rows document.dead_rows_loop0
+  apply WP.spec_mono (loop_fold (List.range rows.val.length)
+    (fun o : alloc.vec.Vec (alloc.vec.Vec Usize) => o.val.map (·.val))
+    (fun acc a => acc ++ [deadRow rows.val live.val a]) (fun o j => o.val.length = j)
+    (fun st => document.dead_rows_loop0.body rows live st.1 st.2) ?_ _ 0#usize (by simp) (by simp))
+  · intro out h
+    rw [h, show ((0#usize : Usize).val) = 0 by simp, List.drop_zero, foldl_snoc_map]
+    simp
+  · intro o a ha hinv
+    unfold document.dead_rows_loop0.body
+    h5i_step
+    all_goals first
+      | (simp_all [FoldStep]; done)
+      | (apply WP.spec_bind (dead_rows_inner_spec rows a (by scalar_tac))
+         intro row hrow
+         h5i_step
+         all_goals first
+           | (simp only [FoldStep]
+              refine ⟨by simp; scalar_tac, ?_, by scalar_tac, by simp_all⟩
+              have h1 : a.val < live.val.length := by scalar_tac
+              have h2 : a.val < rows.val.length := by scalar_tac
+              simp_all [deadRow, List.getElem?_eq_getElem h1, List.getElem?_eq_getElem h2])
+           | (trace_state; sorry))
+      | (simp only [FoldStep]
+         refine ⟨by simp; scalar_tac, ?_, by scalar_tac, by simp_all⟩
+         have h1 : a.val < live.val.length := by scalar_tac
+         simp_all [deadRow, List.getElem?_eq_getElem h1])
+      | (refine ⟨by scalar_tac, ?_⟩
+         have h1 : a.val < live.val.length := by scalar_tac
+         have h2 : a.val < rows.val.length := by scalar_tac
+         simp_all [deadRow, List.getElem?_eq_getElem h1, List.getElem?_eq_getElem h2])
       | (trace_state; sorry)
 
 end o5s_kernel.DocKernel

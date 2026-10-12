@@ -1,4 +1,5 @@
 import DocRep
+import DocKernelCommit
 open Aeneas Aeneas.Std Result H5iAppLib o5s_kernel
 /-!
 # Commit keeps the representation (draft)

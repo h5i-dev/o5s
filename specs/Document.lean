@@ -96,7 +96,7 @@ def Room (d : document.Doc) (dp : document.Patch) : Prop :=
   d.atoms.val.length + (dp.ops.val.map fun
     | .Insert _ _ xs => xs.val.length | _ => 0).sum + 2 < Usize.max ∧
   d.edges.val.length + 2 * (dp.ops.val.map fun
-    | .Insert _ _ xs => xs.val.length + 1 | _ => 1).sum < Usize.max ∧
+    | .Insert _ _ xs => xs.val.length + 1 | _ => 1).sum + 2 < Usize.max ∧
   d.deps.val.length + 1 < Usize.max ∧ d.deletions.val.length + dp.ops.val.length < Usize.max ∧
   d.insertions.val.length + dp.ops.val.length < Usize.max
 
@@ -140,28 +140,8 @@ def errorOfT (P : Patch) (r : U64 × Nat × Nat) : Option DocModel.Error :=
 def errorOf (P : Patch) (r : document.Refusal) : Option DocModel.Error :=
   errorOfT P (r.kind, r.op.val, r.item.val)
 
-/-- T1.1/T1.2: the kernel validates exactly as the model, error included. -/
-theorem validate_refines (d : document.Doc) (H : Hist) (P : Patch) (dp : document.Patch)
-    (hr : Replayed d H) (ht : Tr H P dp) (adm : Admissible H P) (room : Room d dp) :
-    document.validate d dp ⦃ r =>
-      (r.kind.val = 0 ↔ DocModel.validate H P = .ok ()) ∧
-      ∀ e, DocModel.validate H P = .error e → errorOf P r = some e ⦄ := by sorry
-
-/-- A validated patch commits. -/
-theorem commit_succeeds (d : document.Doc) (H : Hist) (P : Patch) (dp : document.Patch)
-    (hr : Replayed d H) (ht : Tr H P dp) (adm : Admissible H P) (room : Room d dp)
-    (croom : CommitRoom d dp) (hv : DocModel.validate H P = .ok ()) :
-    ∃ d', document.commit d dp = ok d' ∧ Replayed d' (H ++ [P]) := by sorry
-
-/-- What the adapter returns, given the kernel's answer (T1.1 at the level
-of `model::DocumentGraph::apply`). -/
-theorem apply_refines (d : document.Doc) (H : Hist) (P : Patch) (dp : document.Patch)
-    (hr : Replayed d H) (ht : Tr H P dp) (adm : Admissible H P) (room : Room d dp)
-    (croom : CommitRoom d dp) :
-    document.validate d dp ⦃ r =>
-      (r.kind.val = 0 → ∃ d', document.commit d dp = ok d' ∧ Replayed d' (H ++ [P]) ∧
-          applySpec H P = .ok (H ++ [P], .inserted)) ∧
-      (r.kind.val ≠ 0 → ∃ e, errorOf P r = some e ∧ applySpec H P = .error e) ⦄ := by sorry
+-- `validate_refines`, `commit_succeeds` and `apply_refines` are stated and
+-- proved in `DocRefine.lean`, which can import the representation proofs.
 
 /-! ## Materialization -/
 
