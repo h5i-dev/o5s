@@ -84,6 +84,15 @@ Per grouped command, over both runs:
 
 The lock is held for about 2.0 ms per command through the proxy and 1.1 ms on the host network, which bounds one repository near 500 and 900 commands/s. Almost all of it is PostgreSQL executing each command's own reads and writes one command after another; the kernel is negligible. Fewer statements per group (one read per table for the whole group, multi-row writes) would cut it most. That needs set-valued filters and multi-row statements in `h5i_app_sql`, which plans every registry statement. Sending a whole group's reads and writes in one flush each would save only the per-command waits.
 
+With statements kept prepared on each connection (commit `ee4dc71`; `O5S_PREPARED=0` turns it off), the same workload with 3,000 agents on the host network:
+
+| Statements | 800/s offered: achieved (p50) | 1,200/s offered: achieved (p50) | Write time per command |
+|---|---:|---:|---:|
+| Unnamed | 643 (372 ms) | 618 (1,306 ms) | 0.40 ms |
+| Prepared | 758 (59 ms) | 740 (718 ms) | 0.25 ms |
+
+Loads, about 0.7 ms per command, are now most of the lock time.
+
 ### History length
 
 `o5s-load history` grows one repository through given sizes of admitted graph-document patches, each creating its own file, and at each size times single operations ten times with the whole history in place: a proposal, the admission of one approved patch, the channel view, one document, a Git export, and a workspace round trip (create it, edit a line, propose). `--shape chain` makes each patch depend on the previous one; `independent` patches have no dependencies, so each is a causal head.
