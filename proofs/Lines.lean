@@ -3,12 +3,11 @@ import Coordinates
 import LinesModel
 open Aeneas Aeneas.Std Result H5iAppLib o5s_kernel
 /-!
-# Specifications of the extracted `lines` kernel (to prove)
+# The extracted `lines` kernel
 
 Each theorem relates an extracted function in `crates/kernel/src/lines.rs` to
-the model in `proofs/LinesModel.lean`, whose order-independence and
-conflict theorems are already proved. When this file is proved, move it to
-`proofs/` and add its theorems to `h5i-app.toml`.
+the model in `LinesModel.lean`, whose order-independence and conflict
+theorems carry over to the extracted code.
 -/
 namespace o5s_kernel.Lines
 open LinesModel Rendering
@@ -476,6 +475,19 @@ def chunksOf (bs : List Usize) (rs : List Rg) : Option (List Chunk) :=
 def cabs (out : alloc.vec.Vec Chunk) (ok : Bool) : Option (List Chunk) :=
   if ok then some out.val else none
 
+theorem cast_len (y : Usize) : (UScalar.cast .U64 y).val = y.val := by
+  apply UScalar.cast_val_mod_pow_greater_numBits_eq
+  have := System.Platform.numBits_eq
+  simp only [UScalarTy.numBits]
+  omega
+
+/-- A `u64` below a vector length cast to `u64` is below the length. -/
+theorem lt_len_of_cast {x c : U64} {y : Usize} (hc : c = UScalar.cast .U64 y) (h : x < c) :
+    x.val < y.val := by
+  have : x.val < c.val := h
+  rw [hc, cast_len] at this
+  exact this
+
 @[step] theorem chunks_loop_spec (bs : alloc.vec.Vec Usize) (rs : alloc.vec.Vec Rg)
     (kept : alloc.vec.Vec Usize) (hk : ∀ j ∈ kept.val, j.val < rs.val.length) :
     lines.chunks_loop bs rs kept (alloc.vec.Vec.new _) true 0#usize ⦃ r =>
@@ -500,7 +512,9 @@ def cabs (out : alloc.vec.Vec Chunk) (ok : Bool) : Option (List Chunk) :=
          all_goals first
            -- The boundary lookups are in bounds.
            | (exact lt_of_le_of_lt (Nat.mod_le _ _) (by omega))
-           | (exact lt_of_le_of_lt (Nat.mod_le _ _) (by simp_all [UScalar.cast_val_eq]; omega))
+           | (apply lt_of_le_of_lt (Nat.mod_le _ _)
+              have := lt_len_of_cast (by assumption) (by assumption)
+              simpa using this)
            -- A reversed or out-of-range line stops the chunks.
            | (refine ⟨⟨by scalar_tac, ?_⟩, by omega⟩
               rw [← r_post]
@@ -509,7 +523,7 @@ def cabs (out : alloc.vec.Vec Chunk) (ok : Bool) : Option (List Chunk) :=
            -- Otherwise the chunk is emitted.
            | (refine ⟨by scalar_tac, ?_⟩
               have hx2 : x2.val < bs.val.length := by
-                first | omega | (simp_all [UScalar.cast_val_eq]; omega)
+                first | omega | (have := lt_len_of_cast (by assumption) (by assumption); simpa using this)
               have hx1 : x1.val ≤ x2.val := by omega
               have hm1 : x1.val % 2 ^ System.Platform.numBits = x1.val :=
                 Nat.mod_eq_of_lt (by scalar_tac)
@@ -521,8 +535,7 @@ def cabs (out : alloc.vec.Vec Chunk) (ok : Bool) : Option (List Chunk) :=
               simp only [Option.map_some, Option.some.injEq]
               rw [x_post]
               simp [hm1, hm2]
-              try exact alloc.vec.Vec.ext _ _ (by assumption))
-           | (trace_state; sorry))
+              try exact alloc.vec.Vec.ext _ _ (by assumption)))
 
 @[step] theorem chunks_spec (bs : alloc.vec.Vec Usize) (rs : alloc.vec.Vec Rg)
     (kept : alloc.vec.Vec Usize) (hk : ∀ j ∈ kept.val, j.val < rs.val.length) :

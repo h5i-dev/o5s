@@ -1,7 +1,7 @@
 import Indexed
 open Aeneas Aeneas.Std Result H5iAppLib o5s_kernel
 /-!
-# Causal searches (M5, statements to prove)
+# Causal searches (M5)
 
 `causality::frontier` gives the graph dependencies of a document edit and
 the nearest file heads (`documents::nearest`); `causality::sole_head` is the

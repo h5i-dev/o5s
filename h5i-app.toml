@@ -46,6 +46,17 @@ theorems = [
   "o5s_kernel.LinesModel.merge_fails",
   "o5s_kernel.LinesModel.merge_order_independent",
   "o5s_kernel.LinesModel.sep_trans",
+  "o5s_kernel.Lines.sorted_spec",
+  "o5s_kernel.Lines.merge_spec",
+  "o5s_kernel.Lines.merge_correct",
+  "o5s_kernel.Lines.merge_order_independent",
+  "o5s_kernel.Lines.ranges_valid_spec",
+  "o5s_kernel.Lines.chunks_spec",
+  "o5s_kernel.Lines.render_spec",
+  "o5s_kernel.Lines.merged_renders",
+  "o5s_kernel.Causality.frontier_spec",
+  "o5s_kernel.Causality.frontier_covers",
+  "o5s_kernel.Causality.sole_head_spec",
 ]
 
 [[mutant]]
