@@ -3,12 +3,12 @@
 <title>o5s · version control for many concurrent agents</title>
 <meta name="theme-color" content="#D21C1C">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@300..700&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 /* Ground and accent follow h5i (../h5i/docs/_static/console-mock.css); layout and type follow hancore.dev. */
-:root{color-scheme:dark;--ground:#050506;--surface:#0d0d10;--raised:#16161a;--line:#24242a;--line-strong:#34343c;--ink:#ededf0;--ink-2:#a8a8b2;--ink-3:#6d6d77;--red:#d9231b;--accent:#ff6258;--accent-hi:#ff8a82;--green:#5cbf88;--amber:#d9a441;--cyan:#7db8d3;
---sans:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;--serif:"Instrument Serif",Georgia,serif;--mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace}
-*,*::before,*::after{box-sizing:border-box}html,body{margin:0}body{background:var(--ground);color:var(--ink);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+:root{color-scheme:dark;--ground:#050506;--surface:#0d0d10;--raised:#16161a;--line:#24242a;--line-strong:#34343c;--ink:#ebe6db;--ink-2:#a9a49a;--ink-3:#6d6b66;--red:#d9231b;--accent:#ff6258;--accent-hi:#ff8a82;--green:#5cbf88;--amber:#d9a441;--cyan:#7db8d3;
+--sans:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace}
+*,*::before,*::after{box-sizing:border-box}html,body{margin:0}body{background:var(--ground);color:var(--ink);font:400 12px/1.6 var(--mono);-webkit-font-smoothing:antialiased}
 a,button{color:inherit}button,input,select{font:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .mono{font:400 11px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase}
@@ -29,9 +29,10 @@ a,button{color:inherit}button,input,select{font:inherit}
 .wall{position:absolute;inset:0;width:100%;height:100%;display:block}
 .hero{position:absolute;left:40px;bottom:96px;z-index:5;max-width:min(620px,calc(100% - 80px));pointer-events:none}
 .hero .kicker{color:var(--accent);margin-bottom:18px}
-.hero h1{margin:0;font:400 clamp(40px,6.2vw,84px)/.98 var(--serif);letter-spacing:-.01em}
-.hero h1 i{color:var(--accent)}
-.hero p{margin:22px 0 0;max-width:520px;color:var(--ink-2);font-size:15px;line-height:1.6}
+.hero h1{margin:0;font:600 clamp(22px,2.6vw,34px)/1.15 var(--sans);font-stretch:112%;letter-spacing:-.005em}
+.hero h1 i{font-style:normal;color:var(--accent)}
+.hero p{margin:20px 0 0;max-width:520px;color:var(--ink-2);font:400 12px/1.65 var(--mono)}
+.hero p::before{content:'// ';color:var(--ink-3)}
 .enter{position:absolute;right:40px;bottom:30px;z-index:6;display:inline-flex;align-items:center;gap:10px;min-height:44px;color:var(--ink);font:500 11px var(--sans);letter-spacing:.3em;text-transform:uppercase;text-decoration:none}
 .enter:hover{color:var(--accent)}
 .note{position:absolute;left:40px;bottom:30px;z-index:5;margin:0;color:var(--ink-3);font:400 11px/44px var(--mono);letter-spacing:.08em}
@@ -39,11 +40,11 @@ a,button{color:inherit}button,input,select{font:inherit}
 .facts{position:relative;z-index:3;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--line)}
 .fact{padding:34px 40px 40px;border-right:1px solid var(--line)}.fact:last-child{border-right:0}
 .fact .mono{color:var(--accent)}
-.fact h2{margin:14px 0 10px;font:400 28px/1.1 var(--serif)}
-.fact p{margin:0;color:var(--ink-2);font-size:13.5px;line-height:1.6}
+.fact h2{margin:14px 0 10px;font:600 15px/1.3 var(--sans);font-stretch:110%;letter-spacing:.01em}
+.fact p{margin:0;color:var(--ink-2);font:400 12px/1.65 var(--mono)}
 .how{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0;border-top:1px solid var(--line)}
 .how>div{padding:40px}.how>div+div{border-left:1px solid var(--line)}
-.how h2{margin:0 0 16px;font:400 34px/1.05 var(--serif)}.how h2 i{color:var(--accent)}
+.how h2{margin:0 0 16px;font:600 20px/1.2 var(--sans);font-stretch:112%}.how h2 i{font-style:normal;color:var(--accent)}
 .how p{color:var(--ink-2);margin:0 0 14px;max-width:56ch}
 .code{margin:0;padding:22px 24px;background:var(--surface);border:1px solid var(--line);font:12.5px/1.9 var(--mono);color:var(--ink-2);overflow:auto;white-space:pre}
 .code b{color:var(--ink);font-weight:500}.code em{color:var(--ink-3);font-style:normal}
@@ -52,11 +53,11 @@ a,button{color:inherit}button,input,select{font:inherit}
 /* Repositories */
 .console{min-height:100svh;padding:96px 40px 40px;max-width:1520px;margin:0 auto}
 .console-head{display:flex;justify-content:space-between;align-items:end;gap:24px;flex-wrap:wrap;margin-bottom:26px}
-.console-head h1{margin:8px 0 0;font:400 46px/1 var(--serif)}.console-head h1 i{color:var(--accent)}
+.console-head h1{margin:8px 0 0;font:600 26px/1.15 var(--sans);font-stretch:112%}.console-head h1 i{font-style:normal;color:var(--accent)}
 .console-head .mono{color:var(--accent)}
 .session{display:flex;gap:8px;align-items:center}
 .console-head .identity{color:var(--ink-3);margin-right:8px}
-input,select{background:var(--surface);border:1px solid var(--line);color:var(--ink);padding:9px 11px;border-radius:2px;min-height:38px}
+input,select{background:var(--surface);border:1px solid var(--line);color:var(--ink);padding:9px 11px;border-radius:0;min-height:38px;font:400 12px var(--mono)}
 input::placeholder{color:var(--ink-3)}
 .btn{background:transparent;border:1px solid var(--line-strong);color:var(--ink);padding:0 14px;min-height:38px;border-radius:2px;cursor:pointer;font:500 11px var(--sans);letter-spacing:.2em;text-transform:uppercase}
 .btn:hover{border-color:var(--accent);color:var(--accent)}.btn:disabled{opacity:.35;cursor:default}
@@ -65,7 +66,7 @@ input::placeholder{color:var(--ink-3)}
 .toolbar #search{flex:1;min-width:200px}
 .metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:1px solid var(--line);margin-bottom:24px}
 .metric{padding:18px 0 20px}.metric+.metric{padding-left:22px;border-left:1px solid var(--line)}
-.metric span{color:var(--ink-3)}.metric strong{display:block;margin-top:10px;font:400 44px/1 var(--serif)}
+.metric span{color:var(--ink-3)}.metric strong{display:block;margin-top:10px;font:400 30px/1 var(--mono)}
 .metric.warn strong{color:var(--amber)}
 .grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,1fr);gap:24px;align-items:start}
 .stack{display:grid;gap:24px}
@@ -73,17 +74,17 @@ input::placeholder{color:var(--ink-3)}
 .panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
 .panel-head h2{margin:0;font:500 11px var(--sans);letter-spacing:.24em;text-transform:uppercase;color:var(--ink-2)}
 .panel-body{padding:18px}
-.muted{color:var(--ink-3);font-size:12px}
+.muted{color:var(--ink-3);font:400 11px/1.6 var(--mono)}
 .card{padding:16px 18px;border-bottom:1px solid var(--line)}.card:last-child{border-bottom:0}
 .card-top{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
 .card h3{margin:0;font:500 13px var(--mono);color:var(--ink)}
-.card p{margin:8px 0 10px;white-space:pre-wrap}
+.card p{margin:8px 0 10px;white-space:pre-wrap;color:var(--ink)}
 .hash{font:11px var(--mono);color:var(--ink-3);overflow-wrap:anywhere;margin-top:6px}
 .tag{font:500 10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);border:1px solid var(--line-strong);padding:3px 7px}
 .tag.good{color:var(--green);border-color:rgba(92,191,136,.4)}.tag.ready{color:var(--accent);border-color:rgba(255,98,88,.4)}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 pre{margin:8px 0;background:var(--ground);border:1px solid var(--line);padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.7 var(--mono);max-height:260px;overflow:auto}
-details{margin-top:10px}summary{cursor:pointer;color:var(--ink-2);font-size:12px}
+details{margin-top:10px}summary{cursor:pointer;color:var(--ink-2);font:400 11px var(--mono)}
 .conflict{border-left:2px solid var(--amber);padding:10px 14px;margin-bottom:14px;background:rgba(217,164,65,.04)}
 .conflict h3{margin:0 0 6px;color:var(--amber);font:500 13px var(--mono)}
 .graph-operation{border-left:2px solid var(--cyan);padding-left:12px;margin-top:12px}
@@ -449,8 +450,7 @@ theorem extracted_view_converges : Replayed d₁ H₁ → Replayed d₂ H₂ →
 let view = cache.sync_append_only(&repo, &channel)?; export(&root, &repo, view)
 theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
 `.replace(/\s+/g, ' ');
-  const GLYPHS = '░▒▓#%&@*+=';
-  let cols = 0, rows = 0, cells = [], width = 0, height = 0, dpr = 1, on = false, frame = 0, last = 0;
+    let cols = 0, rows = 0, cells = [], width = 0, height = 0, dpr = 1, on = false, frame = 0, last = 0;
   let mouse = {x: 0.7, y: 0.4}, blinkAt = 0, collected = [], patches = [], arms = [], nextHash = 0;
   const rand = (a, b) => a + Math.random() * (b - a);
   const hex = () => Math.floor(Math.random() * 0xffff).toString(16).padStart(4, '0');
@@ -461,6 +461,7 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     cols = Math.ceil(width / CW); rows = Math.ceil(height / CH);
     shape.width = cols; shape.height = rows;
+    if (agents.length) seat();
     cells = [];
     for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) cells.push(SOURCE[(y * 131 + x) % SOURCE.length]);
   }
@@ -469,17 +470,28 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
     const cx = cols * 0.66, cy = rows * 0.4 + Math.sin(t * 0.0009) * 1.6;
     return {cx, cy, rx: Math.max(12, cols * 0.085), ry: Math.max(10, rows * 0.21)};
   }
-  function spawn() {
-    const side = Math.random();
-    patches.push({x: side < 0.5 ? rand(cols * 0.36, cols * 0.5) : rand(cols * 0.42, cols * 0.86), y: side < 0.5 ? rand(4, rows - 4) : rand(rows * 0.8, rows - 3),
-      vx: rand(-0.02, 0.02), vy: rand(-0.015, 0.015), label: hex(), arm: -1});
+  // Agents around the octopus, each at its own terminal, proposing now and
+  // then: their patches fly toward the octopus and wait to be taken.
+  const SEATS = [[0.40, 0.14], [0.52, 0.07], [0.44, 0.36], [0.47, 0.6], [0.84, 0.5], [0.92, 0.66],
+    [0.86, 0.84], [0.62, 0.95], [0.46, 0.9], [0.73, 0.08]];
+  let agents = [], proposed = 0;
+  function seat() {
+    // Labels are about 26 cells wide; keep them on screen.
+    agents.forEach((g, k) => { g.x = Math.min(SEATS[k][0] * cols, cols - 28); g.y = Math.max(5, SEATS[k][1] * rows); });
+  }
+  function propose(g, t) {
+    const b = body(t), dx = b.cx - g.x, dy = b.cy - g.y, d = Math.hypot(dx, dy) || 1;
+    // It stops short of the octopus, where an arm can reach it.
+    const stop = Math.min(d * 0.55, b.rx * 3.2 + rand(0, b.rx * 0.8));
+    patches.push({x: g.x + 10, y: g.y, sx: g.x + 10, sy: g.y, tx: b.cx - dx / d * stop, ty: b.cy - dy / d * stop * 0.9,
+      age: 0, label: hex(), agent: g.name, arm: -1});
+    g.sent = t; proposed++;
   }
   function init() {
     arms = Array.from({length: 8}, (_, i) => ({i, phase: i * 0.8, target: null, reach: 0, tip: null}));
-    patches = []; for (let i = 0; i < 6; i++) spawn();
-    collected = [];
-    // Two arms are already reaching when the page opens.
-    for (const k of [1, 6]) { const p = patches[k % patches.length]; p.arm = k; Object.assign(arms[k], {target: p, reach: 0.35, phaseState: 'out'}); }
+    agents = SEATS.map((_, k) => ({name: 'agent·' + String(k + 1).padStart(2, '0'), next: rand(0, 2500), sent: -1e9}));
+    seat();
+    patches = []; collected = []; proposed = 0;
   }
   function armPoints(arm, b, t) {
     const n = 22, base = (arm.i - 3.5) / 3.5, points = [];
@@ -490,24 +502,35 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
       const k = arm.reach;
       goal = {x: rest.x + (arm.target.x - rest.x) * k, y: rest.y + (arm.target.y - rest.y) * k};
     }
+    const idle = 1 - (arm.target ? arm.reach : 0), side = base < 0 ? -1 : 1;
     for (let s = 0; s <= n; s++) {
-      const u = s / n, wave = Math.sin(t * 0.0021 + arm.phase + u * 5.2) * (1 - (arm.target ? arm.reach : 0)) * 2.2 * u;
-      const x = bx + (goal.x - bx) * u + wave * 1.6, y = by + (goal.y - by) * u * (0.9 + 0.1 * u) + wave;
-      points.push({x, y, w: (1 - u) * 3.8 + 0.9});
+      const u = s / n;
+      // A slow travelling wave, and a curl that tightens toward the tip.
+      const wave = Math.sin(t * 0.0016 + arm.phase + u * 4.4) * idle * 2.4 * u * u;
+      const curl = idle * u * u * u * 5 * side * (0.6 + 0.4 * Math.sin(t * 0.0009 + arm.phase));
+      const x = bx + (goal.x - bx) * u + wave * 1.4 + curl, y = by + (goal.y - by) * u + wave - curl * 0.6 * u;
+      points.push({x, y, w: Math.pow(1 - u, 1.4) * 4.2 + 0.35});
     }
     arm.tip = points[n];
     return points;
   }
   function step(t, dt) {
+    for (const g of agents) {
+      g.next -= dt;
+      if (g.next <= 0) {
+        if (patches.filter(p => p.arm < 0).length < 10) propose(g, t);
+        g.next = rand(2500, 7000);
+      }
+    }
     for (const p of patches) if (p.arm < 0) {
-      p.x += p.vx * dt * 0.06; p.y += p.vy * dt * 0.06;
-      if (p.x < cols * 0.34 || p.x > cols - 8) p.vx *= -1;
-      if (p.y < 3 || p.y > rows - 3) p.vy *= -1;
+      p.age = Math.min(1, p.age + dt / 1400);
+      const e = 1 - Math.pow(1 - p.age, 3);
+      p.x = p.sx + (p.tx - p.sx) * e; p.y = p.sy + (p.ty - p.sy) * e;
     }
     for (const arm of arms) {
       if (!arm.target) {
-        if (Math.random() < 0.004 * dt / 16) {
-          const free = patches.filter(p => p.arm < 0);
+        if (Math.random() < 0.012 * dt / 16) {
+          const free = patches.filter(p => p.arm < 0 && p.age > 0.9);
           if (free.length) { const p = free[Math.floor(Math.random() * free.length)]; p.arm = arm.i; arm.target = p; arm.reach = 0; arm.phaseState = 'out'; }
         }
         continue;
@@ -521,9 +544,9 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
         arm.reach = Math.max(0, arm.reach - dt * 0.0009);
         if (arm.tip) { p.x = arm.tip.x; p.y = arm.tip.y; }
         if (arm.reach <= 0) {
-          collected.unshift({label: p.label, id: ++nextHash, born: t});
-          collected = collected.slice(0, 14);
-          patches.splice(patches.indexOf(p), 1); spawn();
+          collected.unshift({label: p.label, agent: p.agent, id: ++nextHash, born: t});
+          collected = collected.slice(0, 12);
+          patches.splice(patches.indexOf(p), 1);
           arm.target = null;
         }
       }
@@ -536,28 +559,35 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
     for (const arm of arms) {
       const pts = armPoints(arm, b, t);
       for (let s = 1; s < pts.length; s++) {
-        sctx.strokeStyle = `rgb(${Math.round(150 + 80 * (1 - s / pts.length))},0,0)`;
+        sctx.strokeStyle = `rgb(${Math.round(150 + 90 * (1 - s / pts.length))},0,0)`;
         sctx.lineWidth = pts[s].w;
         sctx.beginPath(); sctx.moveTo(pts[s - 1].x, pts[s - 1].y); sctx.lineTo(pts[s].x, pts[s].y); sctx.stroke();
       }
     }
-    // Mantle with a little shading.
-    const grad = sctx.createRadialGradient(b.cx - b.rx * 0.3, b.cy - b.ry * 0.4, 1, b.cx, b.cy, b.rx * 1.3);
-    grad.addColorStop(0, 'rgb(255,0,0)'); grad.addColorStop(1, 'rgb(120,0,0)');
+    // The mantle swept back over the head, shaded from below, like a lamp
+    // held under it; the head band carries the eyes.
+    const lean = -0.42 + Math.sin(t * 0.0007) * 0.05;
+    const mx = b.cx + b.rx * 0.35, my = b.cy - b.ry * 0.55;
+    const grad = sctx.createLinearGradient(mx - b.rx, my - b.ry * 1.2, b.cx, b.cy + b.ry);
+    grad.addColorStop(0, 'rgb(120,0,0)'); grad.addColorStop(0.6, 'rgb(205,0,0)'); grad.addColorStop(1, 'rgb(255,0,0)');
     sctx.fillStyle = grad;
-    sctx.beginPath(); sctx.ellipse(b.cx, b.cy, b.rx, b.ry, 0, 0, Math.PI * 2); sctx.fill();
-    // Eyes follow the pointer and blink.
-    const blinking = t < blinkAt + 140, ey = b.cy + b.ry * 0.2, gx = (mouse.x * cols - b.cx) / cols, gy = (mouse.y * rows - ey) / rows;
+    sctx.beginPath(); sctx.ellipse(mx, my, b.rx * 1.05, b.ry * 0.95, lean, 0, Math.PI * 2); sctx.fill();
+    sctx.beginPath(); sctx.ellipse(b.cx, b.cy + b.ry * 0.35, b.rx * 0.92, b.ry * 0.48, 0, 0, Math.PI * 2); sctx.fill();
+    // Eyes: low on the head band, a dim iris with a horizontal slit pupil
+    // that follows the pointer; the lid closes slowly.
+    const lid = t < blinkAt + 380 ? Math.sin((t - blinkAt) / 380 * Math.PI) : 0;
+    const ey = b.cy + b.ry * 0.28, gx = (mouse.x * cols - b.cx) / cols, gy = (mouse.y * rows - ey) / rows;
     for (const side of [-1, 1]) {
-      const ex = b.cx + side * b.rx * 0.44, r = Math.max(2.6, b.rx * 0.24);
-      sctx.fillStyle = 'rgb(0,255,0)';
-      sctx.beginPath(); sctx.ellipse(ex, ey, r * 1.15, blinking ? 0.5 : r * 0.9, 0, 0, Math.PI * 2); sctx.fill();
-      if (!blinking) {
+      const ex = b.cx + side * b.rx * 0.6, r = Math.max(2.6, b.rx * 0.17);
+      sctx.fillStyle = 'rgb(0,200,0)';
+      sctx.beginPath(); sctx.ellipse(ex, ey, r * 1.2, r * 0.8 * (1 - lid * 0.9), side * 0.15, 0, Math.PI * 2); sctx.fill();
+      if (lid < 0.6) {
         sctx.fillStyle = 'rgb(0,0,255)';
-        sctx.beginPath(); sctx.ellipse(ex + Math.max(-1, Math.min(1, gx * 6)) * r * 0.45, ey + Math.max(-1, Math.min(1, gy * 6)) * r * 0.35, r * 0.5, r * 0.55, 0, 0, Math.PI * 2); sctx.fill();
+        const px = ex + Math.max(-1, Math.min(1, gx * 5)) * r * 0.35, py = ey + Math.max(-1, Math.min(1, gy * 5)) * r * 0.2;
+        sctx.fillRect(px - r * 0.8, py - 0.55, r * 1.6, 1.1);
       }
     }
-    if (t > blinkAt + 2600 + Math.random() * 3000) blinkAt = t;
+    if (t > blinkAt + 5000 + Math.random() * 6000) blinkAt = t;
     return sctx.getImageData(0, 0, cols, rows).data;
   }
   function draw(t) {
@@ -567,29 +597,44 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
     const drift = Math.floor(t / 900);
     for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
       const i = y * cols + x, r = px[i * 4], g = px[i * 4 + 1], bl = px[i * 4 + 2];
-      let ch = cells[(i + (y % 4 === 0 ? drift : 0)) % cells.length], color;
-      if (g > 120) { color = 'rgba(245,242,236,1)'; ch = '@#%&'[(x + y) % 4]; }
-      else if (bl > 120) { color = 'rgba(5,5,6,1)'; ch = ' '; }
-      else if (r > 40) {
+      const ch = cells[(i + (y % 4 === 0 ? drift : 0)) % cells.length];
+      let color;
+      if (bl > 120) color = 'rgba(5,5,6,1)';
+      else if (g > 100) color = 'rgba(245,214,160,1)';
+      else if (r > 30) {
         const k = r / 255;
-        color = `rgba(${Math.round(200 + 55 * k)},${Math.round(30 + 70 * k)},${Math.round(25 + 63 * k)},${0.5 + k * 0.5})`;
-        if (k > 0.8 && (x * 7 + y * 3) % 4 === 0) ch = GLYPHS[(x + y + drift) % GLYPHS.length];
-        if (ch === ' ') ch = '·';
-      } else color = 'rgba(237,237,240,0.085)';
+        color = `rgba(${Math.round(170 + 85 * k)},${Math.round(28 + 70 * k * k)},${Math.round(24 + 64 * k * k)},${0.42 + k * 0.58})`;
+      } else color = 'rgba(235,230,219,0.07)';
       if (ch !== ' ') { ctx.fillStyle = color; ctx.fillText(ch, x * CW, y * CH); }
     }
-    // Drifting patches and the channel they join.
+    // Agents, their patches in flight, and the channel they join.
+    ctx.font = '400 11px "IBM Plex Mono", Menlo, monospace';
+    for (const g of agents) {
+      const hot = t - g.sent < 900;
+      ctx.fillStyle = hot ? '#ff6258' : 'rgba(235,230,219,0.55)';
+      const cursor = Math.floor(t / 530 + g.y) % 2 ? '▍' : ' ';
+      ctx.fillText(`${g.name} $ ${hot ? 'o5s propose ↗' : 'edit' + cursor}`, g.x * CW - 4, g.y * CH - 6);
+    }
     ctx.font = '500 12px "IBM Plex Mono", Menlo, monospace';
     for (const p of patches) {
-      ctx.fillStyle = p.arm >= 0 ? '#ff8a82' : 'rgba(237,237,240,0.85)';
+      if (p.arm < 0 && p.age < 1) {
+        // A short dotted trail back toward the agent who sent it.
+        ctx.fillStyle = 'rgba(255,98,88,0.35)';
+        for (let k = 1; k <= 4; k++) {
+          const e = Math.max(0, 1 - Math.pow(1 - Math.max(0, p.age - k * 0.06), 3));
+          ctx.fillText('·', (p.sx + (p.tx - p.sx) * e) * CW, (p.sy + (p.ty - p.sy) * e) * CH - 6);
+        }
+      }
+      ctx.fillStyle = p.arm >= 0 ? '#ff8a82' : 'rgba(235,230,219,0.92)';
       ctx.fillText(`[#${p.label}]`, p.x * CW - 24, p.y * CH - 6);
     }
-    const lx = width - 210, top = 92;
-    ctx.fillStyle = 'rgba(237,237,240,0.6)'; ctx.fillText('main ←', lx, top);
+    const lx = width - 236, top = 92;
+    ctx.fillStyle = 'rgba(235,230,219,0.6)';
+    ctx.fillText(`main ← ${nextHash} admitted · ${proposed} proposed · ${agents.length} agents`, lx - 84, top);
     collected.forEach((c, k) => {
       const fresh = Math.max(0, 1 - (t - c.born) / 1200);
-      ctx.fillStyle = fresh > 0 ? `rgba(255,${Math.round(98 + 120 * fresh)},${Math.round(88 + 120 * fresh)},1)` : `rgba(237,237,240,${Math.max(0.18, 0.7 - k * 0.04)})`;
-      ctx.fillText(`#${String(c.id).padStart(3, '0')} ${c.label}… admitted`, lx, top + 18 + k * CH * 1.3);
+      ctx.fillStyle = fresh > 0 ? `rgba(255,${Math.round(98 + 120 * fresh)},${Math.round(88 + 120 * fresh)},1)` : `rgba(235,230,219,${Math.max(0.18, 0.7 - k * 0.05)})`;
+      ctx.fillText(`#${String(c.id).padStart(3, '0')} ${c.label} ← ${c.agent}`, lx, top + 20 + k * CH * 1.3);
     });
   }
   function loop(t) {
