@@ -147,10 +147,15 @@ Done in the round of October 11, 2026:
   - Pipelined PostgreSQL commands and group commit (about twice the proposals per second on one hot repository), and an open-loop mode in `o5s-load`.
   - A CI workflow covering format, tests with PostgreSQL, the Worker build, the Lean gates and extraction drift.
 
+Done in the round of October 12, 2026:
+
+- **Proofs.** The extracted `lines` and `causality` functions refine their models; the graph-document model (`DocModel`) is proved, including `view_converges`; the PostgreSQL loader serves narrow loads (`Served.pg_served`). All are gated in CI. The registry proofs cover repository roles on the `authz` branch.
+- **Kernel.** Acknowledged pairs are compared field by field, so the extracted kernel declares no axiom.
+
 Next:
 
-1. Prove the statements in `specs/` (refinement of `document`, `lines` and `causality`; `view_converges`; `pg_served`). Then move them into the gated projects.
-2. Finish the registry proofs for roles on the `authz` branch, and run the new DDL on the deployed database before deploying it.
+1. Prove the extracted `document` functions against `DocModel` (`specs/Document.lean`): helper specifications (`specs/DocKernel.lean`), then validation, commit and materialization.
+2. Run the new DDL (`o5s_roles`, revocation tables) on the deployed database, then merge and deploy the `authz` branch.
 3. Run the Worker workspace flow, the Artifacts clone and the pipelined engine against the live deployment.
 4. A single hot repository on PostgreSQL saturates near 500 proposals/s with group commit (`docs/load-testing.md`). Multi-row writes would cut the statements per group further.
 5. Multi-host and 10,000-client runs need more than one machine.

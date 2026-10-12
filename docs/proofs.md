@@ -18,7 +18,7 @@ Statements still to be proved live in `specs/`. They are type-checked against th
 
 ## Proved and gated
 
-**Registry** (`crates/registry/proofs`, 326 theorems in 12 modules):
+**Registry** (`crates/registry/proofs`, 397 theorems in 13 modules):
 
 | Guarantee | Theorem |
 |---|---|
@@ -31,7 +31,7 @@ Statements still to be proved live in `specs/`. They are type-checked against th
 | The store holds what committing computes | `Storage.stored` |
 | The PostgreSQL loader (`pgLoad`, a model of `service.rs::load` branch by branch) returns narrow loads, so `narrow_load` holds for what PostgreSQL actually returns. It needs dependency rows stored in key order, which the native `prepare` ensures and the kernel does not yet require | `Served.pg_load_narrow`, `pg_served` |
 
-**Kernels** (`proofs`, 210 theorems in 14 modules), among them:
+**Kernels** (`proofs`, 518 theorems in 17 modules), among them:
 
 | Guarantee | Theorem |
 |---|---|
