@@ -77,12 +77,17 @@ async fn call(target: &JsValue, method: &str, args: &[JsValue]) -> Result<JsValu
     let value = Reflect::apply(&f, target, &array).map_err(js_err)?;
     // Binding methods return RPC promises, which are thenables but not
     // `Promise` instances; `Promise.resolve` awaits any thenable.
-    JsFuture::from(Promise::resolve(&value)).await.map_err(js_err)
+    JsFuture::from(Promise::resolve(&value))
+        .await
+        .map_err(js_err)
 }
 
 /// A short description of a value the binding returned, for error messages.
 fn describe(v: &JsValue) -> String {
-    js_sys::JSON::stringify(v).ok().and_then(|s| s.as_string()).unwrap_or_else(|| format!("{v:?}"))
+    js_sys::JSON::stringify(v)
+        .ok()
+        .and_then(|s| s.as_string())
+        .unwrap_or_else(|| format!("{v:?}"))
 }
 
 fn field(v: &JsValue, name: &str) -> Option<String> {
@@ -121,8 +126,12 @@ async fn open(binding: &JsValue, name: &str) -> Result<(Repo, String), String> {
         }
     };
     let info = call(&repo.0, "info", &[]).await?;
-    let remote = field(&info, "remote")
-        .ok_or_else(|| format!("Artifacts repository info has no remote: {}", describe(&info)))?;
+    let remote = field(&info, "remote").ok_or_else(|| {
+        format!(
+            "Artifacts repository info has no remote: {}",
+            describe(&info)
+        )
+    })?;
     Ok((repo, remote))
 }
 
@@ -182,7 +191,8 @@ pub async fn export(
     let refname = format!("refs/heads/{channel}");
     let (artifact, remote) = open(&binding, name).await?;
     let token = call(&artifact.0, "createToken", &["write".into(), 300.into()]).await?;
-    let token = field(&token, "plaintext").ok_or_else(|| format!("Artifacts returned no token: {}", describe(&token)))?;
+    let token = field(&token, "plaintext")
+        .ok_or_else(|| format!("Artifacts returned no token: {}", describe(&token)))?;
     let remote = remote.trim_end_matches('/');
     for _ in 0..3 {
         let refs = git::advertised_refs(
