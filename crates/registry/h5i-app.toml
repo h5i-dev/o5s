@@ -26,4 +26,6 @@ theorems = [
   "o5s_registry.Narrow.narrow_load",
   "o5s_registry.Served.pg_load_narrow",
   "o5s_registry.Served.pg_served",
+  "o5s_registry.Group.group_served",
+  "o5s_registry.Group.defer_repo",
 ]

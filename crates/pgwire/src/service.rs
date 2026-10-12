@@ -168,6 +168,17 @@ fn members_of_named(rows: &kernel::Rows, label: &[u8]) -> Result<Vec<Query>, DbE
 /// the batch. All queries but the members of a named channel go out in one
 /// roundtrip.
 pub async fn load(tx: &Tx<'_>, cmd: &kernel::Command) -> Result<kernel::Snapshot, DbError> {
+    load_with(tx, cmd, None).await
+}
+
+/// `load`, but with the repository row given instead of read: a grouped
+/// transaction keeps the row its earlier commands wrote in memory and stores
+/// it once at the end (`Group.group_served`).
+pub async fn load_with(
+    tx: &Tx<'_>,
+    cmd: &kernel::Command,
+    repository_row: Option<&kernel::Repository>,
+) -> Result<kernel::Snapshot, DbError> {
     use kernel::Command as C;
     use kernel::registry_tables as col;
     let mut q = Vec::new();
@@ -336,6 +347,14 @@ pub async fn load(tx: &Tx<'_>, cmd: &kernel::Command) -> Result<kernel::Snapshot
         }
     }
     let mut rows = kernel::Rows::default();
+    if let Some(r) = repository_row
+        && q.iter().any(|x| matches!(x.field, Field::Repository))
+    {
+        q.retain(|x| !matches!(x.field, Field::Repository));
+        if let h5i_app_sql::Write::Put { row, .. } = r.sql_put() {
+            field(&mut rows, Field::Repository).push(row);
+        }
+    }
     run(tx, q, &mut rows).await?;
     // Members of the named channel need its id first.
     let label = match cmd {
@@ -429,6 +448,18 @@ impl<C: Connector, R: Runtime> Service<C, R> {
         } else {
             None
         };
+        // An admission makes the channel's Git projection stale.
+        let merged = match &command {
+            Command::Merge { repo, channel, .. } | Command::MergeBatch { repo, channel, .. } => {
+                Some(crate::outbox::Outbox {
+                    org: actor.tenant,
+                    repo: repo.clone(),
+                    channel: channel.clone(),
+                    user: actor.user,
+                })
+            }
+            _ => None,
+        };
         let plan = plan(actor, view.as_deref(), command).map_err(Failure::Refused)?;
         let mut replies = Vec::new();
         for step in &plan.steps {
@@ -450,9 +481,15 @@ impl<C: Connector, R: Runtime> Service<C, R> {
             };
             let outcome = self
                 .engine
-                .execute(&step.principal, &step.command, idem, |r| {
-                    serde_json::to_vec(r).unwrap_or_default()
-                })
+                .execute(
+                    &step.principal,
+                    &step.command,
+                    idem,
+                    merged
+                        .clone()
+                        .filter(|_| matches!(step.command, kernel::Command::Merge { .. })),
+                    |r| serde_json::to_vec(r).unwrap_or_default(),
+                )
                 .await
                 .map_err(unavailable)?;
             match outcome {

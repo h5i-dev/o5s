@@ -23,6 +23,7 @@
 //! `h5i_app_pgsql` (both extracted to Lean). Statements are sent unnamed with
 //! their parameter types, as Hyperdrive needs.
 
+pub mod outbox;
 pub mod revoke;
 pub mod service;
 
@@ -244,6 +245,7 @@ pub fn ddl(schema: &str) -> Result<Vec<String>, DbError> {
         format!("SET LOCAL search_path TO {name}"),
     ];
     out.push(IDEMPOTENCY_DDL.into());
+    out.push(outbox::DDL.into());
     out.extend(revoke::DDL.iter().map(|d| d.to_string()));
     for t in &tables {
         out.push(text(&h5i_app_pgsql::create(t))?);
@@ -295,6 +297,7 @@ struct Queued {
     principal: kernel::Principal,
     cmd: kernel::Command,
     idem: Option<(String, Vec<u8>)>,
+    outbox: Option<outbox::Outbox>,
     encode: Box<dyn Fn(&kernel::Reply) -> Vec<u8> + Send + Sync>,
     done: futures::channel::oneshot::Sender<Result<Outcome, DbError>>,
 }
@@ -320,6 +323,9 @@ pub struct Engine<C: Connector, R: Runtime> {
     /// on every execution. Off behind transaction-mode poolers (Hyperdrive),
     /// which may run a later transaction on another server connection.
     pub prepared: bool,
+    /// Record each successful admission's channel in `o5s_export_pending`
+    /// within its transaction (the Worker, which exports after replying).
+    pub outbox: bool,
 }
 
 /// A pooled connection and, if enabled, its prepared statements by SQL text
@@ -429,6 +435,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
             group_commit: false,
             groups: Mutex::default(),
             prepared: false,
+            outbox: false,
         })
     }
 
@@ -536,10 +543,14 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         actor: &kernel::Principal,
         cmd: &kernel::Command,
         idem: Option<Idem<'_>>,
+        outbox: Option<outbox::Outbox>,
         encode: impl Fn(&kernel::Reply) -> Vec<u8> + Send + Sync + 'static,
     ) -> Result<Outcome, DbError> {
+        let outbox = outbox.filter(|_| self.outbox);
         if !self.group_commit {
-            return self.execute_one(actor, cmd, idem, &encode).await;
+            return self
+                .execute_one(actor, cmd, idem, outbox.as_ref(), &encode)
+                .await;
         }
         let tid = tenant(actor.scope)?;
         let (done, rx) = futures::channel::oneshot::channel();
@@ -550,6 +561,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
                 principal: *actor,
                 cmd: cmd.clone(),
                 idem: idem.map(|i| (i.key.to_string(), i.fingerprint)),
+                outbox,
                 encode: Box::new(encode),
                 done,
             });
@@ -619,7 +631,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
                 fingerprint: fingerprint.clone(),
             });
             let r = self
-                .execute_one(&q.principal, &q.cmd, idem, &q.encode)
+                .execute_one(&q.principal, &q.cmd, idem, q.outbox.as_ref(), &q.encode)
                 .await;
             let _ = q.done.send(r);
         }
@@ -658,49 +670,90 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         lap(0, &mut us);
         let tx = Tx { client, tid };
         let mut out = Vec::with_capacity(batch.len());
+        // The repository row the earlier commands wrote, kept here and stored
+        // once at the end; their other writes, and idempotency records, go
+        // out in the same flush as the next command's reads, ahead of them
+        // (`Group.group_served`, `Group.defer_repo`).
+        let mut repository: Option<kernel::Repository> = None;
+        let mut pending: Vec<kernel::Write> = Vec::new();
+        let mut records: Vec<(String, Vec<u8>, Vec<u8>)> = Vec::new();
+        let mut exports: Vec<(outbox::Outbox, u64)> = Vec::new();
         for q in batch {
-            if let Some((key, fingerprint)) = &q.idem {
-                let stored = client
-                    .query(
-                        "SELECT fingerprint, reply FROM h5i_idempotency WHERE tenant_id = $1 AND key = $2",
-                        &[(&tid, Type::INT8), (key, Type::TEXT)],
-                    )
-                    .await?;
-                lap(1, &mut us);
-                if let Some(row) = stored.first() {
-                    let fp: Vec<u8> = row.try_get(0)?;
-                    out.push(if &fp != fingerprint {
-                        Err(DbError::IdempotencyConflict)
-                    } else {
-                        Ok(Outcome::Replayed(row.try_get(1)?))
-                    });
-                    continue;
+            let flush = std::mem::take(&mut pending);
+            let recorded = std::mem::take(&mut records);
+            let lookup = async {
+                match &q.idem {
+                    Some((key, _)) => client
+                        .query(
+                            "SELECT fingerprint, reply FROM h5i_idempotency WHERE tenant_id = $1 AND key = $2",
+                            &[(&tid, Type::INT8), (key, Type::TEXT)],
+                        )
+                        .await
+                        .map(Some),
+                    None => Ok(None),
                 }
-            }
-            let snap = service::load(&tx, &q.cmd).await?;
+            };
+            let flush = kernel::sql_writes(&flush);
+            let (stored, recorded, stored_reply, snap) = futures::join!(
+                store(client, tid, &flush),
+                record(client, tid, &recorded),
+                lookup,
+                service::load_with(&tx, &q.cmd, repository.as_ref())
+            );
+            writes += stored? as u64;
+            recorded?;
             lap(2, &mut us);
+            if let (Some((_, fingerprint)), Some(row)) =
+                (&q.idem, stored_reply?.as_ref().and_then(|r| r.first()))
+            {
+                let fp: Vec<u8> = row.try_get(0)?;
+                out.push(if &fp != fingerprint {
+                    Err(DbError::IdempotencyConflict)
+                } else {
+                    Ok(Outcome::Replayed(row.try_get(1)?))
+                });
+                continue;
+            }
+            let snap = snap?;
             let decided = kernel::transition(&q.principal, &snap, &q.cmd);
             lap(3, &mut us);
             match decided {
                 Err(refusal) => out.push(Ok(Outcome::Done(Err(refusal)))),
                 Ok((ws, reply)) => {
-                    writes += store(client, tid, &kernel::sql_writes(&ws)).await? as u64;
-                    lap(4, &mut us);
+                    for w in ws.iter() {
+                        match w {
+                            kernel::Write::SetRepository(r) => repository = Some(r.clone()),
+                            other => pending.push(other.clone()),
+                        }
+                    }
                     if let Some((key, fingerprint)) = &q.idem {
-                        let bytes = (q.encode)(&reply);
-                        client
-                            .query(
-                                "INSERT INTO h5i_idempotency (tenant_id, key, fingerprint, reply) VALUES ($1, $2, $3, $4)",
-                                &[(&tid, Type::INT8), (key, Type::TEXT), (fingerprint, Type::BYTEA), (&bytes, Type::BYTEA)],
-                            )
-                            .await?;
-                        lap(5, &mut us);
+                        records.push((key.clone(), fingerprint.clone(), (q.encode)(&reply)));
+                    }
+                    if let (Some(o), Some(g)) = (&q.outbox, generation(&ws)) {
+                        exports.push((o.clone(), g));
                     }
                     out.push(Ok(Outcome::Done(Ok(reply))));
                 }
             }
         }
-        client.batch_execute("COMMIT").await.map_err(commit_error)?;
+        // The last flush: the remaining writes, the repository row, the
+        // idempotency records and COMMIT, in that order.
+        let last: Vec<kernel::Write> = repository
+            .into_iter()
+            .map(kernel::Write::SetRepository)
+            .collect();
+        let (pending, last) = (kernel::sql_writes(&pending), kernel::sql_writes(&last));
+        let (stored, stored_repository, recorded, marked, committed) = futures::join!(
+            store(client, tid, &pending),
+            store(client, tid, &last),
+            record(client, tid, &records),
+            mark_exports(client, &exports),
+            client.batch_execute("COMMIT")
+        );
+        writes += stored? as u64 + stored_repository? as u64;
+        recorded?;
+        marked?;
+        committed.map_err(commit_error)?;
         lap(6, &mut us);
         self.stats.groups.fetch_add(1, Ordering::Relaxed);
         self.stats
@@ -718,6 +771,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         actor: &kernel::Principal,
         cmd: &kernel::Command,
         idem: Option<Idem<'_>>,
+        outbox: Option<&outbox::Outbox>,
         encode: &(dyn Fn(&kernel::Reply) -> Vec<u8> + Sync),
     ) -> Result<Outcome, DbError> {
         let tid = tenant(actor.scope)?;
@@ -725,7 +779,15 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
             self.stats.attempts.fetch_add(1, Ordering::Relaxed);
             let lease = self.lease().await?;
             let result = self
-                .attempt(lease.client(), tid, actor, cmd, idem.as_ref(), encode)
+                .attempt(
+                    lease.client(),
+                    tid,
+                    actor,
+                    cmd,
+                    idem.as_ref(),
+                    outbox,
+                    encode,
+                )
                 .await;
             match result {
                 Ok(outcome) => {
@@ -764,6 +826,7 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         actor: &kernel::Principal,
         cmd: &kernel::Command,
         idem: Option<&Idem<'_>>,
+        outbox: Option<&outbox::Outbox>,
         encode: &(dyn Fn(&kernel::Reply) -> Vec<u8> + Sync),
     ) -> Result<Outcome, DbError> {
         // One flush: BEGIN and the lock, the idempotency lookup and the
@@ -825,13 +888,19 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
                         None => Ok(()),
                     }
                 };
-                let (stored, recorded, committed) = futures::join!(
+                let pending: Vec<_> = outbox
+                    .and_then(|o| Some((o.clone(), generation(&ws)?)))
+                    .into_iter()
+                    .collect();
+                let (stored, recorded, marked, committed) = futures::join!(
                     store(client, tid, &writes),
                     record,
+                    mark_exports(client, &pending),
                     client.batch_execute("COMMIT")
                 );
                 stored?;
                 recorded?;
+                marked?;
                 committed.map_err(commit_error)?;
                 Ok(Outcome::Done(Ok(reply)))
             }
@@ -884,6 +953,63 @@ impl Tx<'_> {
 
 /// Plan (`h5i_app_sql::plan`), compile (`h5i_app_pgsql::compile`) and run each
 /// write in order. The statements are pipelined on the connection.
+/// The generation (repository event counter) a write list reaches, if it
+/// writes the repository row.
+fn generation(ws: &[kernel::Write]) -> Option<u64> {
+    ws.iter().rev().find_map(|w| match w {
+        kernel::Write::SetRepository(r) => Some(r.events),
+        _ => None,
+    })
+}
+
+/// Record channels whose projections are now stale (`outbox`), pipelined.
+async fn mark_exports(client: &Conn, exports: &[(outbox::Outbox, u64)]) -> Result<(), DbError> {
+    let mut params = Vec::with_capacity(exports.len());
+    for (o, g) in exports {
+        params.push((o, outbox::record_params(o, *g)?));
+    }
+    let pending = params
+        .iter()
+        .map(|(o, (org, generation, user))| async move {
+            client
+                .query(
+                    outbox::RECORD,
+                    &[
+                        (org, Type::INT8),
+                        (&o.repo, Type::TEXT),
+                        (&o.channel, Type::TEXT),
+                        (generation, Type::INT8),
+                        (user, Type::INT8),
+                    ],
+                )
+                .await
+        });
+    for result in futures::future::join_all(pending).await {
+        result?;
+    }
+    Ok(())
+}
+
+/// Store idempotency records `(key, fingerprint, reply)`, pipelined.
+async fn record(
+    client: &Conn,
+    tid: i64,
+    records: &[(String, Vec<u8>, Vec<u8>)],
+) -> Result<(), DbError> {
+    let pending = records.iter().map(|(key, fingerprint, reply)| async move {
+        client
+            .query(
+                "INSERT INTO h5i_idempotency (tenant_id, key, fingerprint, reply) VALUES ($1, $2, $3, $4)",
+                &[(&tid, Type::INT8), (key, Type::TEXT), (fingerprint, Type::BYTEA), (reply, Type::BYTEA)],
+            )
+            .await
+    });
+    for result in futures::future::join_all(pending).await {
+        result?;
+    }
+    Ok(())
+}
+
 /// Send `ws` as pipelined statements; returns how many.
 async fn store(client: &Conn, tid: i64, ws: &Vec<Write>) -> Result<usize, DbError> {
     let tables = tables();

@@ -93,6 +93,13 @@ With statements kept prepared on each connection (commit `ee4dc71`; `O5S_PREPARE
 
 Loads, about 0.7 ms per command, are now most of the lock time.
 
+With the repository row kept in memory across a group and each command's writes sent with the next command's reads (commit after `687590d`), 3,000 agents on the host network:
+
+| Version | 800/s offered: achieved (p50) | 1,200/s offered: achieved (p50) | Lock time per command |
+|---|---:|---:|---:|
+| Prepared statements | 727 (191 ms) | 774 (726 ms) | 0.99 ms |
+| Grouped repository row | 748 (65 ms) | 894 (241 ms) | 0.86 ms |
+
 ### History length
 
 `o5s-load history` grows one repository through given sizes of admitted graph-document patches, each creating its own file, and at each size times single operations ten times with the whole history in place: a proposal, the admission of one approved patch, the channel view, one document, a Git export, and a workspace round trip (create it, edit a line, propose). `--shape chain` makes each patch depend on the previous one; `independent` patches have no dependencies, so each is a causal head.

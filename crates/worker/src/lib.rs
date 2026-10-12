@@ -26,8 +26,8 @@ use serde::Deserialize;
 use std::{sync::Arc, time::Duration};
 use tower_service::Service as _;
 use worker::{
-    Context, Env, HttpRequest, Hyperdrive, SecureTransport, Socket, event,
-    postgres_tls::PassthroughTls,
+    Context, Env, HttpRequest, Hyperdrive, ScheduleContext, ScheduledEvent, SecureTransport,
+    Socket, event, postgres_tls::PassthroughTls,
 };
 
 /// PostgreSQL schema of the registry tables, as the native server uses.
@@ -76,16 +76,22 @@ struct AppState {
     ctx: Arc<Context>,
 }
 
+/// The registry over Hyperdrive. Admissions record their channel's stale
+/// projection in the same transaction (`o5s_pgwire::outbox`).
+fn registry(env: &Env) -> Result<Registry, Failure> {
+    let hyperdrive = env
+        .hyperdrive("HYPERDRIVE")
+        .map_err(|e| Failure::Unavailable(e.to_string()))?;
+    // One Worker request runs its transactions one after another.
+    let mut engine = Engine::new(Hyper(hyperdrive), Delay, SCHEMA, 1)
+        .map_err(|e| Failure::Unavailable(e.to_string()))?;
+    engine.outbox = true;
+    Ok(Service::with_cache(engine, views().clone()))
+}
+
 impl AppState {
     fn registry(&self) -> Result<Registry, Failure> {
-        let hyperdrive = self
-            .env
-            .hyperdrive("HYPERDRIVE")
-            .map_err(|e| Failure::Unavailable(e.to_string()))?;
-        // One Worker request runs its transactions one after another.
-        let engine = Engine::new(Hyper(hyperdrive), Delay, SCHEMA, 1)
-            .map_err(|e| Failure::Unavailable(e.to_string()))?;
-        Ok(Service::with_cache(engine, views().clone()))
+        registry(&self.env)
     }
 
     fn auth(&self) -> Result<auth::HmacAuth, Response> {
@@ -181,6 +187,50 @@ fn router(env: Env, ctx: Context) -> Router {
             env: Arc::new(env),
             ctx: Arc::new(ctx),
         })
+}
+
+/// Deliver the Git projections admissions left stale: their export after
+/// the reply failed or never ran. A refused export (conflicts, a removed
+/// channel, lost access) is forgotten; the next admission records it again.
+#[event(scheduled)]
+async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    if let Err(e) = sweep(&env).await {
+        worker::console_error!("Git export sweep failed: {e:?}");
+    }
+}
+
+async fn sweep(env: &Env) -> Result<(), Failure> {
+    let registry = registry(env)?;
+    let pending = registry
+        .engine
+        .pending_exports(25)
+        .await
+        .map_err(o5s_pgwire::service::unavailable)?;
+    for p in pending {
+        let a = Actor {
+            tenant: p.outbox.org,
+            user: p.outbox.user,
+        };
+        let done = match export_channel(env, &a, &p.outbox.repo, &p.outbox.channel).await {
+            Ok(generation) => Some(generation),
+            Err(Failure::Refused(r)) => {
+                worker::console_error!("Git export of {} refused: {}", p.outbox.repo, r.0);
+                Some(p.generation)
+            }
+            Err(e) => {
+                worker::console_error!("Git export of {} failed: {e:?}", p.outbox.repo);
+                None
+            }
+        };
+        if let Some(generation) = done {
+            registry
+                .engine
+                .exported(&p.outbox, generation)
+                .await
+                .map_err(o5s_pgwire::service::unavailable)?;
+        }
+    }
+    Ok(())
 }
 
 #[event(fetch)]
@@ -302,34 +352,58 @@ async fn command(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> 
     if r.is_ok()
         && let Some((repo, channel)) = merged
     {
-        let state = s.clone();
+        let env = s.env.clone();
         s.ctx.wait_until(async move {
-            if let Err(e) = export_channel(&state, &a, &repo, &channel).await {
-                worker::console_error!("Git export after merge failed: {e:?}");
+            let outbox = o5s_pgwire::outbox::Outbox {
+                org: a.tenant,
+                repo: repo.clone(),
+                channel: channel.clone(),
+                user: a.user,
+            };
+            let delivered = match export_channel(&env, &a, &repo, &channel).await {
+                Ok(generation) => match registry(&env) {
+                    Ok(r) => r
+                        .engine
+                        .exported(&outbox, generation)
+                        .await
+                        .map_err(|e| format!("{e:?}")),
+                    Err(e) => Err(format!("{e:?}")),
+                },
+                Err(e) => Err(format!("{e:?}")),
+            };
+            // The scheduled sweep retries what is still recorded.
+            if let Err(e) = delivered {
+                worker::console_error!("Git export after merge failed: {e}");
             }
         });
     }
     reply(r)
 }
 
-/// Push a channel's admitted snapshot to its Artifacts repository.
-async fn export_channel(
-    s: &AppState,
+/// Push a channel's admitted snapshot to its Artifacts repository; returns
+/// the generation exported.
+async fn export_channel(env: &Env, a: &Actor, repo: &str, channel: &str) -> Result<u64, Failure> {
+    export_reply(env, a, repo, channel).await.map(|(_, g)| g)
+}
+
+async fn export_reply(
+    env: &Env,
     a: &Actor,
     repo: &str,
     channel: &str,
-) -> Result<serde_json::Value, Failure> {
-    let view_repo = s.registry()?.repository(a, repo).await?;
+) -> Result<(serde_json::Value, u64), Failure> {
+    let view_repo = registry(env)?.repository(a, repo).await?;
     let view = view_repo.materialize(channel).map_err(Failure::Refused)?;
-    artifacts::export(
-        &s.env,
+    let reply = artifacts::export(
+        env,
         &artifact_name(a, repo, None),
         channel,
         &view_repo,
         &view,
     )
     .await
-    .map_err(unavailable)
+    .map_err(unavailable)?;
+    Ok((reply, view_repo.generation))
 }
 
 #[worker::send]
@@ -352,7 +426,11 @@ async fn export(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> R
             "invalid channel name".into(),
         ))));
     }
-    reply(export_channel(&s, &a, &q.repo, &q.channel).await)
+    reply(
+        export_reply(&s.env, &a, &q.repo, &q.channel)
+            .await
+            .map(|(v, _)| v),
+    )
 }
 
 #[worker::send]
