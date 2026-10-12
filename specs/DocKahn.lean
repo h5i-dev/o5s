@@ -727,14 +727,15 @@ theorem inv_emit (ax : g.Ax) {atoms : List (alloc.vec.Vec U8)} {r : Nat} {k : do
 /-- The result of the Kahn loop: the layers are the depth layers, every
 unblocked live vertex is layered, the vertices left over are the blocked live
 ones, and the flag reports whether any exist. -/
-structure Final (atoms : List (alloc.vec.Vec U8)) (rem : List Bool)
+structure Final (atoms : List (alloc.vec.Vec U8)) (rest : List Bool)
     (layers : List (alloc.vec.Vec Usize)) (bytes : List U8) (b : Bool) : Prop where
   lay : ∀ j (h : j < layers.length) v, v ∈ (layers[j]).val.map (·.val) ↔ g.L v ∧ ¬ g.B v ∧ g.D v j
   lnd : ∀ L ∈ layers, (L.val.map (·.val)).Nodup ∧ L.val ≠ []
   all : ∀ v, g.L v → ¬ g.B v → ∃ j < layers.length, g.D v j
-  rem : ∀ v < g.n, remF rem v = true ↔ g.L v ∧ g.B v
+  rem : ∀ v < g.n, remF rest v = true ↔ g.L v ∧ g.B v
   blocked : b = true ↔ ∃ v, g.L v ∧ g.B v
   bytes : bytes = (layers.flatMap (fun L => L.val.map (·.val))).flatMap (atomB atoms)
+  rlen : rest.length = g.n
 
 theorem final_of (ax : g.Ax) {atoms} {r : Nat} {k : document.Kahn} (hI : g.Inv atoms r k)
     (hready : k.ready.val = []) :
@@ -774,7 +775,7 @@ theorem final_done (ax : g.Ax) {atoms} {r : Nat} {k : document.Kahn} (hI : g.Inv
         rw [← hI.left] at this; omega
     · exact (hI.blk hb).1
   obtain ⟨hall, hrem⟩ := final_of ax hI hready
-  refine ⟨hI.lay, hI.lnd, ?_, hrem, ?_, hI.bytes⟩
+  refine ⟨hI.lay, hI.lnd, ?_, hrem, ?_, hI.bytes, hI.rlen⟩
   · intro v hl hb; obtain ⟨j, hj, hd⟩ := hall v hl hb; exact ⟨j, by rw [hI.llen]; exact hj, hd⟩
   · constructor
     · intro h

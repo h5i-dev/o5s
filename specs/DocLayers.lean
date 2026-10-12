@@ -145,6 +145,122 @@ theorem delete_inserts_spec (doc : document.Doc) (wf : MatWF doc) :
          calc o.val.length ≤ d.val * doc.insertions.val.length := hinv
            _ ≤ (d.val + 1) * doc.insertions.val.length := Nat.mul_le_mul_right _ (by omega))
 
+/-! ## Edge rows -/
+
+theorem mem_addL_getD (rows : List (List Usize)) (a w : Usize) (u : Nat) (hu : u < rows.length)
+    (ha : a.val < rows.length) (v : Usize) :
+    v ∈ (addL rows a w)[u]?.getD [] ↔ v ∈ rows[u]?.getD [] ∨ (a.val = u ∧ v = w) := by
+  unfold addL
+  rw [List.getElem?_set]
+  by_cases h : a.val = u
+  · subst h
+    simp [ha, List.getElem?_eq_getElem ha, getElem!_pos rows a.val ha]
+  · simp [h]
+
+open Classical in
+theorem allStep_mem (edges : List (Usize × Usize × Usize)) (off : List Bool) (l : List Nat)
+    (rows0 : List (List Usize)) (hb : ∀ e ∈ edges, e.1.val < rows0.length) (u : Nat)
+    (hu : u < rows0.length) (v : Usize) :
+    v ∈ (l.foldl (allStep edges off) rows0)[u]?.getD [] ↔
+      v ∈ rows0[u]?.getD [] ∨ ∃ i ∈ l, ∃ h : liveEdge edges off i,
+        (edges[i]'h.1).1.val = u ∧ (edges[i]'h.1).2.1 = v := by
+  induction l generalizing rows0 with
+  | nil => simp
+  | cons i l ih =>
+    rw [List.foldl_cons]
+    have hlen : (allStep edges off rows0 i).length = rows0.length := by
+      unfold allStep; split_ifs <;> simp [addL_length]
+    rw [ih (allStep edges off rows0 i) (by rw [hlen]; exact hb) (by rw [hlen]; exact hu)]
+    unfold allStep
+    split_ifs with hl
+    · rw [mem_addL_getD rows0 _ _ u hu (hb _ (List.getElem_mem _)) v]
+      constructor
+      · rintro ((h | ⟨h1, h2⟩) | ⟨j, hj, hl', h1, h2⟩)
+        · exact .inl h
+        · exact .inr ⟨i, by simp, hl, h1, h2.symm⟩
+        · exact .inr ⟨j, by simp [hj], hl', h1, h2⟩
+      · rintro (h | ⟨j, hj, hl', h1, h2⟩)
+        · exact .inl (.inl h)
+        · rcases List.mem_cons.mp hj with rfl | hj
+          · exact .inl (.inr ⟨h1, h2.symm⟩)
+          · exact .inr ⟨j, hj, hl', h1, h2⟩
+    · constructor
+      · rintro (h | ⟨j, hj, hl', h1, h2⟩)
+        · exact .inl h
+        · exact .inr ⟨j, by simp [hj], hl', h1, h2⟩
+      · rintro (h | ⟨j, hj, hl', h1, h2⟩)
+        · exact .inl h
+        · rcases List.mem_cons.mp hj with rfl | hj
+          · exact absurd hl' hl
+          · exact .inr ⟨j, hj, hl', h1, h2⟩
+
+open Classical in
+theorem allStep_fold_length (edges : List (Usize × Usize × Usize)) (off : List Bool) (l : List Nat)
+    (rows0 : List (List Usize)) : (l.foldl (allStep edges off) rows0).length = rows0.length := by
+  induction l generalizing rows0 with
+  | nil => rfl
+  | cons i l ih => rw [List.foldl_cons, ih]; unfold allStep; split_ifs <;> simp [addL_length]
+
+/-- Edge `u → v` of the kernel's edge table that no retraction withdraws. -/
+def AliveEdge (doc : document.Doc) (u : Nat) (v : Usize) : Prop :=
+  ∃ i, ∃ h : i < doc.edges.val.length, ¬ (∃ x ∈ doc.retractions.val, x.1.val = i) ∧
+    (doc.edges.val[i]).1.val = u ∧ (doc.edges.val[i]).2.1 = v
+
+/-- The rows of `all_rows`: row `u` holds the targets of the live edges out of `u`. -/
+theorem all_rows_spec (doc : document.Doc)
+    (hb : ∀ e ∈ doc.edges.val, e.1.val < doc.atoms.val.length)
+    (hr : ∀ x ∈ doc.retractions.val, x.1.val < doc.edges.val.length)
+    (room : doc.edges.val.length < Usize.max) :
+    document.all_rows doc ⦃ rows => rows.val.length = doc.atoms.val.length ∧
+      ∀ (u : Nat) (hu : u < rows.val.length) (v : Usize), v ∈ (rows.val[u]).val ↔ AliveEdge doc u v ⦄ := by
+  unfold document.all_rows
+  h5i_step
+  all_goals first
+    | (intro x hx; exact hr x hx)
+    | (intro e he; simp at he)
+    | skip
+  all_goals first
+    | (have hb' : ∀ e ∈ doc.edges.val, e.1.val < rows.val.length := by
+         intro e he; rw [rows_post, List.length_replicate]
+         first | exact hb e he | exact hb _ _ _ he
+       have hempty : ∀ row ∈ rows.val, row.val = [] := by
+         intro row h; rw [rows_post] at h; rw [List.eq_of_mem_replicate h]; rfl
+       apply WP.spec_mono (all_rows_loop_spec doc.edges off rows (by rw [off_post]) hb' hempty room)
+       rintro r ⟨hr1, -⟩
+       have hlen : r.val.length = rows.val.length := by
+         have := congrArg List.length hr1
+         simp only [rowsL, List.length_map, allStep_fold_length] at this
+         exact this
+       have hrows0 : rowsL rows = List.replicate doc.atoms.val.length [] := by
+         simp [rowsL, rows_post]
+       refine ⟨by rw [hlen, rows_post, List.length_replicate], fun u hu v => ?_⟩
+       have hu0 : u < (rowsL rows).length := by rw [hrows0, List.length_replicate]; rw [hlen, rows_post] at hu; simpa using hu
+       have e1 : (r.val[u]).val = (rowsL r)[u]?.getD [] := by
+         simp [rowsL, List.getElem?_map, List.getElem?_eq_getElem hu]
+       rw [e1, hr1, allStep_mem _ _ _ _ (by rw [hrows0, List.length_replicate]; intro e he; exact (by
+         first | exact hb e he | exact hb _ _ _ he)) u hu0 v]
+       rw [hrows0]
+       have hnil : (List.replicate doc.atoms.val.length ([] : List Usize))[u]?.getD [] = [] := by
+         rw [List.getElem?_replicate]; split_ifs <;> rfl
+       rw [hnil]
+       unfold AliveEdge
+       constructor
+       · rintro (h | ⟨i, -, ⟨hi', hoff⟩, h1, h2⟩)
+         · simp at h
+         · refine ⟨i, hi', fun hw => ?_, h1, h2⟩
+           obtain ⟨x, hx, hx1⟩ := hw
+           have ht := (off_post1 i hi').mpr ⟨x.1, ⟨x.2, by simpa using hx⟩, hx1⟩
+           rw [List.getElem?_eq_getElem (by rw [off_post]; exact hi'), ht] at hoff
+           cases hoff
+       · rintro ⟨i, hi', hw, h1, h2⟩
+         refine .inr ⟨i, List.mem_range.mpr hi', ⟨hi', ?_⟩, h1, h2⟩
+         rw [List.getElem?_eq_getElem (by rw [off_post]; exact hi')]
+         cases hc : (off.val[i]'(by rw [off_post]; exact hi'))
+         · rfl
+         · exfalso; apply hw
+           obtain ⟨a, ⟨x, hx⟩, ha⟩ := (off_post1 i hi').mp hc
+           exact ⟨(a, x), hx, ha⟩)
+
 end o5s_kernel.DocKernel
 
 namespace o5s_kernel.DocKahn
