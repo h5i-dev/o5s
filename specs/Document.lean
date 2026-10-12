@@ -69,16 +69,17 @@ def TrOp (H : Hist) : Op → document.Op → Prop
 def Tr (H : Hist) (P : Patch) (dp : document.Patch) : Prop :=
   dp.deps.val.map (·.val) = P.deps.map (idx (ids H)) ∧ List.Forall₂ (TrOp H) P.ops dp.ops.val
 
-/-- `d` is the document the adapter holds after admitting `H` in order. -/
-inductive Replayed : document.Doc → Hist → Prop
-  | nil {d} : document.empty = ok d → Replayed d []
-  | snoc {d d' H P dp} : Replayed d H → Tr H P dp → document.commit d dp = ok d' →
-      Replayed d' (H ++ [P])
-
 /-- The adapter's preconditions before it calls the kernel: a new identity,
 distinct known dependencies, at least one operation. -/
 def Admissible (H : Hist) (P : Patch) : Prop :=
   P.id ∉ ids H ∧ P.deps.Nodup ∧ P.id ∉ P.deps ∧ (∀ q ∈ P.deps, q ∈ ids H) ∧ P.ops ≠ []
+
+/-- `d` is the document the adapter holds after admitting `H` in order: each
+patch was admissible, validated, translated and committed. -/
+inductive Replayed : document.Doc → Hist → Prop
+  | nil {d} : document.empty = ok d → Replayed d []
+  | snoc {d d' H P dp} : Replayed d H → Tr H P dp → Admissible H P →
+      DocModel.validate H P = .ok () → document.commit d dp = ok d' → Replayed d' (H ++ [P])
 
 /-- Sizes stay below the machine bound (indices, edge and atom counts). -/
 def Room (d : document.Doc) (dp : document.Patch) : Prop :=
@@ -89,25 +90,26 @@ def Room (d : document.Doc) (dp : document.Patch) : Prop :=
   d.deps.val.length + 1 < Usize.max ∧ d.deletions.val.length + dp.ops.val.length < Usize.max ∧
   d.insertions.val.length + dp.ops.val.length < Usize.max
 
-/-- The error a refusal stands for, as the adapter maps it (`model.rs`). -/
-def errorOf (P : Patch) (r : document.Refusal) : Option DocModel.Error :=
-  match P.ops[r.op.val]? with
+/-- The error a refusal `(kind, op, item)` stands for, as the adapter maps it
+(`model.rs`). -/
+def errorOfT (P : Patch) (r : U64 × Nat × Nat) : Option DocModel.Error :=
+  match P.ops[r.2.1]? with
   | none => none
   | some o =>
-    let anchor : Option Anchor := match o, r.item.val with
+    let anchor : Option Anchor := match o, r.2.2 with
       | .insert l _ _, 0 => some l
       | .insert _ r _, _ => some r
       | .delete ts, k => (ts[k]?).map .node
       | .order b _, 0 => some (.node b)
       | .order _ a, _ => some (.node a)
       | _, _ => none
-    let op : Option OpId := match o, r.item.val with
+    let op : Option OpId := match o, r.2.2 with
       | .restore d, _ => some d
       | .keep d _, 0 => some d
       | .keep _ i, _ => some i
       | .retract o, _ => some o
       | _, _ => none
-    match r.kind.val with
+    match r.1.val with
     | 1 => match op, anchor with
       | some o, _ => some (.unobservedPatch o.patch)
       | none, some (.node n) => some (.unobservedPatch n.op.patch)
@@ -123,6 +125,10 @@ def errorOf (P : Patch) (r : document.Refusal) : Option DocModel.Error :=
     | 10 => some .cycle
     | 11 => op.map .unknownOrder
     | _ => none
+
+/-- The error a kernel refusal stands for. -/
+def errorOf (P : Patch) (r : document.Refusal) : Option DocModel.Error :=
+  errorOfT P (r.kind, r.op.val, r.item.val)
 
 /-- T1.1/T1.2: the kernel validates exactly as the model, error included. -/
 theorem validate_refines (d : document.Doc) (H : Hist) (P : Patch) (dp : document.Patch)
