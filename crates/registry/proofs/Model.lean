@@ -221,7 +221,8 @@ theorem guarded_ok {a : Principal} {s : St} {n : alloc.vec.Vec U8} {need : U64} 
   · rename_i ha
     refine ⟨?_, h⟩
     by_contra hv
-    simp [authorize, readable, hv] at ha
+    have hf : visible a s.repo n = false := by simpa using hv
+    simp [authorize, readable, hf] at ha
 
 /-- What `transition` computes. -/
 def step (a : Principal) (s : St) : Command → Out

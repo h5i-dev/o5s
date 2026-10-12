@@ -145,16 +145,17 @@ theorem narrow_model (a : Principal) (full part : St) (c : Command) (hn : Narrow
       Model.guarded a part n need k = Model.guarded a full n need k' := by
     intro n need k k' hro e
     subst e
-    simp only [Model.guarded, Model.authorize, Model.readable, hr, hro]
+    unfold Model.guarded Model.authorize Model.readable
+    rw [hr, hro]
   cases c <;> simp only [Model.step, usesRoles] at hn hroles ⊢
   case Register => unfold Model.register; rw [find?_agree hn.1, any_agree hn.2]
   case Create => rw [hr]
-  case Fork => exact hg _ _ _ _ (hroles rfl) (fork_agree hr hn.1 hn.2.1 hn.2.2)
-  case Propose => exact hg _ _ _ _ (hroles rfl) (propose_agree hr hn.1 hn.2.1 hn.2.2)
-  case Approve => exact hg _ _ _ _ (hroles rfl) (by unfold Model.approve; rw [find?_agree hn, hr])
-  case Check => exact hg _ _ _ _ (hroles rfl) (by unfold Model.check; rw [find?_agree hn, hr])
-  case Merge => exact hg _ _ _ _ (hroles rfl) (merge_agree hr hn.1 hn.2.1 hn.2.2)
-  case Grant => exact hg _ _ _ _ (hroles rfl) (by simp only [Model.grant, hr, hroles rfl])
+  case Fork => exact hg _ _ _ _ (hroles trivial) (fork_agree hr hn.1 hn.2.1 hn.2.2)
+  case Propose => exact hg _ _ _ _ (hroles trivial) (propose_agree hr hn.1 hn.2.1 hn.2.2)
+  case Approve => exact hg _ _ _ _ (hroles trivial) (by unfold Model.approve; rw [find?_agree hn, hr])
+  case Check => exact hg _ _ _ _ (hroles trivial) (by unfold Model.check; rw [find?_agree hn, hr])
+  case Merge => exact hg _ _ _ _ (hroles trivial) (merge_agree hr hn.1 hn.2.1 hn.2.2)
+  case Grant => exact hg _ _ _ _ (hroles trivial) (by simp only [Model.grant, hr, hroles trivial])
 
 /-- **Narrow loads.** A run of the extracted `transition` on rows that agree
 with the whole tenant on every lookup the command makes computes what the

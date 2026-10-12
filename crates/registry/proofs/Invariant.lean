@@ -811,15 +811,15 @@ theorem inv_merge {s : St} (hi : Inv s) {u : U64} {n : alloc.vec.Vec U8} {ids : 
 
 /-! ## Every successful command keeps the invariant -/
 
-theorem inv_grant {s : St} (hi : Inv s) {a : Principal} {u lvl : U64} {ws r}
+theorem inv_grant {s : St} (hi : Inv s) (hcr : s.repo.created = true) {a : Principal} {u lvl : U64} {ws r}
     (h : Model.grant a s u lvl = .Ok (ws, r)) : Inv (applyAll s ws) := by
   unfold Model.grant at h
   split_ifs at h with h1 hm h3
   all_goals simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h
-  obtain ⟨rfl, -⟩ := h
-  have hinc := Refine.inc_val hm
-  rw [applyAll_eq]
-  split_ifs <;>
+  all_goals obtain ⟨rfl, -⟩ := h
+  all_goals have hinc := Refine.inc_val hm
+  all_goals rw [applyAll_eq]
+  all_goals (try split_ifs) <;>
     simp only [List.nil_append, List.cons_append, List.singleton_append, List.filterMap_cons,
       List.filterMap_nil, repoOf, patchOf, depOf, approvalOf, checkOf, channelOf, memberOf, pathOf, eventOf,
       bodyOf, listingOf, roleOf, puts_nil, puts_single, List.getLast?_singleton, Option.getD_some] <;>
@@ -830,6 +830,7 @@ theorem inv_grant {s : St} (hi : Inv s) {a : Principal} {u lvl : U64} {ws r}
       | exact hi.channel_fresh | exact hi.channel_labels | exact hi.member_keys | exact hi.members_placed
       | exact hi.members_known | exact hi.closed | exact hi.reviewed | exact hi.bodies_known
       | exact hi.path_keys | exact hi.path_fresh | exact hi.path_labels | exact hi.unborn
+      | (intro e; rw [hcr] at e; cases e)
       | (intro e he
          rcases mem_upsert_of he with rfl | he
          · exact le_refl _
@@ -851,7 +852,7 @@ theorem inv_step (a : Principal) {s : St} (hi : Inv s) (c : Command) {ws r}
          | exact inv_approve hi h
          | exact inv_check hi h
          | exact inv_merge hi h
-         | exact inv_grant hi h)
+         | exact inv_grant hi hcr h)
 
 /-- **Every successful run of the extracted `transition` keeps the invariant.** -/
 theorem inv_preserved (a : Principal) (s : Snapshot) (c : Command) (ws : alloc.vec.Vec Write)
@@ -921,8 +922,8 @@ theorem step_writes (a : Principal) {s : St} (c : Command) {ws r} (h : Model.ste
   case Grant =>
     unfold Model.grant at h
     split_ifs at h <;> simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h
-    obtain ⟨rfl, -⟩ := h
-    split_ifs <;> simp
+    all_goals obtain ⟨rfl, -⟩ := h
+    all_goals simp
   case Fork =>
     unfold Model.fork at h
     repeat' split at h
