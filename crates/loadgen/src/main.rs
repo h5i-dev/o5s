@@ -118,19 +118,20 @@ where
     Fut: std::future::Future<Output = Result<Value, String>>,
 {
     let started = tokio::time::Instant::now();
-    let results: Vec<(Duration, Result<Value, String>)> = stream::iter(jobs.into_iter().enumerate())
-        .map(|(k, j)| {
-            let at = started + Duration::from_secs_f64(k as f64 / rate);
-            let fut = f(j);
-            async move {
-                tokio::time::sleep_until(at).await;
-                let r = fut.await;
-                (at.elapsed(), r)
-            }
-        })
-        .buffer_unordered(100_000)
-        .collect()
-        .await;
+    let results: Vec<(Duration, Result<Value, String>)> =
+        stream::iter(jobs.into_iter().enumerate())
+            .map(|(k, j)| {
+                let at = started + Duration::from_secs_f64(k as f64 / rate);
+                let fut = f(j);
+                async move {
+                    tokio::time::sleep_until(at).await;
+                    let r = fut.await;
+                    (at.elapsed(), r)
+                }
+            })
+            .buffer_unordered(100_000)
+            .collect()
+            .await;
     let mut s = Samples::default();
     let mut values = Vec::new();
     for (d, r) in results {
@@ -305,18 +306,31 @@ async fn o5s(w: &Work, url: &str, tenant: u64) -> Value {
         let token = c.auth.issue(tenant, 1000 + i, u64::MAX / 2);
         async move {
             let Some(cli) = cli else {
-                return c.call(1000 + i, "/api/command", Some(body)).await.map(|v| json!({"repo":r,"patch":v["patch"]}));
+                return c
+                    .call(1000 + i, "/api/command", Some(body))
+                    .await
+                    .map(|v| json!({"repo":r,"patch":v["patch"]}));
             };
             match line {
                 Some(n) => {
-                    let text = std::fs::read_to_string(dir.join("base.txt")).map_err(|e| e.to_string())?;
+                    let text =
+                        std::fs::read_to_string(dir.join("base.txt")).map_err(|e| e.to_string())?;
                     let mut lines: Vec<String> = text.lines().map(|l| format!("{l}\n")).collect();
                     lines[n as usize] = content(i);
-                    std::fs::write(dir.join("base.txt"), lines.concat()).map_err(|e| e.to_string())?;
+                    std::fs::write(dir.join("base.txt"), lines.concat())
+                        .map_err(|e| e.to_string())?;
                 }
-                None => std::fs::write(dir.join(format!("agent-{i}.txt")), content(i)).map_err(|e| e.to_string())?,
+                None => std::fs::write(dir.join(format!("agent-{i}.txt")), content(i))
+                    .map_err(|e| e.to_string())?,
             }
-            let out = run_in(&dir, cli.to_str().unwrap(), &["propose", "--intent", &format!("agent {i}")], &token, url).await?;
+            let out = run_in(
+                &dir,
+                cli.to_str().unwrap(),
+                &["propose", "--intent", &format!("agent {i}")],
+                &token,
+                url,
+            )
+            .await?;
             let v: Value = serde_json::from_str(&out).map_err(|e| e.to_string())?;
             Ok(json!({"repo":r,"patch":v["patch"]}))
         }

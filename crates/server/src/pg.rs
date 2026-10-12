@@ -17,5 +17,7 @@ pub async fn connect(url: &str, schema: &str, connections: usize) -> Result<PgBa
     {
         engine.max_attempts = attempts;
     }
+    // Commands waiting for one repository share its next transaction.
+    engine.group_commit = std::env::var("O5S_GROUP_COMMIT").map_or(true, |v| v != "0");
     Ok(o5s_pgwire::service::Service::new(engine))
 }
