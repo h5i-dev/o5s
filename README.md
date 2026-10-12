@@ -63,9 +63,9 @@ See the [CLI manual](docs/cli.md) for line and graph edits, conflict resolution 
 | **Channel** | A named set of admitted patches that always includes every dependency of its members. `main` is created with the repository; `fork` copies a channel. |
 | **Admission** | A patch joins a channel when it has an independent approval and a passing check report, and its dependencies are already members. A batch is admitted all or nothing. |
 | **View** | The files a channel's patches produce. Concurrent edits of the same text stay visible as conflict alternatives until a resolution patch is admitted. |
-| **Documents** | Text can be edited by line ranges on an earlier version, or as a graph of stable text atoms that survive concurrent insertions and deletions. Binary and executable files are supported; symlinks and submodules are refused. |
+| **Documents** | Text can be edited by line ranges on an earlier version, or as a graph of stable text atoms that survive concurrent insertions and deletions. A renamed graph document keeps its identity, so concurrent edits of the old path follow it. Binary and executable files, symlinks and submodules are supported. |
 
-Agents keep using Git for their working copies. `o5s propose` reads staged, unstaged and untracked changes without touching the index; `o5s fetch` writes the admitted snapshot to `refs/o5s/main` without moving `HEAD`.
+Agents keep using Git for their working copies. `o5s propose` reads staged, unstaged and untracked changes without touching the index; `o5s fetch` writes the admitted snapshot to `refs/o5s/main` without moving `HEAD`. `o5s ci --command CMD` runs a check command on the immutable snapshot each proposal defines and reports the result as an independent check.
 
 ---
 
@@ -97,7 +97,9 @@ The registry kernel ([`crates/registry`](crates/registry)) makes every committed
 | PostgreSQL's partial, per-command loads compute what the whole repository specifies | `frame`, `Narrow.narrow_load` |
 | The store holds what committing computes | `Storage.stored` |
 
-The document kernels in [`proofs/`](proofs) prove admission, graph traversal, interval conflicts, checked rendering, frontiers and deletion tags. Not yet proved: the document graph adapter, conflict semantics, convergence and line merging. The [verification plan](docs/verification-plan.md) covers how to prove them. Hashing, authentication, edit preparation and Git export are tested native code.
+The kernels in [`proofs/`](proofs) prove admission, graph traversal, interval conflicts, checked rendering, frontiers and deletion tags. They also prove line merging: it never fails spuriously, and any order of the same concurrent edits merges to the same result (`LinesModel`).
+
+Graph documents, line ranges and causal head searches run on extracted kernels (`document`, `lines`, `causality`). Their refinement and convergence theorems are stated in [`specs/`](specs) against the extracted code, and are type-checked in CI but not yet proved ([proof scope](docs/proofs.md), [verification plan](docs/verification-plan.md)). Hashing, authentication and Git export are tested native code.
 
 ---
 
@@ -107,7 +109,7 @@ The document kernels in [`proofs/`](proofs) prove admission, graph traversal, in
 |---|---|---|
 | Local log (default) | A checksummed write-ahead log of committed kernel writes in `O5S_DATA`; `o5s-server verify`, `backup` and `import-json` | One server, development, tests |
 | PostgreSQL | One transaction per command under a per-repository lock, loading only the rows the command reads; idempotency keys and retries | Several server replicas sharing one database |
-| Cloudflare Workers | The same kernel and PostgreSQL service through Hyperdrive, with Git export to Cloudflare Artifacts | [`crates/worker`](crates/worker/README.md) |
+| Cloudflare Workers | The same kernel and PostgreSQL service through Hyperdrive. Git projections, clone access and per-agent workspaces live in Cloudflare Artifacts | [`crates/worker`](crates/worker/README.md) |
 
 Set `O5S_DATABASE_URL` to use PostgreSQL; `O5S_DATA`, `O5S_BIND` and `H5I_APP_SECRET` set the data directory, listen address and token signing key. The server serves `/healthz`, `/readyz`, `/metrics` and request IDs. [Storage and transactions](docs/storage.md) covers backups, secret rotation and the Git export guard. [Load testing](docs/load-testing.md) has throughput figures for both backends.
 

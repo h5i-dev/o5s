@@ -22,6 +22,26 @@ The results below are for 1,000 authors with 64 requests in flight, on the host 
 
 PostgreSQL ran in a local Docker container reached through Docker's port proxy, with a 32-connection pool. An uncontended approval takes 2.8 ms and a proposal 3.2 ms (`cargo run --release -p o5s-server --example pg_latency`): one simple-query roundtrip for `BEGIN`, the search path and the lock, two typed `SELECT`s, pipelined upserts, and `COMMIT`. A single hot repository is limited by those roundtrips under its lock, to about 350 transactions per second here. Unrelated repositories proceed in parallel. All runs completed with zero failed requests, zero retries and checked contents. The earlier SERIALIZABLE engine reached 95, 106 and 396 proposals/s on these workloads and retried 23% of attempts.
 
+### Pipelined PostgreSQL commands
+
+Since October 11, 2026 a PostgreSQL command sends `BEGIN`, the repository lock, the idempotency lookup and every independent load in one flush. It then sends its writes, the idempotency record and `COMMIT` in a second flush (`crates/pgwire`). A command therefore waits for two network roundtrips under the lock instead of about seven, plus one per dependency and path.
+
+The same three workloads, run back to back before (commit `0b73a23`) and after the change, with release builds and the same container:
+
+| Workload | Proposals/s before (p95) | Proposals/s after (p95) | Review pairs/s before | Review pairs/s after |
+|---|---:|---:|---:|---:|
+| Adjacent lines, one file | 211 (319 ms) | 208 (324 ms) | 184 | 178 |
+| One file each | 262 (261 ms) | 256 (272 ms) | 179 | 176 |
+| One repository each | 2,140 (59 ms) | 2,099 (58 ms) | 3,898 | 4,058 |
+
+There was no measurable change here. An uncontended proposal took 3.4 ms before and 3.5 ms after (`pg_latency`). With `synchronous_commit = off`, the adjacent-lines workload reached 219 proposals/s, so the WAL flush is not the limit either. Inside this container even `SELECT 1` takes 0.17–0.48 ms to execute, while a TCP connect to its port takes 0.06 ms. A hot repository is limited by the execution time of its dozen statements under the lock, not by roundtrips, so pipelining cannot help on this host. It matters where each roundtrip is long, as from a Worker through Hyperdrive to a hosted database.
+
+Raising a single repository's rate further needs fewer statements per command, for example multi-row writes or several commands per transaction. Unrelated repositories already scale with the connection pool.
+
+### Open-loop runs
+
+`o5s-load o5s --rate R` sends proposals at a fixed rate of R per second, whatever the server's latency, and measures each from its scheduled send time. Queueing behind an overloaded server therefore counts toward latency instead of slowing the client down. Without `--rate`, the clients are closed loop as above.
+
 ## Python driver
 
 `scripts/load.py` drives the same HTTP commands as clients. It creates one identity per author and separate identities for review and check reports. Proposals run concurrently, followed by concurrent review/check reports and admission batches. Each run compares forward and reverse admission orders, checks every admitted patch's membership, and checks output bytes or retained conflict alternatives. It also checks that self-approval and unreviewed admission are refused without changing the channel view. A failed check gives a nonzero exit status.
