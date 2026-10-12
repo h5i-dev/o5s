@@ -52,6 +52,18 @@ In the adjacent-lines run, 3,016 commands committed in 116 transactions, about 2
 
 `o5s-load o5s --rate R` sends proposals at a fixed rate of R per second, whatever the server's latency, and measures each from its scheduled send time. Queueing behind an overloaded server therefore counts toward latency instead of slowing the client down. Without `--rate`, the clients are closed loop as above.
 
+With group commit, 2,000 agents proposing to one file each in one repository, at fixed offered rates:
+
+| Offered proposals/s | Achieved | p50 | p95 | p99 |
+|---:|---:|---:|---:|---:|
+| 100 | 100 | 5 ms | 5 ms | 6 ms |
+| 200 | 200 | 5 ms | 6 ms | 9 ms |
+| 300 | 300 | 4 ms | 11 ms | 18 ms |
+| 400 | 395 | 71 ms | 265 ms | 284 ms |
+| 800 | 498 | 611 ms | 1,443 ms | 1,521 ms |
+
+Up to 300 per second, a proposal costs about one uncontended transaction. Near 400 per second, the queue starts to form, and past about 500 per second (the closed-loop maximum above) it grows for the whole run. No request failed and every content check passed.
+
 ## Python driver
 
 `scripts/load.py` drives the same HTTP commands as clients. It creates one identity per author and separate identities for review and check reports. Proposals run concurrently, followed by concurrent review/check reports and admission batches. Each run compares forward and reverse admission orders, checks every admitted patch's membership, and checks output bytes or retained conflict alternatives. It also checks that self-approval and unreviewed admission are refused without changing the channel view. A failed check gives a nonzero exit status.
