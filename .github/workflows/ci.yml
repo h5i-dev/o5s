@@ -1,0 +1,118 @@
+# Format, tests (including PostgreSQL), the Worker build, the JavaScript
+# tests, the Lean proof gate, and a check that the committed Lean is exactly
+# what the Rust kernels extract to. `scripts/verify.sh` runs the same locally.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  # The h5i release whose `h5i app` matches the h5i-app 0.1.1 crates, and the
+  # Aeneas commit pinned in both lakefiles.
+  H5I_VERSION: v0.5.0
+  AENEAS_REV: b86120db3183b0107eb5f2637b11c424cd06ef1c
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: o5s
+          POSTGRES_PASSWORD: o5s
+          POSTGRES_DB: o5s
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U o5s"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      O5S_TEST_DATABASE_URL: postgres://o5s:o5s@127.0.0.1:5432/o5s
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo test --workspace --locked
+      - run: cargo check -p o5s-worker --target wasm32-unknown-unknown --locked
+
+  javascript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test cloudflare/worker.test.mjs crates/server/tests/ui.test.mjs
+      - name: Admin UI script syntax
+        run: >-
+          node --input-type=module -e 'import fs from "node:fs"; import vm from "node:vm";
+          const html = fs.readFileSync("crates/server/src/index.html", "utf8");
+          const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];
+          if (!scripts.length) throw Error("No UI script found");
+          for (const s of scripts) new vm.Script(s[1]);'
+
+  # No sorry, native_decide or axiom; every hand-written theorem on Lean's
+  # three standard axioms; every theorem named in h5i-app.toml present.
+  lean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install elan and h5i
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          curl -fsSL https://raw.githubusercontent.com/h5i-dev/h5i/$H5I_VERSION/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/h5i/lake
+            proofs/.lake
+            crates/registry/proofs/.lake
+          key: lake-${{ hashFiles('**/lean-toolchain', '**/lakefile.lean', '**/lake-manifest.json') }}-${{ github.sha }}
+          restore-keys: |
+            lake-${{ hashFiles('**/lean-toolchain', '**/lakefile.lean', '**/lake-manifest.json') }}-
+      - run: h5i app check .
+      - run: h5i app check crates/registry
+
+  # The committed proofs/generated/ must be what Charon and Aeneas extract
+  # from the kernels today.
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install h5i
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/h5i-dev/h5i/$H5I_VERSION/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            extra-substituters = https://hacl.cachix.org
+            extra-trusted-public-keys = hacl.cachix.org-1:FzsZ2xsByOwKwIWNPII7yMOelJNDZ12mDAj3d1eGX0c=
+      - uses: DeterminateSystems/magic-nix-cache-action@v8
+      - name: Build Charon and Aeneas at the pinned commit
+        run: |
+          nix build "github:AeneasVerif/aeneas/$AENEAS_REV" -o "$RUNNER_TEMP/aeneas" -L
+          nix build "github:AeneasVerif/aeneas/$AENEAS_REV#charon" -o "$RUNNER_TEMP/charon" -L
+          echo "$RUNNER_TEMP/aeneas/bin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/charon/bin" >> "$GITHUB_PATH"
+      - run: h5i app extract --check . crates/registry
