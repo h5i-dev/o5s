@@ -1,25 +1,180 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>o5s · Collaboration console</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>o5s · version control for many concurrent agents</title>
+<meta name="theme-color" content="#D21C1C">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@300..700&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap">
 <style>
-:root{color-scheme:dark;--bg:#0b111b;--panel:#111a27;--line:#253143;--muted:#8e9db2;--text:#edf1f6;--accent:#b9f878;--conflict:#ffb780}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer;background:#1d2b3d;border:1px solid #344359;color:var(--text);padding:9px 13px;border-radius:7px}button:hover{border-color:var(--accent)}button:disabled{opacity:.4;cursor:default}input,select,textarea{background:#0c1420;border:1px solid var(--line);border-radius:7px;color:var(--text);padding:10px;max-width:100%}textarea{width:100%;resize:vertical;min-height:82px;font:13px ui-monospace,monospace}input:focus,textarea:focus{outline:1px solid var(--accent)}header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:18px 30px;gap:20px}.brand{font-size:26px;font-weight:750;letter-spacing:-1px}.brand span{font-size:12px;color:var(--muted);font-weight:400;letter-spacing:0;margin-left:15px}.pill{font:11px ui-monospace,monospace;background:#1a3024;color:var(--accent);padding:6px 10px;border-radius:20px}.session{display:flex;gap:8px}.session input{width:310px}main{max-width:1460px;margin:auto;padding:30px}.intro{display:flex;justify-content:space-between;align-items:end;margin-bottom:25px}.eyebrow{text-transform:uppercase;letter-spacing:2px;font-size:11px;color:var(--accent)}h1{font-size:35px;letter-spacing:-1.2px;margin:9px 0}p{color:var(--muted);line-height:1.7}h2{font-size:15px;margin:0}h3{font-size:14px;margin:0}.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:20px}.toolbar input{width:180px}.primary{background:var(--accent);color:#102015;border-color:var(--accent);font-weight:650}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:20px 0}.metric,.panel{background:var(--panel);border:1px solid var(--line);border-radius:11px}.metric{padding:17px}.metric strong{font-size:27px;display:block;margin-top:5px}.metric span{font-size:12px;color:var(--muted)}.grid{display:grid;grid-template-columns:1.7fr 1fr;gap:20px}.panel-head{padding:17px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}.panel-body{padding:20px}.stack{display:grid;gap:20px}.graph{overflow:auto;padding:10px 20px;background:linear-gradient(transparent 23px,#172131 24px);background-size:24px 24px}.graph svg{display:block;min-height:90px}.muted{color:var(--muted);font-size:12px}.card{border-bottom:1px solid var(--line);padding:17px 20px}.card:last-child{border-bottom:0}.card-top{display:flex;justify-content:space-between;gap:10px;margin-bottom:8px}.card p{margin:5px 0 12px;color:var(--text);white-space:pre-wrap}.hash{font:11px ui-monospace,monospace;color:var(--muted)}.tag{font-size:11px;border:1px solid var(--line);padding:3px 7px;border-radius:5px;color:var(--muted)}.tag.good{color:var(--accent)}.tag.warn{color:var(--conflict)}.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.actions button{font-size:12px;padding:6px 9px}pre{background:#0b131e;border:1px solid var(--line);padding:12px;border-radius:7px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.7 ui-monospace,monospace;max-height:230px;overflow:auto}.conflict{border-left:2px solid var(--conflict);padding-left:15px;margin-bottom:25px}.conflict h3{color:var(--conflict)}label{display:block;color:var(--muted);font-size:12px;margin:13px 0 6px}.field-row{display:flex;gap:10px}.field-row input{flex:1}.status{position:sticky;bottom:16px;margin-top:20px;padding:12px 16px;border:1px solid var(--line);background:#172438;border-radius:8px;display:none;white-space:pre-wrap}.status.error{color:var(--conflict);border-color:#64452e}details{margin-top:15px}summary{cursor:pointer;color:var(--muted);font-size:12px}.empty{padding:28px;color:var(--muted);text-align:center}.activity{max-height:220px;overflow:auto}.activity div{font:12px/2 ui-monospace,monospace;color:var(--muted)}footer{padding:25px 0;color:var(--muted);font-size:11px;border-top:1px solid var(--line);margin-top:30px}@media(max-width:900px){header,.intro{align-items:start;flex-direction:column}.grid{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}main{padding:20px}.session input{width:240px}h1{font-size:28px}}
+/* Ground and accent follow h5i (../h5i/docs/_static/console-mock.css); layout and type follow hancore.dev. */
+:root{color-scheme:dark;--ground:#050506;--surface:#0d0d10;--raised:#16161a;--line:#24242a;--line-strong:#34343c;--ink:#ededf0;--ink-2:#a8a8b2;--ink-3:#6d6d77;--red:#d9231b;--accent:#ff6258;--accent-hi:#ff8a82;--green:#5cbf88;--amber:#d9a441;--cyan:#7db8d3;
+--sans:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;--serif:"Instrument Serif",Georgia,serif;--mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace}
+*,*::before,*::after{box-sizing:border-box}html,body{margin:0}body{background:var(--ground);color:var(--ink);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+a,button{color:inherit}button,input,select{font:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.mono{font:400 11px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+[hidden]{display:none!important}
 
-/* Theme tokens match ../h5i/web/src/theme.css (Apache-2.0). */
-:root{--ground:#0a0a0c;--surface:#101013;--surface-2:#16161a;--raised:#1d1d22;--hover:#202026;--line:#24242a;--line-strong:#34343c;--ink:#ededf0;--ink-2:#a8a8b2;--ink-3:#75757f;--accent:#ff6258;--accent-hi:#ff8a82;--green:#5cbf88;--amber:#d9a441;--cyan:#7db8d3;--violet:#b08ad6;--bg:var(--ground);--panel:var(--surface);--muted:var(--ink-2);--text:var(--ink);--conflict:var(--amber);--font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;--font-mono:"SFMono-Regular",Menlo,Consolas,"DejaVu Sans Mono",monospace}
-body{font:13.5px var(--font-ui)}header{padding:14px 24px;background:var(--surface);position:sticky;top:0;z-index:10}.brand{font-size:23px}main{padding:24px;max-width:1500px}.intro{margin-bottom:18px}h1{font-size:27px;margin:6px 0}.intro p{margin:0}.eyebrow{letter-spacing:1px}.pill{background:var(--raised);color:var(--ink-2);border-radius:4px}.toolbar{padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:4px}.toolbar #repositories{min-width:190px}.toolbar #channel{min-width:120px}.toolbar #export{margin-left:auto}button{background:var(--raised);border-color:var(--line-strong);border-radius:4px}button:hover{background:var(--hover);border-color:var(--accent)}input,select,textarea{background:var(--ground);border-radius:4px}.primary{background:var(--raised);color:var(--ink);border-color:var(--accent)}.primary:hover{background:var(--hover)}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.metric,.panel{border-radius:4px}.metrics{gap:10px;margin:16px 0}.metric{padding:12px 16px}.metric strong{font-size:23px}.metric:last-child strong{color:var(--amber)}.grid{grid-template-columns:minmax(0,1.5fr) minmax(330px,1fr);gap:16px;align-items:start}.stack{gap:16px}.panel-head{padding:13px 16px}.panel-body,.card{padding:16px}.grid>.stack:nth-child(2){position:sticky;top:85px}.card-top{margin-bottom:6px}.card p{max-width:75ch}.tag.good{color:var(--green)}pre{background:var(--ground);font-family:var(--font-mono);border-radius:4px}.graph{background:var(--ground)}.status{background:var(--raised);z-index:11;border-radius:4px}.status.error{border-color:var(--amber)}.queue-tools{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line)}.queue-tools input{flex:1;min-width:0}.conflict{background:rgba(217,164,65,.05);padding:12px;border-radius:4px;margin-bottom:16px}.conflict .actions{position:sticky;bottom:0}.conflict pre{max-height:150px}.panel-head a{color:var(--accent);text-decoration:none}.empty{text-align:left}.activity{max-height:160px}.graph-section{padding:14px 16px}.graph-section summary{font-size:13px;color:var(--ink-2)}.graph-section .graph{padding-top:16px}.context{font:12px var(--font-mono);color:var(--ink-2);padding:8px 0}#proposal-panel{scroll-margin-top:90px}#files-panel{scroll-margin-top:90px}#work{color:var(--ink-3)}@media(max-width:1000px){.grid{grid-template-columns:1fr}.grid>.stack:nth-child(2){position:static}.toolbar #export{margin-left:0}.intro{align-items:start}.session{max-width:100%}.session input{min-width:0}.queue-tools{flex-wrap:wrap}}
+/* Frame shared by both pages */
+.frame-top{position:fixed;top:0;left:0;right:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 40px;pointer-events:none}
+.frame-top>*{pointer-events:auto}
+.brand{display:inline-flex;align-items:center;gap:12px;min-height:44px;color:var(--ink-2);font:500 11px var(--sans);letter-spacing:.3em;text-decoration:none;text-transform:lowercase}
+.brand svg{width:22px;height:22px}
+.nav{display:flex;gap:4px}
+.nav a{display:inline-flex;align-items:center;min-height:44px;padding:0 10px;color:var(--ink-3);font:400 11px/1 var(--mono);letter-spacing:.14em;text-decoration:none;text-transform:lowercase}
+.nav a:hover{color:var(--ink)}.nav a[aria-current="page"]{color:var(--ink);text-decoration:underline;text-decoration-color:var(--accent);text-underline-offset:7px}
 
-#document-panel{scroll-margin-top:90px}.document-notice{border-left:3px solid var(--amber);padding:8px 12px;margin-bottom:16px}.document-notice p{margin:0}.node-list{display:grid;gap:10px}.node-card{padding:12px;border:1px solid var(--line);border-radius:4px}.node-card pre{margin:8px 0}.node-card summary{color:var(--ink-2)}.graph-conflict-title{color:var(--amber)}.hash{overflow-wrap:anywhere}.graph-operation{border-left:2px solid var(--cyan);padding-left:12px;margin-top:12px}.form-note{color:var(--ink-2);font-size:12px;line-height:1.6}#graph-fields textarea{min-height:190px}#content[hidden],#content-label[hidden],#delete-label[hidden]{display:none}
+/* Landing */
+.stage{position:relative;height:100svh;min-height:600px;overflow:hidden}
+.wall{position:absolute;inset:0;width:100%;height:100%;display:block}
+.hero{position:absolute;left:40px;bottom:96px;z-index:5;max-width:min(620px,calc(100% - 80px));pointer-events:none}
+.hero .kicker{color:var(--accent);margin-bottom:18px}
+.hero h1{margin:0;font:400 clamp(40px,6.2vw,84px)/.98 var(--serif);letter-spacing:-.01em}
+.hero h1 i{color:var(--accent)}
+.hero p{margin:22px 0 0;max-width:520px;color:var(--ink-2);font-size:15px;line-height:1.6}
+.enter{position:absolute;right:40px;bottom:30px;z-index:6;display:inline-flex;align-items:center;gap:10px;min-height:44px;color:var(--ink);font:500 11px var(--sans);letter-spacing:.3em;text-transform:uppercase;text-decoration:none}
+.enter:hover{color:var(--accent)}
+.note{position:absolute;left:40px;bottom:30px;z-index:5;margin:0;color:var(--ink-3);font:400 11px/44px var(--mono);letter-spacing:.08em}
+.scrim{position:absolute;inset:0;z-index:2;background:linear-gradient(90deg,rgba(5,5,6,.9) 0,rgba(5,5,6,.55) 38%,rgba(5,5,6,0) 62%),linear-gradient(0deg,rgba(5,5,6,.85) 0,rgba(5,5,6,0) 40%);pointer-events:none}
+.facts{position:relative;z-index:3;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--line)}
+.fact{padding:34px 40px 40px;border-right:1px solid var(--line)}.fact:last-child{border-right:0}
+.fact .mono{color:var(--accent)}
+.fact h2{margin:14px 0 10px;font:400 28px/1.1 var(--serif)}
+.fact p{margin:0;color:var(--ink-2);font-size:13.5px;line-height:1.6}
+.how{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0;border-top:1px solid var(--line)}
+.how>div{padding:40px}.how>div+div{border-left:1px solid var(--line)}
+.how h2{margin:0 0 16px;font:400 34px/1.05 var(--serif)}.how h2 i{color:var(--accent)}
+.how p{color:var(--ink-2);margin:0 0 14px;max-width:56ch}
+.code{margin:0;padding:22px 24px;background:var(--surface);border:1px solid var(--line);font:12.5px/1.9 var(--mono);color:var(--ink-2);overflow:auto;white-space:pre}
+.code b{color:var(--ink);font-weight:500}.code em{color:var(--ink-3);font-style:normal}
+.site-foot{display:flex;justify-content:space-between;gap:16px;padding:22px 40px;border-top:1px solid var(--line);color:var(--ink-3);font:400 11px var(--mono);letter-spacing:.08em}
+
+/* Repositories */
+.console{min-height:100svh;padding:96px 40px 40px;max-width:1520px;margin:0 auto}
+.console-head{display:flex;justify-content:space-between;align-items:end;gap:24px;flex-wrap:wrap;margin-bottom:26px}
+.console-head h1{margin:8px 0 0;font:400 46px/1 var(--serif)}.console-head h1 i{color:var(--accent)}
+.console-head .mono{color:var(--accent)}
+.session{display:flex;gap:8px;align-items:center}
+.console-head .identity{color:var(--ink-3);margin-right:8px}
+input,select{background:var(--surface);border:1px solid var(--line);color:var(--ink);padding:9px 11px;border-radius:2px;min-height:38px}
+input::placeholder{color:var(--ink-3)}
+.btn{background:transparent;border:1px solid var(--line-strong);color:var(--ink);padding:0 14px;min-height:38px;border-radius:2px;cursor:pointer;font:500 11px var(--sans);letter-spacing:.2em;text-transform:uppercase}
+.btn:hover{border-color:var(--accent);color:var(--accent)}.btn:disabled{opacity:.35;cursor:default}
+.btn.small{min-height:30px;padding:0 10px;font-size:10px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.toolbar #search{flex:1;min-width:200px}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-bottom:1px solid var(--line);margin-bottom:24px}
+.metric{padding:18px 0 20px}.metric+.metric{padding-left:22px;border-left:1px solid var(--line)}
+.metric span{color:var(--ink-3)}.metric strong{display:block;margin-top:10px;font:400 44px/1 var(--serif)}
+.metric.warn strong{color:var(--amber)}
+.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,1fr);gap:24px;align-items:start}
+.stack{display:grid;gap:24px}
+.panel{border:1px solid var(--line);background:var(--surface)}
+.panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.panel-head h2{margin:0;font:500 11px var(--sans);letter-spacing:.24em;text-transform:uppercase;color:var(--ink-2)}
+.panel-body{padding:18px}
+.muted{color:var(--ink-3);font-size:12px}
+.card{padding:16px 18px;border-bottom:1px solid var(--line)}.card:last-child{border-bottom:0}
+.card-top{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.card h3{margin:0;font:500 13px var(--mono);color:var(--ink)}
+.card p{margin:8px 0 10px;white-space:pre-wrap}
+.hash{font:11px var(--mono);color:var(--ink-3);overflow-wrap:anywhere;margin-top:6px}
+.tag{font:500 10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);border:1px solid var(--line-strong);padding:3px 7px}
+.tag.good{color:var(--green);border-color:rgba(92,191,136,.4)}.tag.ready{color:var(--accent);border-color:rgba(255,98,88,.4)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+pre{margin:8px 0;background:var(--ground);border:1px solid var(--line);padding:12px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.7 var(--mono);max-height:260px;overflow:auto}
+details{margin-top:10px}summary{cursor:pointer;color:var(--ink-2);font-size:12px}
+.conflict{border-left:2px solid var(--amber);padding:10px 14px;margin-bottom:14px;background:rgba(217,164,65,.04)}
+.conflict h3{margin:0 0 6px;color:var(--amber);font:500 13px var(--mono)}
+.graph-operation{border-left:2px solid var(--cyan);padding-left:12px;margin-top:12px}
+.node-card{padding:10px 12px;border:1px solid var(--line);margin-top:8px}.node-card h3{font:500 12px var(--mono);margin:0}
+.document-notice{border-left:2px solid var(--amber);padding:6px 12px;margin-bottom:12px}.document-notice p{margin:0}
+.context{font:12px var(--mono);color:var(--ink-3);padding:6px 0}
+.activity{max-height:240px;overflow:auto}.activity div{font:12px/2 var(--mono);color:var(--ink-3)}
+.graph{overflow:auto;padding:12px 18px;background:var(--ground)}
+.empty{padding:26px 18px;color:var(--ink-3)}
+.status{position:fixed;left:40px;bottom:20px;z-index:30;max-width:560px;padding:10px 14px;border:1px solid var(--line-strong);background:var(--raised);font:12px var(--mono);display:none;white-space:pre-wrap}
+.status.error{border-color:var(--accent);color:var(--accent-hi)}
+@media(max-width:1000px){.facts{grid-template-columns:repeat(2,minmax(0,1fr))}.how{grid-template-columns:1fr}.how>div+div{border-left:0;border-top:1px solid var(--line)}.grid{grid-template-columns:1fr}}
+@media(max-width:640px){.frame-top{padding:10px 16px}.brand span{display:none}.hero{left:16px;bottom:90px;max-width:calc(100% - 32px)}.enter{right:16px}.note{left:16px}.facts{grid-template-columns:1fr}.fact{border-right:0;border-bottom:1px solid var(--line);padding:26px 16px}.how>div{padding:26px 16px}.console{padding:84px 16px 32px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metric+.metric{padding-left:14px}.site-foot{padding:18px 16px;flex-direction:column}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 </style></head><body>
-<header><div class="brand">o5s<span>collaboration console</span></div><div class="session"><input id="token" type="password" placeholder="Paste your agent’s bearer token" autocomplete="off" aria-label="Bearer token"><button id="connect">Connect</button></div></header>
-<main><div class="intro"><div><div class="eyebrow">Repository / Review / Integration</div><h1>Review and integrate changes.</h1><p>Inspect intent and edits, check readiness, then integrate. Conflicts remain visible until resolved.</p></div><span class="pill" id="identity">LOCAL / DISCONNECTED</span></div>
-<div class="toolbar"><select id="repositories" aria-label="Repository"><option value="">Select repository</option></select><input id="new-repo" placeholder="Repository name" aria-label="New repository name"><button id="create">Create repository</button><select id="channel" aria-label="Channel"><option>main</option></select><button id="fork">Fork view</button><button id="refresh">Refresh</button><button id="worktree">Create workspace</button><button id="export">Export to local Git</button></div>
-<div class="metrics"><div class="metric"><span>Immutable patches</span><strong id="m-patches">—</strong></div><div class="metric"><span>Integrated in this view</span><strong id="m-merged">—</strong></div><div class="metric"><span>Awaiting integration</span><strong id="m-pending">—</strong></div><div class="metric"><span>Unresolved paths</span><strong id="m-conflicts">—</strong></div></div>
-<div class="grid"><div class="stack"><section class="panel" id="files-panel"><div class="panel-head"><h2>Channel files & conflicts</h2><span class="muted">files, graph order & conflicts</span></div><div class="panel-body" id="files"><p>No view selected.</p></div></section><section class="panel" id="document-panel" hidden tabindex="-1" aria-labelledby="document-title"><div class="panel-head"><h2 id="document-title">Document graph</h2><button type="button" id="close-document" aria-label="Close document inspection">Close</button></div><div class="panel-body" id="document-details"></div></section><section class="panel"><div class="panel-head"><h2>Patch proposals</h2><div class="actions"><span class="muted" id="count"></span><button id="integrate-ready" disabled>Integrate ready patches</button></div></div><div class="queue-tools"><input id="search" type="search" placeholder="Find by intent, path or patch ID" aria-label="Search patches"><select id="filter" aria-label="Review queue filter"><option value="pending">Awaiting integration</option><option value="ready">Ready to integrate</option><option value="conflicted">In conflict</option><option value="all">All patches</option></select></div><div id="patches"><div class="empty">Connect to a local repository to begin.</div></div></section><details class="panel graph-section"><summary>Dependency graph · latest 80 patches</summary><div class="graph" id="graph"></div></details></div>
-<div class="stack"><section class="panel" id="workspace-panel" hidden><div class="panel-head"><h2>Workspace changes</h2><span class="tag">detached snapshot</span></div><form class="panel-body" id="workspace-proposal"><p class="muted">Edit files locally, then record an immutable proposal. Staged and unstaged text edits, additions and deletions are included.</p><pre id="workspace-path"></pre><div class="hash" id="workspace-commit"></div><label for="workspace-intent">Intent · why should these changes exist?</label><textarea id="workspace-intent" required></textarea><button type="submit" class="primary">Record workspace proposal</button></form></section><section class="panel" id="proposal-panel"><div class="panel-head"><h2>Propose a change</h2><span class="tag">immutable</span></div><form class="panel-body" id="proposal"><div class="context" id="compose-context">New independent change</div><label for="intent">Intent · why should this change exist?</label><textarea id="intent" placeholder="Describe the behavior and acceptance criteria" required></textarea><label for="deps">Dependencies · patch IDs separated by commas</label><input id="deps" placeholder="1, 2" style="width:100%"><label for="path">File path</label><input id="path" placeholder="src/main.rs" required style="width:100%"><label for="edit-mode">Edit scope</label><select id="edit-mode"><option value="file">Complete file</option><option value="lines">Line range on an immutable base</option><option value="graph">Graph operations on stable nodes</option></select><div id="line-fields" hidden><label for="line-base">Base patch ID</label><input id="line-base" type="number" min="1"><div class="field-row"><div><label for="line-start">Start line · zero based</label><input id="line-start" type="number" min="0" value="0"></div><div><label for="line-end">End line · excluded</label><input id="line-end" type="number" min="0" value="1"></div></div><p class="muted">Equal start and end inserts text. Empty replacement deletes the range. Disjoint ranges on the same base merge automatically.</p></div><div id="graph-fields" hidden><label for="graph-operations">Operations · JSON array</label><textarea id="graph-operations" rows="9" spellcheck="false" aria-describedby="graph-hint"></textarea><p class="muted" id="graph-hint">Inspect the document to find stable node IDs. Dependencies must include the patches whose anchors you use. Order, deletion and restoration operations receive the same review as text edits.</p><button type="button" id="inspect-compose">Inspect this document</button><button type="button" id="graph-example">Start a new document</button></div><label for="content" id="content-label">Complete file content</label><textarea id="content" rows="7" placeholder="Your version of this file"></textarea><label id="delete-label"><input type="checkbox" id="delete"> Delete this file (tombstone)</label><button class="primary" type="submit" style="width:100%;margin-top:15px">Record patch</button><p class="muted">Review and check reports must come from another authenticated identity. Set dependencies to the changes you are building on.</p></form></section><section class="panel"><div class="panel-head"><h2>Activity</h2><span class="muted">persisted locally</span></div><div class="panel-body activity" id="activity"></div></section><section class="panel"><div class="panel-body"><h2>A different collaboration unit</h2><p>A channel is a named patch set. A proposal is an immutable intent, dependency set and edit bundle. Concurrent edits remain visible until an explicit resolution depends on them.</p><p class="muted">Whole-file proposals preserve conflicting alternatives. Line proposals merge disjoint ranges on a shared base. Graph operations retain stable text nodes, deletion tags and reviewed ordering. The complete graph operation model, native adapters and storage are tested; existing Lean proofs cover narrower kernel properties.</p></div></section></div></div>
-<div class="context" id="work"></div><div id="status" class="status" role="status"></div><footer>o5s / Apache-2.0 &nbsp;·&nbsp; Local axum + h5i-app &nbsp;·&nbsp; No remote push is performed.</footer></main>
+<header class="frame-top">
+  <a class="brand" href="#/" aria-label="o5s home"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#ff6258" d="M12 2c4.4 0 7.5 3.1 7.5 7.3 0 2.4-1 4.2-2.6 5.4.5 1.8 1.9 3 3.6 3.3-1.3 1.2-3.6 1.3-5.2.1-.3 1.6-1.4 3-3.3 3.6.3-1.4-.1-2.7-1-3.6-.9.9-1.3 2.2-1 3.6-1.9-.6-3-2-3.3-3.6-1.6 1.2-3.9 1.1-5.2-.1 1.7-.3 3.1-1.5 3.6-3.3C3.5 13.5 4.5 11.7 4.5 9.3 4.5 5.1 7.6 2 12 2z"/><circle cx="9.3" cy="9.6" r="1.5" fill="#050506"/><circle cx="14.7" cy="9.6" r="1.5" fill="#050506"/></svg><span>o5s</span></a>
+  <nav class="nav" aria-label="Pages"><a href="#/" id="nav-home">what is o5s</a><a href="#/repos" id="nav-repos">repositories</a><a href="https://github.com/h5i-dev/o5s" rel="noopener">github</a></nav>
+</header>
+
+<main id="home-page">
+  <section class="stage" aria-labelledby="hero-title">
+    <canvas class="wall" id="wall" aria-hidden="true"></canvas>
+    <div class="scrim"></div>
+    <div class="hero">
+      <div class="kicker mono">o5s · octopus</div>
+      <h1 id="hero-title">Version control for <i>many</i> concurrent agents.</h1>
+      <p>Every change is an immutable patch. Agents propose against what they saw; non-conflicting patches merge in any order with the same result. The core is proved in Lean 4 against the Rust that runs.</p>
+    </div>
+    <p class="note" aria-hidden="true">// eight arms, one channel.</p>
+    <a class="enter" href="#/repos">repositories ↩</a>
+  </section>
+  <section class="facts" aria-label="What o5s does">
+    <div class="fact"><div class="mono">01 · no rebase</div><h2>Patches, not pushes.</h2><p>Disjoint patches commute. Different lines of one file merge; nobody loses a race.</p></div>
+    <div class="fact"><div class="mono">02 · conflicts</div><h2>Conflicts are data.</h2><p>Overlapping edits stay side by side until a reviewed resolution patch is admitted.</p></div>
+    <div class="fact"><div class="mono">03 · review</div><h2>Gated admission.</h2><p>A patch enters a channel only with an independent approval and a passing check.</p></div>
+    <div class="fact"><div class="mono">04 · proofs</div><h2>Verified core.</h2><p>Every registry decision is extracted Rust, proved in Lean: invariant, gate, isolation.</p></div>
+  </section>
+  <section class="how" aria-label="How agents use o5s">
+    <div><h2>Agents keep <i>Git</i>.<br>o5s collects the patches.</h2><p>Each agent works in an ordinary checkout. A proposal records what changed and what it saw; reviewers and checks are independent identities; admission adds the patch to a channel, whose files and conflicts everyone can view here.</p><p class="muted">Line edits, graph documents with stable atoms, binary files, renames, symlinks and submodules.</p></div>
+    <div><pre class="code"><em># an agent</em>
+<b>o5s</b> connect demo
+<b>o5s</b> propose --intent 'Add the parser'
+<em># independent reviewer and checks</em>
+<b>o5s</b> --profile reviewer approve 1
+<b>o5s</b> --profile checks check 1 --pass
+<b>o5s</b> --profile reviewer merge 1
+<em># everyone</em>
+<b>o5s</b> fetch            <em># → refs/o5s/main</em></pre></div>
+  </section>
+  <footer class="site-foot"><span>o5s · Apache-2.0</span><span>draws on Pijul's ideas · contains no Pijul code</span></footer>
+</main>
+
+<main id="repos-page" class="console" hidden aria-labelledby="repos-title">
+  <div class="console-head">
+    <div><div class="mono">read only · repositories</div><h1 id="repos-title">Channels, patches <i>&amp;</i> conflicts.</h1></div>
+    <div class="session"><span class="identity mono" id="identity">disconnected</span><input id="token" type="password" placeholder="Bearer token" autocomplete="off" aria-label="Bearer token"><button class="btn" id="connect">Connect</button></div>
+  </div>
+  <div class="toolbar">
+    <select id="repositories" aria-label="Repository"><option value="">Repository</option></select>
+    <select id="channel" aria-label="Channel"><option>main</option></select>
+    <input id="search" type="search" placeholder="Find by intent, path or patch ID  ( / )" aria-label="Search patches">
+    <select id="filter" aria-label="Patch filter"><option value="all">All patches</option><option value="pending">Not in this channel</option><option value="ready">Ready to admit</option><option value="conflicted">In conflict</option></select>
+    <button class="btn" id="refresh">Refresh</button>
+  </div>
+  <div class="metrics">
+    <div class="metric"><span class="mono">patches</span><strong id="m-patches">—</strong></div>
+    <div class="metric"><span class="mono">in this channel</span><strong id="m-merged">—</strong></div>
+    <div class="metric"><span class="mono">not admitted</span><strong id="m-pending">—</strong></div>
+    <div class="metric warn"><span class="mono">unresolved paths</span><strong id="m-conflicts">—</strong></div>
+  </div>
+  <div class="grid">
+    <div class="stack">
+      <section class="panel" id="files-panel"><div class="panel-head"><h2>Files &amp; conflicts</h2><span class="muted">channel view</span></div><div class="panel-body" id="files"><p class="muted">Connect and choose a repository.</p></div></section>
+      <section class="panel" id="document-panel" hidden tabindex="-1" aria-labelledby="document-title"><div class="panel-head"><h2 id="document-title">Document graph</h2><button class="btn small" type="button" id="close-document" aria-label="Close document">Close</button></div><div class="panel-body" id="document-details"></div></section>
+      <details class="panel"><summary class="panel-head" style="margin:0"><h2>Dependency graph · latest 80</h2></summary><div class="graph" id="graph"></div></details>
+    </div>
+    <div class="stack">
+      <section class="panel"><div class="panel-head"><h2>Patches</h2><span class="muted" id="count"></span></div><div id="patches"><div class="empty">Connect to view patches.</div></div></section>
+      <section class="panel"><div class="panel-head"><h2>Activity</h2><span class="muted">latest 30</span></div><div class="panel-body activity" id="activity"></div></section>
+    </div>
+  </div>
+  <div class="context" id="work"></div>
+</main>
+<div id="status" class="status" role="status"></div>
+
 <script>
 'use strict';
+// Repository viewer: read only. Every request is a GET.
 const $ = id => document.getElementById(id);
-let data = null, actor = null, token = '', busy = false, workspace = null, inspection = null;
+let data = null, actor = null, token = '', busy = false, inspection = null;
 const el = (tag, text, cls) => {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
@@ -31,44 +186,32 @@ function message(text, error = false) {
   $('status').className = 'status' + (error ? ' error' : '');
   $('status').style.display = 'block';
 }
-async function api(path, body) {
-  const response = await fetch(path, {
-    method: body ? 'POST' : 'GET',
-    headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'},
-    body: body ? JSON.stringify(body) : undefined
-  });
+async function api(path) {
+  const response = await fetch(path, {headers: {Authorization: 'Bearer ' + token}});
   const value = await response.json();
   if (!response.ok) throw Error(value.error || 'Request failed');
   return value;
 }
 function repo() {
   const name = $('repositories').value;
-  if (!name) throw Error('Select or create a repository first.');
+  if (!name) throw Error('Choose a repository first.');
   return name;
-}
-async function cmd(command) {
-  const reply = await api('/api/command', {repo: repo(), ...command});
-  message(JSON.stringify(reply));
-  await load();
-  return reply;
 }
 async function connect() {
   token = $('token').value.trim() || token;
   const result = await api('/api/repositories');
   actor = result.actor;
-  workspace = null;
   closeDocument();
-  $('workspace-panel').hidden = true;
   $('token').value = '';
-  $('token').placeholder = 'Connected · paste token to switch identity';
-  $('identity').textContent = `TENANT ${actor.tenant} / AGENT ${actor.user}`;
+  $('token').placeholder = 'Connected · paste to switch';
+  $('identity').textContent = `org ${actor.tenant} · user ${actor.user}`;
   const selected = $('repositories').value;
   $('repositories').replaceChildren(...result.repositories.map(name => {
     const option = el('option', name); option.value = name; return option;
   }));
   if (result.repositories.includes(selected)) $('repositories').value = selected;
   if (result.repositories.length) await load();
-  else message('Connected. Create your first repository.');
+  else message('Connected. This organization has no repositories yet.');
 }
 async function load() {
   const repository = repo(), channel = $('channel').value || 'main';
@@ -89,9 +232,9 @@ function readyPatches() {
   }
   return ids;
 }
-function button(text, action, disabled = false) {
-  const node = el('button', text);
-  node.type = 'button'; node.disabled = disabled;
+function button(text, action) {
+  const node = el('button', text, 'btn small');
+  node.type = 'button';
   node.onclick = () => safe(action);
   return node;
 }
@@ -99,19 +242,6 @@ function graphEdits(patch) { return patch.graph_edits || []; }
 function pathsOf(patch) { return [...(patch.edits || []), ...graphEdits(patch)].map(edit => edit.path); }
 function graphPaths() {
   return new Set(Object.values(data.repository.patches).flatMap(patch => graphEdits(patch).map(edit => edit.path)));
-}
-function focusComposer() {
-  $('proposal-panel').scrollIntoView({behavior: 'smooth', block: 'start'});
-  $('intent').focus({preventScroll: true});
-}
-function composeGraph(path, dependencies, context) {
-  $('edit-mode').value = 'graph'; editScope();
-  $('path').value = path;
-  $('deps').value = dependencies.join(', ');
-  $('graph-operations').value = '[]';
-  $('delete').checked = false;
-  $('compose-context').textContent = context;
-  focusComposer();
 }
 function bytesText(bytes) { return new TextDecoder().decode(Uint8Array.from(bytes || [])); }
 function nodeCard(node, title) {
@@ -134,44 +264,25 @@ function insertedNodes(patch, operations) {
     id: {insertion: {patch: identity, ordinal: index}, ordinal}, bytes
   })));
 }
-function renderPatch(patch, active) {
+function renderPatch(patch, active, ready) {
   const card = el('div', undefined, 'card'), top = el('div', undefined, 'card-top');
-  top.append(el('h3', `#${patch.id} · agent ${patch.author}`), el('span', active.has(patch.id) ? 'integrated' : 'proposed', 'tag' + (active.has(patch.id) ? ' good' : '')));
+  const state = active.has(patch.id) ? ['in channel', 'tag good'] : ready.has(patch.id) ? ['ready', 'tag ready'] : ['proposed', 'tag'];
+  top.append(el('h3', `#${patch.id} · user ${patch.author}`), el('span', state[0], state[1]));
   card.append(top, el('div', `SHA-256 ${patch.hash}`, 'hash'), el('p', patch.intent));
   const graph = graphEdits(patch), edits = patch.edits || [];
-  card.append(el('div', `depends on ${patch.dependencies.length ? patch.dependencies.map(id => '#' + id).join(', ') : '∅'} · ${pathsOf(patch).length} file(s)${graph.length ? ' · graph operations' : ''}`, 'muted'));
-  const actions = el('div', undefined, 'actions');
-  actions.append(
-    button(patch.approvals.length ? '✓ Reviewed' : 'Approve', () => cmd({cmd: 'approve', patch: patch.id}), patch.author === actor.user),
-    button(patch.checks_passed ? '✓ Passing report' : 'Report passing checks', () => cmd({cmd: 'check', patch: patch.id, passed: true}), patch.author === actor.user),
-    button('Integrate', () => cmd({cmd: 'merge', patch: patch.id, channel: $('channel').value}), active.has(patch.id) || !patch.approvals.length || !patch.checks_passed || !patch.dependencies.every(id => active.has(id)))
-  );
-  if (graph.length) {
-    actions.append(button('Build on graph patch', () => composeGraph(graph[0].path, [patch.id], 'Graph operations observing patch #' + patch.id)));
-  } else if (edits.length) {
-    actions.append(button('Build on this patch', () => {
-      const edit = edits[0];
-      $('edit-mode').value = 'file'; editScope();
-      $('line-base').value = String(patch.id); $('deps').value = String(patch.id);
-      $('path').value = edit.path; $('content').value = edit.content || ''; $('delete').checked = edit.content === null;
-      $('compose-context').textContent = 'Building on patch #' + patch.id; focusComposer();
-    }));
-  }
-  card.append(actions);
-  const details = el('details'); details.append(el('summary', graph.length ? 'Inspect graph operations & node IDs' : 'Inspect edits'));
-  for (const edit of edits) {
-    details.append(el('div', edit.path, 'muted'), el('pre', edit.content === null ? '[deleted]' : edit.content));
-    if (edit.content !== null) details.append(button('Edit lines in ' + edit.path, () => {
-      $('edit-mode').value = 'lines'; editScope();
-      $('line-base').value = String(patch.id); $('deps').value = String(patch.id); $('path').value = edit.path;
-      $('content').value = ''; $('delete').checked = false;
-      $('compose-context').textContent = 'Line edits on #' + patch.id + ' · ' + edit.path; focusComposer();
-    }));
-  }
+  const chips = el('div', undefined, 'chips');
+  chips.append(
+    el('span', patch.dependencies.length ? 'deps ' + patch.dependencies.map(id => '#' + id).join(' ') : 'no deps', 'tag'),
+    el('span', patch.approvals.length ? 'approved' : 'unreviewed', 'tag' + (patch.approvals.length ? ' good' : '')),
+    el('span', patch.checks_passed ? 'checks pass' : 'no check', 'tag' + (patch.checks_passed ? ' good' : '')),
+    el('span', `${pathsOf(patch).length} file(s)${graph.length ? ' · graph' : ''}`, 'tag'));
+  card.append(chips);
+  const details = el('details'); details.append(el('summary', graph.length ? 'Graph operations & node IDs' : 'Edits'));
+  for (const edit of edits) details.append(el('div', edit.path, 'muted'), el('pre', edit.content === null ? '[deleted]' : edit.content));
   for (const edit of graph) {
     const section = el('div', undefined, 'graph-operation');
     section.append(el('h3', edit.path), el('pre', JSON.stringify(edit.operations, null, 2)));
-    section.append(button('Inspect channel graph · ' + edit.path, () => inspectDocument(edit.path)));
+    section.append(button('Inspect document · ' + edit.path, () => inspectDocument(edit.path)));
     const nodes = insertedNodes(patch, edit.operations);
     if (nodes.length) {
       const nodeDetails = el('details'); nodeDetails.append(el('summary', `${nodes.length} inserted text block(s) · stable IDs`));
@@ -187,53 +298,42 @@ function renderFiles(view) {
   for (const [path, alternatives] of Object.entries(view.conflicts)) {
     const card = el('div', undefined, 'conflict'); card.append(el('h3', path + ' · unresolved'));
     if (paths.has(path)) {
-      card.append(el('p', 'This graph retains competing operations. Inspect the text blocks and conflict evidence before proposing a resolution.', 'form-note'));
+      card.append(el('p', 'This graph document keeps competing operations until a reviewed resolution is admitted.', 'muted'));
       card.append(button('Inspect graph conflict', () => inspectDocument(path)));
-      card.append(button('Propose graph operations', () => composeGraph(path, view.patches, 'Reviewed graph resolution · ' + path)));
     } else {
       for (const alternative of alternatives) card.append(el('div', `patch #${alternative.patch}`, 'muted'), el('pre', alternative.content === null ? '[deleted]' : alternative.content));
-      card.append(button('Compose resolution', () => {
-        $('edit-mode').value = 'file'; editScope(); $('path').value = path;
-        $('deps').value = alternatives.map(alternative => alternative.patch).join(', ');
-        $('intent').value = 'Resolve concurrent edits to ' + path;
-        $('content').value = alternatives.find(alternative => alternative.content !== null)?.content || '';
-        $('delete').checked = false; $('compose-context').textContent = 'Resolution · ' + path + ' · ' + alternatives.length + ' alternatives';
-        focusComposer();
-      }));
     }
     $('files').append(card);
   }
   for (const [path, content] of Object.entries(view.files).slice(0, 80)) {
     const binary = (view.binary || []).includes(path), executable = (view.executable || []).includes(path);
     const label = path + (executable ? ' · executable' : '') + (binary ? ' · binary' : '');
-    const body = binary ? el('p', 'Binary content, ' + Math.floor(content.length * 3 / 4) + ' bytes (base64 in the API).') : el('pre', content);
+    const body = binary ? el('p', 'Binary content, ' + Math.floor(content.length * 3 / 4) + ' bytes.', 'muted') : el('pre', content);
     const details = el('details'); details.append(el('summary', label), body);
     if (paths.has(path)) details.append(button('Inspect graph · ' + path, () => inspectDocument(path)));
     $('files').append(details);
   }
-  if (!Object.keys(view.files).length && !Object.keys(view.conflicts).length) $('files').append(el('p', 'This view contains no live files.'));
+  if (!Object.keys(view.files).length && !Object.keys(view.conflicts).length) $('files').append(el('p', 'This channel has no live files.', 'muted'));
 }
 function render() {
-  $('workspace-panel').hidden = !workspace || workspace.repo !== repo() || workspace.channel !== $('channel').value;
   const registry = data.repository, view = data.view, active = new Set(view.patches), all = Object.values(registry.patches).reverse();
   const selected = $('channel').value;
   $('channel').replaceChildren(...Object.keys(registry.channels).map(name => { const option = el('option', name); option.value = name; return option; }));
   $('channel').value = Object.hasOwn(registry.channels, selected) ? selected : 'main';
   $('m-patches').textContent = all.length; $('m-merged').textContent = view.patches.length;
   $('m-pending').textContent = all.filter(patch => !active.has(patch.id)).length; $('m-conflicts').textContent = Object.keys(view.conflicts).length;
-  $('export').disabled = Object.keys(view.conflicts).length > 0; $('worktree').disabled = $('export').disabled;
   const search = $('search').value.toLowerCase(), filter = $('filter').value, ready = new Set(readyPatches());
   const conflicted = new Set(Object.values(view.conflicts).flat().map(alternative => alternative.patch));
   const shown = all.filter(patch => (
     filter === 'all' || filter === 'pending' && !active.has(patch.id) || filter === 'ready' && ready.has(patch.id) || filter === 'conflicted' && conflicted.has(patch.id)
   ) && (!search || `${patch.id} ${patch.intent} ${pathsOf(patch).join(' ')}`.toLowerCase().includes(search)));
-  $('count').textContent = `${shown.length} matching · ${all.length} total`; $('integrate-ready').disabled = !ready.size;
-  $('patches').replaceChildren(...shown.slice(0, 80).map(patch => renderPatch(patch, active)));
-  if (!shown.length) $('patches').append(el('div', all.length ? 'No patches match this queue.' : 'Record the first patch to begin.', 'empty'));
+  $('count').textContent = `${shown.length} of ${all.length}`;
+  $('patches').replaceChildren(...shown.slice(0, 80).map(patch => renderPatch(patch, active, ready)));
+  if (!shown.length) $('patches').append(el('div', all.length ? 'No patches match.' : 'No patches yet.', 'empty'));
   renderFiles(view);
-  $('activity').replaceChildren(...registry.events.slice(-30).reverse().map(event => el('div', `agent ${event.actor} · ${event.action}${event.patch ? ' #' + event.patch : ''}${event.channel ? ' → ' + event.channel : ''}`)));
+  $('activity').replaceChildren(...registry.events.slice(-30).reverse().map(event => el('div', `user ${event.actor} · ${event.action}${event.patch ? ' #' + event.patch : ''}${event.channel ? ' → ' + event.channel : ''}`)));
   graph(all.slice(0, 80).reverse(), active);
-  if (data.work) $('work').textContent = `Last refresh: ${data.work.processed_patches} new patches · ${data.work.updated_paths} file updates · ${data.work.rendered_paths} paths rendered · ${data.work.dependency_edges} dependency edges examined`;
+  if (data.work) $('work').textContent = `last refresh · ${data.work.processed_patches} new patches · ${data.work.updated_paths} file updates · ${data.work.rendered_paths} paths rendered`;
 }
 function closeDocument() { inspection = null; $('document-panel').hidden = true; $('document-details').replaceChildren(); }
 async function inspectDocument(path, focus = true) {
@@ -271,11 +371,9 @@ async function inspectDocument(path, focus = true) {
     }
     body.append(details);
   });
-  // Deleted atoms remain addressable for restoration and later operation review.
+  // Deleted atoms stay addressable, so later operations can restore them.
   const allNodes = el('details'); allNodes.append(el('summary', `All addressable blocks · ${result.nodes.length}`));
   result.nodes.forEach((node, index) => allNodes.append(nodeCard(node, 'Block ' + (index + 1)))); body.append(allNodes);
-  body.append(button('Compose graph operations', () => composeGraph(path, data.view.patches, 'Graph operations · ' + path)));
-  body.append(el('p', 'Node IDs identify immutable blocks. A resolution is a new operation proposal and needs independent review and a passing check report.', 'form-note'));
   $('document-panel').hidden = false;
   if (focus) { $('document-panel').scrollIntoView({behavior: 'smooth', block: 'start'}); $('document-panel').focus({preventScroll: true}); }
 }
@@ -292,10 +390,11 @@ function graph(patches, active) {
   }
   for (const patch of patches) {
     const [x, y] = positions.get(patch.id), circle = document.createElementNS(ns, 'circle');
-    circle.setAttribute('cx', x); circle.setAttribute('cy', y); circle.setAttribute('r', 7);
-    circle.setAttribute('fill', active.has(patch.id) ? '#5cbf88' : '#75757f'); svg.append(circle);
-    const text = document.createElementNS(ns, 'text'); text.setAttribute('x', x + 15); text.setAttribute('y', y + 4);
-    text.setAttribute('fill', '#a8a8b2'); text.setAttribute('font-size', 11); text.textContent = `#${patch.id} / agent ${patch.author}`; svg.append(text);
+    circle.setAttribute('cx', x); circle.setAttribute('cy', y); circle.setAttribute('r', 6);
+    circle.setAttribute('fill', active.has(patch.id) ? '#ff6258' : '#34343c'); svg.append(circle);
+    const text = document.createElementNS(ns, 'text'); text.setAttribute('x', x + 14); text.setAttribute('y', y + 4);
+    text.setAttribute('fill', '#a8a8b2'); text.setAttribute('font-size', 11); text.setAttribute('font-family', 'IBM Plex Mono, monospace');
+    text.textContent = `#${patch.id} · user ${patch.author}`; svg.append(text);
   }
   $('graph').replaceChildren(svg);
 }
@@ -305,72 +404,212 @@ async function safe(action) {
   try { await action(); } catch (error) { message(error.message, true); }
   finally { busy = false; document.body.removeAttribute('aria-busy'); }
 }
-function editScope() {
-  const mode = $('edit-mode').value, lines = mode === 'lines', graph = mode === 'graph';
-  $('line-fields').hidden = !lines; $('graph-fields').hidden = !graph;
-  $('delete').disabled = lines || graph; $('delete-label').hidden = graph;
-  $('content').hidden = graph; $('content-label').hidden = graph;
-  $('content-label').textContent = lines ? 'Replacement text' : 'Complete file content';
-}
-$('edit-mode').onchange = editScope;
-$('close-document').onclick = () => { closeDocument(); $('files-panel').scrollIntoView({block: 'start'}); $('refresh').focus(); };
-$('inspect-compose').onclick = () => safe(() => inspectDocument($('path').value.trim()));
-$('graph-example').onclick = () => {
-  $('graph-operations').value = JSON.stringify([{kind: 'insert', left: 'Start', right: 'End', atoms: [Array.from(new TextEncoder().encode('Your text\n'))]}], null, 2);
-  $('graph-operations').focus();
-};
-$('integrate-ready').onclick = () => safe(() => cmd({cmd: 'merge_batch', channel: $('channel').value, patches: readyPatches()}));
+$('close-document').onclick = () => { closeDocument(); $('refresh').focus(); };
 $('search').oninput = () => { if (data) render(); };
 $('filter').onchange = () => { if (data) render(); };
+$('connect').onclick = () => safe(connect);
+$('token').onkeydown = event => { if (event.key === 'Enter') safe(connect); };
+$('refresh').onclick = () => safe(load);
+$('repositories').onchange = () => safe(async () => { closeDocument(); $('channel').value = 'main'; await load(); });
+$('channel').onchange = () => safe(async () => { closeDocument(); await load(); });
 document.addEventListener('keydown', event => {
   if (event.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(event.target.tagName)) { event.preventDefault(); $('search').focus(); }
   if (event.key === 'Escape' && inspection && !$('document-panel').hidden) { closeDocument(); $('refresh').focus(); }
 });
-$('connect').onclick = () => safe(connect); $('refresh').onclick = () => safe(load);
-$('repositories').onchange = () => safe(async () => { closeDocument(); $('channel').value = 'main'; await load(); });
-$('channel').onchange = () => safe(async () => { closeDocument(); await load(); });
-$('create').onclick = () => safe(async () => {
-  const name = $('new-repo').value.trim(); await api('/api/command', {cmd: 'create', repo: name});
-  await connect(); $('repositories').value = name; await load();
-});
-$('fork').onclick = () => safe(async () => { const name = prompt('New channel name'); if (name) await cmd({cmd: 'fork', source: $('channel').value, channel: name}); });
-$('worktree').onclick = () => safe(async () => {
-  const repository = repo(), channel = $('channel').value;
-  workspace = {...await api('/api/worktree', {repo: repository, channel}), repo: repository, channel};
-  // The native server returns a local path; the Worker an Artifacts remote with a write token.
-  $('workspace-path').textContent = workspace.remote
-    ? `git -c http.extraHeader="Authorization: Bearer ${workspace.token}" clone -b ${workspace.branch} ${workspace.remote}\n` +
-      `git switch -c ${workspace.push}  # commit, then: git push origin ${workspace.push}`
-    : workspace.path;
-  $('workspace-commit').textContent = workspace.commit;
-  $('workspace-panel').hidden = false; $('workspace-intent').focus();
-  message(workspace.dirty ? 'Workspace ready · existing local changes preserved.' : 'Workspace ready · edit files, then record your proposal.');
-});
-$('workspace-proposal').onsubmit = event => {
-  event.preventDefault(); return safe(async () => {
-    if (!workspace) throw Error('Create a workspace first.');
-    const reply = await api('/api/worktree/propose', {repo: workspace.repo, channel: workspace.channel, commit: workspace.commit, intent: $('workspace-intent').value, ...(workspace.push ? {branch: workspace.push} : {})});
-    message(JSON.stringify(reply)); await load();
-  });
-};
-$('export').onclick = () => safe(async () => message(JSON.stringify(await api('/api/export', {repo: repo(), channel: $('channel').value}), null, 2)));
-$('proposal').onsubmit = event => {
-  event.preventDefault(); return safe(async () => {
-    const dependencies = $('deps').value.split(',').map(part => part.trim()).filter(Boolean).map(Number);
-    if (dependencies.some(id => !Number.isSafeInteger(id) || id < 1)) throw Error('Dependencies must be positive patch IDs.');
-    const path = $('path').value.trim(), intent = $('intent').value, mode = $('edit-mode').value;
-    if (mode === 'graph') {
-      let operations;
-      try { operations = JSON.parse($('graph-operations').value); } catch (_) { throw Error('Operations must be valid JSON.'); }
-      if (!Array.isArray(operations) || !operations.length) throw Error('Enter a nonempty JSON array of graph operations.');
-      await cmd({cmd: 'propose_graph', intent, dependencies, edits: [{path, operations}]});
-    } else if (mode === 'lines') {
-      const base = Number($('line-base').value), start = Number($('line-start').value), end = Number($('line-end').value);
-      if (!Number.isSafeInteger(base) || base < 1 || ![start, end].every(value => Number.isSafeInteger(value) && value >= 0) || end < start) throw Error('Enter a positive base ID and a valid line range.');
-      await cmd({cmd: 'propose_lines', intent, dependencies, edits: [{path, base, start, end, content: $('content').value}]});
-    } else {
-      await cmd({cmd: 'propose', intent, dependencies, edits: [{path, content: $('delete').checked ? null : $('content').value}]});
+
+// Pages: #/ is the introduction, #/repos the viewer.
+function route() {
+  const repos = location.hash.startsWith('#/repos');
+  $('home-page').hidden = repos; $('repos-page').hidden = !repos;
+  $('nav-home').toggleAttribute('aria-current', !repos); $('nav-repos').toggleAttribute('aria-current', repos);
+  if (repos) $('nav-repos').setAttribute('aria-current', 'page'); else $('nav-home').setAttribute('aria-current', 'page');
+  octopus.running(!repos);
+}
+
+// The octopus: a wall of o5s's own code; the creature is the code's light.
+// Its shape is drawn into an offscreen canvas one pixel per character cell,
+// and each cell's character takes that pixel's brightness. Its arms reach
+// for drifting patches and carry them into the channel on the right.
+const octopus = (() => {
+  if (typeof window === 'undefined' || !window.requestAnimationFrame || !document.querySelector) return {running() {}};
+  const wall = $('wall'), ctx = wall.getContext('2d');
+  const shape = document.createElement('canvas'), sctx = shape.getContext('2d', {willReadFrequently: true});
+  const CW = 7.2, CH = 13, FONT = '12px "IBM Plex Mono", Menlo, monospace';
+  const SOURCE = `pub fn heads(rows: &Vec<Vec<usize>>, members: &Vec<usize>, covered: Vec<bool>) -> Vec<usize> {
+    let mut covered = covered; let mut i = 0;
+    while i < members.len() { let deps = &rows[members[i]]; let mut j = 0;
+        while j < deps.len() { covered[deps[j]] = true; j += 1; } i += 1; }
+theorem heads_keep_past (rows : Rows) (members : Vec Usize) : causality.heads rows members covered ⦃ hs =>
+  ∀ u, (∃ x ∈ hs, Past rows u x) ↔ (∃ m ∈ members, Past rows u m) ⦄
+pub fn transition(actor: &Principal, s: &Snapshot, cmd: &Command) -> Outcome { match cmd {
+    Command::Merge { name, patches } => merge(actor, s, name, patches),
+theorem merge_gate : admitted p c s' → approved p s ∧ checked p s ∧ closed (deps p) c
+fn validate(d: &Doc, p: &Patch) -> Result<(), Refusal> { ensure!(observed(d, p.anchors)) }
+theorem extracted_view_converges : Replayed d₁ H₁ → Replayed d₂ H₂ → H₁ ~ H₂ → view d₁ = view d₂
+let view = cache.sync_append_only(&repo, &channel)?; export(&root, &repo, view)
+theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
+`.replace(/\s+/g, ' ');
+  const GLYPHS = '░▒▓#%&@*+=';
+  let cols = 0, rows = 0, cells = [], width = 0, height = 0, dpr = 1, on = false, frame = 0, last = 0;
+  let mouse = {x: 0.7, y: 0.4}, blinkAt = 0, collected = [], patches = [], arms = [], nextHash = 0;
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const hex = () => Math.floor(Math.random() * 0xffff).toString(16).padStart(4, '0');
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    width = wall.clientWidth; height = wall.clientHeight;
+    wall.width = Math.round(width * dpr); wall.height = Math.round(height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cols = Math.ceil(width / CW); rows = Math.ceil(height / CH);
+    shape.width = cols; shape.height = rows;
+    cells = [];
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) cells.push(SOURCE[(y * 131 + x) % SOURCE.length]);
+  }
+  // Octopus geometry in cell units.
+  function body(t) {
+    const cx = cols * 0.66, cy = rows * 0.4 + Math.sin(t * 0.0009) * 1.6;
+    return {cx, cy, rx: Math.max(12, cols * 0.085), ry: Math.max(10, rows * 0.21)};
+  }
+  function spawn() {
+    const side = Math.random();
+    patches.push({x: side < 0.5 ? rand(cols * 0.36, cols * 0.5) : rand(cols * 0.42, cols * 0.86), y: side < 0.5 ? rand(4, rows - 4) : rand(rows * 0.8, rows - 3),
+      vx: rand(-0.02, 0.02), vy: rand(-0.015, 0.015), label: hex(), arm: -1});
+  }
+  function init() {
+    arms = Array.from({length: 8}, (_, i) => ({i, phase: i * 0.8, target: null, reach: 0, tip: null}));
+    patches = []; for (let i = 0; i < 6; i++) spawn();
+    collected = [];
+    // Two arms are already reaching when the page opens.
+    for (const k of [1, 6]) { const p = patches[k % patches.length]; p.arm = k; Object.assign(arms[k], {target: p, reach: 0.35, phaseState: 'out'}); }
+  }
+  function armPoints(arm, b, t) {
+    const n = 22, base = (arm.i - 3.5) / 3.5, points = [];
+    const bx = b.cx + base * b.rx * 0.8, by = b.cy + b.ry * 0.78;
+    const rest = {x: b.cx + base * b.rx * 2.6, y: b.cy + b.ry * 2.4 + Math.abs(base) * -4};
+    let goal = rest;
+    if (arm.target) {
+      const k = arm.reach;
+      goal = {x: rest.x + (arm.target.x - rest.x) * k, y: rest.y + (arm.target.y - rest.y) * k};
     }
-  });
-};
+    for (let s = 0; s <= n; s++) {
+      const u = s / n, wave = Math.sin(t * 0.0021 + arm.phase + u * 5.2) * (1 - (arm.target ? arm.reach : 0)) * 2.2 * u;
+      const x = bx + (goal.x - bx) * u + wave * 1.6, y = by + (goal.y - by) * u * (0.9 + 0.1 * u) + wave;
+      points.push({x, y, w: (1 - u) * 3.8 + 0.9});
+    }
+    arm.tip = points[n];
+    return points;
+  }
+  function step(t, dt) {
+    for (const p of patches) if (p.arm < 0) {
+      p.x += p.vx * dt * 0.06; p.y += p.vy * dt * 0.06;
+      if (p.x < cols * 0.34 || p.x > cols - 8) p.vx *= -1;
+      if (p.y < 3 || p.y > rows - 3) p.vy *= -1;
+    }
+    for (const arm of arms) {
+      if (!arm.target) {
+        if (Math.random() < 0.004 * dt / 16) {
+          const free = patches.filter(p => p.arm < 0);
+          if (free.length) { const p = free[Math.floor(Math.random() * free.length)]; p.arm = arm.i; arm.target = p; arm.reach = 0; arm.phaseState = 'out'; }
+        }
+        continue;
+      }
+      const p = arm.target;
+      if (arm.phaseState === 'out') {
+        arm.reach = Math.min(1, arm.reach + dt * 0.0011);
+        if (arm.reach >= 1) arm.phaseState = 'in';
+      } else {
+        // Carry the patch home: the target follows the tip back.
+        arm.reach = Math.max(0, arm.reach - dt * 0.0009);
+        if (arm.tip) { p.x = arm.tip.x; p.y = arm.tip.y; }
+        if (arm.reach <= 0) {
+          collected.unshift({label: p.label, id: ++nextHash, born: t});
+          collected = collected.slice(0, 14);
+          patches.splice(patches.indexOf(p), 1); spawn();
+          arm.target = null;
+        }
+      }
+    }
+  }
+  function drawShape(t) {
+    sctx.fillStyle = '#000'; sctx.fillRect(0, 0, cols, rows);
+    const b = body(t);
+    sctx.lineCap = 'round';
+    for (const arm of arms) {
+      const pts = armPoints(arm, b, t);
+      for (let s = 1; s < pts.length; s++) {
+        sctx.strokeStyle = `rgb(${Math.round(150 + 80 * (1 - s / pts.length))},0,0)`;
+        sctx.lineWidth = pts[s].w;
+        sctx.beginPath(); sctx.moveTo(pts[s - 1].x, pts[s - 1].y); sctx.lineTo(pts[s].x, pts[s].y); sctx.stroke();
+      }
+    }
+    // Mantle with a little shading.
+    const grad = sctx.createRadialGradient(b.cx - b.rx * 0.3, b.cy - b.ry * 0.4, 1, b.cx, b.cy, b.rx * 1.3);
+    grad.addColorStop(0, 'rgb(255,0,0)'); grad.addColorStop(1, 'rgb(120,0,0)');
+    sctx.fillStyle = grad;
+    sctx.beginPath(); sctx.ellipse(b.cx, b.cy, b.rx, b.ry, 0, 0, Math.PI * 2); sctx.fill();
+    // Eyes follow the pointer and blink.
+    const blinking = t < blinkAt + 140, ey = b.cy + b.ry * 0.2, gx = (mouse.x * cols - b.cx) / cols, gy = (mouse.y * rows - ey) / rows;
+    for (const side of [-1, 1]) {
+      const ex = b.cx + side * b.rx * 0.44, r = Math.max(2.6, b.rx * 0.24);
+      sctx.fillStyle = 'rgb(0,255,0)';
+      sctx.beginPath(); sctx.ellipse(ex, ey, r * 1.15, blinking ? 0.5 : r * 0.9, 0, 0, Math.PI * 2); sctx.fill();
+      if (!blinking) {
+        sctx.fillStyle = 'rgb(0,0,255)';
+        sctx.beginPath(); sctx.ellipse(ex + Math.max(-1, Math.min(1, gx * 6)) * r * 0.45, ey + Math.max(-1, Math.min(1, gy * 6)) * r * 0.35, r * 0.5, r * 0.55, 0, 0, Math.PI * 2); sctx.fill();
+      }
+    }
+    if (t > blinkAt + 2600 + Math.random() * 3000) blinkAt = t;
+    return sctx.getImageData(0, 0, cols, rows).data;
+  }
+  function draw(t) {
+    const px = drawShape(t);
+    ctx.fillStyle = '#050506'; ctx.fillRect(0, 0, width, height);
+    ctx.font = FONT; ctx.textBaseline = 'top';
+    const drift = Math.floor(t / 900);
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+      const i = y * cols + x, r = px[i * 4], g = px[i * 4 + 1], bl = px[i * 4 + 2];
+      let ch = cells[(i + (y % 4 === 0 ? drift : 0)) % cells.length], color;
+      if (g > 120) { color = 'rgba(245,242,236,1)'; ch = '@#%&'[(x + y) % 4]; }
+      else if (bl > 120) { color = 'rgba(5,5,6,1)'; ch = ' '; }
+      else if (r > 40) {
+        const k = r / 255;
+        color = `rgba(${Math.round(200 + 55 * k)},${Math.round(30 + 70 * k)},${Math.round(25 + 63 * k)},${0.5 + k * 0.5})`;
+        if (k > 0.8 && (x * 7 + y * 3) % 4 === 0) ch = GLYPHS[(x + y + drift) % GLYPHS.length];
+        if (ch === ' ') ch = '·';
+      } else color = 'rgba(237,237,240,0.085)';
+      if (ch !== ' ') { ctx.fillStyle = color; ctx.fillText(ch, x * CW, y * CH); }
+    }
+    // Drifting patches and the channel they join.
+    ctx.font = '500 12px "IBM Plex Mono", Menlo, monospace';
+    for (const p of patches) {
+      ctx.fillStyle = p.arm >= 0 ? '#ff8a82' : 'rgba(237,237,240,0.85)';
+      ctx.fillText(`[#${p.label}]`, p.x * CW - 24, p.y * CH - 6);
+    }
+    const lx = width - 210, top = 92;
+    ctx.fillStyle = 'rgba(237,237,240,0.6)'; ctx.fillText('main ←', lx, top);
+    collected.forEach((c, k) => {
+      const fresh = Math.max(0, 1 - (t - c.born) / 1200);
+      ctx.fillStyle = fresh > 0 ? `rgba(255,${Math.round(98 + 120 * fresh)},${Math.round(88 + 120 * fresh)},1)` : `rgba(237,237,240,${Math.max(0.18, 0.7 - k * 0.04)})`;
+      ctx.fillText(`#${String(c.id).padStart(3, '0')} ${c.label}… admitted`, lx, top + 18 + k * CH * 1.3);
+    });
+  }
+  function loop(t) {
+    if (!on) return;
+    const dt = Math.min(64, t - (last || t)); last = t;
+    if (frame++ % 2 === 0) { step(t, dt * 2); draw(t); }
+    requestAnimationFrame(loop);
+  }
+  const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  window.addEventListener('resize', () => { resize(); if (still) draw(0); });
+  window.addEventListener('pointermove', e => { mouse = {x: e.clientX / Math.max(1, width), y: e.clientY / Math.max(1, height)}; });
+  resize(); init();
+  return {running(want) {
+    if (still) { if (want) { resize(); draw(0); } return; }
+    if (want && !on) { on = true; last = 0; resize(); requestAnimationFrame(loop); }
+    if (!want) on = false;
+  }};
+})();
+if (typeof window !== 'undefined' && window.addEventListener && typeof location !== 'undefined') {
+  window.addEventListener('hashchange', route);
+  route();
+}
 </script></body></html>

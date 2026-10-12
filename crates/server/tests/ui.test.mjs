@@ -67,13 +67,6 @@ test('graph proposals display stable hashes, actual operations and block IDs wit
   const files = descendants(f.elements.get('files'));
   assert.ok(files.some(node => node.textContent === 'Inspect graph conflict'));
   assert.ok(!files.some(node => node.textContent === '[deleted]'));
-  const build = cards.find(node => node.textContent === 'Build on graph patch');
-  await build.onclick();
-  assert.equal(f.elements.get('edit-mode').value, 'graph');
-  assert.equal(f.elements.get('graph-operations').value, '[]');
-  assert.equal(f.elements.get('path').value, 'src/graph.txt');
-  assert.equal(f.elements.get('deps').value, '1');
-  assert.equal(f.requests.length, 0);
 });
 
 test('document inspection exposes exact conflict frontiers and copies node IDs', async () => {
@@ -88,25 +81,19 @@ test('document inspection exposes exact conflict frontiers and copies node IDs',
   assert.ok(content.some(node => node.textContent === '<x>')); // textContent, never HTML
   await content.find(node => node.textContent === 'Copy node ID').onclick();
   assert.deepEqual(JSON.parse(f.copied[0]), f.graph.nodes[0].id);
-  await content.find(node => node.textContent === 'Compose graph operations').onclick();
-  assert.equal(f.elements.get('graph-operations').value, '[]');
 });
 
-test('graph composer submits an explicit reviewed operation envelope and refuses malformed JSON', async () => {
+test('the console is read only: no write controls, and every request is a GET', async () => {
+  const html = readFileSync(new URL('../src/index.html', import.meta.url), 'utf8');
+  for (const id of ['create', 'proposal', 'fork', 'worktree', 'export', 'integrate-ready', 'workspace-proposal']) {
+    assert.ok(!html.includes(`id="${id}"`), id);
+  }
+  assert.ok(!/method:\s*['"]POST/.test(html));
   const f = fixture();
-  vm.runInContext('composeGraph("src/graph.txt", [1], "Graph resolution")', f.context);
-  f.elements.get('intent').value = 'Establish reviewed order';
-  f.elements.get('graph-operations').value = '{invalid';
-  await f.elements.get('proposal').onsubmit({preventDefault() {}});
-  assert.equal(f.requests.length, 0);
-  assert.match(f.elements.get('status').textContent, /valid JSON/);
-  const operation = {kind: 'order', before: f.graph.nodes[0].id, after: f.graph.nodes[1].id};
-  f.elements.get('graph-operations').value = JSON.stringify([operation]);
-  await f.elements.get('proposal').onsubmit({preventDefault() {}});
-  const request = f.requests.find(request => request.path === '/api/command');
-  assert.deepEqual(JSON.parse(request.options.body), {
-    repo: 'demo', cmd: 'propose_graph', intent: 'Establish reviewed order', dependencies: [1],
-    edits: [{path: 'src/graph.txt', operations: [operation]}]
-  });
-  assert.equal(request.options.headers.Authorization, 'Bearer test-token');
+  for (const root of ['patches', 'files']) {
+    for (const node of descendants(f.elements.get(root))) if (node.onclick) await node.onclick();
+  }
+  await vm.runInContext('inspectDocument("src/graph.txt")', f.context);
+  assert.ok(f.requests.length > 0);
+  for (const request of f.requests) assert.equal(request.options.method, undefined);
 });
