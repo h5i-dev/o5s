@@ -144,7 +144,7 @@ Done in the round of October 11, 2026:
   - `o5s ci` runs checks on each proposal's snapshot.
   - Symlinks, submodules and identity-preserving moves.
   - Repository roles, token revocation and operator limits (branch `authz`).
-  - Pipelined PostgreSQL commands, and an open-loop mode in `o5s-load`.
+  - Pipelined PostgreSQL commands and group commit (about twice the proposals per second on one hot repository), and an open-loop mode in `o5s-load`.
   - A CI workflow covering format, tests with PostgreSQL, the Worker build, the Lean gates and extraction drift.
 
 Next:
@@ -152,7 +152,7 @@ Next:
 1. Prove the statements in `specs/` (refinement of `document`, `lines` and `causality`; `view_converges`; `pg_served`). Then move them into the gated projects.
 2. Finish the registry proofs for roles on the `authz` branch, and run the new DDL on the deployed database before deploying it.
 3. Run the Worker workspace flow, the Artifacts clone and the pipelined engine against the live deployment.
-4. A single hot repository on PostgreSQL is bound by statement execution under its lock (`docs/load-testing.md`). Try multi-row writes and several commands per transaction.
+4. A single hot repository on PostgreSQL saturates near 500 proposals/s with group commit (`docs/load-testing.md`). Multi-row writes would cut the statements per group further.
 5. Multi-host and 10,000-client runs need more than one machine.
 
 The local PostgreSQL 17 development container is `o5s-platform-pg`, bound to `127.0.0.1:15438`; `scripts/postgres.sh` starts an equivalent one.
