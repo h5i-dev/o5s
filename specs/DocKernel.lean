@@ -1003,41 +1003,6 @@ theorem rowEdge_iff (doc : document.Doc) (seen : List Bool) (st : CheckS)
       · exact absurd ((hoffP i hio).mp hc) hn'
     · exact Or.inr ⟨(a.val, b.val), hp, rfl, rfl⟩
 
-@[step] theorem check_insert_spec (st : document.Check) (doc : document.Doc) (seen : alloc.vec.Vec Bool)
-    (op : Usize) (l r : document.Anchor) (atoms : alloc.vec.Vec (alloc.vec.Vec U8))
-    (wf : DocWF doc) (cwf : CheckWF doc (absC st))
-    (room : doc.atoms.val.length + st.created.val + atoms.val.length + 2 < Usize.max)
-    (room2 : doc.edges.val.length + st.pending.val.length + atoms.val.length + 2 < Usize.max) :
-    document.check_insert st doc seen op l r atoms ⦃ out =>
-      absC out = checkInsertS (absC st) doc seen.val op.val l r atoms.val ⦄ := by
-  sorry
-
-@[step] theorem check_order_spec (st : document.Check) (doc : document.Doc) (seen : alloc.vec.Vec Bool)
-    (op : Usize) (before after : document.Ref)
-    (wf : DocWF doc) (cwf : CheckWF doc (absC st))
-    (room : doc.atoms.val.length + st.created.val + 2 < Usize.max)
-    (room2 : doc.edges.val.length + st.pending.val.length + 2 < Usize.max) :
-    document.check_order st doc seen op before after ⦃ out =>
-      absC out = checkOrderS (absC st) doc seen.val op.val before after ⦄ := by
-  unfold document.check_order checkOrderS
-  h5i_step
-  all_goals first
-    | (simp_all [absC, refuseS]; done)
-    | (trace_state; sorry)
-
-/-! ## One operation, and validation -/
-
-noncomputable def checkOpS (st : CheckS) (doc : document.Doc) (seen : List Bool) (op : Nat)
-    (o : document.Op) : CheckS :=
-  if st.refusal.1 ≠ 0#u64 then st
-  else match o with
-    | .Insert l r atoms => checkInsertS st doc seen op l r atoms.val
-    | .Delete targets => checkDeleteS st doc seen op targets.val
-    | .Restore d => checkRestoreS st doc.deletions.val.length seen op d
-    | .Order b a => checkOrderS st doc seen op b a
-    | .Keep d i => checkKeepS st doc seen op d i
-    | .Retract o => checkRetractS st doc.orders.val seen op o
-
 /-- Well-formedness of the state is kept by every check. -/
 theorem checkAnchorM_zero_node {r : document.Ref} {n : Nat} {seen : List Bool}
     (h : checkAnchorM (.Node r) n seen = 0#u64) : r.index.val < n ∧ 2 ≤ r.index.val := by
@@ -1080,6 +1045,165 @@ theorem chainM_bound (l r first k B : Nat) (hl : l < B) (hr : r < B) (hf : first
   rcases he with he | rfl
   · exact this.1 e he
   · exact ⟨this.2, hr⟩
+
+/-- The rows `causal_rows` builds reach exactly along `CausalRel`. -/
+theorem reach_key (doc : document.Doc) (seen : alloc.vec.Vec Bool) (st : document.Check)
+    (wf : DocWF doc) (cwf : CheckWF doc (absC st))
+    (off : alloc.vec.Vec Bool) (rows : alloc.vec.Vec (alloc.vec.Vec Usize))
+    (room : doc.atoms.val.length + st.created.val < Usize.max)
+    (off_post : off.val.length = doc.edges.val.length)
+    (off_post1 : ∀ (i : ℕ) (h : i < doc.edges.val.length),
+      off.val[i] = true ↔
+        (∃ a b, (a, b) ∈ doc.retractions.val ∧ a.val = i ∧
+          (seen.val = [] ∨ ∃ (h : b.val < seen.val.length), seen.val[b.val] = true)) ∨
+          ∃ e ∈ st.retracted.val, e.val = i)
+    (rows_post : rows.val.length = doc.atoms.val.length + st.created.val)
+    (rows_post1 : ∀ (a : ℕ) (h : a < doc.atoms.val.length + st.created.val) (w : Usize),
+      w ∈ (rows.val[a]).val ↔
+        (∃ i, ∃ (h : causalEdge doc.edges.val off.val seen.val i), (doc.edges.val[i]'h.1).1.val = a ∧
+          (doc.edges.val[i]'h.1).2.1 = w) ∨
+          ∃ a_1, (a_1, w) ∈ st.pending.val ∧ a_1.val = a)
+    (s t : Usize) :
+    Indexed.RowReach rows.val [s] t ↔
+      Relation.ReflTransGen (CausalRel doc seen.val (absC st)) s.val t.val := by
+  have hlt : ∀ a b, CausalRel doc seen.val (absC st) a b →
+      a < doc.atoms.val.length + st.created.val ∧ b < doc.atoms.val.length + st.created.val := by
+    rintro a b (⟨i, hi, -, -, h1, h2⟩ | hp)
+    · have := wf.edges _ (List.getElem_mem hi)
+      constructor <;> omega
+    · have := cwf.pending _ hp
+      simp only [absC] at this
+      constructor <;> omega
+  have hoffP : ∀ i (h : i < off.val.length), off.val[i] = true ↔ OffP doc seen.val (absC st) i := by
+    intro i h
+    rw [off_post1 i (by omega)]
+    unfold OffP
+    simp only [absC, List.mem_map, List.length_eq_zero_iff]
+    constructor
+    · rintro (⟨a, b, hab, ha, hs⟩ | ⟨e, he, rfl⟩)
+      · exact Or.inl ⟨(a, b), hab, ha, hs⟩
+      · exact Or.inr ⟨e, he, rfl⟩
+    · rintro (⟨⟨a, b⟩, hab, ha, hs⟩ | ⟨e, he, rfl⟩)
+      · exact Or.inl ⟨a, b, hab, ha, hs⟩
+      · exact Or.inr ⟨e, he, rfl⟩
+  have hrows : ∀ a (h : a < rows.val.length) (w : Usize), w ∈ (rows.val[a]).val ↔
+      (∃ i, ∃ h : causalEdge doc.edges.val off.val seen.val i,
+        (doc.edges.val[i]'h.1).1.val = a ∧ (doc.edges.val[i]'h.1).2.1 = w) ∨
+      ∃ x ∈ (absC st).pending, x.1 = a ∧ x.2 = w.val := by
+    intro a h w
+    rw [rows_post1 a (by omega) w]
+    simp only [absC, List.mem_map, pairVal]
+    constructor
+    · rintro (h | ⟨a1, hm, rfl⟩)
+      · exact Or.inl h
+      · exact Or.inr ⟨_, ⟨(a1, w), hm, rfl⟩, rfl, rfl⟩
+    · rintro (h | ⟨_, ⟨⟨a1, w1⟩, hm, rfl⟩, h1, h2⟩)
+      · exact Or.inl h
+      · right
+        have : w1 = w := UScalar.eq_of_val_eq h2
+        subst this
+        exact ⟨a1, hm, h1⟩
+  rw [rowReach_single_iff]
+  apply rtg_val_iff
+  · intro a b
+    exact rowEdge_iff doc seen.val (absC st) off.val off_post hoffP rows.val
+      (doc.atoms.val.length + st.created.val) rows_post hrows (fun a b h => (hlt a b h).1) a b
+  · intro a b h
+    have := (hlt a b h).2
+    have hm : Usize.max < 2 ^ UScalarTy.Usize.numBits := by simp [Usize.max, Usize.numBits]
+    exact ⟨UScalar.ofNatCore b (by omega), by simp⟩
+
+@[step] theorem check_insert_spec (st : document.Check) (doc : document.Doc) (seen : alloc.vec.Vec Bool)
+    (op : Usize) (l r : document.Anchor) (atoms : alloc.vec.Vec (alloc.vec.Vec U8))
+    (wf : DocWF doc) (cwf : CheckWF doc (absC st))
+    (room : doc.atoms.val.length + st.created.val + atoms.val.length + 2 < Usize.max)
+    (room2 : doc.edges.val.length + st.pending.val.length + atoms.val.length + 2 < Usize.max) :
+    document.check_insert st doc seen op l r atoms ⦃ out =>
+      absC out = checkInsertS (absC st) doc seen.val op.val l r atoms.val ⦄ := by
+  sorry
+
+@[step] theorem check_order_spec (st : document.Check) (doc : document.Doc) (seen : alloc.vec.Vec Bool)
+    (op : Usize) (before after : document.Ref)
+    (wf : DocWF doc) (cwf : CheckWF doc (absC st))
+    (room : doc.atoms.val.length + st.created.val + 2 < Usize.max)
+    (room2 : doc.edges.val.length + st.pending.val.length + 2 < Usize.max) :
+    document.check_order st doc seen op before after ⦃ out =>
+      absC out = checkOrderS (absC st) doc seen.val op.val before after ⦄ := by
+  unfold document.check_order checkOrderS
+  apply WP.spec_bind (check_anchor_spec (.Node before) doc seen)
+  intro kb hkb
+  apply WP.spec_bind (check_anchor_spec (.Node after) doc seen)
+  intro ka hka
+  dsimp only
+  by_cases h1 : kb = 0#u64
+  · have e1 : ¬ (kb != 0#u64) = true := by simp [h1]
+    have e1' : ¬ checkAnchorM (.Node before) doc.atoms.val.length seen.val ≠ 0#u64 := by rw [← hkb, h1]; simp
+    rw [if_neg e1, if_neg e1']
+    by_cases h2 : ka = 0#u64
+    · have e2 : ¬ (ka != 0#u64) = true := by simp [h2]
+      have e2' : ¬ checkAnchorM (.Node after) doc.atoms.val.length seen.val ≠ 0#u64 := by rw [← hka, h2]; simp
+      rw [if_neg e2, if_neg e2']
+      have hb := checkAnchorM_zero_node (by rw [← hkb, h1])
+      have ha := checkAnchorM_zero_node (by rw [← hka, h2])
+      have rb : ∀ x ∈ doc.retractions.val, x.1.val < doc.edges.val.length := fun x hx => wf.retractions x hx
+      have ob : ∀ e ∈ st.retracted.val, e.val < doc.edges.val.length := fun e he =>
+        cwf.retracted e.val (List.mem_map.mpr ⟨e, he, rfl⟩)
+      have hedge : ∀ (a a1 b : Usize), (a, a1, b) ∈ doc.edges.val →
+          a.val < doc.atoms.val.length + st.created.val ∧ a1.val < doc.atoms.val.length + st.created.val := by
+        intro a a1 b h; have := wf.edges _ h; simp only at this; constructor <;> omega
+      have hpend : ∀ (a b : Usize), (a, b) ∈ st.pending.val →
+          a.val < doc.atoms.val.length + st.created.val ∧ b.val < doc.atoms.val.length + st.created.val := by
+        intro a b h
+        have := cwf.pending (pairVal (a, b)) (by simp only [absC]; exact List.mem_map_of_mem h)
+        simpa [absC, pairVal] using this
+      h5i_step
+      all_goals first
+        | (intro a a1 b h; exact (hedge a a1 b h).1)
+        | (intro a b h; exact (hpend a b h).1)
+        | (intro row hrow v hv
+           obtain ⟨k, hk, rfl⟩ := List.getElem_of_mem hrow
+           rename_i rows_post rows_post1
+           have hk' : k < doc.atoms.val.length + st.created.val := by omega
+           rcases (rows_post1 k hk' v).mp hv with ⟨i, hi, -, h2⟩ | ⟨a1, hm, -⟩
+           · have := hedge _ _ _ (List.getElem_mem hi.1)
+             rw [← h2]; exact this.2
+           · exact (hpend a1 v hm).2)
+        | (simp [absC, refuseS]; done)
+        | (rename_i hbt hrt
+           have key := reach_key doc seen st wf cwf off rows (by omega) off_post off_post1 rows_post rows_post1
+             after.index before.index
+           first
+             | (exfalso; exact hrt (key.mp b_post))
+             | (exfalso; exact b_post (key.mpr hrt))
+             | (simp_all [absC, pairVal]; done)
+             | (trace_state; sorry))
+        | (trace_state; sorry)
+    · have e2 : (ka != 0#u64) = true := by simp [h2]
+      have e2' : checkAnchorM (.Node after) doc.atoms.val.length seen.val ≠ 0#u64 := by rw [← hka]; exact h2
+      rw [if_pos e2, if_pos e2']
+      apply WP.spec_bind (refuse_spec ka op 1#usize)
+      intro r hr
+      simp [absC, refuseS, hr, hka]
+  · have e1 : (kb != 0#u64) = true := by simp [h1]
+    have e1' : checkAnchorM (.Node before) doc.atoms.val.length seen.val ≠ 0#u64 := by rw [← hkb]; exact h1
+    rw [if_pos e1, if_pos e1']
+    apply WP.spec_bind (refuse_spec kb op 0#usize)
+    intro r hr
+    simp [absC, refuseS, hr, hkb]
+
+
+/-! ## One operation, and validation -/
+
+noncomputable def checkOpS (st : CheckS) (doc : document.Doc) (seen : List Bool) (op : Nat)
+    (o : document.Op) : CheckS :=
+  if st.refusal.1 ≠ 0#u64 then st
+  else match o with
+    | .Insert l r atoms => checkInsertS st doc seen op l r atoms.val
+    | .Delete targets => checkDeleteS st doc seen op targets.val
+    | .Restore d => checkRestoreS st doc.deletions.val.length seen op d
+    | .Order b a => checkOrderS st doc seen op b a
+    | .Keep d i => checkKeepS st doc seen op d i
+    | .Retract o => checkRetractS st doc.orders.val seen op o
 
 theorem checkOpS_wf (st : CheckS) (doc : document.Doc) (seen : List Bool) (op : Nat)
     (o : document.Op) (wf : DocWF doc) (cwf : CheckWF doc st) :
