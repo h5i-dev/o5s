@@ -53,7 +53,7 @@ Later insertions, deletions, restorations and ordering operations name the exact
 
 ## Supported file subset
 
-The CLI accepts regular files, each at most 4 MiB, with a total request limit of 4 MiB. UTF-8 text uses graph or line operations. Other bytes travel as base64 whole-file edits. Mode 100755 is kept and fetched back. Deletion is distinct from an empty file. Symbolic links are proposed with their target and submodules with the commit their gitlink stages; `o5s fetch` writes them back as modes 120000 and 160000. A path that passes through a symlink is refused. A rename is proposed as a removal and an addition, as in Git; atom identities do not move with it.
+The CLI accepts regular files, each at most 4 MiB, with a total request limit of 4 MiB. UTF-8 text uses graph or line operations. Other bytes travel as base64 whole-file edits. Mode 100755 is kept and fetched back. Deletion is distinct from an empty file. Symbolic links are proposed with their target and submodules with the commit their gitlink stages; `o5s fetch` writes them back as modes 120000 and 160000. A path that passes through a symlink is refused. A renamed text file (`git mv`, or a new path holding at least half of a removed graph document's lines) is proposed as a move, so the document keeps its atoms and concurrent edits of the old path follow it (`docs/patch-model.md`). Other renames are a removal and an addition, as in Git.
 
 ## Executed checks
 

@@ -50,6 +50,20 @@ BEGIN ISOLATION LEVEL READ COMMITTED; SET LOCAL search_path TO "o5s"; SELECT pg_
 COMMIT
 ```
 
+The first line, the idempotency check and the loads go out in one flush, and the writes, the idempotency record and `COMMIT` in a second.
+
+**Group commit.** A native server sends commands that arrive while their repository's transaction runs to that repository's queue. The next transaction takes up to 32 of them:
+
+```text
+BEGIN …; SELECT pg_advisory_xact_lock(scope);
+-- command 1: idempotency check, narrow load, transition, writes
+-- command 2: the same, reading what command 1 wrote
+-- …
+COMMIT
+```
+
+Each command still runs the kernel on the rows the earlier ones left, so the order of commands is the lock order as before, and each caller gets its own reply. A refused command writes nothing and does not affect the others. If a statement fails, the transaction rolls back and every command in it runs again on its own, with the usual retries. If `COMMIT` fails with an unknown outcome, every command in the group is told so, as for a single command. `O5S_GROUP_COMMIT=0` turns grouping off. The Worker builds an engine per request, so it never groups.
+
 The transaction-scoped lock orders the commands of a repository (or of an organization's directory). Each later statement reads with a fresh snapshot that includes every earlier holder's commit. A command reads and writes only rows of its own scope, so commands on different scopes share no rows. Every interleaving is therefore equivalent to running commands one at a time in lock order, the model the Lean storage theorems use. The lock ends with the transaction, so it also works behind transaction-mode poolers such as Hyperdrive.
 
 An earlier version ran each command SERIALIZABLE through `h5i_app_pg::Engine`. PostgreSQL's serializable predicate locks cover B-tree index pages shared by many tenants, so unrelated repositories aborted one another. In a 1,000-agent run, 3,570 of 15,598 attempts were retried; with the lock, the same run had none. Disconnects, deadlocks and serialization failures still retry from `BEGIN` (`O5S_DATABASE_ATTEMPTS`, default 64). All SQL on registry tables is planned by `h5i_app_sql` and compiled by the extracted `h5i_app_pgsql`. A test checks that the engine's table definitions equal those `h5i_app_pg` derives from the kernel's `schema!`, so databases created by either are interchangeable. Statements are sent unnamed with typed parameters, and writes are pipelined. Tables live in PostgreSQL schema `o5s` (`O5S_DATABASE_SCHEMA`), and `O5S_DATABASE_POOL` (default 16) bounds connections.

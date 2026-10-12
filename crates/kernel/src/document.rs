@@ -609,7 +609,9 @@ fn commit_op(mut doc: Doc, patch: usize, o: &Op) -> Doc {
             deletion,
             insertion,
         } => {
-            doc.acked = h5i_app_std::set::insert(&doc.acked, &(deletion.index, insertion.index));
+            if !has_pair(&doc.acked, deletion.index, insertion.index) {
+                doc.acked.push((deletion.index, insertion.index));
+            }
             doc
         }
         Op::Retract { order } => {
@@ -674,6 +676,18 @@ pub fn shared_anchors(targets: &Vec<usize>, left: usize, right: usize) -> Vec<us
     anchors
 }
 
+/// Whether `pairs` contains `(a, b)`, compared field by field so that the
+/// extracted code needs no opaque tuple equality.
+pub fn has_pair(pairs: &Vec<(usize, usize)>, a: usize, b: usize) -> bool {
+    let mut found = false;
+    let mut i = 0;
+    while i < pairs.len() {
+        found = found || (pairs[i].0 == a && pairs[i].1 == b);
+        i += 1;
+    }
+    found
+}
+
 /// The conflicts of deletion `d` with every insertion.
 fn deletion_conflicts(mut out: Vec<DeleteInsert>, doc: &Doc, d: usize) -> Vec<DeleteInsert> {
     let patch = doc.deletions[d].patch;
@@ -685,7 +699,7 @@ fn deletion_conflicts(mut out: Vec<DeleteInsert>, doc: &Doc, d: usize) -> Vec<De
             doc.insertions[i].right,
         );
         if anchors.len() > 0
-            && !h5i_app_std::set::contains(&doc.acked, &(d, i))
+            && !has_pair(&doc.acked, d, i)
             && concurrent(&doc.deps, patch, doc.insertions[i].patch)
         {
             out.push(DeleteInsert {

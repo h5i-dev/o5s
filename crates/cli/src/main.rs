@@ -1211,10 +1211,15 @@ fn automatic_graph_edits(
         .map(u64::to_string)
         .collect::<Vec<_>>()
         .join(",");
+    let moves = detect_moves(&graph_paths, &legacy_paths, before, after, changes);
+    let moved_away: BTreeSet<&str> = moves.values().map(String::as_str).collect();
     let mut graph_edits = Vec::new();
     let mut files = Vec::new();
     for edit in changes {
         let path = edit["path"].as_str().ok_or("Missing edited path")?;
+        if moved_away.contains(path) {
+            continue;
+        }
         let updated = after.get(path);
         // Binary files, symlinks and submodules are whole-file edits.
         let legacy = legacy_paths.contains(path)
@@ -1233,18 +1238,20 @@ fn automatic_graph_edits(
                 "{path} is a text graph document; binary content, a symlink or a submodule needs a new path"
             )));
         }
+        // A moved document is edited from its old path's graph and content.
+        let source = moves.get(path).map_or(path, String::as_str);
         let document = api.request(
             "/api/document",
             &[
                 ("repo", repo),
                 ("channel", channel),
-                ("path", path),
+                ("path", source),
                 ("patches", &patches),
             ],
             None,
         )?;
         // A removed document keeps its graph; recreating it replaces those atoms.
-        let original = match before.get(path) {
+        let original = match before.get(source) {
             Some(f) => f.text.clone(),
             None => serde_json::from_value::<Vec<u8>>(document["bytes"].clone())
                 .ok()
@@ -1252,18 +1259,89 @@ fn automatic_graph_edits(
                 .unwrap_or_default(),
         };
         let operations =
-            if graph_paths.contains(path) || !original.is_empty() || !updated.text.is_empty() {
+            if graph_paths.contains(source) || !original.is_empty() || !updated.text.is_empty() {
                 graph_operations(&document, &original, &updated.text)?
             } else {
                 Vec::new()
             };
         let mut graph = json!({"path":path,"operations":operations});
+        if source != path {
+            graph["from"] = json!(source);
+        }
         if updated.executable {
             graph["executable"] = json!(true);
         }
         graph_edits.push(graph);
     }
     Ok(Some((graph_edits, files)))
+}
+
+/// Graph documents removed at one path and added at another with at least
+/// half of their lines, as `new path → old path`: proposed as moves, so the
+/// document keeps its identity and concurrent edits of the old path follow it.
+fn detect_moves(
+    graph_paths: &BTreeSet<&str>,
+    legacy_paths: &BTreeSet<&str>,
+    before: &Files,
+    after: &Files,
+    changes: &[Value],
+) -> BTreeMap<String, String> {
+    let paths: Vec<&str> = changes.iter().filter_map(|e| e["path"].as_str()).collect();
+    let removed: Vec<&str> = paths
+        .iter()
+        .copied()
+        .filter(|p| graph_paths.contains(p) && before.contains_key(*p) && !after.contains_key(*p))
+        .collect();
+    let added: Vec<&str> = paths
+        .iter()
+        .copied()
+        .filter(|p| {
+            !before.contains_key(*p)
+                && !graph_paths.contains(p)
+                && !legacy_paths.contains(p)
+                && after
+                    .get(*p)
+                    .is_some_and(|f| !f.binary && f.kind == Kind::File)
+        })
+        .collect();
+    let similarity = |a: &str, b: &str| -> f64 {
+        let mut lines: BTreeMap<&str, i64> = BTreeMap::new();
+        for l in a.split_inclusive('\n') {
+            *lines.entry(l).or_default() += 1;
+        }
+        let mut shared = 0;
+        for l in b.split_inclusive('\n') {
+            if let Some(n) = lines.get_mut(l).filter(|n| **n > 0) {
+                *n -= 1;
+                shared += 1;
+            }
+        }
+        let total = a
+            .split_inclusive('\n')
+            .count()
+            .max(b.split_inclusive('\n').count());
+        if total == 0 {
+            1.0
+        } else {
+            shared as f64 / total as f64
+        }
+    };
+    let mut moves = BTreeMap::new();
+    let mut taken = BTreeSet::new();
+    for old in removed {
+        let text = &before[old].text;
+        let best = added
+            .iter()
+            .filter(|n| !taken.contains(*n))
+            .map(|n| (similarity(text, &after[*n].text), *n))
+            .filter(|(score, _)| *score >= 0.5)
+            .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(a.1)));
+        if let Some((_, new)) = best {
+            taken.insert(new);
+            moves.insert(new.to_string(), old.to_string());
+        }
+    }
+    moves
 }
 
 fn read_graph_edits(path: &Path) -> Result<Value> {

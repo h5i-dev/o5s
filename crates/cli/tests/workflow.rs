@@ -813,3 +813,43 @@ async fn symlinks_and_submodules_round_trip_through_proposals_and_fetch() {
     f.admit(&a, second);
     assert_eq!(f.ok(&a, 2, &["view"])["files"]["link"], "elsewhere");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn git_mv_moves_a_graph_document_and_concurrent_old_path_edits_follow() {
+    use serde_json::json;
+    let f = Fixture::new().await;
+    let a = f.repo("moves");
+    f.ok(&a, 1, &["connect", "moves"]);
+    fs::write(a.join("old.txt"), "one\ntwo\nthree\n").unwrap();
+    git(&a, &["add", "old.txt"]);
+    let base = patch(f.ok(&a, 1, &["propose", "--intent", "base"]));
+    f.admit(&a, base);
+    f.ok(&a, 1, &["fetch"]);
+    git(&a, &["reset", "--hard", "refs/o5s/main"]);
+    let b = f.root.path().join("moves-agent");
+    git(
+        &a,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            b.to_str().unwrap(),
+            "refs/o5s/main",
+        ],
+    );
+    // Agent A renames the file (and edits it); agent B edits the old path.
+    git(&a, &["mv", "old.txt", "new.txt"]);
+    fs::write(a.join("new.txt"), "one\ntwo\nthree\nfour\n").unwrap();
+    let moved = patch(f.ok(&a, 1, &["propose", "--intent", "rename"]));
+    let detail = f.ok(&a, 1, &["show", &moved.to_string()]);
+    assert_eq!(detail["graph_edits"], json!([detail["graph_edits"][0]]));
+    assert_eq!(detail["graph_edits"][0]["path"], "new.txt");
+    assert_eq!(detail["graph_edits"][0]["from"], "old.txt");
+    fs::write(b.join("old.txt"), "ONE\ntwo\nthree\n").unwrap();
+    let edited = patch(f.ok(&b, 2, &["propose", "--intent", "edit old path"]));
+    f.admit(&a, moved);
+    f.admit(&b, edited);
+    let view = f.ok(&a, 1, &["view"]);
+    assert_eq!(view["files"], json!({"new.txt": "ONE\ntwo\nthree\nfour\n"}));
+    assert_eq!(view["conflicts"], json!({}));
+}
