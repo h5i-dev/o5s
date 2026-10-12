@@ -374,7 +374,7 @@ async fn compact_view(
     with_view(&s, &a, &q.repo, &q.channel, repo, move |repo, cache| {
         let work = cache.sync_append_only(repo, &channel)?;
         let view = cache.content()?;
-        Ok(serde_json::json!({"files":view.files,"conflicts":view.conflicts,"executable":view.executable,"binary":view.binary,"patch_count":cache.patch_count(),"work":work,"generation":repo.generation}))
+        Ok(serde_json::json!({"files":view.files,"conflicts":view.conflicts,"executable":view.executable,"binary":view.binary,"symlinks":view.symlinks,"submodules":view.submodules,"patch_count":cache.patch_count(),"work":work,"generation":repo.generation}))
     })
     .await
 }
