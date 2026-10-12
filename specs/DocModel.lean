@@ -3,6 +3,7 @@ import Mathlib.Logic.Relation
 import Mathlib.Data.Finset.Basic
 import Mathlib.Data.Finset.Card
 import Mathlib.Data.List.Chain
+import Mathlib.Data.Nat.Find
 /-!
 # Graph documents: the model (M0, statements to prove)
 
@@ -660,8 +661,7 @@ theorem retract_breaks (H H' : Hist) (R : Patch) (o : OpId) (b a : NodeId)
     · exact hn x
     · exact hne x
 
-/-- The view exists and is unique (layers are a function of `H`). -/
-theorem view_exists (H : Hist) : ∃ V, IsView H V := by sorry
+/-- Views are unique (layers are a function of `H`); `view_exists` below. -/
 theorem depth_unique {H : Hist} {v : Anchor} {k m : Nat} (hk : Depth H v k) (hm : Depth H v m) :
     k = m := by
   obtain ⟨⟨p, hp, hl, hc⟩, hall⟩ := hk
@@ -746,12 +746,6 @@ theorem view_converges (l₁ l₂ : List Patch) (same : ∀ P, P ∈ l₁ ↔ P 
     (t₂ : Topological l₂) (u : IdsInjective l₁) (H₁ : Hist) (h₁ : replay [] l₁ = .ok H₁) :
     ∃ H₂, replay [] l₂ = .ok H₂ ∧ ∀ V, IsView H₁ V ↔ IsView H₂ V := by sorry
 
-/-- T2.7: bytes exist exactly when the live atoms are totally ordered and no
-delete/insert conflict is open. -/
-theorem clean_iff (H : Hist) (V : View) (hv : IsView H V) :
-    V.bytes.isSome ↔ (∀ d i A, ¬ DI H d i A) ∧ (∀ a, ¬ Blocked H a) ∧
-      ∀ u v, Live H u → Live H v → u ≠ v → Prec H u v ∨ Prec H v u := by sorry
-
 theorem snoc_chain {H : Hist} {p : List Anchor} {u v : Anchor} (hp : p.IsChain (Sum H))
     (hl : p.getLast? = some u) (s : Sum H u v) : (p ++ [v]).IsChain (Sum H) := by
   apply hp.append (List.isChain_singleton v)
@@ -794,6 +788,371 @@ theorem bytes_order (H : Hist) (V : View) (hv : IsView H V) (b : List UInt8)
   obtain ⟨q, hq, hql, hlen⟩ := extend_chain hpc hpl' hp
   have := hmax q hql hq
   omega
+
+/-! ## Depths and layers exist
+
+A chain into an unblocked atom never repeats a vertex (a repeat would be a
+cycle reaching it), so chains are bounded by the number of live atoms and a
+longest one exists. The vertex at position `j` of a longest chain has depth
+`j`, so nonempty layers are contiguous. -/
+
+section Layers
+open Classical
+
+variable {H : Hist}
+
+theorem chain_trans {α} {R : α → α → Prop} {l : List α} (h : l.IsChain R) {i j : Nat}
+    (hij : i < j) (hj : j < l.length) : Relation.TransGen R (l[i]'(by omega)) l[j] := by
+  have adj := List.isChain_iff_getElem.mp h
+  induction j with
+  | zero => omega
+  | succ j ih =>
+    rcases Nat.lt_or_eq_of_le (Nat.lt_succ_iff.mp hij) with hlt | rfl
+    · exact .tail (ih hlt (by omega)) (adj j hj)
+    · exact .single (adj i hj)
+
+theorem last_get {α} {p : List α} {v : α} (hl : p.getLast? = some v) :
+    ∃ h : p.length - 1 < p.length, p[p.length - 1] = v := by
+  have hne : p ≠ [] := by rintro rfl; simp at hl
+  have hlen : 0 < p.length := List.length_pos_of_ne_nil hne
+  refine ⟨by omega, ?_⟩
+  rw [List.getLast?_eq_getElem?, List.getElem?_eq_getElem (by omega)] at hl
+  exact Option.some.inj hl
+
+theorem getLast?_take_succ {α} {p : List α} {j : Nat} (hj : j < p.length) :
+    (p.take (j + 1)).getLast? = some p[j] := by
+  rw [List.getLast?_eq_getElem?]
+  simp [List.getElem?_take, Nat.min_eq_left (show j + 1 ≤ p.length by omega), hj]
+
+theorem chain_reach {p : List Anchor} (hc : p.IsChain (Sum H)) {v : Anchor}
+    (hl : p.getLast? = some v) {i : Nat} (hi : i < p.length) :
+    Relation.ReflTransGen (Sum H) p[i] v := by
+  obtain ⟨hlen, hv⟩ := last_get hl
+  rcases Nat.lt_or_eq_of_le (show i ≤ p.length - 1 by omega) with h | h
+  · rw [← hv]; exact (chain_trans hc h hlen).to_reflTransGen
+  · subst h; exact hv ▸ Relation.ReflTransGen.refl
+
+theorem chain_nodup {p : List Anchor} (hc : p.IsChain (Sum H)) {v : Anchor}
+    (hl : p.getLast? = some v) (hb : ¬ Blocked H v) : p.Nodup := by
+  apply List.pairwise_iff_getElem.mpr
+  intro i j hi hj hij e
+  apply hb
+  have hcyc := chain_trans hc hij hj
+  rw [← e] at hcyc
+  exact ⟨p[i], hcyc, chain_reach hc hl hi⟩
+
+theorem chain_live {p : List Anchor} (hc : p.IsChain (Sum H)) {v : Anchor}
+    (hl : p.getLast? = some v) (hv : Live H v) : ∀ x ∈ p, Live H x := by
+  intro x hx
+  obtain ⟨i, hi, rfl⟩ := List.getElem_of_mem hx
+  obtain ⟨hlen, hpv⟩ := last_get hl
+  by_cases h : i + 1 < p.length
+  · exact (List.isChain_iff_getElem.mp hc i h).1
+  · have : i = p.length - 1 := by omega
+    subst this; rw [hpv]; exact hv
+
+theorem live_node {a : Anchor} (h : Live H a) : ∃ n, a = .node n := by
+  cases a with
+  | node n => exact ⟨n, rfl⟩
+  | start => exact (h : False).elim
+  | stop => exact (h : False).elim
+
+/-- Live atoms, as anchors. -/
+noncomputable def liveAnchors (H : Hist) : Finset Anchor :=
+  (((atoms H).map Prod.fst).map Anchor.node).toFinset.filter (Live H)
+
+theorem atom_key {n : NodeId} (h : IsAtom H n) : ∃ b, (n, b) ∈ atoms H := by
+  unfold IsAtom atom at h
+  by_contra hc
+  push_neg at hc
+  exact h (lookup_none.mpr hc)
+
+theorem live_mem {a : Anchor} (h : Live H a) : a ∈ liveAnchors H := by
+  obtain ⟨n, rfl⟩ := live_node h
+  obtain ⟨b, hb⟩ := atom_key h.1
+  exact Finset.mem_filter.mpr ⟨List.mem_toFinset.mpr
+    (List.mem_map.mpr ⟨n, List.mem_map.mpr ⟨(n, b), hb, rfl⟩, rfl⟩), h⟩
+
+theorem chain_bound {p : List Anchor} (hc : p.IsChain (Sum H)) {v : Anchor}
+    (hl : p.getLast? = some v) (hv : Live H v) (hb : ¬ Blocked H v) :
+    p.length ≤ (liveAnchors H).card := by
+  have nd := chain_nodup hc hl hb
+  have sub : p.toFinset ⊆ liveAnchors H := fun x hx =>
+    live_mem (chain_live hc hl hv x (List.mem_toFinset.mp hx))
+  rw [← List.toFinset_card_of_nodup nd]
+  exact Finset.card_le_card sub
+
+def ChainTo (H : Hist) (v : Anchor) (n : Nat) : Prop :=
+  ∃ p : List Anchor, p.length = n ∧ p.getLast? = some v ∧ p.IsChain (Sum H)
+
+theorem depth_exists {v : Anchor} (hv : Live H v) (hb : ¬ Blocked H v) : ∃ k, Depth H v k := by
+  have hP1 : ChainTo H v 1 := ⟨[v], rfl, rfl, List.isChain_singleton v⟩
+  have hB : 1 ≤ (liveAnchors H).card := Finset.card_pos.mpr ⟨v, live_mem hv⟩
+  have hm1 := Nat.le_findGreatest hB hP1
+  obtain ⟨p, hpl, hpl', hpc⟩ := Nat.findGreatest_spec hB hP1
+  refine ⟨Nat.findGreatest (ChainTo H v) (liveAnchors H).card - 1, ⟨p, by omega, hpl', hpc⟩, ?_⟩
+  intro q hq hqc
+  have := Nat.le_findGreatest (chain_bound hqc hq hv hb)
+    (show ChainTo H v q.length from ⟨q, rfl, hq, hqc⟩)
+  omega
+
+theorem blocked_of_reach {u v : Anchor} (hb : Blocked H u)
+    (h : Relation.ReflTransGen (Sum H) u v) : Blocked H v := by
+  obtain ⟨c, hc, hcu⟩ := hb
+  exact ⟨c, hc, hcu.trans h⟩
+
+/-- The vertex at position `j` of a longest chain has depth `j`. -/
+theorem depth_at {v : Anchor} {k : Nat} (hd : Depth H v k) (hv : Live H v) (hbv : ¬ Blocked H v)
+    {p : List Anchor} (hpl : p.length = k + 1) (hl : p.getLast? = some v)
+    (hc : p.IsChain (Sum H)) {j : Nat} (hj : j < p.length) : Depth H p[j] j := by
+  have hlj : Live H p[j] := chain_live hc hl hv _ (List.getElem_mem hj)
+  have hbj : ¬ Blocked H p[j] := fun b => hbv (blocked_of_reach b (chain_reach hc hl hj))
+  obtain ⟨d, hdj⟩ := depth_exists hlj hbj
+  have h1 : j + 1 ≤ d + 1 := by
+    have := hdj.2 (p.take (j + 1)) (getLast?_take_succ hj) (hc.take (j + 1))
+    simpa [List.length_take, show j + 1 ≤ p.length by omega] using this
+  obtain ⟨⟨q, hql, hqlast, hqc⟩, -⟩ := id hdj
+  have h2 : d ≤ j := by
+    by_cases hjk : j + 1 < p.length
+    · have hchain : (q ++ p.drop (j + 1)).IsChain (Sum H) := by
+        apply hqc.append (hc.drop (j + 1))
+        intro x hx y hy
+        rw [hqlast] at hx
+        rw [List.head?_drop, List.getElem?_eq_getElem hjk] at hy
+        simp at hx hy
+        subst hx; subst hy
+        exact List.isChain_iff_getElem.mp hc j hjk
+      have hlast : (q ++ p.drop (j + 1)).getLast? = some v := by
+        rw [List.getLast?_append, List.getLast?_drop, if_neg (by omega), hl]
+        rfl
+      have := hd.2 _ hlast hchain
+      simp only [List.length_append, List.length_drop] at this
+      omega
+    · have hpj : p[j] = v := by
+        obtain ⟨_, hv'⟩ := last_get hl
+        have e : p.length - 1 = j := by omega
+        simp only [e] at hv'
+        exact hv'
+      have := hd.2 q (hpj ▸ hqlast) hqc
+      omega
+  have : d = j := by omega
+  subst this
+  exact hdj
+
+theorem mem_layer {k : Nat} {n : NodeId} :
+    n ∈ layer H k ↔ Live H (.node n) ∧ ¬ Blocked H (.node n) ∧ Depth H (.node n) k := Iff.rfl
+
+noncomputable def layerSet (H : Hist) (k : Nat) : Finset NodeId :=
+  ((atoms H).map Prod.fst).toFinset.filter (fun n => n ∈ layer H k)
+
+theorem layerSet_coe (k : Nat) : (↑(layerSet H k) : Set NodeId) = layer H k := by
+  ext n
+  constructor
+  · intro h; exact (Finset.mem_filter.mp h).2
+  · intro h
+    obtain ⟨b, hb⟩ := atom_key (mem_layer.mp h).1.1
+    exact Finset.mem_filter.mpr ⟨List.mem_toFinset.mpr (List.mem_map.mpr ⟨(n, b), hb, rfl⟩), h⟩
+
+theorem depth_lt_card {v : Anchor} {k : Nat} (hv : Live H v) (hb : ¬ Blocked H v)
+    (hd : Depth H v k) : k < (liveAnchors H).card := by
+  obtain ⟨⟨p, hpl, hl, hc⟩, -⟩ := hd
+  have := chain_bound hc hl hv hb
+  omega
+
+/-- The deepest nonempty layer. -/
+noncomputable def top (H : Hist) : Nat :=
+  Nat.findGreatest (fun k => (layer H k).Nonempty) (liveAnchors H).card
+
+def HasUnblocked (H : Hist) : Prop := ∃ n, Live H (.node n) ∧ ¬ Blocked H (.node n)
+
+noncomputable def count (H : Hist) : Nat := if HasUnblocked H then top H + 1 else 0
+
+noncomputable def layersOf (H : Hist) : List (Finset NodeId) :=
+  (List.range (count H)).map (layerSet H)
+
+theorem le_top {n : NodeId} {d : Nat} (hl : Live H (.node n)) (hb : ¬ Blocked H (.node n))
+    (hd : Depth H (.node n) d) : d ≤ top H :=
+  Nat.le_findGreatest (P := fun k => (layer H k).Nonempty) (le_of_lt (depth_lt_card hl hb hd))
+    ⟨n, mem_layer.mpr ⟨hl, hb, hd⟩⟩
+
+theorem layer_nonempty (hu : HasUnblocked H) {k : Nat} (hk : k ≤ top H) : (layer H k).Nonempty := by
+  obtain ⟨n, hl, hb⟩ := hu
+  obtain ⟨d, hd⟩ := depth_exists hl hb
+  have htop : (layer H (top H)).Nonempty :=
+    Nat.findGreatest_spec (P := fun k => (layer H k).Nonempty) (le_of_lt (depth_lt_card hl hb hd))
+      ⟨n, mem_layer.mpr ⟨hl, hb, hd⟩⟩
+  obtain ⟨m, hm⟩ := htop
+  obtain ⟨hml, hmb, hmd⟩ := mem_layer.mp hm
+  obtain ⟨⟨p, hpl, hpl', hpc⟩, hmax⟩ := id hmd
+  have hkp : k < p.length := by omega
+  have hdk := depth_at hmd hml hmb hpl hpl' hpc hkp
+  have hlk : Live H p[k] := chain_live hpc hpl' hml _ (List.getElem_mem hkp)
+  have hbk : ¬ Blocked H p[k] := fun b => hmb (blocked_of_reach b (chain_reach hpc hpl' hkp))
+  obtain ⟨n', hn'⟩ := live_node hlk
+  rw [hn'] at hlk hbk hdk
+  exact ⟨n', mem_layer.mpr ⟨hlk, hbk, hdk⟩⟩
+
+/-- The conflicts of `H`, as a set. -/
+def conflictsOf (H : Hist) : Set Conflict := fun c => match c with
+  | .cycle B => (∃ c, Blocked H c) ∧ ∀ n, n ∈ B ↔ Live H (.node n) ∧ Blocked H (.node n)
+  | .order F => F ∈ layersOf H ∧ 2 ≤ F.card
+  | .deleteInsert d i A => DI H d i A
+
+noncomputable def viewOf (H : Hist) : View where
+  layers := layersOf H
+  conflicts := conflictsOf H
+  bytes := if (conflictsOf H).Nonempty then none
+    else some (((layersOf H).flatMap fun L => L.toList).flatMap fun n => (atom H n).getD [])
+
+theorem isView_viewOf (H : Hist) : IsView H (viewOf H) := by
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · intro k hk
+    simp only [viewOf, layersOf, List.getElem_map, List.getElem_range]
+    exact layerSet_coe k
+  · intro n hl hb
+    obtain ⟨d, hd⟩ := depth_exists hl hb
+    have hc : count H = top H + 1 := if_pos ⟨n, hl, hb⟩
+    have hdt := le_top hl hb hd
+    have hlt : d < (viewOf H).layers.length := by
+      simp only [viewOf, layersOf, List.length_map, List.length_range, hc]; omega
+    refine ⟨d, hlt, ?_⟩
+    rw [getElem!_pos _ d hlt]
+    simp only [viewOf, layersOf, List.getElem_map, List.getElem_range]
+    obtain ⟨b, hb'⟩ := atom_key hl.1
+    exact Finset.mem_filter.mpr ⟨List.mem_toFinset.mpr (List.mem_map.mpr ⟨(n, b), hb', rfl⟩),
+      mem_layer.mpr ⟨hl, hb, hd⟩⟩
+  · intro L hL
+    simp only [viewOf, layersOf, List.mem_map, List.mem_range] at hL
+    obtain ⟨k, hk, rfl⟩ := hL
+    have hu : HasUnblocked H := by
+      by_contra h; simp [count, h] at hk
+    have hc : count H = top H + 1 := if_pos hu
+    obtain ⟨n, hn⟩ := layer_nonempty hu (show k ≤ top H by omega)
+    rw [← layerSet_coe] at hn
+    exact ⟨n, hn⟩
+  · intro B; rfl
+  · intro F; rfl
+  · intro d i A; rfl
+  · simp only [viewOf]
+    split_ifs with h
+    · simp [h]
+    · simp [h]
+  · intro b hb
+    simp only [viewOf] at hb
+    split_ifs at hb
+    exact (Option.some.inj hb).symm
+
+/-- The view exists and is unique (`view_unique`). -/
+theorem view_exists (H : Hist) : ∃ V, IsView H V := ⟨viewOf H, isView_viewOf H⟩
+
+theorem prec_depth_lt {u v : Anchor} {k m : Nat} (hu : Depth H u k) (hv : Depth H v m)
+    (h : Prec H u v) : k < m := by
+  obtain ⟨⟨p, hpl, hpl', hpc⟩, -⟩ := hu
+  obtain ⟨q, hq, hql, hlen⟩ := extend_chain hpc hpl' h
+  have := hv.2 q hql hq
+  omega
+
+/-- T2.7: bytes exist exactly when the live atoms are totally ordered and no
+delete/insert conflict is open. -/
+theorem clean_iff (H : Hist) (V : View) (hv : IsView H V) :
+    V.bytes.isSome ↔ (∀ d i A, ¬ DI H d i A) ∧ (∀ a, ¬ Blocked H a) ∧
+      ∀ u v, Live H u → Live H v → u ≠ v → Prec H u v ∨ Prec H v u := by
+  have hs : V.bytes.isSome ↔ ¬ V.conflicts.Nonempty := by
+    rw [← hv.bytes_none]
+    cases V.bytes <;> simp
+  rw [hs, Set.not_nonempty_iff_eq_empty, Set.eq_empty_iff_forall_notMem]
+  -- Totality of `Prec` is the same as singleton layers once nothing is blocked.
+  have total : (∀ a, ¬ Blocked H a) →
+      ((∀ u v, Live H u → Live H v → u ≠ v → Prec H u v ∨ Prec H v u) ↔
+        ∀ F ∈ V.layers, F.card < 2) := by
+    intro nb
+    constructor
+    · intro tot F hF
+      by_contra hc
+      push_neg at hc
+      obtain ⟨x, hx, y, hy, hxy⟩ := Finset.one_lt_card.mp hc
+      obtain ⟨k, hk, rfl⟩ := List.getElem_of_mem hF
+      have mx : x ∈ layer H k := by
+        have : x ∈ (↑(V.layers[k]) : Set NodeId) := hx
+        rwa [hv.layers k hk] at this
+      have my : y ∈ layer H k := by
+        have : y ∈ (↑(V.layers[k]) : Set NodeId) := hy
+        rwa [hv.layers k hk] at this
+      obtain ⟨lx, -, dx⟩ := mem_layer.mp mx
+      obtain ⟨ly, -, dy⟩ := mem_layer.mp my
+      rcases tot _ _ lx ly (fun e => hxy (Anchor.node.inj e)) with p | p
+      · exact absurd (prec_depth_lt dx dy p) (lt_irrefl k)
+      · exact absurd (prec_depth_lt dy dx p) (lt_irrefl k)
+    · intro small u v lu lv huv
+      obtain ⟨nu, rfl⟩ := live_node lu
+      obtain ⟨nv, rfl⟩ := live_node lv
+      obtain ⟨ku, du⟩ := depth_exists lu (nb _)
+      obtain ⟨kv, dv⟩ := depth_exists lv (nb _)
+      have inl : ∀ {n : NodeId} {k : Nat}, Live H (.node n) → Depth H (.node n) k →
+          ∃ hk : k < V.layers.length, n ∈ V.layers[k] := by
+        intro n k ln dn
+        obtain ⟨k', hk', hn⟩ := hv.layers_all n ln (nb _)
+        obtain ⟨-, hn'⟩ := in_layer hv hn
+        obtain ⟨-, -, dn'⟩ := mem_layer.mp hn'
+        have := depth_unique dn dn'
+        subst this
+        rw [getElem!_pos V.layers k hk'] at hn
+        exact ⟨hk', hn⟩
+      -- Two atoms of one layer would make it too big.
+      have one : ∀ {k : Nat} {a b : NodeId}, Live H (.node a) → Depth H (.node a) k →
+          Live H (.node b) → Depth H (.node b) k → a = b := by
+        intro k a b la da lb db
+        obtain ⟨hk, ha⟩ := inl la da
+        obtain ⟨hk', hb⟩ := inl lb db
+        have := small _ (List.getElem_mem hk)
+        by_contra hab
+        have : 1 < (V.layers[k]).card := Finset.one_lt_card.mpr ⟨a, ha, b, hb, hab⟩
+        omega
+      -- The shallower atom lies on the deeper one's longest chain.
+      have lower : ∀ {a b : NodeId} {ka kb : Nat}, Live H (.node a) → Depth H (.node a) ka →
+          Live H (.node b) → Depth H (.node b) kb → ka < kb → Prec H (.node a) (.node b) := by
+        intro a b ka kb la da lb db hlt
+        obtain ⟨⟨p, hpl, hpl', hpc⟩, -⟩ := id db
+        have hkp : ka < p.length := by omega
+        have dk := depth_at db lb (nb _) hpl hpl' hpc hkp
+        have lk : Live H p[ka] := chain_live hpc hpl' lb _ (List.getElem_mem hkp)
+        obtain ⟨n', hn'⟩ := live_node lk
+        rw [hn'] at lk dk
+        have := one la da lk dk
+        subst this
+        obtain ⟨hlen, hlast⟩ := last_get hpl'
+        have hab := chain_trans hpc (show ka < p.length - 1 by omega) hlen
+        rw [hn', hlast] at hab
+        exact hab
+      rcases Nat.lt_trichotomy ku kv with h | h | h
+      · exact Or.inl (lower lu du lv dv h)
+      · subst h; exact absurd (congrArg Anchor.node (one lu du lv dv)) huv
+      · exact Or.inr (lower lv dv lu du h)
+  constructor
+  · intro none_in
+    have nb : ∀ a, ¬ Blocked H a := by
+      intro a ba
+      obtain ⟨c, hc, hca⟩ := id ba
+      let B := ((atoms H).map Prod.fst).toFinset.filter fun n => Live H (.node n) ∧ Blocked H (.node n)
+      apply none_in (.cycle B)
+      refine (hv.cycle B).mpr ⟨⟨a, ba⟩, fun n => ⟨fun h => (Finset.mem_filter.mp h).2, fun h => ?_⟩⟩
+      obtain ⟨b, hb⟩ := atom_key h.1.1
+      exact Finset.mem_filter.mpr ⟨List.mem_toFinset.mpr (List.mem_map.mpr ⟨(n, b), hb, rfl⟩), h⟩
+    refine ⟨fun d i A h => none_in (.deleteInsert d i A) ((hv.deleteInsert d i A).mpr h), nb, ?_⟩
+    rw [total nb]
+    intro F hF
+    by_contra hc
+    exact none_in (.order F) ((hv.order F).mpr ⟨hF, by omega⟩)
+  · rintro ⟨ndi, nb, tot⟩ c hc
+    cases c with
+    | cycle B => obtain ⟨⟨a, ha⟩, -⟩ := (hv.cycle B).mp hc; exact nb a ha
+    | order F =>
+      obtain ⟨hF, h2⟩ := (hv.order F).mp hc
+      have := (total nb).mp tot F hF
+      omega
+    | deleteInsert d i A => exact ndi d i A ((hv.deleteInsert d i A).mp hc)
+
+end Layers
 
 /-- R2.3: a cycle made only of deleted atoms blocks nothing: whatever is
 blocked is downstream of a cycle through a live atom. -/
