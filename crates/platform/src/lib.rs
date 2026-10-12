@@ -1274,10 +1274,15 @@ pub struct IncrementalView {
     originals: BTreeMap<(String, u64), std::sync::Weak<str>>,
     live: BTreeSet<String>,
     outputs: BTreeMap<String, PathOutput>,
-    documents: BTreeMap<String, o5s_kernel::model::DocumentGraph>,
-    /// File-state heads of each graph document.
-    document_heads: BTreeMap<String, BTreeMap<u64, documents::FileState>>,
-    document_outputs: BTreeMap<String, PathOutput>,
+    /// Graph documents by identity, and the identity each edit resolves to.
+    docs: documents::Docs,
+    documents: BTreeMap<documents::DocId, o5s_kernel::model::DocumentGraph>,
+    /// State heads (exists, executable) of each graph document.
+    document_heads: BTreeMap<documents::DocId, BTreeMap<u64, documents::FileState>>,
+    /// Location heads (path) of each graph document.
+    document_locations: BTreeMap<documents::DocId, BTreeMap<u64, String>>,
+    /// What each graph document shows at each of its paths.
+    document_outputs: BTreeMap<documents::DocId, Vec<(String, PathOutput)>>,
 }
 impl IncrementalView {
     pub fn sync(&mut self, repo: &Repository, channel: &str) -> Result<ViewWork, Refusal> {
@@ -1416,16 +1421,32 @@ impl IncrementalView {
                 );
                 work.updated_paths += 1;
             }
+            if !p.graph_edits.is_empty() {
+                self.docs.prime(repo, id)?;
+            }
             for edit in &p.graph_edits {
-                let graph = self.documents.entry(edit.path.clone()).or_default();
-                documents::apply_graph_patch(graph, repo, p, edit)?;
-                let superseded = documents::nearest(repo, &p.dependencies, &edit.path)?;
-                let heads = self.document_heads.entry(edit.path.clone()).or_default();
+                let doc = self
+                    .docs
+                    .get(id, &edit.path)
+                    .ok_or_else(|| refuse("graph document not resolved"))?
+                    .clone();
+                let graph = self.documents.entry(doc.clone()).or_default();
+                documents::apply_graph_patch(graph, repo, &self.docs, p, edit)?;
+                let superseded = documents::nearest(repo, &self.docs, &p.dependencies, &doc)?;
+                let heads = self.document_heads.entry(doc.clone()).or_default();
                 for d in superseded {
                     heads.remove(&d);
                 }
                 heads.insert(id, (!edit.remove, edit.executable));
-                dirty_documents.insert(edit.path.clone());
+                if self.docs.moves(id, &edit.path) {
+                    let before = self.docs.locations(repo, &p.dependencies, &doc)?;
+                    let at = self.document_locations.entry(doc.clone()).or_default();
+                    for d in before.keys() {
+                        at.remove(d);
+                    }
+                    at.insert(id, edit.path.clone());
+                }
+                dirty_documents.insert(doc);
                 work.updated_paths += 1;
             }
             self.applied.insert(id);
@@ -1448,10 +1469,14 @@ impl IncrementalView {
             );
             work.rendered_paths += 1;
         }
-        for path in dirty_documents {
+        for doc in dirty_documents {
             self.document_outputs.insert(
-                path.clone(),
-                documents::render_output(&self.documents[&path], &self.document_heads[&path])?,
+                doc.clone(),
+                documents::render_document(
+                    &self.documents[&doc],
+                    &self.document_heads[&doc],
+                    &self.document_locations[&doc],
+                )?,
             );
             work.rendered_paths += 1;
         }
@@ -1460,7 +1485,8 @@ impl IncrementalView {
     /// Render content without copying the full channel membership history.
     pub fn content(&self) -> Result<View, Refusal> {
         let mut view = collect_outputs(&self.outputs);
-        documents::overlay_outputs(&self.document_outputs, &self.document_heads, &mut view);
+        let (outputs, heads) = documents::by_path(&self.document_outputs, &self.document_heads);
+        documents::overlay_outputs(&outputs, &heads, &mut view);
         Ok(view)
     }
     pub fn patch_count(&self) -> usize {

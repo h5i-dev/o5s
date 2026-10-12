@@ -78,7 +78,14 @@ A path is either a graph document or a legacy whole-file/line document, for its 
 - **Mixed proposals.** `propose_graph` accepts `files` (whole-file edits) beside graph edits, so a proposal can carry text documents and binary files together. A path cannot be both in one proposal.
 - **Symbolic links and submodules.** A whole-file edit with `"kind": "symlink"` holds the link target: non-empty, at most 4,096 bytes, no NUL. One with `"kind": "submodule"` holds a 40-digit lowercase commit id. Neither may be executable or base64. Both are registers like any whole-file edit, so a concurrent retarget conflicts. Line edits and graph documents are text only.
 - **Identity.** The new fields appear in a patch body only when set, and mixed proposals use the body tag `o5s-mixed-patch-v1`. Every earlier patch keeps its SHA-256 identity.
-- **Renames.** A rename is a removal and an addition, as in Git; atom identities do not move with it.
+- **Moves.** A graph edit with `"from": "old/path"` moves that document to its `path`, keeping its atoms and history. A document's identity is the path where it was created, and its location is a register of its own:
+  - creation, a move, or an edit that settles a conflicting location writes it; ordinary edits do not;
+  - an edit names a path as its author saw it, and resolves to the document whose location, in the author's causal past, is that path;
+  - an edit of the old path made concurrently with a move therefore lands in the moved document;
+  - concurrent moves to different paths show a conflict at each path until an edit that observes both settles one;
+  - a new file at a path a document moved away from is a new document.
+
+  The CLI proposes a move when a graph document disappears at one path and a new text file shares at least half of its lines. Whole-file (legacy) paths, binary files, symlinks and submodules move as a removal and an addition, as in Git.
 
 Views list executable paths in `executable`, base64 paths in `binary`, links in `symlinks` and submodules in `submodules`. Git export (native and Cloudflare Artifacts) and `o5s fetch` write modes 100644, 100755, 120000 (link target blob) and 160000 (gitlink to the commit; no object). The CLI reads links with `readlink` and submodules from the index's gitlinks, and refuses any path that passes through a symlink.
 

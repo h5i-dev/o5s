@@ -1,6 +1,7 @@
 import Mathlib.Data.List.Basic
 import Mathlib.Logic.Relation
 import Mathlib.Data.Finset.Basic
+import Mathlib.Data.Finset.Card
 /-!
 # Graph documents: the model (M0, statements to prove)
 
@@ -123,8 +124,9 @@ def IsOrder (H : Hist) (o : OpId) : Prop := ∃ b a, (o, Op.order b a) ∈ ops H
 def RetractedBy (H : Hist) (ok : PId → Prop) (o : OpId) : Prop :=
   ∃ r, (r, Op.retract o) ∈ ops H ∧ ok r.patch
 
+open Classical in
 /-- All edges no patch retracted, including the sentinel edge. -/
-def E (H : Hist) : List (Anchor × Anchor) :=
+noncomputable def E (H : Hist) : List (Anchor × Anchor) :=
   (.start, .stop) :: ((facts H).filter fun f => ¬ RetractedBy H (fun _ => True) f.2.2).map
     fun f => (f.1, f.2.1)
 
@@ -271,8 +273,8 @@ def Blocked (H : Hist) (v : Anchor) : Prop := ∃ c, Prec H c c ∧ Relation.Ref
 at it. Well defined because no cycle reaches it. -/
 def Depth (H : Hist) (v : Anchor) (k : Nat) : Prop :=
   (∃ path : List Anchor, path.length = k + 1 ∧ path.getLast? = some v ∧
-    path.Chain' (Sum H)) ∧
-  ∀ path : List Anchor, path.getLast? = some v → path.Chain' (Sum H) → path.length ≤ k + 1
+    path.IsChain (Sum H)) ∧
+  ∀ path : List Anchor, path.getLast? = some v → path.IsChain (Sum H) → path.length ≤ k + 1
 
 inductive Conflict
   /-- Live atoms downstream of a cycle (not a minimal witness). -/
@@ -382,12 +384,13 @@ theorem clean_iff (H : Hist) (V : View) (hv : IsView H V) :
 /-- T2.7: clean bytes list every live atom once, in `Prec` order. -/
 theorem bytes_order (H : Hist) (V : View) (hv : IsView H V) (b : List UInt8)
     (hb : V.bytes = some b) :
-    ∀ k₁ k₂ n₁ n₂, n₁ ∈ V.layers[k₁]! → n₂ ∈ V.layers[k₂]! →
+    ∀ (k₁ k₂ : Nat) (n₁ n₂ : NodeId), n₁ ∈ V.layers[k₁]! → n₂ ∈ V.layers[k₂]! →
       Prec H (.node n₁) (.node n₂) → k₁ < k₂ := by sorry
 
-/-- R2.3: a cycle made only of deleted atoms blocks nothing. -/
+/-- R2.3: a cycle made only of deleted atoms blocks nothing: whatever is
+blocked is downstream of a cycle through a live atom. -/
 theorem dead_cycle_harmless (H : Hist) (v : Anchor) (hv : Blocked H v) :
-    ∃ c, Prec H c c := by sorry
+    ∃ c, Live H c ∧ Prec H c c := by sorry
 
 /-- T2.6: restoring a deletion removes exactly its conflicts. -/
 theorem restore_clears (H H' : Hist) (R : Patch) (d : OpId)

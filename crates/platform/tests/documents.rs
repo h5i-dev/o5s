@@ -218,3 +218,152 @@ fn unobserved_anchors_and_legacy_mix_are_refused_without_mutation() {
     );
     assert_eq!(before, serde_json::to_value(&db).unwrap());
 }
+
+fn edit_at(db: &mut Database, deps: Vec<u64>, edit: GraphEdit) -> Value {
+    db.execute(
+        &actor(1),
+        Command::ProposeGraph {
+            repo: "r".into(),
+            intent: "edit".into(),
+            dependencies: deps,
+            edits: vec![edit],
+            files: vec![],
+        },
+    )
+    .unwrap()
+}
+fn files(db: &Database) -> Value {
+    let view = db
+        .repo(&actor(1), "r")
+        .unwrap()
+        .materialize("main")
+        .unwrap();
+    serde_json::json!({"files":view.files,"conflicts":view.conflicts.keys().collect::<Vec<_>>()})
+}
+
+#[test]
+fn moves_keep_identity_and_concurrent_edits_of_the_old_path_follow() {
+    let mut db = create();
+    let base = propose(
+        &mut db,
+        vec![],
+        vec![insert(Anchor::Start, Anchor::End, &["a\n", "c\n"])],
+    );
+    let b = base["patch"].as_u64().unwrap();
+    admit(&mut db, b);
+    // Move file → moved, and concurrently insert at the old path.
+    let moved = edit_at(
+        &mut db,
+        vec![b],
+        GraphEdit {
+            path: "moved".into(),
+            from: Some("file".into()),
+            ..Default::default()
+        },
+    );
+    let edit = propose(
+        &mut db,
+        vec![b],
+        vec![insert(
+            Anchor::Node(node(&base, 0)),
+            Anchor::Node(node(&base, 1)),
+            &["b\n"],
+        )],
+    );
+    admit(&mut db, moved["patch"].as_u64().unwrap());
+    admit(&mut db, edit["patch"].as_u64().unwrap());
+    assert_eq!(
+        files(&db),
+        serde_json::json!({"files":{"moved":"a\nb\nc\n"},"conflicts":[]})
+    );
+    // A later edit at the new path continues the same document.
+    let m = moved["patch"].as_u64().unwrap();
+    let e = edit["patch"].as_u64().unwrap();
+    let more = edit_at(
+        &mut db,
+        vec![m, e],
+        GraphEdit {
+            path: "moved".into(),
+            operations: vec![insert(Anchor::Node(node(&base, 1)), Anchor::End, &["d\n"])],
+            ..Default::default()
+        },
+    );
+    admit(&mut db, more["patch"].as_u64().unwrap());
+    assert_eq!(files(&db)["files"]["moved"], "a\nb\nc\nd\n");
+    // A new document at the old path is a different document.
+    let fresh = edit_at(
+        &mut db,
+        vec![more["patch"].as_u64().unwrap()],
+        GraphEdit {
+            path: "file".into(),
+            operations: vec![insert(Anchor::Start, Anchor::End, &["new\n"])],
+            ..Default::default()
+        },
+    );
+    admit(&mut db, fresh["patch"].as_u64().unwrap());
+    assert_eq!(files(&db)["files"]["file"], "new\n");
+    assert_eq!(files(&db)["files"]["moved"], "a\nb\nc\nd\n");
+}
+
+#[test]
+fn concurrent_moves_to_different_paths_conflict_until_resolved() {
+    let mut db = create();
+    let base = propose(
+        &mut db,
+        vec![],
+        vec![insert(Anchor::Start, Anchor::End, &["x\n"])],
+    );
+    let b = base["patch"].as_u64().unwrap();
+    admit(&mut db, b);
+    let to = |db: &mut Database, path: &str| {
+        edit_at(
+            db,
+            vec![b],
+            GraphEdit {
+                path: path.into(),
+                from: Some("file".into()),
+                ..Default::default()
+            },
+        )["patch"]
+            .as_u64()
+            .unwrap()
+    };
+    let left = to(&mut db, "left");
+    let right = to(&mut db, "right");
+    admit(&mut db, left);
+    admit(&mut db, right);
+    assert_eq!(
+        files(&db),
+        serde_json::json!({"files":{},"conflicts":["left","right"]})
+    );
+    // Resolving: a move that observes both heads picks one path.
+    let resolved = edit_at(
+        &mut db,
+        vec![left, right],
+        GraphEdit {
+            path: "left".into(),
+            ..Default::default()
+        },
+    );
+    admit(&mut db, resolved["patch"].as_u64().unwrap());
+    assert_eq!(
+        files(&db),
+        serde_json::json!({"files":{"left":"x\n"},"conflicts":[]})
+    );
+    // A move needs a document at its source.
+    let refused = db.execute(
+        &actor(1),
+        Command::ProposeGraph {
+            repo: "r".into(),
+            intent: "nothing".into(),
+            dependencies: vec![b],
+            edits: vec![GraphEdit {
+                path: "elsewhere".into(),
+                from: Some("missing".into()),
+                ..Default::default()
+            }],
+            files: vec![],
+        },
+    );
+    assert!(refused.unwrap_err().0.contains("a move needs"));
+}

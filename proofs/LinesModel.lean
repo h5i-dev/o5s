@@ -39,6 +39,7 @@ instance (x y : R α) : Decidable (Conf x y) := by unfold Conf; infer_instance
 
 def Valid (x : R α) : Prop := x.1 ≤ x.2.1
 def KeyLe (x y : R α) : Prop := x.1 < y.1 ∨ (x.1 = y.1 ∧ x.2.1 ≤ y.2.1)
+instance (x y : R α) : Decidable (KeyLe x y) := by unfold KeyLe; infer_instance
 /-- Separation: `x` ends before `y` starts, strictly if either is an insertion. -/
 def Sep (x y : R α) : Prop :=
   if x.1 = x.2.1 ∨ y.1 = y.2.1 then x.2.1 < y.1 else x.2.1 ≤ y.1
