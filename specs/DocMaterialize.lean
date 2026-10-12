@@ -356,10 +356,19 @@ theorem liveness_spec (doc : document.Doc)
 def sharedM (targets : List Nat) (l r : Nat) : List Nat :=
   (if l ∈ targets then [l] else []) ++ (if r ∈ targets then [r] else [])
 
+theorem mem_map_val_iff (l : List Usize) (x : Usize) : x.val ∈ l.map (·.val) ↔ x ∈ l := by
+  constructor
+  · intro h
+    obtain ⟨y, hy, he⟩ := List.mem_map.mp h
+    rwa [UScalar.eq_of_val_eq he] at hy
+  · intro h; exact List.mem_map.mpr ⟨x, h, rfl⟩
+
 @[step] theorem shared_anchors_spec (targets : alloc.vec.Vec Usize) (left right : Usize) :
     document.shared_anchors targets left right ⦃ out =>
       out.val.map (·.val) = sharedM (targets.val.map (·.val)) left.val right.val ⦄ := by
-  sorry
+  unfold document.shared_anchors
+  h5i_step
+  all_goals simp_all [sharedM, mem_map_val_iff]
 
 /-- `concurrent`: distinct patches, neither in the other's causal past. -/
 def concurrentM (deps : List (alloc.vec.Vec Usize)) (a b : Usize) : Prop :=
@@ -370,7 +379,24 @@ theorem concurrent_spec (deps : alloc.vec.Vec (alloc.vec.Vec Usize)) (a b : Usiz
     (room : deps.val.length < Usize.max) (ha : a.val < deps.val.length) (hb : b.val < deps.val.length)
     (bounds : ∀ row ∈ deps.val, ∀ v ∈ row.val, v.val < deps.val.length) :
     document.concurrent deps a b ⦃ r => r = decide (concurrentM deps.val a b) ⦄ := by
-  sorry
+  unfold document.concurrent
+  by_cases hab : a = b
+  · rw [if_pos hab]; simp [concurrentM, hab]
+  · rw [if_neg hab]
+    h5i_step
+    all_goals first
+      | (simp_all; done)
+      | scalar_tac
+      | (obtain ⟨v, hv, hr⟩ := b1_post
+         rw [UScalar.eq_of_val_eq hv] at hr
+         intro hc; exact hc.2.1 hr)
+      | (constructor
+         · intro h
+           refine ⟨fun e => hab (by rw [e]), fun hr => ?_, h a rfl⟩
+           have := (pa_post1 b.val (by scalar_tac)).mpr ⟨b, rfl, hr⟩
+           first | (rw [b1_post] at this; cases this) | simp_all
+         · rintro ⟨-, -, h⟩ x hx
+           rwa [UScalar.eq_of_val_eq hx])
 
 /-- A delete–insert conflict, by indices. -/
 def diVal (x : document.DeleteInsert) : Nat × Nat × List Nat :=
@@ -404,16 +430,7 @@ structure MatWF (doc : document.Doc) : Prop where
   room : doc.deps.val.length < Usize.max
   out : doc.deletions.val.length * doc.insertions.val.length < Usize.max
 
-theorem deletion_conflicts_spec (out : alloc.vec.Vec document.DeleteInsert) (doc : document.Doc) (d : Usize)
-    (wf : MatWF doc) (hd : d.val < doc.deletions.val.length)
-    (room : out.val.length + doc.insertions.val.length < Usize.max) :
-    document.deletion_conflicts out doc d ⦃ r =>
-      r.val.map diVal = out.val.map diVal ++ conflictsOf doc d.val ⦄ := by
-  sorry
-
-theorem delete_inserts_spec (doc : document.Doc) (wf : MatWF doc) :
-    document.delete_inserts doc ⦃ out => out.val.map diVal = deleteInsertsM doc ⦄ := by
-  sorry
+-- `deletion_conflicts_spec` and `delete_inserts_spec` are in `DocLayers.lean`.
 
 /-! ## All edges, as rows -/
 
@@ -535,6 +552,13 @@ theorem dead_rows_spec (rows : alloc.vec.Vec (alloc.vec.Vec Usize)) (live : allo
               have h1 : a.val < live.val.length := by scalar_tac
               have h2 : a.val < rows.val.length := by scalar_tac
               simp_all [deadRow, List.getElem?_eq_getElem h1, List.getElem?_eq_getElem h2])
+           | (refine ⟨by scalar_tac, ?_⟩
+              have h1 : a.val < live.val.length := by scalar_tac
+              have h2 : a.val < rows.val.length := by scalar_tac
+              have hb : (live.val[a.val]'h1) = false := by first | exact b_post | simpa using b_post
+              unfold deadRow
+              rw [List.getElem?_eq_getElem h1, Option.getD_some, hb, List.getElem?_eq_getElem h2]
+              simp)
            | (trace_state; sorry))
       | (simp only [FoldStep]
          refine ⟨by simp; scalar_tac, ?_, by scalar_tac, by simp_all⟩
@@ -544,6 +568,13 @@ theorem dead_rows_spec (rows : alloc.vec.Vec (alloc.vec.Vec Usize)) (live : allo
          have h1 : a.val < live.val.length := by scalar_tac
          have h2 : a.val < rows.val.length := by scalar_tac
          simp_all [deadRow, List.getElem?_eq_getElem h1, List.getElem?_eq_getElem h2])
+      | (refine ⟨by scalar_tac, ?_⟩
+         have h1 : a.val < live.val.length := by scalar_tac
+         have h2 : a.val < rows.val.length := by scalar_tac
+         have hb : (live.val[a.val]'h1) = false := by first | exact b_post | simpa using b_post
+         unfold deadRow
+         rw [List.getElem?_eq_getElem h1, Option.getD_some, hb, List.getElem?_eq_getElem h2]
+         simp)
       | (trace_state; sorry)
 
 end o5s_kernel.DocKernel
