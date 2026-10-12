@@ -513,6 +513,13 @@ structure Listing where
   repo : Std.U64
   label : alloc.vec.Vec Std.U8
 
+/-- [o5s_registry::Role]
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 95:12-98:13
+    Visibility: public -/
+structure Role where
+  user : Std.U64
+  level : Std.U64
+
 /-- [o5s_registry::Repository]
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 95:12-98:13
     Visibility: public -/
@@ -580,6 +587,11 @@ structure Repository where
     Visibility: public -/
 @[global_simps, irreducible] def Listing.TABLE : Std.U32 := 10#u32
 
+/-- [o5s_registry::{o5s_registry::Role}::TABLE]
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 135:12-135:60
+    Visibility: public -/
+@[global_simps, irreducible] def Role.TABLE : Std.U32 := 11#u32
+
 /-- [o5s_registry::{o5s_registry::Repository}::KEY_LEN]
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 136:12-136:62
     Visibility: public -/
@@ -634,6 +646,11 @@ structure Repository where
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 136:12-136:62
     Visibility: public -/
 @[global_simps, irreducible] def Listing.KEY_LEN : Std.U32 := 1#u32
+
+/-- [o5s_registry::{o5s_registry::Role}::KEY_LEN]
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 136:12-136:62
+    Visibility: public -/
+@[global_simps, irreducible] def Role.KEY_LEN : Std.U32 := 1#u32
 
 /-- [o5s_registry::{o5s_registry::PatchRow}::to_row]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 138:12-143:13
@@ -751,6 +768,15 @@ def Listing.to_row
   let v ← U64.Insts.H5i_app_sqlColumn.to_val self.repo
   let out ← alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Val) v
   let v1 ← alloc.vec.VecU8.Insts.H5i_app_sqlColumn.to_val self.label
+  alloc.vec.Vec.push out v1
+
+/-- [o5s_registry::{o5s_registry::Role}::to_row]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 138:12-143:13
+    Visibility: public -/
+def Role.to_row (self : Role) : Result (alloc.vec.Vec h5i_app_sql.Val) := do
+  let v ← U64.Insts.H5i_app_sqlColumn.to_val self.user
+  let out ← alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Val) v
+  let v1 ← U64.Insts.H5i_app_sqlColumn.to_val self.level
   alloc.vec.Vec.push out v1
 
 /-- [o5s_registry::{o5s_registry::Repository}::to_row]:
@@ -1215,6 +1241,33 @@ def Listing.from_row
       | none => ok none
       | some x1 => let _ ← i1 + 1#usize
                    ok (some { repo := x, label := x1 })
+
+/-- [o5s_registry::{o5s_registry::Role}::from_row]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 146:12-167:13
+    Visibility: public -/
+def Role.from_row
+  (row : alloc.vec.Vec h5i_app_sql.Val) : Result (Option Role) := do
+  let i := alloc.vec.Vec.len row
+  let i1 ← 0#usize + 1#usize
+  let i2 ← i1 + 1#usize
+  if i != i2
+  then ok none
+  else
+    let v ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+        h5i_app_sql.Val) row 0#usize
+    let o ← U64.Insts.H5i_app_sqlColumn.from_val v
+    match o with
+    | none => ok none
+    | some x =>
+      let v1 ←
+        alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+          h5i_app_sql.Val) row i1
+      let o1 ← U64.Insts.H5i_app_sqlColumn.from_val v1
+      match o1 with
+      | none => ok none
+      | some x1 => let _ ← i1 + 1#usize
+                   ok (some { user := x, level := x1 })
 
 /-- [o5s_registry::{o5s_registry::Repository}::from_rows]: loop body 0:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 174:16-180:17
@@ -1800,6 +1853,59 @@ def Listing.from_rows
   then ok (some out)
   else ok none
 
+/-- [o5s_registry::{o5s_registry::Role}::from_rows]: loop body 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 174:16-180:17
+    Visibility: public -/
+@[rust_loop_body]
+def Role.from_rows_loop.body
+  (rows : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val))
+  (out : alloc.vec.Vec Role) (ok1 : Bool) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Role) × Bool × Std.Usize)
+    ((alloc.vec.Vec Role) × Bool))
+  := do
+  let i1 := alloc.vec.Vec.len rows
+  if i < i1
+  then
+    let v ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
+        h5i_app_sql.Val)) rows i
+    let o ← Role.from_row v
+    let (out1, ok2) ←
+      match o with
+      | none => ok (out, false)
+      | some x => do
+                  let out2 ← alloc.vec.Vec.push out x
+                  ok (out2, ok1)
+    let i2 ← i + 1#usize
+    ok (cont (out1, ok2, i2))
+  else ok (done (out, ok1))
+
+/-- [o5s_registry::{o5s_registry::Role}::from_rows]: loop 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 174:16-180:17
+    Visibility: public -/
+@[rust_loop]
+def Role.from_rows_loop
+  (rows : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val))
+  (out : alloc.vec.Vec Role) (ok1 : Bool) (i : Std.Usize) :
+  Result ((alloc.vec.Vec Role) × Bool)
+  := do
+  loop
+    (fun (out1, ok2, i1) => Role.from_rows_loop.body rows out1 ok2 i1)
+    (out, ok1, i)
+
+/-- [o5s_registry::{o5s_registry::Role}::from_rows]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 170:12-186:13
+    Visibility: public -/
+def Role.from_rows
+  (rows : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val)) :
+  Result (Option (alloc.vec.Vec Role))
+  := do
+  let (out, ok1) ←
+    Role.from_rows_loop rows (alloc.vec.Vec.new Role) true 0#usize
+  if ok1
+  then ok (some out)
+  else ok none
+
 /-- [o5s_registry::{o5s_registry::Repository}::sql_put]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 189:12-191:13
     Visibility: public -/
@@ -1876,6 +1982,13 @@ def Body.sql_put (self : Body) : Result h5i_app_sql.Write := do
 def Listing.sql_put (self : Listing) : Result h5i_app_sql.Write := do
   let v ← Listing.to_row self
   ok (h5i_app_sql.Write.Put Listing.TABLE Listing.KEY_LEN v)
+
+/-- [o5s_registry::{o5s_registry::Role}::sql_put]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 189:12-191:13
+    Visibility: public -/
+def Role.sql_put (self : Role) : Result h5i_app_sql.Write := do
+  let v ← Role.to_row self
+  ok (h5i_app_sql.Write.Put Role.TABLE Role.KEY_LEN v)
 
 /-- [o5s_registry::{o5s_registry::Repository}::from_one]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 204:12-212:13
@@ -2388,8 +2501,53 @@ def Listing.put
   := do
   Listing.put_loop v x 0#usize
 
+/-- [o5s_registry::{o5s_registry::Role}::put]: loop body 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 220:16-228:13
+    Visibility: public -/
+@[rust_loop_body]
+def Role.put_loop.body
+  (v : alloc.vec.Vec Role) (x : Role) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize (alloc.vec.Vec Role))
+  := do
+  let i1 := alloc.vec.Vec.len v
+  if i < i1
+  then
+    let r ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Role) v i
+    if r.user = x.user
+    then
+      let (_, index_mut_back) ←
+        alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Role) v
+          i
+      let v1 := index_mut_back x
+      ok (done v1)
+    else let i2 ← i + 1#usize
+         ok (cont i2)
+  else let v1 ← alloc.vec.Vec.push v x
+       ok (done v1)
+
+/-- [o5s_registry::{o5s_registry::Role}::put]: loop 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 220:16-228:13
+    Visibility: public -/
+@[rust_loop]
+def Role.put_loop
+  (v : alloc.vec.Vec Role) (x : Role) (i : Std.Usize) :
+  Result (alloc.vec.Vec Role)
+  := do
+  loop
+    (fun i1 => Role.put_loop.body v x i1)
+    i
+
+/-- [o5s_registry::{o5s_registry::Role}::put]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 218:12-228:13
+    Visibility: public -/
+@[reducible]
+def Role.put
+  (v : alloc.vec.Vec Role) (x : Role) : Result (alloc.vec.Vec Role) := do
+  Role.put_loop v x 0#usize
+
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::PatchRow}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 88:13-88:18
+    Source: 'crates/registry/src/lib.rs', lines 101:13-101:18
     Visibility: public -/
 def PatchRow.Insts.CoreCloneClone.clone
   (self : PatchRow) : Result PatchRow := do
@@ -2448,7 +2606,7 @@ def PatchRow.del
   PatchRow.del_loop v id (alloc.vec.Vec.new PatchRow) 0#usize
 
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::Dependency}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 96:13-96:18
+    Source: 'crates/registry/src/lib.rs', lines 109:13-109:18
     Visibility: public -/
 def Dependency.Insts.CoreCloneClone.clone
   (self : Dependency) : Result Dependency := do
@@ -2511,7 +2669,7 @@ def Dependency.del
   Dependency.del_loop v patch dependency (alloc.vec.Vec.new Dependency) 0#usize
 
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::Approval}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 102:13-102:18
+    Source: 'crates/registry/src/lib.rs', lines 115:13-115:18
     Visibility: public -/
 def Approval.Insts.CoreCloneClone.clone
   (self : Approval) : Result Approval := do
@@ -2573,7 +2731,7 @@ def Approval.del
   Approval.del_loop v patch reviewer (alloc.vec.Vec.new Approval) 0#usize
 
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::CheckReport}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 109:13-109:18
+    Source: 'crates/registry/src/lib.rs', lines 122:13-122:18
     Visibility: public -/
 def CheckReport.Insts.CoreCloneClone.clone
   (self : CheckReport) : Result CheckReport := do
@@ -2630,7 +2788,7 @@ def CheckReport.del
   CheckReport.del_loop v patch (alloc.vec.Vec.new CheckReport) 0#usize
 
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::Channel}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 117:13-117:18
+    Source: 'crates/registry/src/lib.rs', lines 130:13-130:18
     Visibility: public -/
 def Channel.Insts.CoreCloneClone.clone (self : Channel) : Result Channel := do
   let i ← lift (core.clone.impls.CloneU64.clone self.id)
@@ -2688,7 +2846,7 @@ def Channel.del
   Channel.del_loop v id (alloc.vec.Vec.new Channel) 0#usize
 
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::Member}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 126:13-126:18
+    Source: 'crates/registry/src/lib.rs', lines 139:13-139:18
     Visibility: public -/
 def Member.Insts.CoreCloneClone.clone (self : Member) : Result Member := do
   ok self
@@ -2749,7 +2907,7 @@ def Member.del
   Member.del_loop v channel position (alloc.vec.Vec.new Member) 0#usize
 
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::PathKind}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 134:13-134:18
+    Source: 'crates/registry/src/lib.rs', lines 147:13-147:18
     Visibility: public -/
 def PathKind.Insts.CoreCloneClone.clone
   (self : PathKind) : Result PathKind := do
@@ -2808,7 +2966,7 @@ def PathKind.del
   PathKind.del_loop v id (alloc.vec.Vec.new PathKind) 0#usize
 
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::Event}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 142:13-142:18
+    Source: 'crates/registry/src/lib.rs', lines 155:13-155:18
     Visibility: public -/
 def Event.Insts.CoreCloneClone.clone (self : Event) : Result Event := do
   ok self
@@ -2863,7 +3021,7 @@ def Event.del
   Event.del_loop v seq (alloc.vec.Vec.new Event) 0#usize
 
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::Body}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 153:13-153:18
+    Source: 'crates/registry/src/lib.rs', lines 166:13-166:18
     Visibility: public -/
 def Body.Insts.CoreCloneClone.clone (self : Body) : Result Body := do
   let i ← lift (core.clone.impls.CloneU64.clone self.patch)
@@ -2919,7 +3077,7 @@ def Body.del
   Body.del_loop v patch (alloc.vec.Vec.new Body) 0#usize
 
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::Listing}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 161:13-161:18
+    Source: 'crates/registry/src/lib.rs', lines 174:13-174:18
     Visibility: public -/
 def Listing.Insts.CoreCloneClone.clone (self : Listing) : Result Listing := do
   let i ← lift (core.clone.impls.CloneU64.clone self.repo)
@@ -2974,6 +3132,58 @@ def Listing.del
   Result (alloc.vec.Vec Listing)
   := do
   Listing.del_loop v repo (alloc.vec.Vec.new Listing) 0#usize
+
+/-- [o5s_registry::{impl core::clone::Clone for o5s_registry::Role}::clone]:
+    Source: 'crates/registry/src/lib.rs', lines 183:13-183:18
+    Visibility: public -/
+def Role.Insts.CoreCloneClone.clone (self : Role) : Result Role := do
+  ok self
+
+/-- [o5s_registry::{o5s_registry::Role}::del]: loop body 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 234:16-239:17
+    Visibility: public -/
+@[rust_loop_body]
+def Role.del_loop.body
+  (v : alloc.vec.Vec Role) (user : Std.U64) (out : alloc.vec.Vec Role)
+  (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Role) × Std.Usize) (alloc.vec.Vec Role))
+  := do
+  let i1 := alloc.vec.Vec.len v
+  if i < i1
+  then
+    let r ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Role) v i
+    let out1 ←
+      if r.user = user
+      then ok out
+      else
+        do
+        let r1 ← Role.Insts.CoreCloneClone.clone r
+        alloc.vec.Vec.push out r1
+    let i2 ← i + 1#usize
+    ok (cont (out1, i2))
+  else ok (done out)
+
+/-- [o5s_registry::{o5s_registry::Role}::del]: loop 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 234:16-239:17
+    Visibility: public -/
+@[rust_loop]
+def Role.del_loop
+  (v : alloc.vec.Vec Role) (user : Std.U64) (out : alloc.vec.Vec Role)
+  (i : Std.Usize) :
+  Result (alloc.vec.Vec Role)
+  := do
+  loop
+    (fun (out1, i1) => Role.del_loop.body v user out1 i1)
+    (out, i)
+
+/-- [o5s_registry::{o5s_registry::Role}::del]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 231:12-241:13
+    Visibility: public -/
+@[reducible]
+def Role.del
+  (v : alloc.vec.Vec Role) (user : Std.U64) : Result (alloc.vec.Vec Role) := do
+  Role.del_loop v user (alloc.vec.Vec.new Role) 0#usize
 
 /-- [o5s_registry::{o5s_registry::PatchRow}::del_where]: loop body 0:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 247:16-252:17
@@ -3486,6 +3696,56 @@ def Listing.del_where
   := do
   Listing.del_where_loop v col val (alloc.vec.Vec.new Listing) 0#usize
 
+/-- [o5s_registry::{o5s_registry::Role}::del_where]: loop body 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 247:16-252:17
+    Visibility: public -/
+@[rust_loop_body]
+def Role.del_where_loop.body
+  (v : alloc.vec.Vec Role) (col : Std.U32) (val : h5i_app_sql.Val)
+  (out : alloc.vec.Vec Role) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Role) × Std.Usize) (alloc.vec.Vec Role))
+  := do
+  let i1 := alloc.vec.Vec.len v
+  if i < i1
+  then
+    let r ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Role) v i
+    let v1 ← Role.to_row r
+    let b ← h5i_app_sql.has_col v1 col val
+    let out1 ←
+      if b
+      then ok out
+      else
+        do
+        let r1 ← Role.Insts.CoreCloneClone.clone r
+        alloc.vec.Vec.push out r1
+    let i2 ← i + 1#usize
+    ok (cont (out1, i2))
+  else ok (done out)
+
+/-- [o5s_registry::{o5s_registry::Role}::del_where]: loop 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 247:16-252:17
+    Visibility: public -/
+@[rust_loop]
+def Role.del_where_loop
+  (v : alloc.vec.Vec Role) (col : Std.U32) (val : h5i_app_sql.Val)
+  (out : alloc.vec.Vec Role) (i : Std.Usize) :
+  Result (alloc.vec.Vec Role)
+  := do
+  loop
+    (fun (out1, i1) => Role.del_where_loop.body v col val out1 i1)
+    (out, i)
+
+/-- [o5s_registry::{o5s_registry::Role}::del_where]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 244:12-254:13
+    Visibility: public -/
+@[reducible]
+def Role.del_where
+  (v : alloc.vec.Vec Role) (col : Std.U32) (val : h5i_app_sql.Val) :
+  Result (alloc.vec.Vec Role)
+  := do
+  Role.del_where_loop v col val (alloc.vec.Vec.new Role) 0#usize
+
 /-- [o5s_registry::{o5s_registry::PatchRow}::sql_del]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 257:12-261:13
     Visibility: public -/
@@ -3575,6 +3835,14 @@ def Listing.sql_del (repo : Std.U64) : Result h5i_app_sql.Write := do
   let key ← alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Val) v
   ok (h5i_app_sql.Write.Del Listing.TABLE key)
 
+/-- [o5s_registry::{o5s_registry::Role}::sql_del]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 257:12-261:13
+    Visibility: public -/
+def Role.sql_del (user : Std.U64) : Result h5i_app_sql.Write := do
+  let v ← U64.Insts.H5i_app_sqlColumn.to_val user
+  let key ← alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Val) v
+  ok (h5i_app_sql.Write.Del Role.TABLE key)
+
 /-- [o5s_registry::{o5s_registry::PatchRow}::sql_del_where]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 264:12-266:13
     Visibility: public -/
@@ -3645,6 +3913,13 @@ def Listing.sql_del_where
   (col : Std.U32) (val : h5i_app_sql.Val) : Result h5i_app_sql.Write := do
   ok (h5i_app_sql.Write.DelWhere Listing.TABLE col val)
 
+/-- [o5s_registry::{o5s_registry::Role}::sql_del_where]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 264:12-266:13
+    Visibility: public -/
+def Role.sql_del_where
+  (col : Std.U32) (val : h5i_app_sql.Val) : Result h5i_app_sql.Write := do
+  ok (h5i_app_sql.Write.DelWhere Role.TABLE col val)
+
 /-- [o5s_registry::Snapshot]
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 278:8-280:9
     Visibility: public -/
@@ -3660,6 +3935,7 @@ structure Snapshot where
   events : alloc.vec.Vec Event
   bodies : alloc.vec.Vec Body
   listings : alloc.vec.Vec Listing
+  roles : alloc.vec.Vec Role
 
 /-- [o5s_registry::Rows]
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 284:8-286:9
@@ -3676,6 +3952,7 @@ structure Rows where
   events : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val)
   bodies : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val)
   listings : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val)
+  roles : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val)
 
 /-- [o5s_registry::decode]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 289:8-297:9
@@ -3725,23 +4002,28 @@ def decode (r : Rows) : Result (Option Snapshot) := do
                       match o10 with
                       | none => ok none
                       | some x10 =>
-                        ok (some
-                          {
-                            repository := x,
-                            patches := x1,
-                            dependencies := x2,
-                            approvals := x3,
-                            checks := x4,
-                            channels := x5,
-                            members := x6,
-                            paths := x7,
-                            events := x8,
-                            bodies := x9,
-                            listings := x10
-                          })
+                        let o11 ← Role.from_rows r.roles
+                        match o11 with
+                        | none => ok none
+                        | some x11 =>
+                          ok (some
+                            {
+                              repository := x,
+                              patches := x1,
+                              dependencies := x2,
+                              approvals := x3,
+                              checks := x4,
+                              channels := x5,
+                              members := x6,
+                              paths := x7,
+                              events := x8,
+                              bodies := x9,
+                              listings := x10,
+                              roles := x11
+                            })
 
 /-- [o5s_registry::Write]
-    Source: 'crates/registry/src/lib.rs', lines 228:0-240:1
+    Source: 'crates/registry/src/lib.rs', lines 257:0-270:1
     Visibility: public -/
 @[discriminant isize]
 inductive Write where
@@ -3756,9 +4038,10 @@ inductive Write where
 | PutEvent : Event → Write
 | PutBody : Body → Write
 | PutListing : Listing → Write
+| PutRole : Role → Write
 
 /-- [o5s_registry::apply_write]:
-    Source: 'crates/registry/src/lib.rs', lines 1015:0-1029:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 1115:0-1130:1 -/
 def apply_write (s : Snapshot) (w : Write) : Result Snapshot := do
   match w with
   | Write.SetRepository r => ok { s with repository := r }
@@ -3791,9 +4074,11 @@ def apply_write (s : Snapshot) (w : Write) : Result Snapshot := do
   | Write.PutListing l =>
     let v ← Listing.put s.listings l
     ok { s with listings := v }
+  | Write.PutRole r => let v ← Role.put s.roles r
+                       ok { s with roles := v }
 
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::Repository}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 74:13-74:18
+    Source: 'crates/registry/src/lib.rs', lines 87:13-87:18
     Visibility: public -/
 def Repository.Insts.CoreCloneClone.clone
   (self : Repository) : Result Repository := do
@@ -3816,7 +4101,7 @@ def Repository.Insts.CoreCloneClone.clone
     }
 
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::Write}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 226:9-226:14
+    Source: 'crates/registry/src/lib.rs', lines 255:9-255:14
     Visibility: public -/
 def Write.Insts.CoreCloneClone.clone (self : Write) : Result Write := do
   match self with
@@ -3853,79 +4138,89 @@ def Write.Insts.CoreCloneClone.clone (self : Write) : Result Write := do
   | Write.PutListing __self_0 =>
     let l ← Listing.Insts.CoreCloneClone.clone __self_0
     ok (Write.PutListing l)
+  | Write.PutRole __self_0 =>
+    let r ← Role.Insts.CoreCloneClone.clone __self_0
+    ok (Write.PutRole r)
+
+/-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::Role}]
+    Source: 'crates/registry/src/lib.rs', lines 183:13-183:18 -/
+@[reducible]
+def Role.Insts.CoreCloneClone : core.clone.Clone Role := {
+  clone := Role.Insts.CoreCloneClone.clone
+}
 
 /-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::Listing}]
-    Source: 'crates/registry/src/lib.rs', lines 161:13-161:18 -/
+    Source: 'crates/registry/src/lib.rs', lines 174:13-174:18 -/
 @[reducible]
 def Listing.Insts.CoreCloneClone : core.clone.Clone Listing := {
   clone := Listing.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::Body}]
-    Source: 'crates/registry/src/lib.rs', lines 153:13-153:18 -/
+    Source: 'crates/registry/src/lib.rs', lines 166:13-166:18 -/
 @[reducible]
 def Body.Insts.CoreCloneClone : core.clone.Clone Body := {
   clone := Body.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::Event}]
-    Source: 'crates/registry/src/lib.rs', lines 142:13-142:18 -/
+    Source: 'crates/registry/src/lib.rs', lines 155:13-155:18 -/
 @[reducible]
 def Event.Insts.CoreCloneClone : core.clone.Clone Event := {
   clone := Event.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::PathKind}]
-    Source: 'crates/registry/src/lib.rs', lines 134:13-134:18 -/
+    Source: 'crates/registry/src/lib.rs', lines 147:13-147:18 -/
 @[reducible]
 def PathKind.Insts.CoreCloneClone : core.clone.Clone PathKind := {
   clone := PathKind.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::Member}]
-    Source: 'crates/registry/src/lib.rs', lines 126:13-126:18 -/
+    Source: 'crates/registry/src/lib.rs', lines 139:13-139:18 -/
 @[reducible]
 def Member.Insts.CoreCloneClone : core.clone.Clone Member := {
   clone := Member.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::Channel}]
-    Source: 'crates/registry/src/lib.rs', lines 117:13-117:18 -/
+    Source: 'crates/registry/src/lib.rs', lines 130:13-130:18 -/
 @[reducible]
 def Channel.Insts.CoreCloneClone : core.clone.Clone Channel := {
   clone := Channel.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::CheckReport}]
-    Source: 'crates/registry/src/lib.rs', lines 109:13-109:18 -/
+    Source: 'crates/registry/src/lib.rs', lines 122:13-122:18 -/
 @[reducible]
 def CheckReport.Insts.CoreCloneClone : core.clone.Clone CheckReport := {
   clone := CheckReport.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::Approval}]
-    Source: 'crates/registry/src/lib.rs', lines 102:13-102:18 -/
+    Source: 'crates/registry/src/lib.rs', lines 115:13-115:18 -/
 @[reducible]
 def Approval.Insts.CoreCloneClone : core.clone.Clone Approval := {
   clone := Approval.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::Dependency}]
-    Source: 'crates/registry/src/lib.rs', lines 96:13-96:18 -/
+    Source: 'crates/registry/src/lib.rs', lines 109:13-109:18 -/
 @[reducible]
 def Dependency.Insts.CoreCloneClone : core.clone.Clone Dependency := {
   clone := Dependency.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::PatchRow}]
-    Source: 'crates/registry/src/lib.rs', lines 88:13-88:18 -/
+    Source: 'crates/registry/src/lib.rs', lines 101:13-101:18 -/
 @[reducible]
 def PatchRow.Insts.CoreCloneClone : core.clone.Clone PatchRow := {
   clone := PatchRow.Insts.CoreCloneClone.clone
 }
 
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::Snapshot}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 56:13-56:18
+    Source: 'crates/registry/src/lib.rs', lines 68:13-68:18
     Visibility: public -/
 def Snapshot.Insts.CoreCloneClone.clone
   (self : Snapshot) : Result Snapshot := do
@@ -3945,6 +4240,7 @@ def Snapshot.Insts.CoreCloneClone.clone
   let v8 ← alloc.vec.CloneVec.clone Body.Insts.CoreCloneClone self.bodies
   let v9 ←
     alloc.vec.CloneVec.clone Listing.Insts.CoreCloneClone self.listings
+  let v10 ← alloc.vec.CloneVec.clone Role.Insts.CoreCloneClone self.roles
   ok
     {
       repository := r,
@@ -3957,7 +4253,8 @@ def Snapshot.Insts.CoreCloneClone.clone
       paths := v6,
       events := v7,
       bodies := v8,
-      listings := v9
+      listings := v9,
+      roles := v10
     }
 
 /-- [o5s_registry::apply]: loop body 0:
@@ -3999,7 +4296,7 @@ def apply (snap : Snapshot) (ws : alloc.vec.Vec Write) : Result Snapshot := do
   apply_loop ws s 0#usize
 
 /-- [o5s_registry::sql_write]:
-    Source: 'crates/registry/src/lib.rs', lines 1033:0-1047:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 1134:0-1149:1 -/
 def sql_write
   (w : Write) (out : alloc.vec.Vec h5i_app_sql.Write) :
   Result (alloc.vec.Vec h5i_app_sql.Write)
@@ -4033,6 +4330,8 @@ def sql_write
   | Write.PutListing l =>
     let w1 ← Listing.sql_put l
     alloc.vec.Vec.push out w1
+  | Write.PutRole r => let w1 ← Role.sql_put r
+                       alloc.vec.Vec.push out w1
 
 /-- [o5s_registry::sql_writes]: loop body 0:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 317:12-320:13
@@ -4126,8 +4425,33 @@ def REPOSITORY_SCOPE : Std.U64 := 4611686018427387904#u64
     Visibility: public -/
 @[global_simps, irreducible] def MERGE : Std.U64 := 6#u64
 
+/-- [o5s_registry::GRANT]
+    Source: 'crates/registry/src/lib.rs', lines 41:0-41:25
+    Visibility: public -/
+@[global_simps, irreducible] def GRANT : Std.U64 := 7#u64
+
+/-- [o5s_registry::READ]
+    Source: 'crates/registry/src/lib.rs', lines 46:0-46:24
+    Visibility: public -/
+@[global_simps, irreducible] def READ : Std.U64 := 1#u64
+
+/-- [o5s_registry::WRITE]
+    Source: 'crates/registry/src/lib.rs', lines 48:0-48:25
+    Visibility: public -/
+@[global_simps, irreducible] def WRITE : Std.U64 := 2#u64
+
+/-- [o5s_registry::REVIEW]
+    Source: 'crates/registry/src/lib.rs', lines 50:0-50:26
+    Visibility: public -/
+@[global_simps, irreducible] def REVIEW : Std.U64 := 3#u64
+
+/-- [o5s_registry::ADMIN]
+    Source: 'crates/registry/src/lib.rs', lines 52:0-52:25
+    Visibility: public -/
+@[global_simps, irreducible] def ADMIN : Std.U64 := 4#u64
+
 /-- [o5s_registry::Principal]
-    Source: 'crates/registry/src/lib.rs', lines 44:0-50:1
+    Source: 'crates/registry/src/lib.rs', lines 56:0-62:1
     Visibility: public -/
 structure Principal where
   org : Std.U64
@@ -4135,14 +4459,14 @@ structure Principal where
   scope : Std.U64
 
 /-- [o5s_registry::PathUse]
-    Source: 'crates/registry/src/lib.rs', lines 172:0-175:1
+    Source: 'crates/registry/src/lib.rs', lines 194:0-197:1
     Visibility: public -/
 structure PathUse where
   path : alloc.vec.Vec Std.U8
   graph : Bool
 
 /-- [o5s_registry::Command]
-    Source: 'crates/registry/src/lib.rs', lines 179:0-224:1
+    Source: 'crates/registry/src/lib.rs', lines 201:0-253:1
     Visibility: public -/
 @[discriminant isize]
 inductive Command where
@@ -4167,6 +4491,7 @@ inductive Command where
   alloc.vec.Vec Std.U8 →
   alloc.vec.Vec Std.U64 →
   Command
+| Grant : alloc.vec.Vec Std.U8 → Std.U64 → Std.U64 → Command
 | Probe : Command
 | Inspect : Command
 | ReadBody : Std.U64 → Command
@@ -4174,7 +4499,7 @@ inductive Command where
 | List : Command
 
 /-- [o5s_registry::Reply]
-    Source: 'crates/registry/src/lib.rs', lines 244:0-268:1
+    Source: 'crates/registry/src/lib.rs', lines 274:0-302:1
     Visibility: public -/
 @[discriminant isize]
 inductive Reply where
@@ -4185,9 +4510,10 @@ inductive Reply where
 | Approved : Std.U64 → Reply
 | Checked : Std.U64 → Bool → Reply
 | Merged : Std.U64 → Std.U64 → Reply
+| Granted : Std.U64 → Std.U64 → Reply
 
 /-- [o5s_registry::Error]
-    Source: 'crates/registry/src/lib.rs', lines 272:0-303:1
+    Source: 'crates/registry/src/lib.rs', lines 306:0-344:1
     Visibility: public -/
 @[discriminant isize]
 inductive Error where
@@ -4213,9 +4539,12 @@ inductive Error where
 | MissingDependency : Error
 | Exhausted : Error
 | ReadOnly : Error
+| Forbidden : Error
+| InvalidLevel : Error
+| OwnLevel : Error
 
 /-- [o5s_registry::name_byte]:
-    Source: 'crates/registry/src/lib.rs', lines 308:0-314:1
+    Source: 'crates/registry/src/lib.rs', lines 349:0-355:1
     Visibility: public -/
 def name_byte (c : Std.U8) : Result Bool := do
   if c >= 97#u8
@@ -4278,7 +4607,7 @@ def name_byte (c : Std.U8) : Result Bool := do
            else ok (c = 95#u8)
 
 /-- [o5s_registry::valid_name]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 322:4-329:1
+    Source: 'crates/registry/src/lib.rs', lines 363:4-370:1
     Visibility: public -/
 @[rust_loop_body]
 def valid_name_loop.body
@@ -4299,7 +4628,7 @@ def valid_name_loop.body
   else ok (done true)
 
 /-- [o5s_registry::valid_name]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 322:4-329:1
+    Source: 'crates/registry/src/lib.rs', lines 363:4-370:1
     Visibility: public -/
 @[rust_loop]
 def valid_name_loop
@@ -4309,7 +4638,7 @@ def valid_name_loop
     i
 
 /-- [o5s_registry::valid_name]:
-    Source: 'crates/registry/src/lib.rs', lines 317:0-329:1
+    Source: 'crates/registry/src/lib.rs', lines 358:0-370:1
     Visibility: public -/
 def valid_name («name» : alloc.vec.Vec Std.U8) : Result Bool := do
   let i := alloc.vec.Vec.len «name»
@@ -4322,7 +4651,7 @@ def valid_name («name» : alloc.vec.Vec Std.U8) : Result Bool := do
     else valid_name_loop «name» 0#usize
 
 /-- [o5s_registry::valid_hash]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 1:0-345:1
+    Source: 'crates/registry/src/lib.rs', lines 1:0-386:1
     Visibility: public -/
 @[rust_loop_body]
 def valid_hash_loop.body
@@ -4358,7 +4687,7 @@ def valid_hash_loop.body
   else ok (done true)
 
 /-- [o5s_registry::valid_hash]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 1:0-345:1
+    Source: 'crates/registry/src/lib.rs', lines 1:0-386:1
     Visibility: public -/
 @[rust_loop]
 def valid_hash_loop
@@ -4368,7 +4697,7 @@ def valid_hash_loop
     i
 
 /-- [o5s_registry::valid_hash]:
-    Source: 'crates/registry/src/lib.rs', lines 332:0-345:1
+    Source: 'crates/registry/src/lib.rs', lines 373:0-386:1
     Visibility: public -/
 def valid_hash (hash : alloc.vec.Vec Std.U8) : Result Bool := do
   let i := alloc.vec.Vec.len hash
@@ -4377,7 +4706,7 @@ def valid_hash (hash : alloc.vec.Vec Std.U8) : Result Bool := do
   else valid_hash_loop hash 0#usize
 
 /-- [o5s_registry::visible]:
-    Source: 'crates/registry/src/lib.rs', lines 348:0-353:1
+    Source: 'crates/registry/src/lib.rs', lines 389:0-394:1
     Visibility: public -/
 def visible
   (actor : Principal) (repository : Repository)
@@ -4394,8 +4723,78 @@ def visible
     else ok false
   else ok false
 
+/-- [o5s_registry::level]: loop body 0:
+    Source: 'crates/registry/src/lib.rs', lines 402:4-409:1
+    Visibility: public -/
+@[rust_loop_body]
+def level_loop.body
+  (roles : alloc.vec.Vec Role) (user : Std.U64) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Std.U64)
+  := do
+  let i1 := alloc.vec.Vec.len roles
+  if i < i1
+  then
+    let r ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Role) roles i
+    if r.user = user
+    then ok (done r.level)
+    else let i2 ← i + 1#usize
+         ok (cont i2)
+  else ok (done 0#u64)
+
+/-- [o5s_registry::level]: loop 0:
+    Source: 'crates/registry/src/lib.rs', lines 402:4-409:1
+    Visibility: public -/
+@[rust_loop]
+def level_loop
+  (roles : alloc.vec.Vec Role) (user : Std.U64) (i : Std.Usize) :
+  Result Std.U64
+  := do
+  loop
+    (fun i1 => level_loop.body roles user i1)
+    i
+
+/-- [o5s_registry::level]:
+    Source: 'crates/registry/src/lib.rs', lines 397:0-409:1
+    Visibility: public -/
+def level (roles : alloc.vec.Vec Role) (user : Std.U64) : Result Std.U64 := do
+  let i := alloc.vec.Vec.len roles
+  if i = 0#usize
+  then ok ADMIN
+  else level_loop roles user 0#usize
+
+/-- [o5s_registry::readable]:
+    Source: 'crates/registry/src/lib.rs', lines 412:0-414:1
+    Visibility: public -/
+def readable
+  (actor : Principal) (s : Snapshot) («name» : alloc.vec.Vec Std.U8) :
+  Result Bool
+  := do
+  let b ← visible actor s.repository «name»
+  if b
+  then let i ← level s.roles actor.user
+       ok (i >= READ)
+  else ok false
+
+/-- [o5s_registry::authorize]:
+    Source: 'crates/registry/src/lib.rs', lines 418:0-426:1
+    Visibility: public -/
+def authorize
+  (actor : Principal) (s : Snapshot) («name» : alloc.vec.Vec Std.U8)
+  (need : Std.U64) :
+  Result (Option Error)
+  := do
+  let b ← readable actor s «name»
+  if b
+  then
+    let i ← level s.roles actor.user
+    if i < need
+    then ok (some Error.Forbidden)
+    else ok none
+  else ok (some Error.RepositoryNotFound)
+
 /-- [o5s_registry::find_patch]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 357:4-364:1
+    Source: 'crates/registry/src/lib.rs', lines 430:4-437:1
     Visibility: public -/
 @[rust_loop_body]
 def find_patch_loop.body
@@ -4416,7 +4815,7 @@ def find_patch_loop.body
   else ok (done none)
 
 /-- [o5s_registry::find_patch]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 357:4-364:1
+    Source: 'crates/registry/src/lib.rs', lines 430:4-437:1
     Visibility: public -/
 @[rust_loop]
 def find_patch_loop
@@ -4428,7 +4827,7 @@ def find_patch_loop
     i
 
 /-- [o5s_registry::find_patch]:
-    Source: 'crates/registry/src/lib.rs', lines 355:0-364:1
+    Source: 'crates/registry/src/lib.rs', lines 428:0-437:1
     Visibility: public -/
 @[reducible]
 def find_patch
@@ -4436,7 +4835,7 @@ def find_patch
   find_patch_loop ps id 0#usize
 
 /-- [o5s_registry::find_hash]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 369:4-376:1
+    Source: 'crates/registry/src/lib.rs', lines 442:4-449:1
     Visibility: public -/
 @[rust_loop_body]
 def find_hash_loop.body
@@ -4456,7 +4855,7 @@ def find_hash_loop.body
   else ok (done none)
 
 /-- [o5s_registry::find_hash]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 369:4-376:1
+    Source: 'crates/registry/src/lib.rs', lines 442:4-449:1
     Visibility: public -/
 @[rust_loop]
 def find_hash_loop
@@ -4468,7 +4867,7 @@ def find_hash_loop
     i
 
 /-- [o5s_registry::find_hash]:
-    Source: 'crates/registry/src/lib.rs', lines 367:0-376:1
+    Source: 'crates/registry/src/lib.rs', lines 440:0-449:1
     Visibility: public -/
 @[reducible]
 def find_hash
@@ -4478,7 +4877,7 @@ def find_hash
   find_hash_loop ps hash 0#usize
 
 /-- [o5s_registry::find_channel]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 380:4-387:1
+    Source: 'crates/registry/src/lib.rs', lines 453:4-460:1
     Visibility: public -/
 @[rust_loop_body]
 def find_channel_loop.body
@@ -4500,7 +4899,7 @@ def find_channel_loop.body
   else ok (done none)
 
 /-- [o5s_registry::find_channel]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 380:4-387:1
+    Source: 'crates/registry/src/lib.rs', lines 453:4-460:1
     Visibility: public -/
 @[rust_loop]
 def find_channel_loop
@@ -4513,7 +4912,7 @@ def find_channel_loop
     i
 
 /-- [o5s_registry::find_channel]:
-    Source: 'crates/registry/src/lib.rs', lines 378:0-387:1
+    Source: 'crates/registry/src/lib.rs', lines 451:0-460:1
     Visibility: public -/
 @[reducible]
 def find_channel
@@ -4523,7 +4922,7 @@ def find_channel
   find_channel_loop cs «name» 0#usize
 
 /-- [o5s_registry::find_path]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 391:4-398:1
+    Source: 'crates/registry/src/lib.rs', lines 464:4-471:1
     Visibility: public -/
 @[rust_loop_body]
 def find_path_loop.body
@@ -4545,7 +4944,7 @@ def find_path_loop.body
   else ok (done none)
 
 /-- [o5s_registry::find_path]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 391:4-398:1
+    Source: 'crates/registry/src/lib.rs', lines 464:4-471:1
     Visibility: public -/
 @[rust_loop]
 def find_path_loop
@@ -4557,7 +4956,7 @@ def find_path_loop
     i
 
 /-- [o5s_registry::find_path]:
-    Source: 'crates/registry/src/lib.rs', lines 389:0-398:1
+    Source: 'crates/registry/src/lib.rs', lines 462:0-471:1
     Visibility: public -/
 @[reducible]
 def find_path
@@ -4567,7 +4966,7 @@ def find_path
   find_path_loop ks path 0#usize
 
 /-- [o5s_registry::find_listing]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 403:4-410:1
+    Source: 'crates/registry/src/lib.rs', lines 476:4-483:1
     Visibility: public -/
 @[rust_loop_body]
 def find_listing_loop.body
@@ -4589,7 +4988,7 @@ def find_listing_loop.body
   else ok (done none)
 
 /-- [o5s_registry::find_listing]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 403:4-410:1
+    Source: 'crates/registry/src/lib.rs', lines 476:4-483:1
     Visibility: public -/
 @[rust_loop]
 def find_listing_loop
@@ -4602,7 +5001,7 @@ def find_listing_loop
     i
 
 /-- [o5s_registry::find_listing]:
-    Source: 'crates/registry/src/lib.rs', lines 401:0-410:1
+    Source: 'crates/registry/src/lib.rs', lines 474:0-483:1
     Visibility: public -/
 @[reducible]
 def find_listing
@@ -4612,7 +5011,7 @@ def find_listing
   find_listing_loop ls «name» 0#usize
 
 /-- [o5s_registry::listing_key_used]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 414:4-421:1
+    Source: 'crates/registry/src/lib.rs', lines 487:4-494:1
     Visibility: public -/
 @[rust_loop_body]
 def listing_key_used_loop.body
@@ -4631,7 +5030,7 @@ def listing_key_used_loop.body
   else ok (done false)
 
 /-- [o5s_registry::listing_key_used]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 414:4-421:1
+    Source: 'crates/registry/src/lib.rs', lines 487:4-494:1
     Visibility: public -/
 @[rust_loop]
 def listing_key_used_loop
@@ -4643,7 +5042,7 @@ def listing_key_used_loop
     i
 
 /-- [o5s_registry::listing_key_used]:
-    Source: 'crates/registry/src/lib.rs', lines 412:0-421:1
+    Source: 'crates/registry/src/lib.rs', lines 485:0-494:1
     Visibility: public -/
 @[reducible]
 def listing_key_used
@@ -4651,7 +5050,7 @@ def listing_key_used
   listing_key_used_loop ls repo 0#usize
 
 /-- [o5s_registry::members_of]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 427:4-432:5
+    Source: 'crates/registry/src/lib.rs', lines 500:4-505:5
     Visibility: public -/
 @[rust_loop_body]
 def members_of_loop.body
@@ -4674,7 +5073,7 @@ def members_of_loop.body
   else ok (done out)
 
 /-- [o5s_registry::members_of]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 427:4-432:5
+    Source: 'crates/registry/src/lib.rs', lines 500:4-505:5
     Visibility: public -/
 @[rust_loop]
 def members_of_loop
@@ -4687,7 +5086,7 @@ def members_of_loop
     (out, i)
 
 /-- [o5s_registry::members_of]:
-    Source: 'crates/registry/src/lib.rs', lines 424:0-434:1
+    Source: 'crates/registry/src/lib.rs', lines 497:0-507:1
     Visibility: public -/
 @[reducible]
 def members_of
@@ -4697,7 +5096,7 @@ def members_of
   members_of_loop ms channel (alloc.vec.Vec.new Std.U64) 0#usize
 
 /-- [o5s_registry::dependencies_of]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 440:4-445:5
+    Source: 'crates/registry/src/lib.rs', lines 513:4-518:5
     Visibility: public -/
 @[rust_loop_body]
 def dependencies_of_loop.body
@@ -4721,7 +5120,7 @@ def dependencies_of_loop.body
   else ok (done out)
 
 /-- [o5s_registry::dependencies_of]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 440:4-445:5
+    Source: 'crates/registry/src/lib.rs', lines 513:4-518:5
     Visibility: public -/
 @[rust_loop]
 def dependencies_of_loop
@@ -4734,7 +5133,7 @@ def dependencies_of_loop
     (out, i)
 
 /-- [o5s_registry::dependencies_of]:
-    Source: 'crates/registry/src/lib.rs', lines 437:0-447:1
+    Source: 'crates/registry/src/lib.rs', lines 510:0-520:1
     Visibility: public -/
 @[reducible]
 def dependencies_of
@@ -4744,7 +5143,7 @@ def dependencies_of
   dependencies_of_loop ds patch (alloc.vec.Vec.new Std.U64) 0#usize
 
 /-- [o5s_registry::approved]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 451:4-458:1
+    Source: 'crates/registry/src/lib.rs', lines 524:4-531:1
     Visibility: public -/
 @[rust_loop_body]
 def approved_loop.body
@@ -4764,7 +5163,7 @@ def approved_loop.body
   else ok (done false)
 
 /-- [o5s_registry::approved]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 451:4-458:1
+    Source: 'crates/registry/src/lib.rs', lines 524:4-531:1
     Visibility: public -/
 @[rust_loop]
 def approved_loop
@@ -4776,7 +5175,7 @@ def approved_loop
     i
 
 /-- [o5s_registry::approved]:
-    Source: 'crates/registry/src/lib.rs', lines 449:0-458:1
+    Source: 'crates/registry/src/lib.rs', lines 522:0-531:1
     Visibility: public -/
 @[reducible]
 def approved
@@ -4784,7 +5183,7 @@ def approved
   approved_loop as_ patch 0#usize
 
 /-- [o5s_registry::checks_passed]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 463:4-470:1
+    Source: 'crates/registry/src/lib.rs', lines 536:4-543:1
     Visibility: public -/
 @[rust_loop_body]
 def checks_passed_loop.body
@@ -4804,7 +5203,7 @@ def checks_passed_loop.body
   else ok (done false)
 
 /-- [o5s_registry::checks_passed]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 463:4-470:1
+    Source: 'crates/registry/src/lib.rs', lines 536:4-543:1
     Visibility: public -/
 @[rust_loop]
 def checks_passed_loop
@@ -4816,7 +5215,7 @@ def checks_passed_loop
     i
 
 /-- [o5s_registry::checks_passed]:
-    Source: 'crates/registry/src/lib.rs', lines 461:0-470:1
+    Source: 'crates/registry/src/lib.rs', lines 534:0-543:1
     Visibility: public -/
 @[reducible]
 def checks_passed
@@ -4824,7 +5223,7 @@ def checks_passed
   checks_passed_loop cs patch 0#usize
 
 /-- [o5s_registry::all_known]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 475:4-483:1
+    Source: 'crates/registry/src/lib.rs', lines 548:4-556:1
     Visibility: public -/
 @[rust_loop_body]
 def all_known_loop.body
@@ -4844,7 +5243,7 @@ def all_known_loop.body
   else ok (done true)
 
 /-- [o5s_registry::all_known]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 475:4-483:1
+    Source: 'crates/registry/src/lib.rs', lines 548:4-556:1
     Visibility: public -/
 @[rust_loop]
 def all_known_loop
@@ -4856,7 +5255,7 @@ def all_known_loop
     i
 
 /-- [o5s_registry::all_known]:
-    Source: 'crates/registry/src/lib.rs', lines 473:0-483:1
+    Source: 'crates/registry/src/lib.rs', lines 546:0-556:1
     Visibility: public -/
 @[reducible]
 def all_known
@@ -4866,7 +5265,7 @@ def all_known
   all_known_loop ps ids 0#usize
 
 /-- [o5s_registry::valid_batch]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 491:4-498:1
+    Source: 'crates/registry/src/lib.rs', lines 564:4-571:1
     Visibility: public -/
 @[rust_loop_body]
 def valid_batch_loop.body
@@ -4889,7 +5288,7 @@ def valid_batch_loop.body
   else ok (done true)
 
 /-- [o5s_registry::valid_batch]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 491:4-498:1
+    Source: 'crates/registry/src/lib.rs', lines 564:4-571:1
     Visibility: public -/
 @[rust_loop]
 def valid_batch_loop
@@ -4899,7 +5298,7 @@ def valid_batch_loop
     i
 
 /-- [o5s_registry::valid_batch]:
-    Source: 'crates/registry/src/lib.rs', lines 486:0-498:1
+    Source: 'crates/registry/src/lib.rs', lines 559:0-571:1
     Visibility: public -/
 def valid_batch (ids : alloc.vec.Vec Std.U64) : Result Bool := do
   let i := alloc.vec.Vec.len ids
@@ -4912,14 +5311,14 @@ def valid_batch (ids : alloc.vec.Vec Std.U64) : Result Bool := do
     else valid_batch_loop ids 1#usize
 
 /-- [o5s_registry::bump_events]:
-    Source: 'crates/registry/src/lib.rs', lines 501:0-511:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 574:0-584:1 -/
 def bump_events (r : Repository) : Result Repository := do
   let v ← alloc.vec.CloneVec.clone core.clone.CloneU8 r.label
   let i ← r.events + 1#u64
   ok { r with label := v, events := i }
 
 /-- [o5s_registry::event]:
-    Source: 'crates/registry/src/lib.rs', lines 513:0-521:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 586:0-594:1 -/
 def event
   (seq : Std.U64) (actor : Std.U64) (action : Std.U64) (patch : Option Std.U64)
   (channel : Option Std.U64) :
@@ -4927,8 +5326,60 @@ def event
   := do
   ok { seq, actor, action, patch, channel }
 
+/-- [o5s_registry::grant]:
+    Source: 'crates/registry/src/lib.rs', lines 596:0-627:1 -/
+def grant
+  (actor : Principal) (s : Snapshot) (user : Std.U64) (lvl : Std.U64) :
+  Result (core.result.Result ((alloc.vec.Vec Write) × Reply) Error)
+  := do
+  if lvl > ADMIN
+  then ok (core.result.Result.Err Error.InvalidLevel)
+  else
+    if s.repository.events = core.num.U64.MAX
+    then ok (core.result.Result.Err Error.Exhausted)
+    else
+      let i := alloc.vec.Vec.len s.roles
+      if user = actor.user
+      then
+        if i = 0#usize
+        then
+          if lvl != ADMIN
+          then ok (core.result.Result.Err Error.OwnLevel)
+          else
+            let ws ←
+              alloc.vec.Vec.push (alloc.vec.Vec.new Write) (Write.PutRole
+                { user := actor.user, level := ADMIN })
+            let ws1 ←
+              if user != actor.user
+              then alloc.vec.Vec.push ws (Write.PutRole { user, level := lvl })
+              else ok ws
+            let r ← bump_events s.repository
+            let ws2 ← alloc.vec.Vec.push ws1 (Write.SetRepository r)
+            let i1 ← s.repository.events + 1#u64
+            let e ← event i1 actor.user GRANT none none
+            let ws3 ← alloc.vec.Vec.push ws2 (Write.PutEvent e)
+            ok (core.result.Result.Ok (ws3, Reply.Granted user lvl))
+        else ok (core.result.Result.Err Error.OwnLevel)
+      else
+        let ws ←
+          if i = 0#usize
+          then
+            alloc.vec.Vec.push (alloc.vec.Vec.new Write) (Write.PutRole
+              { user := actor.user, level := ADMIN })
+          else ok (alloc.vec.Vec.new Write)
+        let ws1 ←
+          if user != actor.user
+          then alloc.vec.Vec.push ws (Write.PutRole { user, level := lvl })
+          else ok ws
+        let r ← bump_events s.repository
+        let ws2 ← alloc.vec.Vec.push ws1 (Write.SetRepository r)
+        let i1 ← s.repository.events + 1#u64
+        let e ← event i1 actor.user GRANT none none
+        let ws3 ← alloc.vec.Vec.push ws2 (Write.PutEvent e)
+        ok (core.result.Result.Ok (ws3, Reply.Granted user lvl))
+
 /-- [o5s_registry::register]:
-    Source: 'crates/registry/src/lib.rs', lines 523:0-550:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 629:0-656:1 -/
 def register
   (actor : Principal) (ls : alloc.vec.Vec Listing)
   («name» : alloc.vec.Vec Std.U8) (repo : Std.U64) :
@@ -4967,7 +5418,7 @@ def register
         else ok (core.result.Result.Err Error.InvalidName)
 
 /-- [o5s_registry::create]:
-    Source: 'crates/registry/src/lib.rs', lines 552:0-587:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 658:0-693:1 -/
 def create
   (actor : Principal) (r : Repository) («name» : alloc.vec.Vec Std.U8) :
   Result (core.result.Result ((alloc.vec.Vec Write) × Reply) Error)
@@ -5013,7 +5464,7 @@ def create
     else ok (core.result.Result.Err Error.InvalidName)
 
 /-- [o5s_registry::fork]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 613:4-623:5 -/
+    Source: 'crates/registry/src/lib.rs', lines 719:4-729:5 -/
 @[rust_loop_body]
 def fork_loop.body
   (v : alloc.vec.Vec Member) (i : Std.U64) (id : Std.U64)
@@ -5035,7 +5486,7 @@ def fork_loop.body
   else ok (done ws)
 
 /-- [o5s_registry::fork]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 613:4-623:5 -/
+    Source: 'crates/registry/src/lib.rs', lines 719:4-729:5 -/
 @[rust_loop]
 def fork_loop
   (v : alloc.vec.Vec Member) (i : Std.U64) (id : Std.U64)
@@ -5047,7 +5498,7 @@ def fork_loop
     (ws, i1)
 
 /-- [o5s_registry::fork]:
-    Source: 'crates/registry/src/lib.rs', lines 589:0-641:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 695:0-747:1 -/
 def fork
   (user : Std.U64) (s : Snapshot) (source : alloc.vec.Vec Std.U8)
   («name» : alloc.vec.Vec Std.U8) :
@@ -5088,7 +5539,7 @@ def fork
   else ok (core.result.Result.Err Error.InvalidChannelName)
 
 /-- [o5s_registry::register_paths]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 1:0-683:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 1:0-789:1 -/
 @[rust_loop_body]
 def register_paths_loop.body
   (known : alloc.vec.Vec PathKind) (uses : alloc.vec.Vec PathUse)
@@ -5130,7 +5581,7 @@ def register_paths_loop.body
   else ok (done (core.result.Result.Ok (added, next)))
 
 /-- [o5s_registry::register_paths]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 1:0-683:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 1:0-789:1 -/
 @[rust_loop]
 def register_paths_loop
   (known : alloc.vec.Vec PathKind) (uses : alloc.vec.Vec PathUse)
@@ -5143,7 +5594,7 @@ def register_paths_loop
     (added, next, i)
 
 /-- [o5s_registry::register_paths]:
-    Source: 'crates/registry/src/lib.rs', lines 645:0-683:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 751:0-789:1 -/
 @[reducible]
 def register_paths
   (known : alloc.vec.Vec PathKind) (uses : alloc.vec.Vec PathUse)
@@ -5153,7 +5604,7 @@ def register_paths
   register_paths_loop known uses (alloc.vec.Vec.new PathKind) counter 0#usize
 
 /-- [o5s_registry::propose]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 731:4-737:5 -/
+    Source: 'crates/registry/src/lib.rs', lines 837:4-843:5 -/
 @[rust_loop_body]
 def propose_loop0.body
   (deps : alloc.vec.Vec Std.U64) (id : Std.U64) (ws : alloc.vec.Vec Write)
@@ -5175,7 +5626,7 @@ def propose_loop0.body
   else ok (done ws)
 
 /-- [o5s_registry::propose]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 731:4-737:5 -/
+    Source: 'crates/registry/src/lib.rs', lines 837:4-843:5 -/
 @[rust_loop]
 def propose_loop0
   (deps : alloc.vec.Vec Std.U64) (id : Std.U64) (ws : alloc.vec.Vec Write)
@@ -5187,7 +5638,7 @@ def propose_loop0
     (ws, i)
 
 /-- [o5s_registry::propose]: loop body 1:
-    Source: 'crates/registry/src/lib.rs', lines 739:4-742:5 -/
+    Source: 'crates/registry/src/lib.rs', lines 845:4-848:5 -/
 @[rust_loop_body]
 def propose_loop1.body
   (added : alloc.vec.Vec PathKind) (ws : alloc.vec.Vec Write) (j : Std.Usize) :
@@ -5207,7 +5658,7 @@ def propose_loop1.body
   else ok (done ws)
 
 /-- [o5s_registry::propose]: loop 1:
-    Source: 'crates/registry/src/lib.rs', lines 739:4-742:5 -/
+    Source: 'crates/registry/src/lib.rs', lines 845:4-848:5 -/
 @[rust_loop]
 def propose_loop1
   (added : alloc.vec.Vec PathKind) (ws : alloc.vec.Vec Write) (j : Std.Usize) :
@@ -5218,7 +5669,7 @@ def propose_loop1
     (ws, j)
 
 /-- [o5s_registry::propose]:
-    Source: 'crates/registry/src/lib.rs', lines 685:0-766:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 791:0-872:1 -/
 def propose
   (user : Std.U64) (s : Snapshot) (hash : alloc.vec.Vec Std.U8)
   (deps : alloc.vec.Vec Std.U64) (uses : alloc.vec.Vec PathUse)
@@ -5276,7 +5727,7 @@ def propose
   else ok (core.result.Result.Err Error.InvalidHash)
 
 /-- [o5s_registry::approve]:
-    Source: 'crates/registry/src/lib.rs', lines 768:0-794:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 874:0-900:1 -/
 def approve
   (user : Std.U64) (s : Snapshot) (patch : Std.U64) :
   Result (core.result.Result ((alloc.vec.Vec Write) × Reply) Error)
@@ -5302,7 +5753,7 @@ def approve
         ok (core.result.Result.Ok (ws2, Reply.Approved patch))
 
 /-- [o5s_registry::check]:
-    Source: 'crates/registry/src/lib.rs', lines 796:0-823:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 902:0-929:1 -/
 def check
   (user : Std.U64) (s : Snapshot) (patch : Std.U64) (passed : Bool) :
   Result (core.result.Result ((alloc.vec.Vec Write) × Reply) Error)
@@ -5328,7 +5779,7 @@ def check
         ok (core.result.Result.Ok (ws2, Reply.Checked patch passed))
 
 /-- [o5s_registry::merge_error]:
-    Source: 'crates/registry/src/lib.rs', lines 825:0-831:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 931:0-937:1 -/
 def merge_error (e : o5s_kernel.patch.MergeError) : Result Error := do
   match e with
   | o5s_kernel.patch.MergeError.Unapproved => ok Error.Unapproved
@@ -5336,7 +5787,7 @@ def merge_error (e : o5s_kernel.patch.MergeError) : Result Error := do
   | o5s_kernel.patch.MergeError.MissingDependency => ok Error.MissingDependency
 
 /-- [o5s_registry::Admission]
-    Source: 'crates/registry/src/lib.rs', lines 834:0-840:1
+    Source: 'crates/registry/src/lib.rs', lines 940:0-946:1
     Visibility: public -/
 structure Admission where
   members : alloc.vec.Vec Std.U64
@@ -5346,7 +5797,7 @@ structure Admission where
   writes : alloc.vec.Vec Write
 
 /-- [o5s_registry::admit_one]:
-    Source: 'crates/registry/src/lib.rs', lines 843:0-884:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 949:0-990:1 -/
 def admit_one
   (user : Std.U64) (s : Snapshot) (channel : Std.U64) (id : Std.U64)
   (st : Admission) :
@@ -5409,7 +5860,7 @@ def admit_one
                                   ok (some e1, st)
 
 /-- [o5s_registry::merge]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 906:4-911:5 -/
+    Source: 'crates/registry/src/lib.rs', lines 1012:4-1017:5 -/
 @[rust_loop_body]
 def merge_loop.body
   (user : Std.U64) (r : Repository) (v : alloc.vec.Vec PatchRow)
@@ -5417,8 +5868,9 @@ def merge_loop.body
   (v3 : alloc.vec.Vec CheckReport) (v4 : alloc.vec.Vec Channel)
   (v5 : alloc.vec.Vec Member) (v6 : alloc.vec.Vec PathKind)
   (v7 : alloc.vec.Vec Event) (v8 : alloc.vec.Vec Body)
-  (v9 : alloc.vec.Vec Listing) (ids : alloc.vec.Vec Std.U64) (i : Std.U64)
-  (st : Admission) (failure : Option Error) (i1 : Std.Usize) :
+  (v9 : alloc.vec.Vec Listing) (v10 : alloc.vec.Vec Role)
+  (ids : alloc.vec.Vec Std.U64) (i : Std.U64) (st : Admission)
+  (failure : Option Error) (i1 : Std.Usize) :
   Result (ControlFlow (Admission × (Option Error) × Std.Usize) (Admission ×
     (Option Error)))
   := do
@@ -5446,7 +5898,8 @@ def merge_loop.body
               paths := v6,
               events := v7,
               bodies := v8,
-              listings := v9
+              listings := v9,
+              roles := v10
             } i i3 st
         ok (st2, failure2)
       else ok (st, failure)
@@ -5455,7 +5908,7 @@ def merge_loop.body
   else ok (done (st, failure))
 
 /-- [o5s_registry::merge]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 906:4-911:5 -/
+    Source: 'crates/registry/src/lib.rs', lines 1012:4-1017:5 -/
 @[rust_loop]
 def merge_loop
   (user : Std.U64) (r : Repository) (v : alloc.vec.Vec PatchRow)
@@ -5463,17 +5916,18 @@ def merge_loop
   (v3 : alloc.vec.Vec CheckReport) (v4 : alloc.vec.Vec Channel)
   (v5 : alloc.vec.Vec Member) (v6 : alloc.vec.Vec PathKind)
   (v7 : alloc.vec.Vec Event) (v8 : alloc.vec.Vec Body)
-  (v9 : alloc.vec.Vec Listing) (ids : alloc.vec.Vec Std.U64) (i : Std.U64)
-  (st : Admission) (failure : Option Error) (i1 : Std.Usize) :
+  (v9 : alloc.vec.Vec Listing) (v10 : alloc.vec.Vec Role)
+  (ids : alloc.vec.Vec Std.U64) (i : Std.U64) (st : Admission)
+  (failure : Option Error) (i1 : Std.Usize) :
   Result (Admission × (Option Error))
   := do
   loop
     (fun (st1, failure1, i2) => merge_loop.body user r v v1 v2 v3 v4 v5 v6 v7
-      v8 v9 ids i st1 failure1 i2)
+      v8 v9 v10 ids i st1 failure1 i2)
     (st, failure, i1)
 
 /-- [o5s_registry::merge]:
-    Source: 'crates/registry/src/lib.rs', lines 888:0-939:1 -/
+    Source: 'crates/registry/src/lib.rs', lines 994:0-1045:1 -/
 def merge
   (user : Std.U64) (s : Snapshot) («name» : alloc.vec.Vec Std.U8)
   (ids : alloc.vec.Vec Std.U64) :
@@ -5490,7 +5944,7 @@ def merge
       let (st, failure) ←
         merge_loop user s.repository s.patches s.dependencies s.approvals
           s.checks s.channels s.members s.paths s.events s.bodies s.listings
-          ids c.id
+          s.roles ids c.id
           {
             members := v,
             size := c.size,
@@ -5514,7 +5968,7 @@ def merge
   else ok (core.result.Result.Err Error.InvalidBatch)
 
 /-- [o5s_registry::transition]:
-    Source: 'crates/registry/src/lib.rs', lines 944:0-1002:1
+    Source: 'crates/registry/src/lib.rs', lines 1050:0-1102:1
     Visibility: public -/
 def transition
   (actor : Principal) (s : Snapshot) (cmd : Command) :
@@ -5524,30 +5978,35 @@ def transition
   | Command.Register «name» repo => register actor s.listings «name» repo
   | Command.Create «name» => create actor s.repository «name»
   | Command.Fork repo source channel =>
-    let b ← visible actor s.repository repo
-    if b
-    then fork actor.user s source channel
-    else ok (core.result.Result.Err Error.RepositoryNotFound)
+    let o ← authorize actor s repo WRITE
+    match o with
+    | none => fork actor.user s source channel
+    | some e => ok (core.result.Result.Err e)
   | Command.Propose repo hash dependencies paths body =>
-    let b ← visible actor s.repository repo
-    if b
-    then propose actor.user s hash dependencies paths body
-    else ok (core.result.Result.Err Error.RepositoryNotFound)
+    let o ← authorize actor s repo WRITE
+    match o with
+    | none => propose actor.user s hash dependencies paths body
+    | some e => ok (core.result.Result.Err e)
   | Command.Approve repo patch =>
-    let b ← visible actor s.repository repo
-    if b
-    then approve actor.user s patch
-    else ok (core.result.Result.Err Error.RepositoryNotFound)
+    let o ← authorize actor s repo REVIEW
+    match o with
+    | none => approve actor.user s patch
+    | some e => ok (core.result.Result.Err e)
   | Command.Check repo patch passed =>
-    let b ← visible actor s.repository repo
-    if b
-    then check actor.user s patch passed
-    else ok (core.result.Result.Err Error.RepositoryNotFound)
+    let o ← authorize actor s repo REVIEW
+    match o with
+    | none => check actor.user s patch passed
+    | some e => ok (core.result.Result.Err e)
   | Command.Merge repo channel patches =>
-    let b ← visible actor s.repository repo
-    if b
-    then merge actor.user s channel patches
-    else ok (core.result.Result.Err Error.RepositoryNotFound)
+    let o ← authorize actor s repo REVIEW
+    match o with
+    | none => merge actor.user s channel patches
+    | some e => ok (core.result.Result.Err e)
+  | Command.Grant repo user level1 =>
+    let o ← authorize actor s repo ADMIN
+    match o with
+    | none => grant actor s user level1
+    | some e => ok (core.result.Result.Err e)
   | Command.Probe => ok (core.result.Result.Err Error.ReadOnly)
   | Command.Inspect => ok (core.result.Result.Err Error.ReadOnly)
   | Command.ReadBody _ => ok (core.result.Result.Err Error.ReadOnly)
@@ -5555,7 +6014,7 @@ def transition
   | Command.List => ok (core.result.Result.Err Error.ReadOnly)
 
 /-- [o5s_registry::commit]: loop body 0:
-    Source: 'crates/registry/src/lib.rs', lines 1008:4-1011:5
+    Source: 'crates/registry/src/lib.rs', lines 1108:4-1111:5
     Visibility: public -/
 @[rust_loop_body]
 def commit_loop.body
@@ -5574,7 +6033,7 @@ def commit_loop.body
   else ok (done s)
 
 /-- [o5s_registry::commit]: loop 0:
-    Source: 'crates/registry/src/lib.rs', lines 1008:4-1011:5
+    Source: 'crates/registry/src/lib.rs', lines 1108:4-1111:5
     Visibility: public -/
 @[rust_loop]
 def commit_loop
@@ -5586,7 +6045,7 @@ def commit_loop
     (s, i)
 
 /-- [o5s_registry::commit]:
-    Source: 'crates/registry/src/lib.rs', lines 1006:0-1012:1
+    Source: 'crates/registry/src/lib.rs', lines 1106:0-1112:1
     Visibility: public -/
 @[reducible]
 def commit (s : Snapshot) (ws : alloc.vec.Vec Write) : Result Snapshot := do

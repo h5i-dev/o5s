@@ -23,6 +23,7 @@
 //! `h5i_app_pgsql` (both extracted to Lean). Statements are sent unnamed with
 //! their parameter types, as Hyperdrive needs.
 
+pub mod revoke;
 pub mod service;
 
 use h5i_app_pgsql::{Column, Kind, Query, Table};
@@ -196,6 +197,7 @@ pub fn tables() -> Vec<Table> {
         ),
         table("o5s_bodies", 1, vec![int("patch"), bytes("bytes")]),
         table("o5s_listings", 1, vec![int("repo"), bytes("label")]),
+        table("o5s_roles", 1, vec![int("user"), int("level")]),
     ]
 }
 
@@ -238,6 +240,7 @@ pub fn ddl(schema: &str) -> Result<Vec<String>, DbError> {
         format!("SET LOCAL search_path TO {name}"),
     ];
     out.push(IDEMPOTENCY_DDL.into());
+    out.extend(revoke::DDL.iter().map(|d| d.to_string()));
     for t in &tables {
         out.push(text(&h5i_app_pgsql::create(t))?);
     }

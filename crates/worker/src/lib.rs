@@ -88,22 +88,66 @@ impl AppState {
         Ok(Service::new(engine))
     }
 
-    fn actor(&self, headers: &HeaderMap) -> Result<Actor, Response> {
+    fn auth(&self) -> Result<auth::HmacAuth, Response> {
         let secret = self.env.secret("H5I_APP_SECRET").map_err(|_| {
             json(
                 StatusCode::SERVICE_UNAVAILABLE,
                 serde_json::json!({"error":"secret not configured"}),
             )
         })?;
-        let auth = auth::HmacAuth::new(secret.to_string());
+        Ok(auth::HmacAuth::new(secret.to_string()))
+    }
+
+    /// The caller of a request whose token is valid and not revoked.
+    async fn actor(&self, headers: &HeaderMap) -> Result<Actor, Response> {
         let now = (worker::Date::now().as_millis() / 1000) as u64;
-        auth.authenticate(headers, now)
-            .map(|(tenant, user)| Actor { tenant, user })
-            .map_err(|e| json(StatusCode::UNAUTHORIZED, serde_json::json!({"error":e.0})))
+        let token = bearer(headers);
+        let (tenant, user, exp) = self
+            .auth()?
+            .claims(&token, now)
+            .map_err(|e| json(StatusCode::UNAUTHORIZED, serde_json::json!({"error":e.0})))?;
+        let revoked = async {
+            self.registry()?
+                .engine
+                .revoked(tenant, user, exp, &token)
+                .await
+                .map_err(o5s_pgwire::service::unavailable)
+        }
+        .await;
+        match revoked {
+            Ok(false) => Ok(Actor { tenant, user }),
+            Ok(true) => Err(json(
+                StatusCode::UNAUTHORIZED,
+                serde_json::json!({"error":"token revoked"}),
+            )),
+            Err(f) => Err(reply(Err(f))),
+        }
     }
 }
 
+fn bearer(headers: &HeaderMap) -> String {
+    headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Per isolate: requests reach many isolates, so the rate limit is per
+/// isolate, not global.
+fn rate() -> &'static o5s_platform::limits::RateLimiter {
+    static RATE: std::sync::OnceLock<o5s_platform::limits::RateLimiter> =
+        std::sync::OnceLock::new();
+    RATE.get_or_init(Default::default)
+}
+
 fn router(env: Env, ctx: Context) -> Router {
+    if let Ok(limits) =
+        o5s_platform::limits::Limits::from_lookup(|k| env.var(k).ok().map(|v| v.to_string()))
+    {
+        o5s_platform::limits::set(limits);
+    }
     Router::new()
         .route(
             "/",
@@ -121,6 +165,7 @@ fn router(env: Env, ctx: Context) -> Router {
         .route("/api/command", post(command))
         .route("/api/export", post(export))
         .route("/api/artifacts", get(artifacts_access))
+        .route("/api/tokens/revoke", post(revoke_token))
         .route("/api/worktree", post(worktree))
         .route("/api/worktree/propose", post(worktree_propose))
         .with_state(AppState {
@@ -205,7 +250,7 @@ fn idempotency_key(headers: &HeaderMap) -> Result<Option<String>, Response> {
 
 #[worker::send]
 async fn command(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
-    let a = match s.actor(&headers) {
+    let a = match s.actor(&headers).await {
         Ok(a) => a,
         Err(e) => return e,
     };
@@ -222,6 +267,21 @@ async fn command(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> 
             );
         }
     };
+    if !rate().allow(&a, worker::Date::now().as_millis()) {
+        return json(
+            StatusCode::TOO_MANY_REQUESTS,
+            serde_json::json!({"error":"too many commands; retry later"}),
+        );
+    }
+    if matches!(c, Command::Create { .. }) && o5s_platform::limits::get().max_repositories.is_some()
+    {
+        let count = async { s.registry()?.repositories(&a).await }.await;
+        if let Err(e) = count.and_then(|n| {
+            o5s_platform::limits::check_repositories(n.len()).map_err(Failure::Refused)
+        }) {
+            return reply(Err(e));
+        }
+    }
     // A merge also refreshes the channel's Git projection, after the reply.
     let merged = match &c {
         Command::Merge { repo, channel, .. } | Command::MergeBatch { repo, channel, .. } => {
@@ -265,7 +325,7 @@ async fn export_channel(
 
 #[worker::send]
 async fn export(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
-    let a = match s.actor(&headers) {
+    let a = match s.actor(&headers).await {
         Ok(a) => a,
         Err(e) => return e,
     };
@@ -288,7 +348,7 @@ async fn export(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> R
 
 #[worker::send]
 async fn repositories(State(s): State<AppState>, headers: HeaderMap) -> Response {
-    let a = match s.actor(&headers) {
+    let a = match s.actor(&headers).await {
         Ok(a) => a,
         Err(e) => return e,
     };
@@ -310,7 +370,7 @@ fn main_channel() -> String {
 }
 
 async fn load(s: &AppState, headers: &HeaderMap, name: &str) -> Result<Arc<Repository>, Response> {
-    let a = s.actor(headers)?;
+    let a = s.actor(headers).await?;
     let r = async { s.registry()?.repository(&a, name).await }.await;
     r.map_err(|f| reply(Err(f)))
 }
@@ -519,7 +579,7 @@ async fn artifacts_access(
     headers: HeaderMap,
     Query(q): Query<RepoQuery>,
 ) -> Response {
-    let a = match s.actor(&headers) {
+    let a = match s.actor(&headers).await {
         Ok(a) => a,
         Err(e) => return e,
     };
@@ -549,7 +609,7 @@ async fn artifacts_access(
 /// Artifacts repository only this user is given write tokens for.
 #[worker::send]
 async fn worktree(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
-    let a = match s.actor(&headers) {
+    let a = match s.actor(&headers).await {
         Ok(a) => a,
         Err(e) => return e,
     };
@@ -615,7 +675,7 @@ fn work_branch() -> String {
 /// Propose what the caller's workspace branch changes since its snapshot.
 #[worker::send]
 async fn worktree_propose(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
-    let a = match s.actor(&headers) {
+    let a = match s.actor(&headers).await {
         Ok(a) => a,
         Err(e) => return e,
     };
@@ -657,4 +717,62 @@ async fn worktree_propose(State(s): State<AppState>, headers: HeaderMap, body: B
     }
     .await;
     reply(r)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RevokeRequest {
+    #[serde(default)]
+    all: bool,
+}
+
+/// Revoke the presented token, or with `all`, every token of the caller
+/// expiring no later than it.
+#[worker::send]
+async fn revoke_token(State(s): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    if let Err(e) = s.actor(&headers).await {
+        return e;
+    }
+    let token = bearer(&headers);
+    let now = (worker::Date::now().as_millis() / 1000) as u64;
+    let (tenant, user, exp) = match s.auth().map(|a| a.claims(&token, now)) {
+        Ok(Ok(c)) => c,
+        Ok(Err(e)) => return json(StatusCode::UNAUTHORIZED, serde_json::json!({"error":e.0})),
+        Err(e) => return e,
+    };
+    let all = if body.is_empty() {
+        false
+    } else {
+        match serde_json::from_slice::<RevokeRequest>(&body) {
+            Ok(q) => q.all,
+            Err(e) => {
+                return json(
+                    StatusCode::BAD_REQUEST,
+                    serde_json::json!({"error":e.to_string()}),
+                );
+            }
+        }
+    };
+    use o5s_pgwire::revoke::{Revocation, digest};
+    let r = if all {
+        Revocation::User {
+            tenant,
+            user,
+            not_after: exp,
+        }
+    } else {
+        Revocation::Token {
+            digest: digest(&token),
+            expires: exp,
+        }
+    };
+    let done = async {
+        s.registry()?
+            .engine
+            .revoke(&r)
+            .await
+            .map_err(o5s_pgwire::service::unavailable)
+    }
+    .await;
+    reply(done.map(|()| serde_json::json!({"revoked":r})))
 }

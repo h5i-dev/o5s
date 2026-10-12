@@ -13,6 +13,27 @@ fn state(root: &std::path::Path) -> AppState {
         root.into(),
     )
 }
+/// Reopen the store at `root` after the previous state was dropped, as a
+/// process restart would. JoinHandle completion can precede the blocking worker
+/// dropping its captured Arc, so wait for that final owner to release the lock.
+async fn reopen(root: &std::path::Path) -> AppState {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match Store::open(root) {
+            Ok(store) => {
+                break AppState::new(Backend::local(store), HmacAuth::new("test"), root.into());
+            }
+            Err(e)
+                if e.downcast_ref::<std::io::Error>()
+                    .is_some_and(|e| e.kind() == std::io::ErrorKind::WouldBlock)
+                    && std::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+            Err(e) => panic!("restart failed: {e}"),
+        }
+    }
+}
 async fn request(
     s: &AppState,
     user: u64,
@@ -105,7 +126,7 @@ async fn authenticated_parallel_requests_restart_and_git_projection() {
     let saved = request(&s, 1, 1, "/api/state?repo=demo", None).await.1;
     assert!(Store::open(dir.path()).is_err());
     drop(s);
-    let s = state(dir.path());
+    let s = reopen(dir.path()).await;
     assert_eq!(
         saved,
         request(&s, 1, 1, "/api/state?repo=demo", None).await.1
@@ -241,30 +262,7 @@ async fn concurrent_line_proposals_survive_restart_and_export_merged_git_bytes()
     let (_, v) = request(&s, 1, 1, "/api/view?repo=lines", None).await;
     assert_eq!(v["files"]["src/a.txt"], "ONE\n二\nTHREE\n");
     drop(s);
-    // JoinHandle completion can precede the blocking worker dropping its captured
-    // Arc. Wait for that final owner before simulating a process restart.
-    let reopened = {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        loop {
-            match Store::open(dir.path()) {
-                Ok(store) => {
-                    break AppState::new(
-                        Backend::local(store),
-                        HmacAuth::new("test"),
-                        dir.path().into(),
-                    );
-                }
-                Err(e)
-                    if e.downcast_ref::<std::io::Error>()
-                        .is_some_and(|e| e.kind() == std::io::ErrorKind::WouldBlock)
-                        && std::time::Instant::now() < deadline =>
-                {
-                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-                }
-                Err(e) => panic!("restart failed: {e}"),
-            }
-        }
-    };
+    let reopened = reopen(dir.path()).await;
     let (_, v) = request(&reopened, 1, 1, "/api/state?repo=lines", None).await;
     assert_eq!(v["view"]["files"]["src/a.txt"], "ONE\n二\nTHREE\n");
     let (status, export) = request(
@@ -638,4 +636,130 @@ async fn request_ids_and_metrics_are_reported() {
         "{text}"
     );
     assert!(text.contains("o5s_local_log_bytes"));
+}
+
+async fn with_token(
+    s: &AppState,
+    token: &str,
+    url: &str,
+    body: Option<serde_json::Value>,
+) -> (StatusCode, serde_json::Value) {
+    let r = Request::builder()
+        .method(if body.is_some() { "POST" } else { "GET" })
+        .uri(url)
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::from(body.map_or(String::new(), |v| v.to_string())))
+        .unwrap();
+    let response = router(s.clone()).oneshot(r).await.unwrap();
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
+#[tokio::test]
+async fn roles_restrict_a_repository_to_the_users_granted() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = state(dir.path());
+    command(&s, 1, serde_json::json!({"cmd":"create","repo":"private"})).await;
+    let grant = |user: u64, role: &str| serde_json::json!({"cmd":"grant","repo":"private","user":user,"role":role});
+    // User 1 restricts the repository and lets user 2 write.
+    let r = command(&s, 1, grant(2, "write")).await;
+    assert_eq!(r, serde_json::json!({"user":2,"role":"write"}));
+    let propose = serde_json::json!({"cmd":"propose","repo":"private","intent":"x","dependencies":[],"edits":[{"path":"a","content":"a\n"}]});
+    let p = command(&s, 2, propose.clone()).await["patch"]
+        .as_u64()
+        .unwrap();
+    // User 3 does not see it: not in the list, not readable, cannot propose.
+    let (_, list) = request(&s, 3, 1, "/api/repositories", None).await;
+    assert!(
+        list["repositories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r == "private")
+    );
+    let (status, _) = request(&s, 3, 1, "/api/state?repo=private", None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, v) = request(&s, 3, 1, "/api/command", Some(propose)).await;
+    assert_eq!(v["error"], "repository not found", "{status}");
+    // A writer cannot approve or grant.
+    let (_, v) = request(
+        &s,
+        2,
+        1,
+        "/api/command",
+        Some(serde_json::json!({"cmd":"approve","repo":"private","patch":p})),
+    )
+    .await;
+    assert_eq!(v["error"], "your role does not allow this");
+    let (_, v) = request(&s, 2, 1, "/api/command", Some(grant(3, "read"))).await;
+    assert_eq!(v["error"], "your role does not allow this");
+    let (_, v) = request(&s, 1, 1, "/api/command", Some(grant(1, "read"))).await;
+    assert_eq!(v["error"], "users cannot change their own role");
+    let (_, saved) = request(&s, 1, 1, "/api/state?repo=private", None).await;
+    assert_eq!(
+        saved["repository"]["roles"],
+        serde_json::json!({"1":4,"2":2})
+    );
+    // The roles survive a restart.
+    drop(s);
+    let s = reopen(dir.path()).await;
+    let (status, _) = request(&s, 3, 1, "/api/state?repo=private", None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        request(&s, 2, 1, "/api/state?repo=private", None).await.0,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn revoked_tokens_are_refused_everywhere() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = state(dir.path());
+    let one = s.auth.issue(1, 5, 1_000_000_000_000);
+    let two = s.auth.issue(1, 5, 2_000_000_000_000);
+    assert_eq!(
+        with_token(&s, &one, "/api/repositories", None).await.0,
+        StatusCode::OK
+    );
+    // Revoking one token leaves the other.
+    let (status, v) = with_token(&s, &one, "/api/tokens/revoke", Some(serde_json::json!({}))).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (status, v) = with_token(&s, &one, "/api/repositories", None).await;
+    assert_eq!(
+        (status, v["error"].as_str()),
+        (StatusCode::UNAUTHORIZED, Some("token revoked"))
+    );
+    assert_eq!(
+        with_token(&s, &two, "/api/repositories", None).await.0,
+        StatusCode::OK
+    );
+    // `all` revokes every token expiring no later than the one presented.
+    let three = s.auth.issue(1, 5, 3_000_000_000_000);
+    with_token(
+        &s,
+        &three,
+        "/api/tokens/revoke",
+        Some(serde_json::json!({"all":true})),
+    )
+    .await;
+    for t in [&two, &three] {
+        assert_eq!(
+            with_token(&s, t, "/api/repositories", None).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    // Another user's tokens are untouched; the file survives restarts.
+    let other = s.auth.issue(1, 6, 3_000_000_000_000);
+    assert_eq!(
+        with_token(&s, &other, "/api/repositories", None).await.0,
+        StatusCode::OK
+    );
+    drop(s);
+    let s = reopen(dir.path()).await;
+    assert_eq!(
+        with_token(&s, &two, "/api/repositories", None).await.0,
+        StatusCode::UNAUTHORIZED
+    );
 }

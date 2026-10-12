@@ -1317,6 +1317,7 @@ dependencies = [
  "h5i-app-sql",
  "o5s-platform",
  "o5s-registry",
+ "serde",
  "serde_json",
  "sha2",
  "tokio",

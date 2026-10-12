@@ -41,6 +41,11 @@ impl HmacAuth {
 
     /// The tenant and user of a token valid at `now` (unix seconds).
     pub fn verify(&self, token: &str, now: u64) -> Result<(u64, u64), AuthError> {
+        self.claims(token, now).map(|(t, u, _)| (t, u))
+    }
+
+    /// The tenant, user and expiry of a token valid at `now`.
+    pub fn claims(&self, token: &str, now: u64) -> Result<(u64, u64, u64), AuthError> {
         let err = |m: &str| AuthError(m.to_string());
         let t = h5i_app_token::parse(token.as_bytes()).ok_or_else(|| err("malformed token"))?;
         let signed = ct_eq(&self.tag(&t.payload), &t.sig)
@@ -54,7 +59,7 @@ impl HmacAuth {
         if t.exp < now {
             return Err(err("token expired"));
         }
-        Ok((t.tenant, t.user))
+        Ok((t.tenant, t.user, t.exp))
     }
 
     /// Length and a short HMAC fingerprint of the secret, to compare with

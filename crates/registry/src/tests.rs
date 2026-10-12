@@ -465,3 +465,107 @@ fn read_only_loads_never_commit() {
     let s = created();
     assert_eq!(run(&s, who(1, 1), Command::Inspect).1, Err(Error::ReadOnly));
 }
+
+fn grant(s: &Snapshot, by: u64, user: u64, level: u64) -> (Snapshot, Result<Reply, Error>) {
+    run(
+        s,
+        who(1, by),
+        Command::Grant {
+            repo: name("alpha"),
+            user,
+            level,
+        },
+    )
+}
+
+#[test]
+fn open_repositories_admit_every_member_until_restricted() {
+    let s = created();
+    // Open: anyone in the organization proposes, reviews and merges.
+    let (s, a) = propose(&s, 1, 1, vec![]);
+    let s = ready(&s, a);
+    let (s, r) = merge(&s, "main", vec![a]);
+    assert!(r.is_ok());
+    // Restricting: the caller becomes an administrator and grants a reader.
+    let (s, r) = grant(&s, 1, 9, READ);
+    assert_eq!(
+        r,
+        Ok(Reply::Granted {
+            user: 9,
+            level: READ
+        })
+    );
+    assert_eq!(level(&s.roles, 1), ADMIN);
+    assert_eq!(level(&s.roles, 9), READ);
+    // Users without a role no longer see the repository at all.
+    assert_eq!(level(&s.roles, 2), 0);
+    let (_, r) = run(
+        &s,
+        who(1, 2),
+        Command::Approve {
+            repo: name("alpha"),
+            patch: a,
+        },
+    );
+    assert_eq!(r, Err(Error::RepositoryNotFound));
+    assert!(!readable(&who(1, 2), &s, &name("alpha")));
+    assert!(readable(&who(1, 9), &s, &name("alpha")));
+    // A reader cannot propose; a writer cannot review or grant.
+    let propose_as = |s: &Snapshot, u: u64| {
+        run(
+            s,
+            who(1, u),
+            Command::Propose {
+                repo: name("alpha"),
+                hash: hash(2),
+                dependencies: vec![],
+                paths: vec![],
+                body: vec![2],
+            },
+        )
+        .1
+    };
+    assert_eq!(propose_as(&s, 9), Err(Error::Forbidden));
+    let (s, _) = grant(&s, 1, 9, WRITE);
+    assert!(propose_as(&s, 9).is_ok());
+    assert_eq!(grant(&s, 9, 5, READ).1, Err(Error::Forbidden));
+    let (_, r) = run(
+        &s,
+        who(1, 9),
+        Command::Approve {
+            repo: name("alpha"),
+            patch: a,
+        },
+    );
+    assert_eq!(r, Err(Error::Forbidden));
+    // Revoking removes access; nobody changes their own level.
+    let (s, _) = grant(&s, 1, 9, 0);
+    assert_eq!(propose_as(&s, 9), Err(Error::RepositoryNotFound));
+    assert_eq!(grant(&s, 1, 1, READ).1, Err(Error::OwnLevel));
+    assert_eq!(grant(&s, 1, 7, ADMIN + 1).1, Err(Error::InvalidLevel));
+    // Other organizations never see it, whatever their user id.
+    assert_eq!(
+        run(
+            &s,
+            who(2, 1),
+            Command::Grant {
+                repo: name("alpha"),
+                user: 3,
+                level: ADMIN
+            }
+        )
+        .1,
+        Err(Error::RepositoryNotFound)
+    );
+}
+
+#[test]
+fn restricting_cannot_demote_the_caller() {
+    let s = created();
+    assert_eq!(grant(&s, 1, 1, READ).1, Err(Error::OwnLevel));
+    // Granting oneself admin on an open repository just restricts it.
+    let (s, r) = grant(&s, 1, 1, ADMIN);
+    assert!(r.is_ok());
+    assert_eq!(s.roles.len(), 1);
+    assert_eq!(level(&s.roles, 1), ADMIN);
+}

@@ -183,16 +183,57 @@ def merge (u : U64) (s : St) (n : alloc.vec.Vec U8) (ids : List U64) : Out :=
 def visible (a : Principal) (r : Repository) (n : alloc.vec.Vec U8) : Bool :=
   decide (REPOSITORY_SCOPE.val ≤ a.scope.val) && r.created && decide (r.org = a.org) && decide (r.label.val = n.val)
 
+/-- A user's access level: `ADMIN` on an open repository (no role rows). -/
+def level (roles : List Role) (u : U64) : U64 :=
+  if roles = [] then ADMIN else ((roles.find? (fun r => decide (r.user = u))).map (·.level)).getD 0#u64
+
+def readable (a : Principal) (s : St) (n : alloc.vec.Vec U8) : Bool :=
+  visible a s.repo n && decide (READ.val ≤ (level s.roles a.user).val)
+
+/-- Why a command needing level `need` is refused, if it is. -/
+def authorize (a : Principal) (s : St) (n : alloc.vec.Vec U8) (need : U64) : Option Error :=
+  if !readable a s n then some .RepositoryNotFound
+  else if (level s.roles a.user).val < need.val then some .Forbidden
+  else none
+
+def grant (a : Principal) (s : St) (u lvl : U64) : Out :=
+  if ADMIN.val < lvl.val then .Err .InvalidLevel
+  else if s.repo.events = MAX then .Err .Exhausted
+  else if u = a.user ∧ (s.roles ≠ [] ∨ lvl ≠ ADMIN) then .Err .OwnLevel
+  else
+    let i := inc s.repo.events
+    .Ok ((if s.roles = [] then [.PutRole ⟨a.user, ADMIN⟩] else []) ++
+      (if u ≠ a.user then [.PutRole ⟨u, lvl⟩] else []) ++
+      [.SetRepository { s.repo with events := i }, .PutEvent ⟨i, a.user, GRANT, none, none⟩],
+      .Granted u lvl)
+
+/-- Run `k` if `a` has level `need`, otherwise refuse. -/
+def guarded (a : Principal) (s : St) (n : alloc.vec.Vec U8) (need : U64) (k : Out) : Out :=
+  match authorize a s n need with
+  | some e => .Err e
+  | none => k
+
+theorem guarded_ok {a : Principal} {s : St} {n : alloc.vec.Vec U8} {need : U64} {k : Out} {x}
+    (h : guarded a s n need k = .Ok x) : visible a s.repo n = true ∧ k = .Ok x := by
+  unfold guarded at h
+  split at h
+  · simp at h
+  · rename_i ha
+    refine ⟨?_, h⟩
+    by_contra hv
+    have hf : visible a s.repo n = false := by simpa using hv
+    simp [authorize, readable, hf] at ha
+
 /-- What `transition` computes. -/
 def step (a : Principal) (s : St) : Command → Out
   | .Register n repo => register a s.listings n repo
   | .Create n => create a s.repo n
-  | .Fork repo src n => if visible a s.repo repo then fork a.user s src n else .Err .RepositoryNotFound
-  | .Propose repo h deps uses body =>
-    if visible a s.repo repo then propose a.user s h deps.val uses.val body else .Err .RepositoryNotFound
-  | .Approve repo p => if visible a s.repo repo then approve a.user s p else .Err .RepositoryNotFound
-  | .Check repo p passed => if visible a s.repo repo then check a.user s p passed else .Err .RepositoryNotFound
-  | .Merge repo n ids => if visible a s.repo repo then merge a.user s n ids.val else .Err .RepositoryNotFound
+  | .Fork repo src n => guarded a s repo WRITE (fork a.user s src n)
+  | .Propose repo h deps uses body => guarded a s repo WRITE (propose a.user s h deps.val uses.val body)
+  | .Approve repo p => guarded a s repo REVIEW (approve a.user s p)
+  | .Check repo p passed => guarded a s repo REVIEW (check a.user s p passed)
+  | .Merge repo n ids => guarded a s repo REVIEW (merge a.user s n ids.val)
+  | .Grant repo u lvl => guarded a s repo ADMIN (grant a s u lvl)
   | _ => .Err .ReadOnly
 
 end o5s_registry.Model

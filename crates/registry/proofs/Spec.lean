@@ -25,10 +25,11 @@ structure St where
   events : List Event
   bodies : List Body
   listings : List Listing
+  roles : List Role
 
 def Snapshot.toSt (s : Snapshot) : St :=
   ⟨s.repository, s.patches.val, s.dependencies.val, s.approvals.val, s.checks.val, s.channels.val,
-    s.members.val, s.paths.val, s.events.val, s.bodies.val, s.listings.val⟩
+    s.members.val, s.paths.val, s.events.val, s.bodies.val, s.listings.val, s.roles.val⟩
 
 /-- What one write does. Keys are those of the tables (`schema!`). -/
 def applyWrite (s : St) : Write → St
@@ -43,10 +44,11 @@ def applyWrite (s : St) : Write → St
   | .PutEvent e => { s with events := upsert (fun y => y.seq) e s.events }
   | .PutBody b => { s with bodies := upsert (fun y => y.patch) b s.bodies }
   | .PutListing l => { s with listings := upsert (fun y => y.repo) l s.listings }
+  | .PutRole r => { s with roles := upsert (fun y => y.user) r s.roles }
 
 def applyAll (s : St) (ws : List Write) : St := ws.foldl applyWrite s
 
 /-- A fresh tenant. -/
-def init : St := ⟨Schema.Repository.zero, [], [], [], [], [], [], [], [], [], []⟩
+def init : St := ⟨Schema.Repository.zero, [], [], [], [], [], [], [], [], [], [], []⟩
 
 end o5s_registry.Spec

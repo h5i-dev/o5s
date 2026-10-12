@@ -54,10 +54,11 @@ theorem applyAll_eq (s : St) (ws : List Write) : applyAll s ws =
       puts (·.patch) (ws.filterMap checkOf) s.checks, puts (·.id) (ws.filterMap channelOf) s.channels,
       puts (fun y => (y.channel, y.position)) (ws.filterMap memberOf) s.members,
       puts (·.id) (ws.filterMap pathOf) s.paths, puts (·.seq) (ws.filterMap eventOf) s.events,
-      puts (·.patch) (ws.filterMap bodyOf) s.bodies, puts (·.repo) (ws.filterMap listingOf) s.listings⟩ := by
+      puts (·.patch) (ws.filterMap bodyOf) s.bodies, puts (·.repo) (ws.filterMap listingOf) s.listings,
+      puts (·.user) (ws.filterMap roleOf) s.roles⟩ := by
   rw [← applyAll_repo, ← applyAll_patches, ← applyAll_deps, ← applyAll_approvals, ← applyAll_checks,
     ← applyAll_channels, ← applyAll_members, ← applyAll_paths, ← applyAll_events, ← applyAll_bodies,
-    ← applyAll_listings]
+    ← applyAll_listings, ← applyAll_roles]
 
 @[simp] theorem puts_nil {α κ} [DecidableEq κ] (k : α → κ) (l : List α) : puts k [] l = l := rfl
 @[simp] theorem puts_single {α κ} [DecidableEq κ] (k : α → κ) (x : α) (l : List α) : puts k [x] l = upsert k x l := rfl
@@ -87,7 +88,7 @@ theorem inv_approve {s : St} (hi : Inv s) {u patch : U64} {ws r}
     have hinc := Refine.inc_val hm
     rw [applyAll_eq]
     simp only [List.filterMap_cons, List.filterMap_nil, repoOf, patchOf, depOf, approvalOf, checkOf, channelOf,
-      memberOf, pathOf, eventOf, bodyOf, listingOf, puts_nil, puts_single, List.getLast?_singleton,
+      memberOf, pathOf, eventOf, bodyOf, listingOf, roleOf, puts_nil, puts_single, List.getLast?_singleton,
       Option.getD_some]
     constructor
     all_goals simp only [hasPatch, isMember]
@@ -137,7 +138,7 @@ theorem inv_check {s : St} (hi : Inv s) {u patch : U64} {passed : Bool} {ws r}
     have hinc := Refine.inc_val hm
     rw [applyAll_eq]
     simp only [List.filterMap_cons, List.filterMap_nil, repoOf, patchOf, depOf, approvalOf, checkOf, channelOf,
-      memberOf, pathOf, eventOf, bodyOf, listingOf, puts_nil, puts_single, List.getLast?_singleton,
+      memberOf, pathOf, eventOf, bodyOf, listingOf, roleOf, puts_nil, puts_single, List.getLast?_singleton,
       Option.getD_some]
     constructor
     all_goals simp only [hasPatch, isMember]
@@ -182,7 +183,7 @@ theorem inv_register {s : St} (hi : Inv s) {a : Principal} {n : alloc.vec.Vec U8
   · exact hi
   · rw [applyAll_eq]
     simp only [List.filterMap_cons, List.filterMap_nil, repoOf, patchOf, depOf, approvalOf, checkOf, channelOf,
-      memberOf, pathOf, eventOf, bodyOf, listingOf, puts_nil, puts_single, List.getLast?_nil, Option.getD_none]
+      memberOf, pathOf, eventOf, bodyOf, listingOf, roleOf, puts_nil, puts_single, List.getLast?_nil, Option.getD_none]
     exact ⟨hi.1, hi.2, hi.3, hi.4, hi.5, hi.6, hi.7, hi.8, hi.9, hi.10, hi.11, hi.12, hi.13, hi.14, hi.15, hi.16,
       hi.17, hi.18, hi.19, hi.20⟩
 
@@ -196,7 +197,7 @@ theorem inv_create {s : St} (hi : Inv s) {a : Principal} {n : alloc.vec.Vec U8} 
   obtain ⟨hp, hd, ha, hc, hch, hm, hpa, he, hb⟩ := hu
   rw [applyAll_eq]
   simp only [List.filterMap_cons, List.filterMap_nil, repoOf, patchOf, depOf, approvalOf, checkOf, channelOf,
-    memberOf, pathOf, eventOf, bodyOf, listingOf, puts_nil, puts_single, List.getLast?_singleton, Option.getD_some,
+    memberOf, pathOf, eventOf, bodyOf, listingOf, roleOf, puts_nil, puts_single, List.getLast?_singleton, Option.getD_some,
     hp, hd, ha, hc, hch, hm, hpa, he, hb]
   constructor <;> simp [upsert, hasPatch, isMember]
 
@@ -278,7 +279,7 @@ theorem inv_fork {s : St} (hi : Inv s) {u : U64} {src n : alloc.vec.Vec U8} {ws 
     exact puts_new _ (List.mem_map.2 ⟨m, List.mem_filter.2 ⟨hm, by simp [e]⟩, rfl⟩) hcopy_keys
   rw [applyAll_eq]
   simp only [List.filterMap_cons, List.filterMap_nil, List.filterMap_append, List.filterMap_map, repoOf, patchOf,
-    depOf, approvalOf, checkOf, channelOf, memberOf, pathOf, eventOf, bodyOf, listingOf, puts_nil, puts_single,
+    depOf, approvalOf, checkOf, channelOf, memberOf, pathOf, eventOf, bodyOf, listingOf, roleOf, puts_nil, puts_single,
     Function.comp_def, filterMap_none, filterMap_some_eq_map, List.nil_append, List.append_nil, List.cons_append,
     List.getLast?_singleton, Option.getD_some, hch]
   have hcopies : (s.members.filter (fun m => decide (m.channel = c.id))).map
@@ -466,7 +467,7 @@ theorem inv_propose {s : St} (hi : Inv s) (hcr : s.repo.created = true) {u : U64
       have h1 := (ha.bounds x hx).1; have h2 := hi.path_fresh y hy; rw [e] at h2; omega)
   rw [applyAll_eq]
   simp only [List.filterMap_cons, List.filterMap_nil, List.filterMap_append, List.filterMap_map, repoOf, patchOf,
-    depOf, approvalOf, checkOf, channelOf, memberOf, pathOf, eventOf, bodyOf, listingOf, puts_nil, puts_single,
+    depOf, approvalOf, checkOf, channelOf, memberOf, pathOf, eventOf, bodyOf, listingOf, roleOf, puts_nil, puts_single,
     Function.comp_def, filterMap_none, filterMap_some_id, filterMap_some_eq_map, List.nil_append, List.append_nil,
     List.cons_append, List.getLast?_singleton, Option.getD_some, hpatches, hpaths]
   set D := puts (fun y => (y.patch, y.dependency)) (deps.map (fun d => ({ patch := id, dependency := d } : Dependency))) s.deps
@@ -810,6 +811,31 @@ theorem inv_merge {s : St} (hi : Inv s) {u : U64} {n : alloc.vec.Vec U8} {ids : 
 
 /-! ## Every successful command keeps the invariant -/
 
+theorem inv_grant {s : St} (hi : Inv s) (hcr : s.repo.created = true) {a : Principal} {u lvl : U64} {ws r}
+    (h : Model.grant a s u lvl = .Ok (ws, r)) : Inv (applyAll s ws) := by
+  unfold Model.grant at h
+  split_ifs at h with h1 hm h3
+  all_goals simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h
+  all_goals obtain ⟨rfl, -⟩ := h
+  all_goals have hinc := Refine.inc_val hm
+  all_goals rw [applyAll_eq]
+  all_goals (try split_ifs) <;>
+    simp only [List.nil_append, List.cons_append, List.singleton_append, List.filterMap_cons,
+      List.filterMap_nil, repoOf, patchOf, depOf, approvalOf, checkOf, channelOf, memberOf, pathOf, eventOf,
+      bodyOf, listingOf, roleOf, puts_nil, puts_single, List.getLast?_singleton, Option.getD_some] <;>
+    constructor <;> (try simp only [hasPatch, isMember]) <;>
+    first
+      | exact hi.patch_keys | exact hi.patch_fresh | exact hi.hashes | exact hi.deps_known
+      | exact hi.approvals_independent | exact hi.checks_independent | exact hi.channel_keys
+      | exact hi.channel_fresh | exact hi.channel_labels | exact hi.member_keys | exact hi.members_placed
+      | exact hi.members_known | exact hi.closed | exact hi.reviewed | exact hi.bodies_known
+      | exact hi.path_keys | exact hi.path_fresh | exact hi.path_labels | exact hi.unborn
+      | (intro e; rw [hcr] at e; cases e)
+      | (intro e he
+         rcases mem_upsert_of he with rfl | he
+         · exact le_refl _
+         · have := hi.event_fresh e he; rw [hinc]; omega)
+
 theorem inv_step (a : Principal) {s : St} (hi : Inv s) (c : Command) {ws r}
     (h : Model.step a s c = .Ok (ws, r)) : Inv (applyAll s ws) := by
   cases c <;> simp only [Model.step] at h
@@ -817,17 +843,16 @@ theorem inv_step (a : Principal) {s : St} (hi : Inv s) (c : Command) {ws r}
   case Create => exact inv_create hi h
   all_goals first
     | (simp at h; done)
-    | (split at h
-       · rename_i hv
-         have hcr : s.repo.created = true := by
-           simp only [Model.visible, Bool.and_eq_true, decide_eq_true_eq] at hv; exact hv.1.1.2
-         first
-           | exact inv_fork hi h
-           | exact inv_propose hi hcr h
-           | exact inv_approve hi h
-           | exact inv_check hi h
-           | exact inv_merge hi h
-       · simp at h)
+    | (obtain ⟨hv, h⟩ := Model.guarded_ok h
+       have hcr : s.repo.created = true := by
+         simp only [Model.visible, Bool.and_eq_true, decide_eq_true_eq] at hv; exact hv.1.1.2
+       first
+         | exact inv_fork hi h
+         | exact inv_propose hi hcr h
+         | exact inv_approve hi h
+         | exact inv_check hi h
+         | exact inv_merge hi h
+         | exact inv_grant hi hcr h)
 
 /-- **Every successful run of the extracted `transition` keeps the invariant.** -/
 theorem inv_preserved (a : Principal) (s : Snapshot) (c : Command) (ws : alloc.vec.Vec Write)
@@ -893,9 +918,12 @@ theorem step_writes (a : Principal) {s : St} (c : Command) {ws r} (h : Model.ste
     obtain ⟨rfl, -⟩ := h; simp
   all_goals first
     | (simp at h; done)
-    | (split at h
-       swap
-       · simp at h)
+    | (obtain ⟨-, h⟩ := Model.guarded_ok h)
+  case Grant =>
+    unfold Model.grant at h
+    split_ifs at h <;> simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h
+    all_goals obtain ⟨rfl, -⟩ := h
+    all_goals simp
   case Fork =>
     unfold Model.fork at h
     repeat' split at h

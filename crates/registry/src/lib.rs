@@ -38,6 +38,18 @@ pub const PROPOSE: u64 = 3;
 pub const APPROVE: u64 = 4;
 pub const CHECK: u64 = 5;
 pub const MERGE: u64 = 6;
+pub const GRANT: u64 = 7;
+
+/// Repository access levels. A repository without role rows is open: every
+/// member of its organization has `ADMIN`. Once restricted, a user without a
+/// row has no access and does not see the repository.
+pub const READ: u64 = 1;
+/// Propose and fork.
+pub const WRITE: u64 = 2;
+/// Approve, report checks and merge.
+pub const REVIEW: u64 = 3;
+/// Grant and revoke access.
+pub const ADMIN: u64 = 4;
 
 /// The authenticated caller and the tenant the engine loads for the command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +79,7 @@ h5i_app_schema::schema! {
         events: Vec<Event>,
         bodies: Vec<Body>,
         listings: Vec<Listing>,
+        roles: Vec<Role>,
     }
 
     /// The repository of this tenant and its identifier counters. A fresh
@@ -164,6 +177,15 @@ h5i_app_schema::schema! {
         key { repo: u64 }
         label: Text,
     }
+
+    /// A user's access level to a restricted repository (`READ`..`ADMIN`; `0`
+    /// revokes).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    pub struct Role in "o5s_roles" {
+        key { user: u64 }
+        level: u64,
+    }
 }
 
 /// A document path a proposal touches, and the edit model it uses.
@@ -213,6 +235,13 @@ pub enum Command {
         channel: Text,
         patches: Vec<u64>,
     },
+    /// Set `user`'s access level. On an open repository this restricts it
+    /// and makes the caller an administrator.
+    Grant {
+        repo: Text,
+        user: u64,
+        level: u64,
+    },
     /// Loads for reads; they never commit. `Probe` reads only the repository row.
     Probe,
     Inspect,
@@ -237,6 +266,7 @@ pub enum Write {
     PutEvent(Event),
     PutBody(Body),
     PutListing(Listing),
+    PutRole(Role),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -264,6 +294,10 @@ pub enum Reply {
     Merged {
         channel: u64,
         admitted: u64,
+    },
+    Granted {
+        user: u64,
+        level: u64,
     },
 }
 
@@ -300,6 +334,13 @@ pub enum Error {
     Exhausted,
     /// A read-only load, never a transition.
     ReadOnly,
+    /// The caller's access level does not allow the command.
+    Forbidden,
+    /// Not a level between `0` and `ADMIN`.
+    InvalidLevel,
+    /// Users cannot change their own level on a restricted repository, so
+    /// one administrator always remains.
+    OwnLevel,
 }
 
 type Outcome = Result<(Vec<Write>, Reply), Error>;
@@ -350,6 +391,38 @@ pub fn visible(actor: &Principal, repository: &Repository, name: &Text) -> bool 
         && repository.created
         && repository.org == actor.org
         && bytes::eq(&repository.label, name)
+}
+
+/// `user`'s access level: `ADMIN` on an open repository (no role rows).
+pub fn level(roles: &Vec<Role>, user: u64) -> u64 {
+    if roles.len() == 0 {
+        return ADMIN;
+    }
+    let mut i = 0;
+    while i < roles.len() {
+        if roles[i].user == user {
+            return roles[i].level;
+        }
+        i += 1;
+    }
+    0
+}
+
+/// May `actor` read this tenant's repository named `name`?
+pub fn readable(actor: &Principal, s: &Snapshot, name: &Text) -> bool {
+    visible(actor, &s.repository, name) && level(&s.roles, actor.user) >= READ
+}
+
+/// Refuse a command that needs level `need`: an invisible repository, or
+/// one the caller cannot read, is not found; a readable one is forbidden.
+pub fn authorize(actor: &Principal, s: &Snapshot, name: &Text, need: u64) -> Option<Error> {
+    if !readable(actor, s, name) {
+        Some(Error::RepositoryNotFound)
+    } else if level(&s.roles, actor.user) < need {
+        Some(Error::Forbidden)
+    } else {
+        None
+    }
 }
 
 pub fn find_patch(ps: &Vec<PatchRow>, id: u64) -> Option<PatchRow> {
@@ -518,6 +591,39 @@ fn event(seq: u64, actor: u64, action: u64, patch: Option<u64>, channel: Option<
         patch,
         channel,
     }
+}
+
+fn grant(actor: &Principal, s: &Snapshot, user: u64, lvl: u64) -> Outcome {
+    let r = &s.repository;
+    if lvl > ADMIN {
+        return Err(Error::InvalidLevel);
+    }
+    if r.events == u64::MAX {
+        return Err(Error::Exhausted);
+    }
+    let open = s.roles.len() == 0;
+    if user == actor.user && (!open || lvl != ADMIN) {
+        return Err(Error::OwnLevel);
+    }
+    let mut ws = Vec::new();
+    if open {
+        ws.push(Write::PutRole(Role {
+            user: actor.user,
+            level: ADMIN,
+        }));
+    }
+    if user != actor.user {
+        ws.push(Write::PutRole(Role { user, level: lvl }));
+    }
+    ws.push(Write::SetRepository(bump_events(r)));
+    ws.push(Write::PutEvent(event(
+        r.events + 1,
+        actor.user,
+        GRANT,
+        None,
+        None,
+    )));
+    Ok((ws, Reply::Granted { user, level: lvl }))
 }
 
 fn register(actor: &Principal, ls: &Vec<Listing>, name: &Text, repo: u64) -> Outcome {
@@ -949,50 +1055,44 @@ pub fn transition(actor: &Principal, s: &Snapshot, cmd: &Command) -> Outcome {
             repo,
             source,
             channel,
-        } => {
-            if !visible(actor, &s.repository, repo) {
-                return Err(Error::RepositoryNotFound);
-            }
-            fork(actor.user, s, source, channel)
-        }
+        } => match authorize(actor, s, repo, WRITE) {
+            Some(e) => Err(e),
+            None => fork(actor.user, s, source, channel),
+        },
         Command::Propose {
             repo,
             hash,
             dependencies,
             paths,
             body,
-        } => {
-            if !visible(actor, &s.repository, repo) {
-                return Err(Error::RepositoryNotFound);
-            }
-            propose(actor.user, s, hash, dependencies, paths, body)
-        }
-        Command::Approve { repo, patch } => {
-            if !visible(actor, &s.repository, repo) {
-                return Err(Error::RepositoryNotFound);
-            }
-            approve(actor.user, s, *patch)
-        }
+        } => match authorize(actor, s, repo, WRITE) {
+            Some(e) => Err(e),
+            None => propose(actor.user, s, hash, dependencies, paths, body),
+        },
+        Command::Approve { repo, patch } => match authorize(actor, s, repo, REVIEW) {
+            Some(e) => Err(e),
+            None => approve(actor.user, s, *patch),
+        },
         Command::Check {
             repo,
             patch,
             passed,
-        } => {
-            if !visible(actor, &s.repository, repo) {
-                return Err(Error::RepositoryNotFound);
-            }
-            check(actor.user, s, *patch, *passed)
-        }
+        } => match authorize(actor, s, repo, REVIEW) {
+            Some(e) => Err(e),
+            None => check(actor.user, s, *patch, *passed),
+        },
         Command::Merge {
             repo,
             channel,
             patches,
-        } => {
-            if !visible(actor, &s.repository, repo) {
-                return Err(Error::RepositoryNotFound);
-            }
-            merge(actor.user, s, channel, patches)
-        }
+        } => match authorize(actor, s, repo, REVIEW) {
+            Some(e) => Err(e),
+            None => merge(actor.user, s, channel, patches),
+        },
+        Command::Grant { repo, user, level } => match authorize(actor, s, repo, ADMIN) {
+            Some(e) => Err(e),
+            None => grant(actor, s, *user, *level),
+        },
         Command::Probe
         | Command::Inspect
         | Command::ReadBody { .. }
@@ -1025,6 +1125,7 @@ fn apply_write(s: &mut Snapshot, w: Write) {
         Write::PutEvent(e) => Event::put(&mut s.events, e),
         Write::PutBody(b) => Body::put(&mut s.bodies, b),
         Write::PutListing(l) => Listing::put(&mut s.listings, l),
+        Write::PutRole(r) => Role::put(&mut s.roles, r),
     }
 }
 
@@ -1043,6 +1144,7 @@ fn sql_write(w: &Write, out: &mut Vec<h5i_app_sql::Write>) {
         Write::PutEvent(e) => out.push(e.sql_put()),
         Write::PutBody(b) => out.push(b.sql_put()),
         Write::PutListing(l) => out.push(l.sql_put()),
+        Write::PutRole(r) => out.push(r.sql_put()),
     }
 }
 

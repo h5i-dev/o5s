@@ -69,7 +69,9 @@ def loadMany {α κ} [DecidableEq α] [LinearOrder κ] (ids : List U64) (key : �
 mirroring `crates/pgwire/src/service.rs` branch by branch. Tables a command
 does not load are empty. -/
 noncomputable def pgLoad (c : Command) (full : St) : St :=
-  let none : St := ⟨full.repo, [], [], [], [], [], [], [], [], [], []⟩
+  let none : St := ⟨full.repo, [], [], [], [], [], [], [], [], [], [], []⟩
+  -- Every repository command also loads the whole role table.
+  let base : St := { none with roles := full.roles }
   let channelsNamed (n : alloc.vec.Vec U8) (acc : List Channel) : List Channel :=
     appendNew acc (query channelKey full.channels fun c => decide (c.label.val = n.val))
   let membersOf (chs : List Channel) (n : alloc.vec.Vec U8) : List Member :=
@@ -82,7 +84,7 @@ noncomputable def pgLoad (c : Command) (full : St) : St :=
         (query listingKey full.listings fun l => decide (l.label.val = n.val))
         (query listingKey full.listings fun l => decide (l.repo = repo))) }
   | .Propose _ h deps uses _ =>
-    { none with
+    { base with
       patches :=
         if deps.val.length > pointLoads then query patchKey full.patches fun _ => true
         else deps.val.foldl (fun acc d => appendNew acc (query patchKey full.patches fun p => decide (p.id = d)))
@@ -92,19 +94,20 @@ noncomputable def pgLoad (c : Command) (full : St) : St :=
         else uses.val.foldl (fun acc u => appendNew acc
           (query pathKey full.paths fun k => decide (k.path.val = u.path.val))) [] }
   | .Approve _ p | .Check _ p _ =>
-    { none with patches := query patchKey full.patches fun q => decide (q.id = p) }
+    { base with patches := query patchKey full.patches fun q => decide (q.id = p) }
   | .Fork _ src n =>
     let chs := channelsNamed src (channelsNamed n [])
-    { none with channels := chs, members := membersOf chs src }
+    { base with channels := chs, members := membersOf chs src }
   | .Merge _ n ids =>
     let chs := channelsNamed n []
-    { none with
+    { base with
       channels := chs
       members := membersOf chs n
       patches := loadMany ids.val patchKey full.patches (fun q id => decide (q.id = id))
       deps := loadMany ids.val depKey full.deps (fun d id => decide (d.patch = id))
       approvals := loadMany ids.val approvalKey full.approvals (fun a id => decide (a.patch = id))
       checks := loadMany ids.val checkKey full.checks (fun x id => decide (x.patch = id)) }
+  | .Grant .. => base
   | _ => full
 
 
@@ -587,22 +590,22 @@ on (`ApprovalsSorted` is used by `merge` only). -/
 theorem narrow_core (c : Command) (full : St) (inv : Invariant.Inv full) (S : Ordered full)
     (hA : (∃ r n ids, c = .Merge r n ids) → ApprovalsSorted full) : Narrow c full (pgLoad c full) := by
   cases c with
-  | Register n repo => exact ⟨rfl, register_parts n repo full S⟩
-  | Propose r h deps uses b => exact ⟨rfl, propose_parts r h deps uses b full inv⟩
+  | Register n repo => exact ⟨rfl, fun h => by simp [usesRoles] at h, register_parts n repo full S⟩
+  | Propose r h deps uses b => exact ⟨rfl, fun _ => rfl, propose_parts r h deps uses b full inv⟩
   | Approve r p =>
-    refine ⟨rfl, ?_⟩
+    refine ⟨rfl, fun _ => rfl, ?_⟩
     show Agree _ (query patchKey full.patches fun q => decide (q.id = p)) full.patches
     exact agree_query _ _ _ (pw_one (patch_one inv p))
   | Check r p x =>
-    refine ⟨rfl, ?_⟩
+    refine ⟨rfl, fun _ => rfl, ?_⟩
     show Agree _ (query patchKey full.patches fun q => decide (q.id = p)) full.patches
     exact agree_query _ _ _ (pw_one (patch_one inv p))
-  | Fork r src n => exact ⟨rfl, fork_parts r src n full inv S⟩
+  | Fork r src n => exact ⟨rfl, fun _ => rfl, fork_parts r src n full inv S⟩
   | Merge r n ids =>
     obtain ⟨p1, p2, p3⟩ := merge_parts r n ids full inv S
-    exact ⟨rfl, p1, p2, fun id hid => ⟨(p3 id hid).1, (p3 id hid).2.1,
+    exact ⟨rfl, fun _ => rfl, p1, p2, fun id hid => ⟨(p3 id hid).1, (p3 id hid).2.1,
       merge_approvals_agree r n ids full (hA ⟨r, n, ids, rfl⟩) id hid, (p3 id hid).2.2⟩⟩
-  | _ => exact ⟨by simp [pgLoad], trivial⟩
+  | _ => exact ⟨by simp [pgLoad], fun _ => by simp [pgLoad], trivial⟩
 
 theorem ordered_of_key {s : St} (ord : KeyOrdered s) : Ordered s := by
   obtain ⟨oP, oD, oA, oC, oCh, oM, oPa, oL⟩ := ord
@@ -670,9 +673,12 @@ theorem pg_model (a : Principal) (c : Command) (full : St) (inv : Invariant.Inv 
   | Merge r n ids =>
     obtain ⟨p1, p2, p3⟩ := merge_parts r n ids full inv S
     have hr : (pgLoad (.Merge r n ids) full).repo = full.repo := rfl
-    simp only [Model.step, hr]
+    have hro : (pgLoad (.Merge r n ids) full).roles = full.roles := rfl
+    simp only [Model.step]
     rw [merge_agree' hr p1 p2 (fun id hid => ⟨(p3 id hid).1, (p3 id hid).2.1,
       merge_approvals_any r n ids full id hid, (p3 id hid).2.2⟩)]
+    simp only [Model.guarded, Model.authorize, Model.readable, hr, hro]
+    try rfl
   | _ =>
     exact Narrow.narrow_model a full _ _
       (narrow_core _ full inv S (by rintro ⟨_, _, _, h⟩; cases h))
@@ -795,9 +801,12 @@ theorem step_shapes (a : Principal) {s : St} (hs : MembersSorted s) (c : Command
     obtain ⟨rfl, -⟩ := h; simp [listingOf, memberOf]
   all_goals first
     | (simp at h; done)
-    | (split at h
-       swap
-       · simp at h)
+    | (replace h := (Model.guarded_ok h).2)
+  case Grant =>
+    unfold Model.grant at h
+    split_ifs at h <;> simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h
+    all_goals obtain ⟨rfl, -⟩ := h
+    all_goals refine ⟨.inl ?_, ?_⟩ <;> simp [listingOf, memberOf]
   case Fork =>
     unfold Model.fork at h
     repeat' split at h
@@ -817,10 +826,10 @@ theorem step_shapes (a : Principal) {s : St} (hs : MembersSorted s) (c : Command
     all_goals obtain ⟨rfl, -⟩ := h
     all_goals simp [List.filterMap_append, listingOf, memberOf, Function.comp_def]
   case Approve | Check =>
-    first | unfold Model.approve at h | unfold Model.check at h
+    simp only [Model.approve, Model.check] at h
     repeat' split at h
-    all_goals simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h
-    obtain ⟨rfl, -⟩ := h; simp [listingOf, memberOf]
+    all_goals (try simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h)
+    all_goals (obtain ⟨rfl, -⟩ := h; simp [listingOf, memberOf])
   case Merge =>
     obtain ⟨c, hc, st, hf, hj, rfl⟩ := merge_FJ h
     have hl : st.writes.filterMap listingOf = [] := by

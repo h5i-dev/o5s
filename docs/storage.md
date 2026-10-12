@@ -83,3 +83,7 @@ Backups use PostgreSQL's own tools, for example `pg_dump --schema=o5s`. `scripts
 - Every response has `x-request-id` (the client's, or a new one). With `O5S_LOG_REQUESTS` unset or not `0`, each request logs one JSON line on stderr.
 - `H5I_APP_PREVIOUS_SECRETS` (comma-separated) keeps tokens signed by earlier secrets valid during rotation; only `H5I_APP_SECRET` issues tokens.
 - Git export takes a per-repository file lock, moves `refs/heads/<channel>` by compare-and-swap, and records the exported registry generation. A view older than that generation returns the current commit with `"stale": true` and never moves the ref backwards.
+
+## Upgrading the schema
+
+`o5s-server ddl` prints idempotent `CREATE … IF NOT EXISTS` statements for every table: the registry's (including `o5s_roles` for repository roles), `h5i_idempotency`, and the revocation tables `o5s_revoked_users` and `o5s_revoked_tokens` (`docs/access.md`). A native server creates them at startup when its role may. For databases reached through a role that cannot run DDL, such as Hyperdrive, pipe the output through `psql` as the owner before deploying a version that adds a table.

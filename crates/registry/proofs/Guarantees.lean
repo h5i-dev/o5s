@@ -28,11 +28,9 @@ theorem isolation (a : Principal) (s : Snapshot) (c : Command) (ws : alloc.vec.V
   all_goals first
     | exact absurd rfl (hc _ _)
     | exact absurd rfl (hc' _)
-    | (split at hm
-       · rename_i hv
-         simp only [Model.visible, Bool.and_eq_true, decide_eq_true_eq] at hv
-         exact ⟨hv.1.1.2, hv.1.2⟩
-       · simp at hm)
+    | (obtain ⟨hv, -⟩ := Model.guarded_ok hm
+       simp only [Model.visible, Bool.and_eq_true, decide_eq_true_eq] at hv
+       exact ⟨hv.1.1.2, hv.1.2⟩)
     | simp at hm
 
 /-! ## Admission -/
@@ -110,7 +108,7 @@ theorem merge_gate (a : Principal) (s : Snapshot) (r ch : alloc.vec.Vec U8) (ids
       (∃ x ∈ s.approvals.val, x.patch = m.patch) ∧ (∃ x ∈ s.checks.val, x.patch = m.patch ∧ x.passed = true) := by
   obtain ⟨rr, hm⟩ := model_of h
   simp only [Model.step] at hm
-  split at hm
+  obtain ⟨-, hm⟩ := Model.guarded_ok hm
   · obtain ⟨c, st, hw, he⟩ := merge_shape hm
     intro m hmem
     rw [he] at hmem
@@ -126,7 +124,6 @@ theorem merge_gate (a : Principal) (s : Snapshot) (r ch : alloc.vec.Vec U8) (ids
         simp [hf] at hp
         exact ⟨x, List.mem_of_find?_eq_some hf, by simpa using List.find?_some hf, hp⟩
     · cases he'
-  · simp at hm
 
 /-! ## Directory and repository scopes -/
 
@@ -150,9 +147,12 @@ theorem repo_noListing (a : Principal) (s : St) (c : Command) (hc : ∀ n r, c �
     intro l hl; simp at hl
   all_goals first
     | (simp at h; done)
-    | (split at h
-       swap
-       · simp at h)
+    | (obtain ⟨-, h⟩ := Model.guarded_ok h)
+  case Grant =>
+    unfold Model.grant at h
+    split_ifs at h <;> simp only [reduceCtorEq, core.result.Result.Ok.injEq, Prod.mk.injEq] at h
+    all_goals obtain ⟨rfl, -⟩ := h
+    all_goals (intro l hl; first | (split_ifs at hl <;> simp at hl) | simp at hl)
   case Fork | Propose | Approve | Check =>
     first | unfold Model.fork at h | unfold Model.propose at h | unfold Model.approve at h | unfold Model.check at h
     repeat' split at h
@@ -191,9 +191,8 @@ theorem scopes_separate (a : Principal) (s : Snapshot) (c : Command) (ws : alloc
     case Create n => unfold Model.create at hm; split_ifs at hm <;> simp_all
     all_goals first
       | simp at hm
-      | (split at hm
-         · rename_i hv; simp only [Model.visible, Bool.and_eq_true, decide_eq_true_eq] at hv; omega
-         · simp at hm)
+      | (obtain ⟨hv, -⟩ := Model.guarded_ok hm
+         simp only [Model.visible, Bool.and_eq_true, decide_eq_true_eq] at hv; omega)
 
 /-! ## Loading less than a tenant -/
 

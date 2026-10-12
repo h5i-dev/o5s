@@ -13,7 +13,7 @@ namespace o5s_registry.ApplyProofs
 theorem write_clone (w : Write) : Write.Insts.CoreCloneClone.clone w = ok w := by
   cases w <;> simp [Write.Insts.CoreCloneClone.clone, Repository.clone_eq, PatchRow.clone_eq, Dependency.clone_eq,
     Approval.clone_eq, CheckReport.clone_eq, Channel.clone_eq, Member.clone_eq, PathKind.clone_eq, Event.clone_eq,
-    Body.clone_eq, Listing.clone_eq, lift]
+    Body.clone_eq, Listing.clone_eq, Role.clone_eq]
 
 /-- One write does what `applyWrite` says, and adds at most one row. -/
 theorem apply_write_spec (s : Snapshot) (w : Write) (h : Snapshot.size s < Usize.max) :
