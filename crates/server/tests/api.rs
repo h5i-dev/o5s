@@ -13,6 +13,27 @@ fn state(root: &std::path::Path) -> AppState {
         root.into(),
     )
 }
+/// Reopen the store at `root` after the previous state was dropped, as a
+/// process restart would. JoinHandle completion can precede the blocking worker
+/// dropping its captured Arc, so wait for that final owner to release the lock.
+async fn reopen(root: &std::path::Path) -> AppState {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match Store::open(root) {
+            Ok(store) => {
+                break AppState::new(Backend::local(store), HmacAuth::new("test"), root.into());
+            }
+            Err(e)
+                if e.downcast_ref::<std::io::Error>()
+                    .is_some_and(|e| e.kind() == std::io::ErrorKind::WouldBlock)
+                    && std::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+            Err(e) => panic!("restart failed: {e}"),
+        }
+    }
+}
 async fn request(
     s: &AppState,
     user: u64,
@@ -105,7 +126,7 @@ async fn authenticated_parallel_requests_restart_and_git_projection() {
     let saved = request(&s, 1, 1, "/api/state?repo=demo", None).await.1;
     assert!(Store::open(dir.path()).is_err());
     drop(s);
-    let s = state(dir.path());
+    let s = reopen(dir.path()).await;
     assert_eq!(
         saved,
         request(&s, 1, 1, "/api/state?repo=demo", None).await.1
@@ -241,30 +262,7 @@ async fn concurrent_line_proposals_survive_restart_and_export_merged_git_bytes()
     let (_, v) = request(&s, 1, 1, "/api/view?repo=lines", None).await;
     assert_eq!(v["files"]["src/a.txt"], "ONE\n二\nTHREE\n");
     drop(s);
-    // JoinHandle completion can precede the blocking worker dropping its captured
-    // Arc. Wait for that final owner before simulating a process restart.
-    let reopened = {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        loop {
-            match Store::open(dir.path()) {
-                Ok(store) => {
-                    break AppState::new(
-                        Backend::local(store),
-                        HmacAuth::new("test"),
-                        dir.path().into(),
-                    );
-                }
-                Err(e)
-                    if e.downcast_ref::<std::io::Error>()
-                        .is_some_and(|e| e.kind() == std::io::ErrorKind::WouldBlock)
-                        && std::time::Instant::now() < deadline =>
-                {
-                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-                }
-                Err(e) => panic!("restart failed: {e}"),
-            }
-        }
-    };
+    let reopened = reopen(dir.path()).await;
     let (_, v) = request(&reopened, 1, 1, "/api/state?repo=lines", None).await;
     assert_eq!(v["view"]["files"]["src/a.txt"], "ONE\n二\nTHREE\n");
     let (status, export) = request(
@@ -706,7 +704,7 @@ async fn roles_restrict_a_repository_to_the_users_granted() {
     );
     // The roles survive a restart.
     drop(s);
-    let s = state(dir.path());
+    let s = reopen(dir.path()).await;
     let (status, _) = request(&s, 3, 1, "/api/state?repo=private", None).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(
@@ -759,7 +757,7 @@ async fn revoked_tokens_are_refused_everywhere() {
         StatusCode::OK
     );
     drop(s);
-    let s = state(dir.path());
+    let s = reopen(dir.path()).await;
     assert_eq!(
         with_token(&s, &two, "/api/repositories", None).await.0,
         StatusCode::UNAUTHORIZED
