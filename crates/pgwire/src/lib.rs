@@ -263,6 +263,18 @@ pub enum Outcome {
     Replayed(Vec<u8>),
 }
 
+/// A command waiting for its repository's next transaction.
+struct Queued {
+    principal: kernel::Principal,
+    cmd: kernel::Command,
+    idem: Option<(String, Vec<u8>)>,
+    encode: Box<dyn Fn(&kernel::Reply) -> Vec<u8> + Send + Sync>,
+    done: futures::channel::oneshot::Sender<Result<Outcome, DbError>>,
+}
+
+/// At most this many commands share one transaction.
+const MAX_GROUP: usize = 32;
+
 pub struct Engine<C: Connector, R: Runtime> {
     connector: C,
     runtime: R,
@@ -271,6 +283,11 @@ pub struct Engine<C: Connector, R: Runtime> {
     permits: async_lock::Semaphore,
     pub max_attempts: u32,
     pub stats: Stats,
+    /// Run the commands waiting for one repository's lock in one
+    /// transaction: one `BEGIN`, lock and `COMMIT` for up to `MAX_GROUP`.
+    pub group_commit: bool,
+    /// Per repository tenant: whether a leader is draining it, and the queue.
+    groups: Mutex<std::collections::HashMap<i64, (bool, Vec<Queued>)>>,
 }
 
 /// A connection checked out of the engine; returned on drop unless closed.
@@ -313,6 +330,8 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
             permits: async_lock::Semaphore::new(connections.max(1)),
             max_attempts: 64,
             stats: Stats::default(),
+            group_commit: false,
+            groups: Mutex::default(),
         })
     }
 
@@ -410,22 +429,182 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         rows
     }
 
-    /// Run `cmd` for `actor` in one locked transaction, retrying from BEGIN
+    /// Run `cmd` for `actor` in a locked transaction, retrying from BEGIN
     /// when it certainly did not commit. With `idem`, a repeat returns the
-    /// stored reply bytes instead of running again.
+    /// stored reply bytes instead of running again. With `group_commit`,
+    /// commands that arrive while their repository's transaction runs share
+    /// the next one; each still runs on the rows the earlier ones left.
     pub async fn execute(
         &self,
         actor: &kernel::Principal,
         cmd: &kernel::Command,
         idem: Option<Idem<'_>>,
-        encode: impl Fn(&kernel::Reply) -> Vec<u8>,
+        encode: impl Fn(&kernel::Reply) -> Vec<u8> + Send + Sync + 'static,
+    ) -> Result<Outcome, DbError> {
+        if !self.group_commit {
+            return self.execute_one(actor, cmd, idem, &encode).await;
+        }
+        let tid = tenant(actor.scope)?;
+        let (done, rx) = futures::channel::oneshot::channel();
+        let lead = {
+            let mut groups = self.groups.lock().unwrap();
+            let entry = groups.entry(tid).or_insert_with(|| (false, Vec::new()));
+            entry.1.push(Queued {
+                principal: *actor,
+                cmd: cmd.clone(),
+                idem: idem.map(|i| (i.key.to_string(), i.fingerprint)),
+                encode: Box::new(encode),
+                done,
+            });
+            !std::mem::replace(&mut entry.0, true)
+        };
+        if lead {
+            self.drain(tid).await;
+        }
+        rx.await
+            .unwrap_or_else(|_| Err(DbError::Connect("grouped transaction dropped".into())))
+    }
+
+    /// Run the queue of tenant `tid` in groups until it is empty.
+    async fn drain(&self, tid: i64) {
+        loop {
+            let batch: Vec<Queued> = {
+                let mut groups = self.groups.lock().unwrap();
+                let Some(entry) = groups.get_mut(&tid) else {
+                    return;
+                };
+                if entry.1.is_empty() {
+                    groups.remove(&tid);
+                    return;
+                }
+                let n = entry.1.len().min(MAX_GROUP);
+                entry.1.drain(..n).collect()
+            };
+            self.run_group(tid, batch).await;
+        }
+    }
+
+    async fn run_group(&self, tid: i64, batch: Vec<Queued>) {
+        if batch.len() > 1
+            && let Ok(lease) = self.lease().await
+        {
+            self.stats.attempts.fetch_add(1, Ordering::Relaxed);
+            match self.attempt_group(lease.client(), tid, &batch).await {
+                Ok(results) => {
+                    for (q, r) in batch.into_iter().zip(results) {
+                        if let Ok(o) = &r {
+                            self.count(o);
+                        }
+                        let _ = q.done.send(r);
+                    }
+                    return;
+                }
+                // The outcome is unknown, so rerunning commands without an
+                // idempotency key could apply them twice: report it.
+                Err(DbError::CommitUnknown(e)) => {
+                    let message = e.to_string();
+                    for q in batch {
+                        let _ = q.done.send(Err(DbError::Connect(format!(
+                            "commit outcome unknown: {message}"
+                        ))));
+                    }
+                    return;
+                }
+                // Nothing committed: run each command on its own.
+                Err(_) => {
+                    let _ = lease.client().batch_execute("ROLLBACK").await;
+                }
+            }
+        }
+        for q in batch {
+            let idem = q.idem.as_ref().map(|(key, fingerprint)| Idem {
+                key,
+                fingerprint: fingerprint.clone(),
+            });
+            let r = self
+                .execute_one(&q.principal, &q.cmd, idem, &q.encode)
+                .await;
+            let _ = q.done.send(r);
+        }
+    }
+
+    fn count(&self, outcome: &Outcome) {
+        match outcome {
+            Outcome::Done(Ok(_)) => self.stats.commits.fetch_add(1, Ordering::Relaxed),
+            Outcome::Replayed(_) => self.stats.replays.fetch_add(1, Ordering::Relaxed),
+            Outcome::Done(Err(_)) => 0,
+        };
+    }
+
+    /// Several commands in one locked transaction, in order. A refused
+    /// command writes nothing; a database error rolls back all of them.
+    async fn attempt_group(
+        &self,
+        client: &Client,
+        tid: i64,
+        batch: &[Queued],
+    ) -> Result<Vec<Result<Outcome, DbError>>, DbError> {
+        client
+            .batch_execute(&format!(
+                "BEGIN ISOLATION LEVEL READ COMMITTED; SET LOCAL search_path TO {}; SELECT pg_advisory_xact_lock({tid})",
+                ident(&self.schema)?
+            ))
+            .await?;
+        let tx = Tx { client, tid };
+        let mut out = Vec::with_capacity(batch.len());
+        for q in batch {
+            if let Some((key, fingerprint)) = &q.idem {
+                let stored = client
+                    .query_typed(
+                        "SELECT fingerprint, reply FROM h5i_idempotency WHERE tenant_id = $1 AND key = $2",
+                        &[(&tid, Type::INT8), (key, Type::TEXT)],
+                    )
+                    .await?;
+                if let Some(row) = stored.first() {
+                    let fp: Vec<u8> = row.try_get(0)?;
+                    out.push(if &fp != fingerprint {
+                        Err(DbError::IdempotencyConflict)
+                    } else {
+                        Ok(Outcome::Replayed(row.try_get(1)?))
+                    });
+                    continue;
+                }
+            }
+            let snap = service::load(&tx, &q.cmd).await?;
+            match kernel::transition(&q.principal, &snap, &q.cmd) {
+                Err(refusal) => out.push(Ok(Outcome::Done(Err(refusal)))),
+                Ok((ws, reply)) => {
+                    store(client, tid, &kernel::sql_writes(&ws)).await?;
+                    if let Some((key, fingerprint)) = &q.idem {
+                        let bytes = (q.encode)(&reply);
+                        client
+                            .query_typed(
+                                "INSERT INTO h5i_idempotency (tenant_id, key, fingerprint, reply) VALUES ($1, $2, $3, $4)",
+                                &[(&tid, Type::INT8), (key, Type::TEXT), (fingerprint, Type::BYTEA), (&bytes, Type::BYTEA)],
+                            )
+                            .await?;
+                    }
+                    out.push(Ok(Outcome::Done(Ok(reply))));
+                }
+            }
+        }
+        client.batch_execute("COMMIT").await.map_err(commit_error)?;
+        Ok(out)
+    }
+
+    async fn execute_one(
+        &self,
+        actor: &kernel::Principal,
+        cmd: &kernel::Command,
+        idem: Option<Idem<'_>>,
+        encode: &(dyn Fn(&kernel::Reply) -> Vec<u8> + Sync),
     ) -> Result<Outcome, DbError> {
         let tid = tenant(actor.scope)?;
         for attempt in 0..self.max_attempts {
             self.stats.attempts.fetch_add(1, Ordering::Relaxed);
             let lease = self.lease().await?;
             let result = self
-                .attempt(lease.client(), tid, actor, cmd, idem.as_ref(), &encode)
+                .attempt(lease.client(), tid, actor, cmd, idem.as_ref(), encode)
                 .await;
             match result {
                 Ok(outcome) => {
@@ -464,50 +643,75 @@ impl<C: Connector, R: Runtime> Engine<C, R> {
         actor: &kernel::Principal,
         cmd: &kernel::Command,
         idem: Option<&Idem<'_>>,
-        encode: &impl Fn(&kernel::Reply) -> Vec<u8>,
+        encode: &(dyn Fn(&kernel::Reply) -> Vec<u8> + Sync),
     ) -> Result<Outcome, DbError> {
-        client
-            .batch_execute(&format!(
-                "BEGIN ISOLATION LEVEL READ COMMITTED; SET LOCAL search_path TO {}; SELECT pg_advisory_xact_lock({tid})",
-                ident(&self.schema)?
-            ))
-            .await?;
-        if let Some(idem) = idem {
-            let stored = client
-                .query_typed(
-                    "SELECT fingerprint, reply FROM h5i_idempotency WHERE tenant_id = $1 AND key = $2",
-                    &[(&tid, Type::INT8), (&idem.key, Type::TEXT)],
-                )
-                .await?;
-            if let Some(row) = stored.first() {
-                let fp: Vec<u8> = row.try_get(0)?;
-                if fp != idem.fingerprint {
-                    let _ = client.batch_execute("ROLLBACK").await;
-                    return Err(DbError::IdempotencyConflict);
-                }
-                let bytes: Vec<u8> = row.try_get(1)?;
-                client.batch_execute("COMMIT").await?;
-                return Ok(Outcome::Replayed(bytes));
+        // One flush: BEGIN and the lock, the idempotency lookup and the
+        // command's loads. PostgreSQL runs them in order on this connection,
+        // so every read happens under the lock.
+        let begin = format!(
+            "BEGIN ISOLATION LEVEL READ COMMITTED; SET LOCAL search_path TO {}; SELECT pg_advisory_xact_lock({tid})",
+            ident(&self.schema)?
+        );
+        let tx = Tx { client, tid };
+        let lookup = async {
+            match idem {
+                Some(idem) => client
+                    .query_typed(
+                        "SELECT fingerprint, reply FROM h5i_idempotency WHERE tenant_id = $1 AND key = $2",
+                        &[(&tid, Type::INT8), (&idem.key, Type::TEXT)],
+                    )
+                    .await
+                    .map(Some),
+                None => Ok(None),
             }
+        };
+        let (begun, stored, snap) = futures::join!(
+            client.batch_execute(&begin),
+            lookup,
+            service::load(&tx, cmd)
+        );
+        begun?;
+        if let (Some(idem), Some(row)) = (idem, stored?.as_ref().and_then(|r| r.first())) {
+            let fp: Vec<u8> = row.try_get(0)?;
+            if fp != idem.fingerprint {
+                let _ = client.batch_execute("ROLLBACK").await;
+                return Err(DbError::IdempotencyConflict);
+            }
+            let bytes: Vec<u8> = row.try_get(1)?;
+            client.batch_execute("COMMIT").await?;
+            return Ok(Outcome::Replayed(bytes));
         }
-        let snap = service::load(&Tx { client, tid }, cmd).await?;
-        match kernel::transition(actor, &snap, cmd) {
+        match kernel::transition(actor, &snap?, cmd) {
             Err(refusal) => {
                 client.batch_execute("ROLLBACK").await?;
                 Ok(Outcome::Done(Err(refusal)))
             }
             Ok((ws, reply)) => {
-                store(client, tid, &kernel::sql_writes(&ws)).await?;
-                if let Some(idem) = idem {
-                    let bytes = encode(&reply);
-                    client
-                        .query_typed(
-                            "INSERT INTO h5i_idempotency (tenant_id, key, fingerprint, reply) VALUES ($1, $2, $3, $4)",
-                            &[(&tid, Type::INT8), (&idem.key, Type::TEXT), (&idem.fingerprint, Type::BYTEA), (&bytes, Type::BYTEA)],
-                        )
-                        .await?;
-                }
-                client.batch_execute("COMMIT").await.map_err(commit_error)?;
+                // One flush: the writes, the idempotency record and COMMIT.
+                // If a write fails, PostgreSQL turns the COMMIT into a
+                // rollback, and the write's error is what is returned.
+                let bytes = encode(&reply);
+                let writes = kernel::sql_writes(&ws);
+                let record = async {
+                    match idem {
+                        Some(idem) => client
+                            .query_typed(
+                                "INSERT INTO h5i_idempotency (tenant_id, key, fingerprint, reply) VALUES ($1, $2, $3, $4)",
+                                &[(&tid, Type::INT8), (&idem.key, Type::TEXT), (&idem.fingerprint, Type::BYTEA), (&bytes, Type::BYTEA)],
+                            )
+                            .await
+                            .map(|_| ()),
+                        None => Ok(()),
+                    }
+                };
+                let (stored, recorded, committed) = futures::join!(
+                    store(client, tid, &writes),
+                    record,
+                    client.batch_execute("COMMIT")
+                );
+                stored?;
+                recorded?;
+                committed.map_err(commit_error)?;
                 Ok(Outcome::Done(Ok(reply)))
             }
         }

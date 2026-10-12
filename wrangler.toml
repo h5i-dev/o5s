@@ -1,8 +1,6 @@
 # The o5s API on Workers (`crates/worker`), configured at the repository root,
-# which Workers Builds uses unless a root directory is set. The JavaScript
-# edge adapter in `cloudflare/` serves
-# Artifacts and forwards everything else here (set its O5S_ORIGIN to this
-# Worker's URL, or bind it as a service).
+# which Workers Builds uses unless a root directory is set. Git projections
+# and agent workspaces live in Cloudflare Artifacts (the ARTIFACTS binding).
 # Same name as the Worker deployed from the dashboard (Workers Builds).
 name = "o5s"
 main = "crates/worker/build/index.js"

@@ -25,9 +25,59 @@ pub struct Edit {
     /// `content` is base64 of arbitrary bytes rather than UTF-8 text.
     #[serde(default, skip_serializing_if = "is_false")]
     pub base64: bool,
+    /// A symbolic link (`content` is its target) or a submodule (`content` is
+    /// the commit id); omitted for ordinary files, so their bodies are unchanged.
+    #[serde(default, skip_serializing_if = "Kind::is_file")]
+    pub kind: Kind,
 }
 pub(crate) fn is_false(b: &bool) -> bool {
     !*b
+}
+/// What a path holds besides an ordinary file: Git modes 120000 and 160000.
+#[derive(
+    Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Kind {
+    #[default]
+    File,
+    Symlink,
+    Submodule,
+}
+impl Kind {
+    pub fn is_file(&self) -> bool {
+        *self == Kind::File
+    }
+}
+/// A Git tree entry's mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    Regular,
+    Executable,
+    Symlink,
+    /// The bytes are the 20-byte commit id.
+    Gitlink,
+}
+/// Check a symlink target or submodule commit id.
+pub fn valid_special(kind: Kind, content: &str, executable: bool, base64: bool) -> bool {
+    match kind {
+        Kind::File => true,
+        Kind::Symlink => {
+            !executable
+                && !base64
+                && !content.is_empty()
+                && content.len() <= 4096
+                && !content.contains('\0')
+        }
+        Kind::Submodule => {
+            !executable
+                && !base64
+                && content.len() == 40
+                && content
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        }
+    }
 }
 /// A file's bytes and mode, as one register value: concurrent edits that
 /// differ in any of them conflict.
@@ -36,6 +86,8 @@ pub struct Content {
     pub text: String,
     pub executable: bool,
     pub base64: bool,
+    #[serde(default, skip_serializing_if = "Kind::is_file")]
+    pub kind: Kind,
 }
 impl Edit {
     /// The register value this edit writes; `None` removes the file.
@@ -44,6 +96,7 @@ impl Edit {
             text: text.clone(),
             executable: self.executable,
             base64: self.base64,
+            kind: self.kind,
         })
     }
 }
@@ -477,9 +530,15 @@ impl Repository {
                 None => {
                     e.executable = false;
                     e.base64 = false;
+                    e.kind = Kind::File;
                 }
                 Some(text) if e.base64 && base64_decode(text).is_none() => {
                     return Err(refuse("binary file content must be standard padded base64"));
+                }
+                Some(text) if !valid_special(e.kind, text, e.executable, e.base64) => {
+                    return Err(refuse(
+                        "a symlink needs a target (no NUL, at most 4096 bytes) and a submodule a 40-digit lowercase commit id; neither is executable or base64",
+                    ));
                 }
                 Some(_) => {}
             }
@@ -885,6 +944,8 @@ pub struct Alternative {
     pub executable: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub base64: bool,
+    #[serde(default, skip_serializing_if = "Kind::is_file")]
+    pub kind: Kind,
 }
 impl Alternative {
     fn of(patch: u64, value: &Option<Content>) -> Self {
@@ -893,6 +954,7 @@ impl Alternative {
             content: value.as_ref().map(|c| c.text.clone()),
             executable: value.as_ref().is_some_and(|c| c.executable),
             base64: value.as_ref().is_some_and(|c| c.base64),
+            kind: value.as_ref().map_or(Kind::File, |c| c.kind),
         }
     }
 }
@@ -908,17 +970,40 @@ pub struct View {
     /// Files whose `files` entry is base64.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub binary: BTreeSet<String>,
+    /// Symbolic links; `files` holds the target.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub symlinks: BTreeSet<String>,
+    /// Submodules; `files` holds the commit id.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub submodules: BTreeSet<String>,
 }
 impl View {
-    /// The bytes and Git mode of a file.
+    /// The bytes of a path and whether it is executable.
     pub fn bytes(&self, path: &str) -> Option<(Vec<u8>, bool)> {
+        self.entry(path).map(|(b, m)| (b, m == Mode::Executable))
+    }
+    /// The bytes and Git mode of a path. A submodule's bytes are its commit id.
+    pub fn entry(&self, path: &str) -> Option<(Vec<u8>, Mode)> {
         let text = self.files.get(path)?;
+        if self.submodules.contains(path) {
+            let id: Option<Vec<u8>> = (0..20)
+                .map(|i| u8::from_str_radix(text.get(2 * i..2 * i + 2)?, 16).ok())
+                .collect();
+            return Some((id?, Mode::Gitlink));
+        }
         let bytes = if self.binary.contains(path) {
             base64_decode(text)?
         } else {
             text.as_bytes().to_vec()
         };
-        Some((bytes, self.executable.contains(path)))
+        let mode = if self.symlinks.contains(path) {
+            Mode::Symlink
+        } else if self.executable.contains(path) {
+            Mode::Executable
+        } else {
+            Mode::Regular
+        };
+        Some((bytes, mode))
     }
 }
 
@@ -1020,6 +1105,22 @@ impl Repository {
         cache.sync(self, channel)?;
         cache.view()
     }
+
+    /// The snapshot a patch defines: the patch and its causal past, which
+    /// never changes. Executed checks run against it.
+    pub fn materialize_patch(&self, id: u64) -> Result<View, Refusal> {
+        if !self.patches.contains_key(&id) {
+            return Err(refuse("patch not found"));
+        }
+        let rows = documents::rows(self);
+        let found =
+            o5s_kernel::indexed::reachable(&rows, &vec![id as usize], vec![false; rows.len()]);
+        let mut pending: Vec<u64> = found.queue.into_iter().map(|h| h as u64).collect();
+        pending.sort_unstable();
+        let mut cache = IncrementalView::default();
+        cache.integrate(self, pending)?;
+        cache.view()
+    }
 }
 
 fn render_heads(
@@ -1069,12 +1170,13 @@ fn render_path(
     versions: &BTreeMap<(String, u64), lines::LineVersion>,
     collision: bool,
 ) -> PathOutput {
-    // Line edits merge only when every head agrees on the file's mode.
-    let modes: BTreeSet<Option<bool>> = heads
+    // Line edits merge only when every head is a text file with one mode.
+    let modes: BTreeSet<Option<(bool, Kind)>> = heads
         .values()
-        .map(|v| v.as_ref().map(|c| c.executable))
+        .map(|v| v.as_ref().map(|c| (c.executable, c.kind)))
         .collect();
-    if heads.len() > 1 && !collision && modes.len() == 1 {
+    let text = modes.iter().all(|m| matches!(m, Some((_, Kind::File))));
+    if heads.len() > 1 && !collision && modes.len() == 1 && text {
         if let Some(text) = lines::LineVersion::merge_all(
             heads
                 .keys()
@@ -1082,11 +1184,12 @@ fn render_path(
         )
         .and_then(|v| v.render().ok())
         {
-            let executable = modes.into_iter().next().flatten().unwrap_or(false);
+            let executable = modes.into_iter().next().flatten().is_some_and(|m| m.0);
             return PathOutput::File(Content {
                 text,
                 executable,
                 base64: false,
+                kind: Kind::File,
             });
         }
     }
@@ -1120,6 +1223,16 @@ fn collect_outputs(outputs: &BTreeMap<String, PathOutput>) -> View {
 impl View {
     fn insert_file(&mut self, path: &str, content: &Content) {
         self.files.insert(path.to_string(), content.text.clone());
+        for (set, on) in [
+            (&mut self.symlinks, content.kind == Kind::Symlink),
+            (&mut self.submodules, content.kind == Kind::Submodule),
+        ] {
+            if on {
+                set.insert(path.to_string());
+            } else {
+                set.remove(path);
+            }
+        }
         if content.executable {
             self.executable.insert(path.to_string());
         } else {
@@ -1132,6 +1245,8 @@ impl View {
         }
     }
     fn remove_file(&mut self, path: &str) -> Option<String> {
+        self.symlinks.remove(path);
+        self.submodules.remove(path);
         self.executable.remove(path);
         self.binary.remove(path);
         self.files.remove(path)
@@ -1159,10 +1274,15 @@ pub struct IncrementalView {
     originals: BTreeMap<(String, u64), std::sync::Weak<str>>,
     live: BTreeSet<String>,
     outputs: BTreeMap<String, PathOutput>,
-    documents: BTreeMap<String, o5s_kernel::model::DocumentGraph>,
-    /// File-state heads of each graph document.
-    document_heads: BTreeMap<String, BTreeMap<u64, documents::FileState>>,
-    document_outputs: BTreeMap<String, PathOutput>,
+    /// Graph documents by identity, and the identity each edit resolves to.
+    docs: documents::Docs,
+    documents: BTreeMap<documents::DocId, o5s_kernel::model::DocumentGraph>,
+    /// State heads (exists, executable) of each graph document.
+    document_heads: BTreeMap<documents::DocId, BTreeMap<u64, documents::FileState>>,
+    /// Location heads (path) of each graph document.
+    document_locations: BTreeMap<documents::DocId, BTreeMap<u64, String>>,
+    /// What each graph document shows at each of its paths.
+    document_outputs: BTreeMap<documents::DocId, Vec<(String, PathOutput)>>,
 }
 impl IncrementalView {
     pub fn sync(&mut self, repo: &Repository, channel: &str) -> Result<ViewWork, Refusal> {
@@ -1301,16 +1421,32 @@ impl IncrementalView {
                 );
                 work.updated_paths += 1;
             }
+            if !p.graph_edits.is_empty() {
+                self.docs.prime(repo, id)?;
+            }
             for edit in &p.graph_edits {
-                let graph = self.documents.entry(edit.path.clone()).or_default();
-                documents::apply_graph_patch(graph, repo, p, edit)?;
-                let superseded = documents::nearest(repo, &p.dependencies, &edit.path)?;
-                let heads = self.document_heads.entry(edit.path.clone()).or_default();
+                let doc = self
+                    .docs
+                    .get(id, &edit.path)
+                    .ok_or_else(|| refuse("graph document not resolved"))?
+                    .clone();
+                let graph = self.documents.entry(doc.clone()).or_default();
+                documents::apply_graph_patch(graph, repo, &self.docs, p, edit)?;
+                let superseded = documents::nearest(repo, &self.docs, &p.dependencies, &doc)?;
+                let heads = self.document_heads.entry(doc.clone()).or_default();
                 for d in superseded {
                     heads.remove(&d);
                 }
                 heads.insert(id, (!edit.remove, edit.executable));
-                dirty_documents.insert(edit.path.clone());
+                if self.docs.moves(id, &edit.path) {
+                    let before = self.docs.locations(repo, &p.dependencies, &doc)?;
+                    let at = self.document_locations.entry(doc.clone()).or_default();
+                    for d in before.keys() {
+                        at.remove(d);
+                    }
+                    at.insert(id, edit.path.clone());
+                }
+                dirty_documents.insert(doc);
                 work.updated_paths += 1;
             }
             self.applied.insert(id);
@@ -1333,10 +1469,14 @@ impl IncrementalView {
             );
             work.rendered_paths += 1;
         }
-        for path in dirty_documents {
+        for doc in dirty_documents {
             self.document_outputs.insert(
-                path.clone(),
-                documents::render_output(&self.documents[&path], &self.document_heads[&path])?,
+                doc.clone(),
+                documents::render_document(
+                    &self.documents[&doc],
+                    &self.document_heads[&doc],
+                    &self.document_locations[&doc],
+                )?,
             );
             work.rendered_paths += 1;
         }
@@ -1345,7 +1485,8 @@ impl IncrementalView {
     /// Render content without copying the full channel membership history.
     pub fn content(&self) -> Result<View, Refusal> {
         let mut view = collect_outputs(&self.outputs);
-        documents::overlay_outputs(&self.document_outputs, &self.document_heads, &mut view);
+        let (outputs, heads) = documents::by_path(&self.document_outputs, &self.document_heads);
+        documents::overlay_outputs(&outputs, &heads, &mut view);
         Ok(view)
     }
     pub fn patch_count(&self) -> usize {
@@ -1358,8 +1499,24 @@ impl IncrementalView {
     }
 }
 
+/// The reply of `GET /api/snapshot`: a patch's snapshot with the patch's
+/// hash and the hashes it contains, so a check names exactly what it ran on.
+pub fn snapshot_json(repo: &Repository, patch: u64, view: &View) -> serde_json::Value {
+    let hashes: Vec<&str> = view
+        .patches
+        .iter()
+        .filter_map(|id| repo.patches.get(id).map(|p| p.hash.as_str()))
+        .collect();
+    serde_json::json!({"patch":patch,"hash":repo.patches.get(&patch).map(|p| p.hash.as_str()),
+        "patches":view.patches,"hashes":hashes,"files":view.files,"conflicts":view.conflicts,
+        "executable":view.executable,"binary":view.binary,"symlinks":view.symlinks,
+        "submodules":view.submodules})
+}
+
 pub mod projection;
 
 pub mod lines;
 
 pub mod documents;
+
+pub mod workspace;

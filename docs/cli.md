@@ -53,8 +53,19 @@ Later insertions, deletions, restorations and ordering operations name the exact
 
 ## Supported file subset
 
-The CLI accepts regular files, each at most 4 MiB, with a total request limit of 4 MiB. UTF-8 text uses graph or line operations. Other bytes travel as base64 whole-file edits. Mode 100755 is kept and fetched back. Deletion is distinct from an empty file. Symbolic links and submodules are refused before submitting a proposal. They need explicit patch operations, and silently converting them would corrupt a repository. A rename is proposed as a removal and an addition, as in Git; atom identities do not move with it.
+The CLI accepts regular files, each at most 4 MiB, with a total request limit of 4 MiB. UTF-8 text uses graph or line operations. Other bytes travel as base64 whole-file edits. Mode 100755 is kept and fetched back. Deletion is distinct from an empty file. Symbolic links are proposed with their target and submodules with the commit their gitlink stages; `o5s fetch` writes them back as modes 120000 and 160000. A path that passes through a symlink is refused. A renamed text file (`git mv`, or a new path holding at least half of a removed graph document's lines) is proposed as a move, so the document keeps its atoms and concurrent edits of the old path follow it (`docs/patch-model.md`). Other renames are a removal and an addition, as in Git.
+
+## Executed checks
+
+`o5s ci --command CMD` executes checks; `o5s check` only reports one. For each proposal without a passing check report that this runner has not run yet, `o5s ci`:
+
+1. Fetches the snapshot the proposal defines, which is the proposal and its causal past (`GET /api/snapshot`). It is immutable, so a later admission elsewhere cannot make the result stale.
+2. Writes the snapshot into a fresh temporary directory, with modes, links and submodules (as empty directories). It refuses any path that would be written through a symlink.
+3. Runs `sh -c CMD` there with `O5S_SNAPSHOT` set, killing it after `--timeout` seconds (default 1,800).
+4. Reports pass or fail as an independent check.
+
+Run it under a check reporter's profile. The kernel refuses a check report from the proposal's author. `--patch N` runs one proposal. Runs are recorded in `.git/o5s/ci.json`, so a crash does not repeat finished work.
 
 The client locks connection metadata across commands and writes fetched refs with compare-and-swap. Saved credentials use an atomic file replacement with mode `0600` on Unix. A connected repository cannot be silently rebound to a different tenant or collaboration repository.
 
-The integration tests launch the actual CLI against a live Axum listener and real Git repositories. They cover native worktrees, concurrent line changes, graph conflicts and reviewed order resolution, ref/HEAD/index preservation, native graph proposals from older snapshots, binary and executable files, empty and removed graph documents, refused symlinks and origin/tenant separation. Run `cargo test -p o5s-cli`.
+The integration tests launch the actual CLI against a live Axum listener and real Git repositories. They cover native worktrees, concurrent line changes, graph conflicts and reviewed order resolution, ref/HEAD/index preservation, native graph proposals from older snapshots, binary and executable files, symlinks and submodules, empty and removed graph documents, executed checks and origin/tenant separation. Run `cargo test -p o5s-cli`.

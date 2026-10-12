@@ -1,7 +1,7 @@
 //! Local Git objects and detached workspaces. No network commands or remote
 //! push. Export refuses unresolved conflicts and records immutable patch hashes
 //! in the commit message. Cloudflare Artifacts stores the same Git projection.
-use o5s_platform::{Refusal, Repository, valid_name};
+use o5s_platform::{Kind, Mode, Refusal, Repository, valid_name, workspace};
 use std::{
     collections::BTreeMap,
     io::Write,
@@ -38,28 +38,33 @@ fn git(path: &Path, args: &[&str], input: &[u8]) -> Result<String, Refusal> {
 }
 #[derive(Default)]
 struct Tree {
-    /// Blob id and whether the entry is executable.
-    files: BTreeMap<String, (String, bool)>,
+    /// Object id (a commit for a submodule) and mode.
+    files: BTreeMap<String, (String, Mode)>,
     dirs: BTreeMap<String, Tree>,
 }
 impl Tree {
-    fn add(&mut self, path: &str, blob: String, executable: bool) {
+    fn add(&mut self, path: &str, blob: String, mode: Mode) {
         match path.split_once('/') {
             Some((head, tail)) => self
                 .dirs
                 .entry(head.into())
                 .or_default()
-                .add(tail, blob, executable),
+                .add(tail, blob, mode),
             None => {
-                self.files.insert(path.into(), (blob, executable));
+                self.files.insert(path.into(), (blob, mode));
             }
         }
     }
     fn write(&self, path: &Path) -> Result<String, Refusal> {
         let mut entries = BTreeMap::new();
-        for (name, (blob, executable)) in &self.files {
-            let mode = if *executable { "100755" } else { "100644" };
-            entries.insert(name.clone(), format!("{mode} blob {blob}\t{name}\0"));
+        for (name, (id, mode)) in &self.files {
+            let (mode, kind) = match mode {
+                Mode::Regular => ("100644", "blob"),
+                Mode::Executable => ("100755", "blob"),
+                Mode::Symlink => ("120000", "blob"),
+                Mode::Gitlink => ("160000", "commit"),
+            };
+            entries.insert(name.clone(), format!("{mode} {kind} {id}\t{name}\0"));
         }
         for (name, dir) in &self.dirs {
             entries.insert(
@@ -135,33 +140,30 @@ pub fn export(
     }
     let mut tree = Tree::default();
     for name in view.files.keys() {
-        let (bytes, executable) = view
-            .bytes(name)
-            .ok_or_else(|| Refusal("corrupt binary file".into()))?;
-        tree.add(
-            name,
-            git(&path, &["hash-object", "-w", "--stdin"], &bytes)?,
-            executable,
-        );
+        let (bytes, mode) = view
+            .entry(name)
+            .ok_or_else(|| Refusal("corrupt binary file or submodule id".into()))?;
+        let id = if mode == Mode::Gitlink {
+            view.files[name].clone()
+        } else {
+            git(&path, &["hash-object", "-w", "--stdin"], &bytes)?
+        };
+        tree.add(name, id, mode);
     }
     let tree = tree.write(&path)?;
     let reference = format!("refs/heads/{channel}");
     let parent = git(&path, &["rev-parse", "--verify", &reference], &[]).ok();
+    let hashes: Vec<&str> = view
+        .patches
+        .iter()
+        .map(|id| repo.patches[id].hash.as_str())
+        .collect();
     if let Some(p) = &parent {
+        // Unchanged when the files and the admitted patch set are the same
+        // (equal bytes can still come from a different patch set).
         if git(&path, &["rev-parse", &format!("{p}^{{tree}}")], &[])? == tree {
-            // Still write a commit when the patch set changed (same file bytes
-            // can have a different intent, review or dependency identity).
             let old = git(&path, &["show", "-s", "--format=%B", p], &[])?;
-            let hashes: Vec<&str> = view
-                .patches
-                .iter()
-                .map(|id| repo.patches[id].hash.as_str())
-                .collect();
-            let expected = format!(
-                "o5s verified-admission projection\n\nPatch hashes:\n{}",
-                hashes.join("\n")
-            );
-            if old == expected.trim_end() {
+            if workspace::parse(&old).is_some_and(|(_, h)| h == hashes) {
                 write_mark(&mark, repo.generation)?;
                 return Ok(
                     serde_json::json!({"path":path,"commit":p,"tree":tree,"unchanged":true,"generation":repo.generation}),
@@ -169,11 +171,7 @@ pub fn export(
             }
         }
     }
-    let mut message = String::from("o5s verified-admission projection\n\nPatch hashes:\n");
-    for id in &view.patches {
-        message.push_str(&repo.patches[id].hash);
-        message.push('\n');
-    }
+    let message = workspace::message(Some(repo.generation), &hashes);
     let args = if let Some(p) = &parent {
         vec!["commit-tree", &tree, "-p", p]
     } else {
@@ -269,7 +267,7 @@ pub fn workspace_proposal(
     intent: &str,
     repo: &Repository,
 ) -> Result<o5s_platform::Command, Refusal> {
-    use o5s_platform::{Command as Proposal, Edit, valid_path};
+    use o5s_platform::valid_path;
     use std::collections::BTreeSet;
     let refusal = |message: &str| Refusal(message.into());
     if !valid_name(name)
@@ -279,10 +277,9 @@ pub fn workspace_proposal(
     {
         return Err(refusal("invalid workspace identity"));
     }
-    let membership = repo
-        .channels
-        .get(channel)
-        .ok_or_else(|| refusal("channel not found"))?;
+    if !repo.channels.contains_key(channel) {
+        return Err(refusal("channel not found"));
+    }
     let root = std::fs::canonicalize(root).map_err(|e| Refusal(e.to_string()))?;
     let bare = std::fs::canonicalize(
         root.join("artifacts")
@@ -326,21 +323,19 @@ pub fn workspace_proposal(
         return Err(refusal("workspace belongs to a different repository"));
     }
     let message = text(run(&["show", "-s", "--format=%B", "HEAD"])?)?;
-    let hashes = message
-        .strip_prefix("o5s verified-admission projection\n\nPatch hashes:\n")
-        .ok_or_else(|| refusal("workspace is not an o5s projection"))?;
-    let mut dependencies = Vec::new();
-    for hash in hashes.lines().filter(|line| !line.is_empty()) {
-        let id = repo
-            .patches
-            .values()
-            .find(|p| p.hash == hash)
-            .map(|p| p.id)
-            .ok_or_else(|| refusal("workspace patch identity not found"))?;
-        if !membership.contains(&id) {
-            return Err(refusal("workspace snapshot is outside this channel"));
+    if workspace::parse(&message).is_none() {
+        return Err(refusal("workspace is not an o5s projection"));
+    }
+    // Submodules are gitlinks in the index: mode 160000 and a commit id.
+    let mut submodules = BTreeMap::new();
+    for entry in run(&["ls-files", "-s", "-z"])?.split(|b| *b == 0) {
+        let entry = String::from_utf8_lossy(entry);
+        if let Some((meta, name)) = entry.split_once('\t')
+            && let [mode, commit, _] = meta.split(' ').collect::<Vec<_>>()[..]
+            && mode == "160000"
+        {
+            submodules.insert(name.to_string(), commit.to_string());
         }
-        dependencies.push(id);
     }
     let mut changed = run(&[
         "diff",
@@ -357,8 +352,11 @@ pub fn workspace_proposal(
         .filter(|p| !p.is_empty())
         .map(|p| text(p.to_vec()))
         .collect::<Result<_, _>>()?;
-    if paths.is_empty() || paths.len() > 1024 {
-        return Err(refusal("1..1024 changed files required"));
+    if paths.is_empty() || paths.len() > workspace::MAX_FILES {
+        return Err(Refusal(format!(
+            "1..{} changed files required",
+            workspace::MAX_FILES
+        )));
     }
     let mut edits = Vec::new();
     let mut total = 0usize;
@@ -366,13 +364,32 @@ pub fn workspace_proposal(
         if !valid_path(&file) {
             return Err(refusal("invalid workspace file path"));
         }
+        if let Some(commit) = submodules.get(&file) {
+            edits.push(workspace::edit(
+                file,
+                Some(commit.clone().into_bytes()),
+                false,
+                Kind::Submodule,
+            )?);
+            continue;
+        }
         let mut target = path.clone();
         let mut absent = false;
-        for component in file.split('/') {
+        let last = file.split('/').count() - 1;
+        let mut link = None;
+        for (k, component) in file.split('/').enumerate() {
             target.push(component);
             match std::fs::symlink_metadata(&target) {
                 Ok(metadata) if metadata.file_type().is_symlink() => {
-                    return Err(refusal("symlinks are not text patch files"));
+                    if k != last {
+                        return Err(refusal("a path below a symlink is not a file"));
+                    }
+                    let to = std::fs::read_link(&target).map_err(|e| Refusal(e.to_string()))?;
+                    link = Some(
+                        to.into_os_string()
+                            .into_string()
+                            .map_err(|_| refusal("symlink target is not UTF-8"))?,
+                    );
                 }
                 Ok(_) => (),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -382,8 +399,16 @@ pub fn workspace_proposal(
                 Err(e) => return Err(Refusal(e.to_string())),
             }
         }
+        if let Some(to) = link {
+            edits.push(workspace::edit(
+                file,
+                Some(to.into_bytes()),
+                false,
+                Kind::Symlink,
+            )?);
+            continue;
+        }
         let mut executable = false;
-        let mut binary = false;
         let content = if absent {
             None
         } else {
@@ -391,15 +416,14 @@ pub fn workspace_proposal(
             if !metadata.is_file() {
                 return Err(refusal("workspace patch content must be a regular file"));
             }
-            let size = metadata.len();
-            if size > 4 * 1024 * 1024 {
+            if metadata.len() > workspace::MAX_BYTES as u64 {
                 return Err(refusal("workspace file exceeds proposal limit"));
             }
             let bytes = std::fs::read(&target).map_err(|e| Refusal(e.to_string()))?;
             total = total
                 .checked_add(bytes.len())
                 .ok_or_else(|| refusal("proposal too large"))?;
-            if total > 4 * 1024 * 1024 {
+            if total > workspace::MAX_BYTES {
                 return Err(refusal("workspace proposal exceeds limit"));
             }
             #[cfg(unix)]
@@ -407,25 +431,9 @@ pub fn workspace_proposal(
                 use std::os::unix::fs::PermissionsExt;
                 executable = metadata.permissions().mode() & 0o111 != 0;
             }
-            match String::from_utf8(bytes) {
-                Ok(text) => Some(text),
-                Err(e) => {
-                    binary = true;
-                    Some(o5s_platform::base64_encode(e.as_bytes()))
-                }
-            }
+            Some(bytes)
         };
-        edits.push(Edit {
-            path: file,
-            content,
-            executable,
-            base64: binary,
-        });
+        edits.push(workspace::edit(file, content, executable, Kind::File)?);
     }
-    Ok(Proposal::Propose {
-        repo: name.into(),
-        intent: intent.into(),
-        dependencies,
-        edits,
-    })
+    workspace::proposal(name, channel, intent, &message, repo, edits)
 }

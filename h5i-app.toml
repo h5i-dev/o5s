@@ -2,7 +2,7 @@
 
 [extract]
 crate = "crates/kernel"
-start-from = ["patch::merge", "graph::reachable", "graph::boundary", "graph::summary_rows", "graph::weak_component", "interval::conflict", "interval::splice", "interval::append_range", "interval::render_chunks", "interval::checked_render", "indexed::reachable", "indexed::boundary", "coordinates::line_boundaries", "order::frontier", "order::frontier_counts", "tags::visible"]
+start-from = ["patch::merge", "graph::reachable", "graph::boundary", "graph::summary_rows", "graph::weak_component", "interval::conflict", "interval::splice", "interval::append_range", "interval::render_chunks", "interval::checked_render", "indexed::reachable", "indexed::boundary", "coordinates::line_boundaries", "order::frontier", "order::frontier_counts", "tags::visible", "lines::sorted", "lines::merge", "lines::ranges_valid", "lines::render", "document::empty", "document::validate", "document::commit", "document::materialize", "causality::frontier", "causality::sole_head"]
 schema = false
 include = ["h5i_app_std"]
 std-specs = true
@@ -42,6 +42,47 @@ theorems = [
   "o5s_kernel.Tags.visible_spec",
   "o5s_kernel.Tags.visible_iff_no_active_tag",
   "o5s_kernel.Tags.restore_other_cannot_revive",
+  "o5s_kernel.LinesModel.merge_ok",
+  "o5s_kernel.LinesModel.merge_fails",
+  "o5s_kernel.LinesModel.merge_order_independent",
+  "o5s_kernel.LinesModel.sep_trans",
+  "o5s_kernel.Lines.sorted_spec",
+  "o5s_kernel.Lines.merge_spec",
+  "o5s_kernel.Lines.merge_correct",
+  "o5s_kernel.Lines.merge_order_independent",
+  "o5s_kernel.Lines.ranges_valid_spec",
+  "o5s_kernel.Lines.chunks_spec",
+  "o5s_kernel.Lines.render_spec",
+  "o5s_kernel.Lines.merged_renders",
+  "o5s_kernel.Causality.frontier_spec",
+  "o5s_kernel.Causality.frontier_covers",
+  "o5s_kernel.Causality.sole_head_spec",
+  "o5s_kernel.DocModel.validate_local",
+  "o5s_kernel.DocModel.apply_comm",
+  "o5s_kernel.DocModel.rejection_stable",
+  "o5s_kernel.DocModel.admissible_any_order",
+  "o5s_kernel.DocModel.view_converges",
+  "o5s_kernel.DocModel.view_perm",
+  "o5s_kernel.DocModel.view_exists",
+  "o5s_kernel.DocModel.view_unique",
+  "o5s_kernel.DocModel.clean_iff",
+  "o5s_kernel.DocModel.bytes_order",
+  "o5s_kernel.DocModel.dead_cycle_harmless",
+  "o5s_kernel.DocModel.restore_clears",
+  "o5s_kernel.DocModel.ack_pair_specific",
+  "o5s_kernel.DocModel.restore_other_cannot_revive",
+  "o5s_kernel.DocModel.retract_breaks",
+  "o5s_kernel.DocRefine.validate_refines",
+  "o5s_kernel.DocRefine.commit_succeeds",
+  "o5s_kernel.DocRefine.apply_refines",
+  "o5s_kernel.DocKahn.KG.loop2_spec",
+  "o5s_kernel.DocKahn.materialize_kernel",
+  "o5s_kernel.DocMatModel.ax",
+  "o5s_kernel.DocBridge.bridge",
+  "o5s_kernel.DocDecode.isView_of",
+  "o5s_kernel.DocDecode.di_iff",
+  "o5s_kernel.DocMatRefine.materialize_refines",
+  "o5s_kernel.DocMatRefine.extracted_view_converges",
 ]
 
 [[mutant]]

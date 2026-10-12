@@ -337,14 +337,19 @@ $('fork').onclick = () => safe(async () => { const name = prompt('New channel na
 $('worktree').onclick = () => safe(async () => {
   const repository = repo(), channel = $('channel').value;
   workspace = {...await api('/api/worktree', {repo: repository, channel}), repo: repository, channel};
-  $('workspace-path').textContent = workspace.path; $('workspace-commit').textContent = workspace.commit;
+  // The native server returns a local path; the Worker an Artifacts remote with a write token.
+  $('workspace-path').textContent = workspace.remote
+    ? `git -c http.extraHeader="Authorization: Bearer ${workspace.token}" clone -b ${workspace.branch} ${workspace.remote}\n` +
+      `git switch -c ${workspace.push}  # commit, then: git push origin ${workspace.push}`
+    : workspace.path;
+  $('workspace-commit').textContent = workspace.commit;
   $('workspace-panel').hidden = false; $('workspace-intent').focus();
   message(workspace.dirty ? 'Workspace ready · existing local changes preserved.' : 'Workspace ready · edit files, then record your proposal.');
 });
 $('workspace-proposal').onsubmit = event => {
   event.preventDefault(); return safe(async () => {
     if (!workspace) throw Error('Create a workspace first.');
-    const reply = await api('/api/worktree/propose', {repo: workspace.repo, channel: workspace.channel, commit: workspace.commit, intent: $('workspace-intent').value});
+    const reply = await api('/api/worktree/propose', {repo: workspace.repo, channel: workspace.channel, commit: workspace.commit, intent: $('workspace-intent').value, ...(workspace.push ? {branch: workspace.push} : {})});
     message(JSON.stringify(reply)); await load();
   });
 };

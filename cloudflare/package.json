@@ -1,1 +1,0 @@
-{"name":"o5s-edge","private":true,"type":"module","scripts":{"test":"node --test","dev":"wrangler dev"},"devDependencies":{"wrangler":"^4.145.0"}}

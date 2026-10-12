@@ -22,10 +22,14 @@ impl LineVersion {
     pub fn render(&self) -> Result<String, Refusal> {
         render(&self.original, &self.changes)
     }
+    /// Merge concurrent versions of one base: all their ranges, sorted by
+    /// coordinates, go through the extracted `lines::merge`, which keeps
+    /// identical edits once and refuses conflicting ones. The result does not
+    /// depend on the order of `versions` (`LinesModel.merge_order_independent`).
     pub fn merge_all<'a>(mut versions: impl Iterator<Item = Option<&'a Self>>) -> Option<Self> {
         let first = versions.next()??;
-        let mut changes = std::collections::BTreeMap::new();
-        for version in std::iter::once(Some(first)).chain(versions) {
+        let mut all: Vec<&LineEdit> = first.changes.iter().collect();
+        for version in versions {
             let version = version?;
             if version.base != first.base
                 || (!std::sync::Arc::ptr_eq(&version.original, &first.original)
@@ -33,62 +37,33 @@ impl LineVersion {
             {
                 return None;
             }
-            for edit in &version.changes {
-                let key = (edit.start, edit.end);
-                if let Some(existing) = changes.get(&key) {
-                    if existing == edit {
-                        continue;
-                    }
-                    return None;
-                }
-                if changes
-                    .range(..key)
-                    .next_back()
-                    .is_some_and(|(_, e)| overlaps(e, edit))
-                    || changes
-                        .range(key..)
-                        .next()
-                        .is_some_and(|(_, e)| overlaps(e, edit))
-                {
-                    return None;
-                }
-                changes.insert(key, edit.clone());
-            }
+            all.extend(version.changes.iter());
         }
+        // Equal coordinates sort by content so the kernel sees identical
+        // edits next to each other; any order of equal keys gives the same
+        // answer, this one just keeps the output deterministic.
+        all.sort_by(|a, b| (a.start, a.end, &a.content).cmp(&(b.start, b.end, &b.content)));
+        let kept = o5s_kernel::lines::merge(&ranges(all.iter().copied()))?;
         Some(Self {
             base: first.base,
             original: first.original.clone(),
-            changes: changes.into_values().collect(),
+            changes: kept.into_iter().map(|i| all[i].clone()).collect(),
         })
     }
 }
-fn overlaps(a: &LineEdit, b: &LineEdit) -> bool {
-    o5s_kernel::interval::conflict(a.start, a.end, b.start, b.end)
+fn ranges<'a>(edits: impl Iterator<Item = &'a LineEdit>) -> Vec<o5s_kernel::lines::Range> {
+    edits
+        .map(|e| (e.start, e.end, e.content.as_bytes().to_vec()))
+        .collect()
 }
+/// Render through the extracted kernel: line boundaries, range-to-byte
+/// conversion and the checked renderer. `changes` must be sorted and free of
+/// conflicts, as `prepare_lines` and `merge_all` produce them.
 fn render(original: &str, changes: &[LineEdit]) -> Result<String, Refusal> {
-    let original = original.as_bytes().to_vec();
-    let boundaries = o5s_kernel::coordinates::line_boundaries(&original);
-    let mut cursor = 0;
-    for e in changes {
-        let start = usize::try_from(e.start).map_err(|_| refuse("invalid line range"))?;
-        let end = usize::try_from(e.end).map_err(|_| refuse("invalid line range"))?;
-        if start < cursor || end < start || end >= boundaries.len() {
-            return Err(refuse("invalid or overlapping line range"));
-        }
-        cursor = end;
-    }
-    let chunks: Vec<_> = changes
-        .iter()
-        .map(|e| {
-            (
-                boundaries[e.start as usize],
-                boundaries[e.end as usize],
-                e.content.as_bytes().to_vec(),
-            )
-        })
-        .collect();
-    let bytes = o5s_kernel::interval::checked_render(&original, &chunks)
-        .ok_or_else(|| refuse("invalid byte intervals or materialization capacity exceeded"))?;
+    let all: Vec<usize> = (0..changes.len()).collect();
+    let bytes =
+        o5s_kernel::lines::render(&original.as_bytes().to_vec(), &ranges(changes.iter()), &all)
+            .ok_or_else(|| refuse("invalid line range, or materialization capacity exceeded"))?;
     String::from_utf8(bytes).map_err(|_| refuse("invalid UTF-8 materialization"))
 }
 impl Repository {
@@ -146,7 +121,7 @@ impl Repository {
         while i < changes.len() {
             let end = i + changes[i..].partition_point(|e| e.path == changes[i].path);
             let group = &changes[i..end];
-            if group.windows(2).any(|es| overlaps(&es[0], &es[1])) {
+            if !o5s_kernel::lines::ranges_valid(&ranges(group.iter())) {
                 return Err(refuse("overlapping line edits"));
             }
             let version = self.line_version(&group[0].path, group)?;
@@ -155,7 +130,7 @@ impl Repository {
                 .get(&version.base)
                 .and_then(|p| p.edits.iter().find(|e| e.path == group[0].path))
                 .ok_or_else(|| refuse("line base file not found"))?;
-            if base.base64 {
+            if base.base64 || !base.kind.is_file() {
                 return Err(refuse(
                     "line edits need a text file; replace binary files whole",
                 ));
@@ -167,52 +142,35 @@ impl Repository {
                 content: Some(version.render()?),
                 executable,
                 base64: false,
+                kind: crate::Kind::File,
             });
             i = end;
         }
         deps.sort_unstable();
         deps.dedup();
-        // A base is an exact causal snapshot. Never discard earlier edits by
-        // accepting ranges against an obsolete base in the same dependency view.
-        let mut active = std::collections::BTreeSet::new();
-        let mut stack = deps.clone();
-        while let Some(id) = stack.pop() {
-            let patch = self
-                .patches
-                .get(&id)
-                .ok_or_else(|| refuse("unknown dependency"))?;
-            if active.insert(id) {
-                stack.extend(patch.dependencies.iter().copied());
-            }
+        if deps.iter().any(|d| !self.patches.contains_key(d)) {
+            return Err(refuse("unknown dependency"));
         }
+        // A base is an exact causal snapshot. Never discard earlier edits by
+        // accepting ranges against an obsolete base in the same dependency
+        // view: the base must be the file's sole causal head
+        // (the extracted `causality::sole_head`).
+        let rows = crate::documents::rows(self);
+        let roots: Vec<usize> = deps.iter().map(|d| *d as usize).collect();
+        let mut marks = vec![false; rows.len()];
         for edit in &out {
-            let mut heads = std::collections::BTreeSet::new();
-            for id in &active {
-                let patch = &self.patches[id];
-                if patch.edits.iter().any(|e| e.path == edit.path) {
-                    // Search only for current heads, stopping once all have been
-                    // found. A linear edit history examines one edge per patch.
-                    let mut targets = heads.clone();
-                    let min = targets.first().copied().unwrap_or(u64::MAX);
-                    let mut visited = std::collections::BTreeSet::new();
-                    let mut stack = patch.dependencies.clone();
-                    while !targets.is_empty() {
-                        let Some(d) = stack.pop() else { break };
-                        if d < min || !visited.insert(d) {
-                            continue;
-                        }
-                        if targets.remove(&d) {
-                            heads.remove(&d);
-                        }
-                        if !targets.is_empty() {
-                            stack.extend(self.patches[&d].dependencies.iter().copied());
-                        }
-                    }
-                    heads.insert(*id);
-                }
-            }
+            let edits = (0..rows.len())
+                .map(|h| {
+                    self.patches
+                        .get(&(h as u64))
+                        .is_some_and(|p| p.edits.iter().any(|e| e.path == edit.path))
+                })
+                .collect();
             let base = changes.iter().find(|e| e.path == edit.path).unwrap().base;
-            if heads != std::collections::BTreeSet::from([base]) {
+            let (sole, m) =
+                o5s_kernel::causality::sole_head(&rows, &edits, &roots, base as usize, marks);
+            marks = m;
+            if !sole {
                 return Err(refuse(
                     "line base must be the sole causal file head; resolve or choose the latest base",
                 ));

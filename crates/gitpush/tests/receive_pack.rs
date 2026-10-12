@@ -93,7 +93,10 @@ fn push(dir: &Path, files: &BTreeMap<String, File>, message: &str) -> Result<Oid
 fn files(entries: &[(&str, &[u8], bool)]) -> BTreeMap<String, File> {
     entries
         .iter()
-        .map(|(p, b, x)| (p.to_string(), (b.to_vec(), *x)))
+        .map(|(p, b, x)| {
+            let mode = if *x { Mode::Executable } else { Mode::Regular };
+            (p.to_string(), (b.to_vec(), mode))
+        })
         .collect()
 }
 
@@ -137,7 +140,7 @@ fn pushes_create_update_and_round_trip_bytes_and_modes() {
     // A fast-forward with a removed file and an edit.
     let mut second = first.clone();
     second.remove("empty");
-    second.insert("README.md".into(), (b"hello\n".to_vec(), false));
+    second.insert("README.md".into(), (b"hello\n".to_vec(), Mode::Regular));
     let c2 = push(dir.path(), &second, "second").unwrap();
     git(dir.path(), &["fsck", "--strict"], b"");
     assert_eq!(
@@ -152,6 +155,32 @@ fn pushes_create_update_and_round_trip_bytes_and_modes() {
         git(dir.path(), &["show", "main:README.md"], b""),
         b"hello\n"
     );
+}
+
+#[test]
+fn symlinks_and_submodules_round_trip() {
+    let dir = bare();
+    let commit_id = [7u8; 20];
+    let mut entries = files(&[("target.txt", b"t", false)]);
+    entries.insert("link".into(), (b"target.txt".to_vec(), Mode::Symlink));
+    entries.insert("vendor/lib".into(), (commit_id.to_vec(), Mode::Gitlink));
+    push(dir.path(), &entries, "special").unwrap();
+    let listing = String::from_utf8(git(dir.path(), &["ls-tree", "-r", "main"], b"")).unwrap();
+    assert!(
+        listing.contains("120000 blob") && listing.contains("\tlink"),
+        "{listing}"
+    );
+    assert!(
+        listing.contains(&format!("160000 commit {}\tvendor/lib", hex(&commit_id))),
+        "{listing}"
+    );
+    assert_eq!(
+        git(dir.path(), &["cat-file", "blob", "main:link"], b""),
+        b"target.txt"
+    );
+    let mut bad = BTreeMap::new();
+    bad.insert("m".into(), (vec![1, 2], Mode::Gitlink));
+    assert!(tree(&bad).is_err());
 }
 
 #[test]

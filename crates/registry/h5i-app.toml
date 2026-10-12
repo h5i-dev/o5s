@@ -24,4 +24,6 @@ theorems = [
   "o5s_registry.Invariant.patches_immutable",
   "o5s_registry.Invariant.members_append_only",
   "o5s_registry.Narrow.narrow_load",
+  "o5s_registry.Served.pg_load_narrow",
+  "o5s_registry.Served.pg_served",
 ]

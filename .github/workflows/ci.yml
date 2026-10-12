@@ -58,7 +58,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - run: node --test cloudflare/worker.test.mjs crates/server/tests/ui.test.mjs
+      - run: node --test crates/server/tests/ui.test.mjs
       - name: Admin UI script syntax
         run: >-
           node --input-type=module -e 'import fs from "node:fs"; import vm from "node:vm";
