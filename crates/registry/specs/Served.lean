@@ -51,7 +51,9 @@ def listingKey (l : Listing) : Nat := l.repo.val
 mirroring `crates/pgwire/src/service.rs` branch by branch. Tables a command
 does not load are empty. -/
 noncomputable def pgLoad (c : Command) (full : St) : St :=
-  let none : St := ⟨full.repo, [], [], [], [], [], [], [], [], [], []⟩
+  let none : St := ⟨full.repo, [], [], [], [], [], [], [], [], [], [], []⟩
+  -- Every repository command also loads the whole role table.
+  let base : St := { none with roles := full.roles }
   let channelsNamed (n : alloc.vec.Vec U8) (acc : List Channel) : List Channel :=
     appendNew acc (query channelKey full.channels fun c => decide (c.label.val = n.val))
   let membersOf (chs : List Channel) (n : alloc.vec.Vec U8) : List Member :=
@@ -64,7 +66,7 @@ noncomputable def pgLoad (c : Command) (full : St) : St :=
         (query listingKey full.listings fun l => decide (l.label.val = n.val))
         (query listingKey full.listings fun l => decide (l.repo = repo)) }
   | .Propose _ h deps uses _ =>
-    { none with
+    { base with
       patches :=
         if deps.val.length > pointLoads then query patchKey full.patches fun _ => true
         else deps.val.foldl (fun acc d => appendNew acc (query patchKey full.patches fun p => decide (p.id = d)))
@@ -74,20 +76,21 @@ noncomputable def pgLoad (c : Command) (full : St) : St :=
         else uses.val.foldl (fun acc u => appendNew acc
           (query pathKey full.paths fun k => decide (k.path.val = u.path.val))) [] }
   | .Approve _ p | .Check _ p _ =>
-    { none with patches := query patchKey full.patches fun q => decide (q.id = p) }
+    { base with patches := query patchKey full.patches fun q => decide (q.id = p) }
   | .Fork _ src n =>
     let chs := channelsNamed src (channelsNamed n [])
-    { none with channels := chs, members := membersOf chs src }
+    { base with channels := chs, members := membersOf chs src }
   | .Merge _ n ids =>
     let chs := channelsNamed n []
     let one {α} [DecidableEq α] {κ} [LinearOrder κ] (key : α → κ) (t : List α) (P : α → U64 → Bool) :=
       if ids.val.length > pointLoads then query key t fun _ => true
       else ids.val.foldl (fun acc id => appendNew acc (query key t fun r => P r id)) []
-    { none with channels := chs, members := membersOf chs n,
+    { base with channels := chs, members := membersOf chs n,
       patches := one patchKey full.patches fun q id => decide (q.id = id),
       deps := one depKey full.deps fun d id => decide (d.patch = id),
       approvals := one approvalKey full.approvals fun a id => decide (a.patch = id),
       checks := one checkKey full.checks fun x id => decide (x.patch = id) }
+  | .Grant .. => base
   | _ => full
 
 /-- Each table, filtered by any condition `load` uses, is already in

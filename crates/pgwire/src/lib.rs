@@ -197,6 +197,7 @@ pub fn tables() -> Vec<Table> {
         ),
         table("o5s_bodies", 1, vec![int("patch"), bytes("bytes")]),
         table("o5s_listings", 1, vec![int("repo"), bytes("label")]),
+        table("o5s_roles", 1, vec![int("user"), int("level")]),
     ]
 }
 

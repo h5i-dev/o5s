@@ -25,9 +25,14 @@ theorem any_agree {α} {P : α → Bool} {l₁ l₂ : List α} (h : Agree P l₁
 
 theorem filter_agree {α} {P : α → Bool} {l₁ l₂ : List α} (h : Agree P l₁ l₂) : l₁.filter P = l₂.filter P := h
 
+/-- Repository commands check the caller's role, so they read the role table. -/
+def usesRoles : Command → Bool
+  | .Register .. | .Create .. => false
+  | _ => true
+
 /-- What a narrow load `part` must share with the whole tenant `full` for command `c`. -/
 def Narrow (c : Command) (full part : St) : Prop :=
-  part.repo = full.repo ∧
+  part.repo = full.repo ∧ (usesRoles c = true → part.roles = full.roles) ∧
   match c with
   | .Register n repo => Agree (fun l : Listing => decide (l.label.val = n.val)) part.listings full.listings ∧
       Agree (fun l : Listing => decide (l.repo = repo)) part.listings full.listings
@@ -135,14 +140,21 @@ theorem merge_agree {full part : St} (hr : part.repo = full.repo) {u : U64} {n :
 /-- On a narrow load the model computes what it computes on the whole tenant. -/
 theorem narrow_model (a : Principal) (full part : St) (c : Command) (hn : Narrow c full part) :
     Model.step a part c = Model.step a full c := by
-  obtain ⟨hr, hn⟩ := hn
-  cases c <;> simp only [Model.step, hr] at hn ⊢
+  obtain ⟨hr, hroles, hn⟩ := hn
+  have hg : ∀ n need (k k' : Model.Out), part.roles = full.roles → k = k' →
+      Model.guarded a part n need k = Model.guarded a full n need k' := by
+    intro n need k k' hro e
+    subst e
+    simp only [Model.guarded, Model.authorize, Model.readable, hr, hro]
+  cases c <;> simp only [Model.step, usesRoles] at hn hroles ⊢
   case Register => unfold Model.register; rw [find?_agree hn.1, any_agree hn.2]
-  case Fork => rw [fork_agree hr hn.1 hn.2.1 hn.2.2]
-  case Propose => rw [propose_agree hr hn.1 hn.2.1 hn.2.2]
-  case Approve => unfold Model.approve; rw [find?_agree hn, hr]
-  case Check => unfold Model.check; rw [find?_agree hn, hr]
-  case Merge => rw [merge_agree hr hn.1 hn.2.1 hn.2.2]
+  case Create => rw [hr]
+  case Fork => exact hg _ _ _ _ (hroles rfl) (fork_agree hr hn.1 hn.2.1 hn.2.2)
+  case Propose => exact hg _ _ _ _ (hroles rfl) (propose_agree hr hn.1 hn.2.1 hn.2.2)
+  case Approve => exact hg _ _ _ _ (hroles rfl) (by unfold Model.approve; rw [find?_agree hn, hr])
+  case Check => exact hg _ _ _ _ (hroles rfl) (by unfold Model.check; rw [find?_agree hn, hr])
+  case Merge => exact hg _ _ _ _ (hroles rfl) (merge_agree hr hn.1 hn.2.1 hn.2.2)
+  case Grant => exact hg _ _ _ _ (hroles rfl) (by simp only [Model.grant, hr, hroles rfl])
 
 /-- **Narrow loads.** A run of the extracted `transition` on rows that agree
 with the whole tenant on every lookup the command makes computes what the

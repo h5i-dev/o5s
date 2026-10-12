@@ -20,6 +20,7 @@ def pathOf : Write → Option PathKind | .PutPath x => some x | _ => none
 def eventOf : Write → Option Event | .PutEvent x => some x | _ => none
 def bodyOf : Write → Option Body | .PutBody x => some x | _ => none
 def listingOf : Write → Option Listing | .PutListing x => some x | _ => none
+def roleOf : Write → Option Role | .PutRole x => some x | _ => none
 def repoOf : Write → Option Repository | .SetRepository x => some x | _ => none
 
 /-- Fold puts of one table. -/
@@ -79,6 +80,11 @@ theorem applyAll_listings : (applyAll s ws).listings = puts (·.repo) (ws.filter
   induction ws generalizing s with
   | nil => rfl
   | cons w ws ih => cases w <;> simp [applyAll, applyWrite, listingOf, puts] at ih ⊢ <;> exact ih _
+
+theorem applyAll_roles : (applyAll s ws).roles = puts (·.user) (ws.filterMap roleOf) s.roles := by
+  induction ws generalizing s with
+  | nil => rfl
+  | cons w ws ih => cases w <;> simp [applyAll, applyWrite, roleOf, puts] at ih ⊢ <;> exact ih _
 
 theorem applyAll_repo : (applyAll s ws).repo = ((ws.filterMap repoOf).getLast?).getD s.repo := by
   induction ws generalizing s with

@@ -618,6 +618,132 @@ theorem visible_eq (a : Principal) (r : Repository) (n : alloc.vec.Vec U8) (b) (
   have := post_of_ok (visible_spec a r n) h
   rw [this, Model.visible]
 
+theorem level_loop_spec (roles : alloc.vec.Vec Role) (u : U64) :
+    level_loop roles u 0#usize ⦃ l =>
+      l = ((roles.val.find? (fun r => decide (r.user = u))).map (·.level)).getD 0#u64 ⦄ := by
+  unfold level_loop
+  apply WP.spec_mono (loop_search roles.val (fun r => decide (r.user = u)) (fun l : U64 => l)
+    (fun _ r => r.level) 0#u64 _ ?_ 0#usize (by simp))
+  · intro r hr; rw [hr, searchFrom_findD]; simp
+  · intro j hj; unfold level_loop.body; h5i_step
+
+theorem level_eq (roles : alloc.vec.Vec Role) (u : U64) (l) (h : level roles u = ok l) :
+    l = Model.level roles.val u := by
+  unfold level at h
+  by_cases h0 : roles.val = []
+  · have : alloc.vec.Vec.len roles = 0#usize := by
+      apply UScalar.eq_of_val_eq; simp [alloc.vec.Vec.len, h0]
+    simp only [this, ↓reduceIte, ok.injEq] at h
+    simp [Model.level, h0, h]
+  · have hl : ¬ alloc.vec.Vec.len roles = 0#usize := by
+      intro e
+      have := congrArg (·.val) e
+      simp [alloc.vec.Vec.len] at this
+      exact h0 this
+    simp only [hl, ↓reduceIte] at h
+    have := post_of_ok (level_loop_spec roles u) h
+    simp [Model.level, h0, this]
+
+theorem readable_eq (a : Principal) (s : Snapshot) (n : alloc.vec.Vec U8) (b) (h : readable a s n = ok b) :
+    b = Model.readable a (Snapshot.toSt s) n := by
+  unfold readable at h
+  obtain ⟨v, hv, h⟩ := bind_eq_ok.1 h
+  have hv' := visible_eq _ _ _ _ hv
+  unfold Model.readable
+  simp only [Snapshot.toSt] at hv' ⊢
+  rw [← hv']
+  split at h
+  · obtain ⟨l, hl, h⟩ := bind_eq_ok.1 h
+    have := level_eq _ _ _ hl
+    simp only [ok.injEq] at h
+    subst h this
+    simp_all
+  · simp only [ok.injEq] at h; subst h; simp_all
+
+theorem authorize_eq (a : Principal) (s : Snapshot) (n : alloc.vec.Vec U8) (need : U64) (o)
+    (h : authorize a s n need = ok o) : o = Model.authorize a (Snapshot.toSt s) n need := by
+  unfold authorize at h
+  obtain ⟨b, hb, h⟩ := bind_eq_ok.1 h
+  have hb' := readable_eq _ _ _ _ hb
+  unfold Model.authorize
+  rw [← hb']
+  split at h
+  · obtain ⟨l, hl, h⟩ := bind_eq_ok.1 h
+    have := level_eq _ _ _ hl
+    simp only [Snapshot.toSt] at this ⊢
+    subst this
+    rename_i hbt
+    simp only [hbt, Bool.not_true, Bool.false_eq_true, ↓reduceIte]
+    split at h <;> simp only [ok.injEq] at h <;> subst h
+    · rename_i hlt; simp [hlt]
+    · rename_i hlt; simp [hlt]
+  · rename_i hbt
+    simp only [ok.injEq] at h; subst h
+    simp [hbt]
+
+theorem len_zero_iff (v : alloc.vec.Vec Role) : alloc.vec.Vec.len v = 0#usize ↔ v.val = [] := by
+  constructor
+  · intro e
+    have := congrArg (·.val) e
+    simpa [alloc.vec.Vec.len] using this
+  · intro e
+    apply UScalar.eq_of_val_eq
+    simp [alloc.vec.Vec.len, e]
+
+theorem grant_spec (a : Principal) (s : Snapshot) (u lvl : U64) :
+    grant a s u lvl ⦃ res => lift res = Model.grant a (Snapshot.toSt s) u lvl ⦄ := by
+  unfold grant Model.grant
+  by_cases h1 : lvl > ADMIN
+  · have : ADMIN.val < lvl.val := h1
+    simp [h1, this, lift]
+  · have h1' : ¬ ADMIN.val < lvl.val := h1
+    by_cases hm : s.repository.events = core.num.U64.MAX
+    · simp [h1, h1', hm, lift, Model.MAX]
+    · have hm' : s.repository.events ≠ Model.MAX := hm
+      have hlt := Commands.lt_max hm
+      simp only [h1, h1', hm, hm', ↓reduceIte, Snapshot.toSt]
+      by_cases hu : u = a.user
+      · subst hu
+        by_cases h0 : s.roles.val = []
+        · have hl := (len_zero_iff s.roles).2 h0
+          by_cases hA : lvl = ADMIN
+          · subst hA
+            simp only [hl, h0, ↓reduceIte, ne_eq, not_true_eq_false, or_self, and_false, bne_self_eq_false,
+              Bool.false_eq_true]
+            unfold bump_events event
+            step*
+            all_goals (try scalar_tac)
+            have hx := inc_of_val hm' x_post
+            have hi := inc_of_val hm' i_post
+            subst_vars
+            simp [lift, push_ok_val, *]
+          · simp [hl, h0, hA, lift]
+        · have hl : ¬ alloc.vec.Vec.len s.roles = 0#usize := fun e => h0 ((len_zero_iff s.roles).1 e)
+          simp [hl, h0, lift]
+      · simp only [hu, ↓reduceIte, false_and, ne_eq, not_false_eq_true, bne_iff_ne]
+        unfold bump_events event
+        by_cases h0 : s.roles.val = []
+        · have hl := (len_zero_iff s.roles).2 h0
+          simp only [hl, h0, ↓reduceIte]
+          step*
+          all_goals (try scalar_tac)
+          have hx := inc_of_val hm' x_post
+          have hi := inc_of_val hm' i_post
+          subst_vars
+          simp [lift, push_ok_val, *]
+        · have hl : ¬ alloc.vec.Vec.len s.roles = 0#usize := fun e => h0 ((len_zero_iff s.roles).1 e)
+          simp only [hl, h0, ↓reduceIte]
+          step*
+          all_goals (try scalar_tac)
+          have hx := inc_of_val hm' x_post
+          have hi := inc_of_val hm' i_post
+          subst_vars
+          simp [lift, push_ok_val, *]
+
+theorem grant_refines (a : Principal) (s : Snapshot) (u lvl : U64) (r)
+    (h : grant a s u lvl = ok r) : lift r = Model.grant a (Snapshot.toSt s) u lvl :=
+  post_of_ok (grant_spec a s u lvl) h
+
 /-- **Refinement.** Whenever the extracted `transition` returns, its result is
 `Model.step` on the same rows. -/
 theorem transition_refines (a : Principal) (s : Snapshot) (c : Command) (r)
@@ -627,21 +753,20 @@ theorem transition_refines (a : Principal) (s : Snapshot) (c : Command) (r)
   case Create n => have := post_of_ok (create_refines a s.repository n) h; exact this
   all_goals first
     | (simp only [Result.ok.injEq] at h; subst h; rfl)
-    | (obtain ⟨b, hb, h⟩ := bind_eq_ok.1 h
-       have hv := visible_eq _ _ _ _ hb
-       simp only [Snapshot.toSt] at hv ⊢
+    | (obtain ⟨o, ho, h⟩ := bind_eq_ok.1 h
+       have hv := authorize_eq _ _ _ _ _ ho
+       simp only [Model.guarded]
        rw [← hv]
-       split at h
-       · rename_i hb1
-         simp only [hb1, ↓reduceIte]
+       cases o with
+       | some e => simp only [Result.ok.injEq] at h; subst h; rfl
+       | none =>
+         simp only
          first
            | exact fork_refines _ _ _ _ _ h
            | exact propose_refines _ _ _ _ _ _ _ h
            | (have := post_of_ok (approve_refines _ _ _) h; exact this)
            | (have := post_of_ok (check_refines _ _ _ _) h; exact this)
            | exact merge_refines _ _ _ _ _ h
-       · rename_i hb1
-         simp only [Result.ok.injEq] at h; subst h
-         simp [hb1, lift])
+           | exact grant_refines _ _ _ _ _ h)
 
 end o5s_registry.Refine

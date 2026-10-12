@@ -1084,108 +1084,13 @@ def Body.delWhereA (col : Nat) (val : Val) : AWrite Val := .delWhere Body.table 
       (l.filter (fun y => !decide ((Body.row y)[col]? = some val))).map Body.row := by
   rw [List.filter_map]; rfl
 
-/-! ## `Role` (table `o5s_roles`) -/
-
-/-- Columns `user`, `level`. -/
-def Role.row (x : Role) : List Val :=
-  [int x.user.val, int x.level.val]
-
-def Role.table : Nat := 10
-def Role.keyLen : Nat := 1
-def Role.col_user : Nat := 0
-def Role.col_level : Nat := 1
-
-@[simp] theorem Role.row_col_user (x : Role) :
-    (Role.row x)[Role.col_user]? = some (int x.user.val) := by
-  simp [Role.row, Role.col_user]
-
-@[simp] theorem Role.row_col_level (x : Role) :
-    (Role.row x)[Role.col_level]? = some (int x.level.val) := by
-  simp [Role.row, Role.col_level]
-
-@[simp] theorem Role.row_length (x : Role) : (Role.row x).length = 2 := rfl
-
-@[step] theorem Role.to_row_spec (x : Role) : Role.to_row x ⦃ v => v.val = Role.row x ⦄ := by
-  have := usize_max_le
-  unfold Role.to_row; step* <;> simp_all [Role.row] <;> scalar_tac
-
-theorem Role.row_inj : Function.Injective Role.row := by
-  intro a b h; cases a; cases b; simp_all [Role.row]
-
-theorem Role.clone_eq (x : Role) : Role.Insts.CoreCloneClone.clone x = ok x := by
-  simp [Role.Insts.CoreCloneClone.clone, lift]
-
-@[step] theorem Role.clone_spec (x : Role) : Role.Insts.CoreCloneClone.clone x ⦃ y => y = x ⦄ := by
-  rw [Role.clone_eq]; simp
-
-def Role.putA (x : Role) : AWrite Val := .put Role.table Role.keyLen (Role.row x)
-
-@[step] theorem Role.sql_put_spec (x : Role) : Role.sql_put x ⦃ w => sqlW w = Role.putA x ⦄ := by
-  unfold Role.sql_put; step*; simp_all [sqlW, Role.putA, Role.table, Role.keyLen, Role.TABLE, Role.KEY_LEN]
-
-/-- Insert, or replace the row with the same key. -/
-@[step] theorem Role.put_spec (v : alloc.vec.Vec Role) (x : Role) (h : v.length < Usize.max) :
-    Role.put v x ⦃ v' => v'.val = upsert (fun y => y.user) x v.val ⦄ := by
-  unfold Role.put Role.put_loop
-  apply WP.spec_mono (loop_search v.val (fun q => decide (q.user = x.user))
-    (fun y : alloc.vec.Vec Role => y.val) (fun j _ => v.val.set j x) (v.val ++ [x]) _ ?_ 0#usize (by simp))
-  · intro r hr; rw [hr, show ((0#usize : Usize) : Nat) = 0 from rfl]
-    exact upsert_loop_result (fun y => y.user) x _ 0 (Nat.zero_le _) (by simp)
-  · intro j hj; unfold Role.put_loop.body; h5i_step
-
-/-- The rows without this key. -/
-@[step] theorem Role.del_spec (v : alloc.vec.Vec Role) (user : U64) :
-    Role.del v user ⦃ v' => v'.val = v.val.filter (fun y => ¬(y.user = user)) ⦄ := by
-  unfold Role.del Role.del_loop
-  apply WP.spec_mono (loop_fold v.val (fun w : alloc.vec.Vec Role => w.val)
-    (fun acc y => if decide ¬(y.user = user) then acc ++ [y] else acc)
-    (fun w j => w.length ≤ j) (fun x => Role.del_loop.body v user x.1 x.2) ?_ _ 0#usize (by simp) (by simp))
-  · intro r hr; rw [hr, foldl_filter]; simp
-  · intro o j hj ho; have := v.len_ineq; unfold Role.del_loop.body; h5i_step
-
-/-- The rows whose column `col` does not hold `val`. -/
-@[step] theorem Role.del_where_spec (v : alloc.vec.Vec Role) (col : U32) (val : Val) :
-    Role.del_where v col val ⦃ v' => v'.val = v.val.filter (fun y => ¬((Role.row y)[col.val]? = some val)) ⦄ := by
-  unfold Role.del_where Role.del_where_loop
-  apply WP.spec_mono (loop_fold v.val (fun w : alloc.vec.Vec Role => w.val)
-    (fun acc y => if decide ¬((Role.row y)[col.val]? = some val) then acc ++ [y] else acc)
-    (fun w j => w.length ≤ j) (fun x => Role.del_where_loop.body v col val x.1 x.2) ?_ _ 0#usize (by simp) (by simp))
-  · intro r hr; rw [hr, foldl_filter]; simp
-  · intro o j hj ho; have := v.len_ineq; unfold Role.del_where_loop.body; h5i_step
-
-def Role.delA (user : U64) : AWrite Val := .del Role.table [int user.val]
-def Role.delWhereA (col : Nat) (val : Val) : AWrite Val := .delWhere Role.table col val
-
-@[step] theorem Role.sql_del_spec (user : U64) : Role.sql_del user ⦃ w => sqlW w = Role.delA user ⦄ := by
-  unfold Role.sql_del; step* <;> simp_all [sqlW, Role.delA, Role.table, Role.TABLE] <;> scalar_tac
-
-@[step] theorem Role.sql_del_where_spec (col : U32) (val : Val) :
-    Role.sql_del_where col val ⦃ w => sqlW w = Role.delWhereA col.val val ⦄ := by
-  unfold Role.sql_del_where; simp [sqlW, Role.delWhereA, Role.table, Role.TABLE]
-
-/-! Row writes on the encoding match the list operations. -/
-
-@[simp] theorem Role.map_put (x : Role) (l : List Role) :
-    upsert (·.take 1) (Role.row x) (l.map Role.row) = (upsert (fun y => y.user) x l).map Role.row :=
-  map_upsert _ _ _ _ _ (fun y => by simp [Role.row])
-
-@[simp] theorem Role.map_del (user : U64) (l : List Role) :
-    (l.map Role.row).filter (fun r => !decide (r.take 1 = [int user.val])) =
-      (l.filter (fun y => !decide (y.user = user))).map Role.row :=
-  map_filter_of _ _ _ _ (fun y => by simp [Role.row])
-
-@[simp] theorem Role.map_del_where (col : Nat) (val : Val) (l : List Role) :
-    (l.map Role.row).filter (fun r => !decide (r[col]? = some val)) =
-      (l.filter (fun y => !decide ((Role.row y)[col]? = some val))).map Role.row := by
-  rw [List.filter_map]; rfl
-
 /-! ## `Listing` (table `o5s_listings`) -/
 
 /-- Columns `repo`, `label`. -/
 def Listing.row (x : Listing) : List Val :=
   [int x.repo.val, .Bytes x.label]
 
-def Listing.table : Nat := 11
+def Listing.table : Nat := 10
 def Listing.keyLen : Nat := 1
 def Listing.col_repo : Nat := 0
 def Listing.col_label : Nat := 1
@@ -1274,13 +1179,108 @@ def Listing.delWhereA (col : Nat) (val : Val) : AWrite Val := .delWhere Listing.
       (l.filter (fun y => !decide ((Listing.row y)[col]? = some val))).map Listing.row := by
   rw [List.filter_map]; rfl
 
+/-! ## `Role` (table `o5s_roles`) -/
+
+/-- Columns `user`, `level`. -/
+def Role.row (x : Role) : List Val :=
+  [int x.user.val, int x.level.val]
+
+def Role.table : Nat := 11
+def Role.keyLen : Nat := 1
+def Role.col_user : Nat := 0
+def Role.col_level : Nat := 1
+
+@[simp] theorem Role.row_col_user (x : Role) :
+    (Role.row x)[Role.col_user]? = some (int x.user.val) := by
+  simp [Role.row, Role.col_user]
+
+@[simp] theorem Role.row_col_level (x : Role) :
+    (Role.row x)[Role.col_level]? = some (int x.level.val) := by
+  simp [Role.row, Role.col_level]
+
+@[simp] theorem Role.row_length (x : Role) : (Role.row x).length = 2 := rfl
+
+@[step] theorem Role.to_row_spec (x : Role) : Role.to_row x ⦃ v => v.val = Role.row x ⦄ := by
+  have := usize_max_le
+  unfold Role.to_row; step* <;> simp_all [Role.row] <;> scalar_tac
+
+theorem Role.row_inj : Function.Injective Role.row := by
+  intro a b h; cases a; cases b; simp_all [Role.row]
+
+theorem Role.clone_eq (x : Role) : Role.Insts.CoreCloneClone.clone x = ok x := by
+  simp [Role.Insts.CoreCloneClone.clone, lift]
+
+@[step] theorem Role.clone_spec (x : Role) : Role.Insts.CoreCloneClone.clone x ⦃ y => y = x ⦄ := by
+  rw [Role.clone_eq]; simp
+
+def Role.putA (x : Role) : AWrite Val := .put Role.table Role.keyLen (Role.row x)
+
+@[step] theorem Role.sql_put_spec (x : Role) : Role.sql_put x ⦃ w => sqlW w = Role.putA x ⦄ := by
+  unfold Role.sql_put; step*; simp_all [sqlW, Role.putA, Role.table, Role.keyLen, Role.TABLE, Role.KEY_LEN]
+
+/-- Insert, or replace the row with the same key. -/
+@[step] theorem Role.put_spec (v : alloc.vec.Vec Role) (x : Role) (h : v.length < Usize.max) :
+    Role.put v x ⦃ v' => v'.val = upsert (fun y => y.user) x v.val ⦄ := by
+  unfold Role.put Role.put_loop
+  apply WP.spec_mono (loop_search v.val (fun q => decide (q.user = x.user))
+    (fun y : alloc.vec.Vec Role => y.val) (fun j _ => v.val.set j x) (v.val ++ [x]) _ ?_ 0#usize (by simp))
+  · intro r hr; rw [hr, show ((0#usize : Usize) : Nat) = 0 from rfl]
+    exact upsert_loop_result (fun y => y.user) x _ 0 (Nat.zero_le _) (by simp)
+  · intro j hj; unfold Role.put_loop.body; h5i_step
+
+/-- The rows without this key. -/
+@[step] theorem Role.del_spec (v : alloc.vec.Vec Role) (user : U64) :
+    Role.del v user ⦃ v' => v'.val = v.val.filter (fun y => ¬(y.user = user)) ⦄ := by
+  unfold Role.del Role.del_loop
+  apply WP.spec_mono (loop_fold v.val (fun w : alloc.vec.Vec Role => w.val)
+    (fun acc y => if decide ¬(y.user = user) then acc ++ [y] else acc)
+    (fun w j => w.length ≤ j) (fun x => Role.del_loop.body v user x.1 x.2) ?_ _ 0#usize (by simp) (by simp))
+  · intro r hr; rw [hr, foldl_filter]; simp
+  · intro o j hj ho; have := v.len_ineq; unfold Role.del_loop.body; h5i_step
+
+/-- The rows whose column `col` does not hold `val`. -/
+@[step] theorem Role.del_where_spec (v : alloc.vec.Vec Role) (col : U32) (val : Val) :
+    Role.del_where v col val ⦃ v' => v'.val = v.val.filter (fun y => ¬((Role.row y)[col.val]? = some val)) ⦄ := by
+  unfold Role.del_where Role.del_where_loop
+  apply WP.spec_mono (loop_fold v.val (fun w : alloc.vec.Vec Role => w.val)
+    (fun acc y => if decide ¬((Role.row y)[col.val]? = some val) then acc ++ [y] else acc)
+    (fun w j => w.length ≤ j) (fun x => Role.del_where_loop.body v col val x.1 x.2) ?_ _ 0#usize (by simp) (by simp))
+  · intro r hr; rw [hr, foldl_filter]; simp
+  · intro o j hj ho; have := v.len_ineq; unfold Role.del_where_loop.body; h5i_step
+
+def Role.delA (user : U64) : AWrite Val := .del Role.table [int user.val]
+def Role.delWhereA (col : Nat) (val : Val) : AWrite Val := .delWhere Role.table col val
+
+@[step] theorem Role.sql_del_spec (user : U64) : Role.sql_del user ⦃ w => sqlW w = Role.delA user ⦄ := by
+  unfold Role.sql_del; step* <;> simp_all [sqlW, Role.delA, Role.table, Role.TABLE] <;> scalar_tac
+
+@[step] theorem Role.sql_del_where_spec (col : U32) (val : Val) :
+    Role.sql_del_where col val ⦃ w => sqlW w = Role.delWhereA col.val val ⦄ := by
+  unfold Role.sql_del_where; simp [sqlW, Role.delWhereA, Role.table, Role.TABLE]
+
+/-! Row writes on the encoding match the list operations. -/
+
+@[simp] theorem Role.map_put (x : Role) (l : List Role) :
+    upsert (·.take 1) (Role.row x) (l.map Role.row) = (upsert (fun y => y.user) x l).map Role.row :=
+  map_upsert _ _ _ _ _ (fun y => by simp [Role.row])
+
+@[simp] theorem Role.map_del (user : U64) (l : List Role) :
+    (l.map Role.row).filter (fun r => !decide (r.take 1 = [int user.val])) =
+      (l.filter (fun y => !decide (y.user = user))).map Role.row :=
+  map_filter_of _ _ _ _ (fun y => by simp [Role.row])
+
+@[simp] theorem Role.map_del_where (col : Nat) (val : Val) (l : List Role) :
+    (l.map Role.row).filter (fun r => !decide (r[col]? = some val)) =
+      (l.filter (fun y => !decide ((Role.row y)[col]? = some val))).map Role.row := by
+  rw [List.filter_map]; rfl
+
 /-! ## Decoding -/
 
 /-- Steps through a generated `from_row`. -/
 macro "row_tac" : tactic => `(tactic| (
   repeat (first
     | (step*; done)
-    | (simp_all only [Repository.row, PatchRow.row, Dependency.row, Approval.row, CheckReport.row, Channel.row, Member.row, PathKind.row, Event.row, Body.row, Role.row, Listing.row, List.getElem_cons_zero, List.getElem_cons_succ, Nat.zero_add, Nat.reduceAdd, bind_tc_ok, u64_from_val, bool_from_val, bytes_from_val, opt_from_val]; step*))
+    | (simp_all only [Repository.row, PatchRow.row, Dependency.row, Approval.row, CheckReport.row, Channel.row, Member.row, PathKind.row, Event.row, Body.row, Listing.row, Role.row, List.getElem_cons_zero, List.getElem_cons_succ, Nat.zero_add, Nat.reduceAdd, bind_tc_ok, u64_from_val, bool_from_val, bytes_from_val, opt_from_val]; step*))
   all_goals simp_all))
 
 theorem Repository.from_row_spec (x : Repository) (v : alloc.vec.Vec Val) (h : v.val = Repository.row x) :
@@ -1333,15 +1333,15 @@ theorem Body.from_row_spec (x : Body) (v : alloc.vec.Vec Val) (h : v.val = Body.
   have hl : v.length = 2 := by simp [alloc.vec.Vec.length, h, Body.row]
   unfold Body.from_row; row_tac
 
-theorem Role.from_row_spec (x : Role) (v : alloc.vec.Vec Val) (h : v.val = Role.row x) :
-    Role.from_row v ⦃ o => o = some x ⦄ := by
-  have hl : v.length = 2 := by simp [alloc.vec.Vec.length, h, Role.row]
-  unfold Role.from_row; row_tac
-
 theorem Listing.from_row_spec (x : Listing) (v : alloc.vec.Vec Val) (h : v.val = Listing.row x) :
     Listing.from_row v ⦃ o => o = some x ⦄ := by
   have hl : v.length = 2 := by simp [alloc.vec.Vec.length, h, Listing.row]
   unfold Listing.from_row; row_tac
+
+theorem Role.from_row_spec (x : Role) (v : alloc.vec.Vec Val) (h : v.val = Role.row x) :
+    Role.from_row v ⦃ o => o = some x ⦄ := by
+  have hl : v.length = 2 := by simp [alloc.vec.Vec.length, h, Role.row]
+  unfold Role.from_row; row_tac
 
 theorem Repository.from_one_spec (rows : alloc.vec.Vec (alloc.vec.Vec Val)) (l : List Repository)
     (hl : l.length ≤ 1) (h : rows.val.map (·.val) = l.map Repository.row) :
@@ -1509,22 +1509,6 @@ theorem Body.from_rows_spec (rows : alloc.vec.Vec (alloc.vec.Vec Val)) (l : List
   step with hl
   simp [ok1_post, l_post]
 
-theorem Role.from_rows_spec (rows : alloc.vec.Vec (alloc.vec.Vec Val)) (l : List Role)
-    (h : rows.val.map (·.val) = l.map Role.row) :
-    Role.from_rows rows ⦃ o => ∃ v, o = some v ∧ v.val = l ⦄ := by
-  have e : Role.from_rows_loop rows (alloc.vec.Vec.new Role) true 0#usize =
-      loop (fun x => rowsBody Role.from_row rows x.1 x.2.1 x.2.2) (alloc.vec.Vec.new Role, true, 0#usize) := by
-    unfold Role.from_rows_loop; congr 1; funext ⟨a, b, c⟩
-    simp only []; unfold Role.from_rows_loop.body rowsBody
-    dsimp only
-    split <;> (try rfl)
-    congr 1; funext v; congr 1; funext o; cases o <;> rfl
-  have hl : Role.from_rows_loop rows (alloc.vec.Vec.new Role) true 0#usize ⦃ r => r.2 = true ∧ r.1.val = l ⦄ := by
-    rw [e]; exact rows_loop Role.from_row Role.row (fun x v hv => Role.from_row_spec x v hv) rows l h
-  unfold Role.from_rows
-  step with hl
-  simp [ok1_post, l_post]
-
 theorem Listing.from_rows_spec (rows : alloc.vec.Vec (alloc.vec.Vec Val)) (l : List Listing)
     (h : rows.val.map (·.val) = l.map Listing.row) :
     Listing.from_rows rows ⦃ o => ∃ v, o = some v ∧ v.val = l ⦄ := by
@@ -1538,6 +1522,22 @@ theorem Listing.from_rows_spec (rows : alloc.vec.Vec (alloc.vec.Vec Val)) (l : L
   have hl : Listing.from_rows_loop rows (alloc.vec.Vec.new Listing) true 0#usize ⦃ r => r.2 = true ∧ r.1.val = l ⦄ := by
     rw [e]; exact rows_loop Listing.from_row Listing.row (fun x v hv => Listing.from_row_spec x v hv) rows l h
   unfold Listing.from_rows
+  step with hl
+  simp [ok1_post, l_post]
+
+theorem Role.from_rows_spec (rows : alloc.vec.Vec (alloc.vec.Vec Val)) (l : List Role)
+    (h : rows.val.map (·.val) = l.map Role.row) :
+    Role.from_rows rows ⦃ o => ∃ v, o = some v ∧ v.val = l ⦄ := by
+  have e : Role.from_rows_loop rows (alloc.vec.Vec.new Role) true 0#usize =
+      loop (fun x => rowsBody Role.from_row rows x.1 x.2.1 x.2.2) (alloc.vec.Vec.new Role, true, 0#usize) := by
+    unfold Role.from_rows_loop; congr 1; funext ⟨a, b, c⟩
+    simp only []; unfold Role.from_rows_loop.body rowsBody
+    dsimp only
+    split <;> (try rfl)
+    congr 1; funext v; congr 1; funext o; cases o <;> rfl
+  have hl : Role.from_rows_loop rows (alloc.vec.Vec.new Role) true 0#usize ⦃ r => r.2 = true ∧ r.1.val = l ⦄ := by
+    rw [e]; exact rows_loop Role.from_row Role.row (fun x v hv => Role.from_row_spec x v hv) rows l h
+  unfold Role.from_rows
   step with hl
   simp [ok1_post, l_post]
 
@@ -1584,8 +1584,8 @@ def IsRow : Nat → List Val → Prop
   | 7 => fun r => ∃ x : PathKind, r = PathKind.row x
   | 8 => fun r => ∃ x : Event, r = Event.row x
   | 9 => fun r => ∃ x : Body, r = Body.row x
-  | 10 => fun r => ∃ x : Role, r = Role.row x
-  | 11 => fun r => ∃ x : Listing, r = Listing.row x
+  | 10 => fun r => ∃ x : Listing, r = Listing.row x
+  | 11 => fun r => ∃ x : Role, r = Role.row x
   | _ => fun _ => False
 
 /-- Split a goal about table `t` into one goal per table. -/
@@ -1595,15 +1595,15 @@ macro "cases_table " t:ident : tactic => `(tactic| rcases $t:ident with _ | _ | 
 macro "schema_step" " [" ls:Lean.Parser.Tactic.simpLemma,* "]" : tactic => `(tactic| (
   intro s w; funext t
   cases w <;> cases_table t <;>
-    simp [applyAllW, applyW, upsert, Repository.putA, Repository.table, Repository.keyLen, Repository.row, PatchRow.putA, PatchRow.table, PatchRow.keyLen, PatchRow.delA, PatchRow.delWhereA, Dependency.putA, Dependency.table, Dependency.keyLen, Dependency.delA, Dependency.delWhereA, Approval.putA, Approval.table, Approval.keyLen, Approval.delA, Approval.delWhereA, CheckReport.putA, CheckReport.table, CheckReport.keyLen, CheckReport.delA, CheckReport.delWhereA, Channel.putA, Channel.table, Channel.keyLen, Channel.delA, Channel.delWhereA, Member.putA, Member.table, Member.keyLen, Member.delA, Member.delWhereA, PathKind.putA, PathKind.table, PathKind.keyLen, PathKind.delA, PathKind.delWhereA, Event.putA, Event.table, Event.keyLen, Event.delA, Event.delWhereA, Body.putA, Body.table, Body.keyLen, Body.delA, Body.delWhereA, Role.putA, Role.table, Role.keyLen, Role.delA, Role.delWhereA, Listing.putA, Listing.table, Listing.keyLen, Listing.delA, Listing.delWhereA, $ls,*] <;>
+    simp [applyAllW, applyW, upsert, Repository.putA, Repository.table, Repository.keyLen, Repository.row, PatchRow.putA, PatchRow.table, PatchRow.keyLen, PatchRow.delA, PatchRow.delWhereA, Dependency.putA, Dependency.table, Dependency.keyLen, Dependency.delA, Dependency.delWhereA, Approval.putA, Approval.table, Approval.keyLen, Approval.delA, Approval.delWhereA, CheckReport.putA, CheckReport.table, CheckReport.keyLen, CheckReport.delA, CheckReport.delWhereA, Channel.putA, Channel.table, Channel.keyLen, Channel.delA, Channel.delWhereA, Member.putA, Member.table, Member.keyLen, Member.delA, Member.delWhereA, PathKind.putA, PathKind.table, PathKind.keyLen, PathKind.delA, PathKind.delWhereA, Event.putA, Event.table, Event.keyLen, Event.delA, Event.delWhereA, Body.putA, Body.table, Body.keyLen, Body.delA, Body.delWhereA, Listing.putA, Listing.table, Listing.keyLen, Listing.delA, Listing.delWhereA, Role.putA, Role.table, Role.keyLen, Role.delA, Role.delWhereA, $ls,*] <;>
     first
-      | exact map_filter_of _ _ _ _ (fun y => by simp [Repository.row, PatchRow.row, Dependency.row, Approval.row, CheckReport.row, Channel.row, Member.row, PathKind.row, Event.row, Body.row, Role.row, Listing.row])
-      | (congr 1; exact List.filter_congr (fun y _ => by simp [Repository.row, PatchRow.row, Dependency.row, Approval.row, CheckReport.row, Channel.row, Member.row, PathKind.row, Event.row, Body.row, Role.row, Listing.row]))))
+      | exact map_filter_of _ _ _ _ (fun y => by simp [Repository.row, PatchRow.row, Dependency.row, Approval.row, CheckReport.row, Channel.row, Member.row, PathKind.row, Event.row, Body.row, Listing.row, Role.row])
+      | (congr 1; exact List.filter_congr (fun y _ => by simp [Repository.row, PatchRow.row, Dependency.row, Approval.row, CheckReport.row, Channel.row, Member.row, PathKind.row, Event.row, Body.row, Listing.row, Role.row]))))
 
 /-- Every table write is well formed: `schema_ok [sqlA]`. -/
 macro "schema_ok" " [" ls:Lean.Parser.Tactic.simpLemma,* "]" : tactic => `(tactic| (
   intro w; cases w <;>
-    simp [WriteOk, RowOk, IsRow, Repository.putA, Repository.table, Repository.keyLen, PatchRow.putA, PatchRow.table, PatchRow.keyLen, PatchRow.delA, PatchRow.delWhereA, Dependency.putA, Dependency.table, Dependency.keyLen, Dependency.delA, Dependency.delWhereA, Approval.putA, Approval.table, Approval.keyLen, Approval.delA, Approval.delWhereA, CheckReport.putA, CheckReport.table, CheckReport.keyLen, CheckReport.delA, CheckReport.delWhereA, Channel.putA, Channel.table, Channel.keyLen, Channel.delA, Channel.delWhereA, Member.putA, Member.table, Member.keyLen, Member.delA, Member.delWhereA, PathKind.putA, PathKind.table, PathKind.keyLen, PathKind.delA, PathKind.delWhereA, Event.putA, Event.table, Event.keyLen, Event.delA, Event.delWhereA, Body.putA, Body.table, Body.keyLen, Body.delA, Body.delWhereA, Role.putA, Role.table, Role.keyLen, Role.delA, Role.delWhereA, Listing.putA, Listing.table, Listing.keyLen, Listing.delA, Listing.delWhereA, $ls,*]))
+    simp [WriteOk, RowOk, IsRow, Repository.putA, Repository.table, Repository.keyLen, PatchRow.putA, PatchRow.table, PatchRow.keyLen, PatchRow.delA, PatchRow.delWhereA, Dependency.putA, Dependency.table, Dependency.keyLen, Dependency.delA, Dependency.delWhereA, Approval.putA, Approval.table, Approval.keyLen, Approval.delA, Approval.delWhereA, CheckReport.putA, CheckReport.table, CheckReport.keyLen, CheckReport.delA, CheckReport.delWhereA, Channel.putA, Channel.table, Channel.keyLen, Channel.delA, Channel.delWhereA, Member.putA, Member.table, Member.keyLen, Member.delA, Member.delWhereA, PathKind.putA, PathKind.table, PathKind.keyLen, PathKind.delA, PathKind.delWhereA, Event.putA, Event.table, Event.keyLen, Event.delA, Event.delWhereA, Body.putA, Body.table, Body.keyLen, Body.delA, Body.delWhereA, Listing.putA, Listing.table, Listing.keyLen, Listing.delA, Listing.delWhereA, Role.putA, Role.table, Role.keyLen, Role.delA, Role.delWhereA, $ls,*]))
 
 /-- A fresh tenant's tables: `schema_init [enc, init]`. -/
 macro "schema_init" " [" ls:Lean.Parser.Tactic.simpLemma,* "]" : tactic => `(tactic| (
@@ -1627,8 +1627,8 @@ def Snapshot.enc (s : Snapshot) : Tables Val
   | 7 => s.paths.val.map PathKind.row
   | 8 => s.events.val.map Event.row
   | 9 => s.bodies.val.map Body.row
-  | 10 => s.roles.val.map Role.row
-  | 11 => s.listings.val.map Listing.row
+  | 10 => s.listings.val.map Listing.row
+  | 11 => s.roles.val.map Role.row
   | _ => []
 
 /-- A fresh tenant's snapshot. -/
@@ -1647,8 +1647,8 @@ def Rows.tabs (r : Rows) : Tables Val
   | 7 => r.paths.val.map (·.val)
   | 8 => r.events.val.map (·.val)
   | 9 => r.bodies.val.map (·.val)
-  | 10 => r.roles.val.map (·.val)
-  | 11 => r.listings.val.map (·.val)
+  | 10 => r.listings.val.map (·.val)
+  | 11 => r.roles.val.map (·.val)
   | _ => []
 
 theorem Snapshot.clone_eq (s : Snapshot) : Snapshot.Insts.CoreCloneClone.clone s = ok s := by
@@ -1692,10 +1692,10 @@ theorem decode_spec (r : Rows) (E : Tables Val)
   obtain ⟨l8, e8⟩ := exists_map Event.row (Rows.tabs r 8) (fun row h => hrow 8 row (h8.subset h))
   have h9 : (Rows.tabs r 9).Perm (E 9) := keyed_perm (hR 9)
   obtain ⟨l9, e9⟩ := exists_map Body.row (Rows.tabs r 9) (fun row h => hrow 9 row (h9.subset h))
-  have h11 : (Rows.tabs r 11).Perm (E 11) := keyed_perm (hR 11)
-  obtain ⟨l11, e11⟩ := exists_map Listing.row (Rows.tabs r 11) (fun row h => hrow 11 row (h11.subset h))
   have h10 : (Rows.tabs r 10).Perm (E 10) := keyed_perm (hR 10)
-  obtain ⟨l10, e10⟩ := exists_map Role.row (Rows.tabs r 10) (fun row h => hrow 10 row (h10.subset h))
+  obtain ⟨l10, e10⟩ := exists_map Listing.row (Rows.tabs r 10) (fun row h => hrow 10 row (h10.subset h))
+  have h11 : (Rows.tabs r 11).Perm (E 11) := keyed_perm (hR 11)
+  obtain ⟨l11, e11⟩ := exists_map Role.row (Rows.tabs r 11) (fun row h => hrow 11 row (h11.subset h))
   unfold decode
   step with Repository.from_one_spec r.repository l0 n0 e0 as ⟨ o0, h0 ⟩
   subst h0; dsimp only
@@ -1717,10 +1717,10 @@ theorem decode_spec (r : Rows) (E : Tables Val)
   subst ho8; dsimp only
   step with Body.from_rows_spec r.bodies l9 e9 as ⟨ o9, v9, ho9, hv9 ⟩
   subst ho9; dsimp only
-  step with Listing.from_rows_spec r.listings l11 e11 as ⟨ o11, v11, ho11, hv11 ⟩
-  subst ho11; dsimp only
-  step with Role.from_rows_spec r.roles l10 e10 as ⟨ o10, v10, ho10, hv10 ⟩
+  step with Listing.from_rows_spec r.listings l10 e10 as ⟨ o10, v10, ho10, hv10 ⟩
   subst ho10; dsimp only
+  step with Role.from_rows_spec r.roles l11 e11 as ⟨ o11, v11, ho11, hv11 ⟩
+  subst ho11; dsimp only
   refine ⟨_, rfl, fun t => ?_⟩
   match t with
   | 0 => simp only [Snapshot.enc, f0]; exact .refl _

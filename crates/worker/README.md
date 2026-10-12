@@ -30,7 +30,7 @@ On October 11, 2026 this ran in local `workerd` (Wrangler 4, Hyperdrive local mo
 
 ## Deploy
 
-Create the tables once as the database owner; Hyperdrive roles usually cannot run DDL:
+Create the tables as the database owner, and run it again before deploying a version that adds tables (the statements are `CREATE … IF NOT EXISTS`, so rerunning is safe). Hyperdrive roles usually cannot run DDL:
 
 ```sh
 O5S_DATABASE_SCHEMA=o5s o5s-server ddl | psql "$OWNER_URL"

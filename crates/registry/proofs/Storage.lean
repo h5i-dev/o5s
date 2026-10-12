@@ -26,6 +26,7 @@ def enc (s : St) : Tables Val
   | 8 => s.events.map Event.row
   | 9 => s.bodies.map Body.row
   | 10 => s.listings.map Listing.row
+  | 11 => s.roles.map Role.row
   | _ => []
 
 /-- The table writes of one write. -/
@@ -41,6 +42,7 @@ def sqlA : Write → List (AWrite Val)
   | .PutEvent e => [Event.putA e]
   | .PutBody b => [Body.putA b]
   | .PutListing l => [Listing.putA l]
+  | .PutRole r => [Role.putA r]
 
 set_option maxHeartbeats 4000000 in
 def app : App St Write Val where

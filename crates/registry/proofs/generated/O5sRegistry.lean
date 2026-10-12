@@ -506,19 +506,19 @@ structure Body where
   patch : Std.U64
   bytes : alloc.vec.Vec Std.U8
 
-/-- [o5s_registry::Role]
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 95:12-98:13
-    Visibility: public -/
-structure Role where
-  user : Std.U64
-  level : Std.U64
-
 /-- [o5s_registry::Listing]
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 95:12-98:13
     Visibility: public -/
 structure Listing where
   repo : Std.U64
   label : alloc.vec.Vec Std.U8
+
+/-- [o5s_registry::Role]
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 95:12-98:13
+    Visibility: public -/
+structure Role where
+  user : Std.U64
+  level : Std.U64
 
 /-- [o5s_registry::Repository]
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 95:12-98:13
@@ -582,15 +582,15 @@ structure Repository where
     Visibility: public -/
 @[global_simps, irreducible] def Body.TABLE : Std.U32 := 9#u32
 
-/-- [o5s_registry::{o5s_registry::Role}::TABLE]
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 135:12-135:60
-    Visibility: public -/
-@[global_simps, irreducible] def Role.TABLE : Std.U32 := 10#u32
-
 /-- [o5s_registry::{o5s_registry::Listing}::TABLE]
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 135:12-135:60
     Visibility: public -/
-@[global_simps, irreducible] def Listing.TABLE : Std.U32 := 11#u32
+@[global_simps, irreducible] def Listing.TABLE : Std.U32 := 10#u32
+
+/-- [o5s_registry::{o5s_registry::Role}::TABLE]
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 135:12-135:60
+    Visibility: public -/
+@[global_simps, irreducible] def Role.TABLE : Std.U32 := 11#u32
 
 /-- [o5s_registry::{o5s_registry::Repository}::KEY_LEN]
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 136:12-136:62
@@ -642,15 +642,15 @@ structure Repository where
     Visibility: public -/
 @[global_simps, irreducible] def Body.KEY_LEN : Std.U32 := 1#u32
 
-/-- [o5s_registry::{o5s_registry::Role}::KEY_LEN]
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 136:12-136:62
-    Visibility: public -/
-@[global_simps, irreducible] def Role.KEY_LEN : Std.U32 := 1#u32
-
 /-- [o5s_registry::{o5s_registry::Listing}::KEY_LEN]
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 136:12-136:62
     Visibility: public -/
 @[global_simps, irreducible] def Listing.KEY_LEN : Std.U32 := 1#u32
+
+/-- [o5s_registry::{o5s_registry::Role}::KEY_LEN]
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 136:12-136:62
+    Visibility: public -/
+@[global_simps, irreducible] def Role.KEY_LEN : Std.U32 := 1#u32
 
 /-- [o5s_registry::{o5s_registry::PatchRow}::to_row]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 138:12-143:13
@@ -760,15 +760,6 @@ def Body.to_row (self : Body) : Result (alloc.vec.Vec h5i_app_sql.Val) := do
   let v1 ← alloc.vec.VecU8.Insts.H5i_app_sqlColumn.to_val self.bytes
   alloc.vec.Vec.push out v1
 
-/-- [o5s_registry::{o5s_registry::Role}::to_row]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 138:12-143:13
-    Visibility: public -/
-def Role.to_row (self : Role) : Result (alloc.vec.Vec h5i_app_sql.Val) := do
-  let v ← U64.Insts.H5i_app_sqlColumn.to_val self.user
-  let out ← alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Val) v
-  let v1 ← U64.Insts.H5i_app_sqlColumn.to_val self.level
-  alloc.vec.Vec.push out v1
-
 /-- [o5s_registry::{o5s_registry::Listing}::to_row]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 138:12-143:13
     Visibility: public -/
@@ -777,6 +768,15 @@ def Listing.to_row
   let v ← U64.Insts.H5i_app_sqlColumn.to_val self.repo
   let out ← alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Val) v
   let v1 ← alloc.vec.VecU8.Insts.H5i_app_sqlColumn.to_val self.label
+  alloc.vec.Vec.push out v1
+
+/-- [o5s_registry::{o5s_registry::Role}::to_row]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 138:12-143:13
+    Visibility: public -/
+def Role.to_row (self : Role) : Result (alloc.vec.Vec h5i_app_sql.Val) := do
+  let v ← U64.Insts.H5i_app_sqlColumn.to_val self.user
+  let out ← alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Val) v
+  let v1 ← U64.Insts.H5i_app_sqlColumn.to_val self.level
   alloc.vec.Vec.push out v1
 
 /-- [o5s_registry::{o5s_registry::Repository}::to_row]:
@@ -1215,33 +1215,6 @@ def Body.from_row
       | some x1 => let _ ← i1 + 1#usize
                    ok (some { patch := x, bytes := x1 })
 
-/-- [o5s_registry::{o5s_registry::Role}::from_row]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 146:12-167:13
-    Visibility: public -/
-def Role.from_row
-  (row : alloc.vec.Vec h5i_app_sql.Val) : Result (Option Role) := do
-  let i := alloc.vec.Vec.len row
-  let i1 ← 0#usize + 1#usize
-  let i2 ← i1 + 1#usize
-  if i != i2
-  then ok none
-  else
-    let v ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
-        h5i_app_sql.Val) row 0#usize
-    let o ← U64.Insts.H5i_app_sqlColumn.from_val v
-    match o with
-    | none => ok none
-    | some x =>
-      let v1 ←
-        alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
-          h5i_app_sql.Val) row i1
-      let o1 ← U64.Insts.H5i_app_sqlColumn.from_val v1
-      match o1 with
-      | none => ok none
-      | some x1 => let _ ← i1 + 1#usize
-                   ok (some { user := x, level := x1 })
-
 /-- [o5s_registry::{o5s_registry::Listing}::from_row]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 146:12-167:13
     Visibility: public -/
@@ -1268,6 +1241,33 @@ def Listing.from_row
       | none => ok none
       | some x1 => let _ ← i1 + 1#usize
                    ok (some { repo := x, label := x1 })
+
+/-- [o5s_registry::{o5s_registry::Role}::from_row]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 146:12-167:13
+    Visibility: public -/
+def Role.from_row
+  (row : alloc.vec.Vec h5i_app_sql.Val) : Result (Option Role) := do
+  let i := alloc.vec.Vec.len row
+  let i1 ← 0#usize + 1#usize
+  let i2 ← i1 + 1#usize
+  if i != i2
+  then ok none
+  else
+    let v ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+        h5i_app_sql.Val) row 0#usize
+    let o ← U64.Insts.H5i_app_sqlColumn.from_val v
+    match o with
+    | none => ok none
+    | some x =>
+      let v1 ←
+        alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+          h5i_app_sql.Val) row i1
+      let o1 ← U64.Insts.H5i_app_sqlColumn.from_val v1
+      match o1 with
+      | none => ok none
+      | some x1 => let _ ← i1 + 1#usize
+                   ok (some { user := x, level := x1 })
 
 /-- [o5s_registry::{o5s_registry::Repository}::from_rows]: loop body 0:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 174:16-180:17
@@ -1800,59 +1800,6 @@ def Body.from_rows
   then ok (some out)
   else ok none
 
-/-- [o5s_registry::{o5s_registry::Role}::from_rows]: loop body 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 174:16-180:17
-    Visibility: public -/
-@[rust_loop_body]
-def Role.from_rows_loop.body
-  (rows : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val))
-  (out : alloc.vec.Vec Role) (ok1 : Bool) (i : Std.Usize) :
-  Result (ControlFlow ((alloc.vec.Vec Role) × Bool × Std.Usize)
-    ((alloc.vec.Vec Role) × Bool))
-  := do
-  let i1 := alloc.vec.Vec.len rows
-  if i < i1
-  then
-    let v ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
-        h5i_app_sql.Val)) rows i
-    let o ← Role.from_row v
-    let (out1, ok2) ←
-      match o with
-      | none => ok (out, false)
-      | some x => do
-                  let out2 ← alloc.vec.Vec.push out x
-                  ok (out2, ok1)
-    let i2 ← i + 1#usize
-    ok (cont (out1, ok2, i2))
-  else ok (done (out, ok1))
-
-/-- [o5s_registry::{o5s_registry::Role}::from_rows]: loop 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 174:16-180:17
-    Visibility: public -/
-@[rust_loop]
-def Role.from_rows_loop
-  (rows : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val))
-  (out : alloc.vec.Vec Role) (ok1 : Bool) (i : Std.Usize) :
-  Result ((alloc.vec.Vec Role) × Bool)
-  := do
-  loop
-    (fun (out1, ok2, i1) => Role.from_rows_loop.body rows out1 ok2 i1)
-    (out, ok1, i)
-
-/-- [o5s_registry::{o5s_registry::Role}::from_rows]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 170:12-186:13
-    Visibility: public -/
-def Role.from_rows
-  (rows : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val)) :
-  Result (Option (alloc.vec.Vec Role))
-  := do
-  let (out, ok1) ←
-    Role.from_rows_loop rows (alloc.vec.Vec.new Role) true 0#usize
-  if ok1
-  then ok (some out)
-  else ok none
-
 /-- [o5s_registry::{o5s_registry::Listing}::from_rows]: loop body 0:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 174:16-180:17
     Visibility: public -/
@@ -1902,6 +1849,59 @@ def Listing.from_rows
   := do
   let (out, ok1) ←
     Listing.from_rows_loop rows (alloc.vec.Vec.new Listing) true 0#usize
+  if ok1
+  then ok (some out)
+  else ok none
+
+/-- [o5s_registry::{o5s_registry::Role}::from_rows]: loop body 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 174:16-180:17
+    Visibility: public -/
+@[rust_loop_body]
+def Role.from_rows_loop.body
+  (rows : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val))
+  (out : alloc.vec.Vec Role) (ok1 : Bool) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Role) × Bool × Std.Usize)
+    ((alloc.vec.Vec Role) × Bool))
+  := do
+  let i1 := alloc.vec.Vec.len rows
+  if i < i1
+  then
+    let v ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
+        h5i_app_sql.Val)) rows i
+    let o ← Role.from_row v
+    let (out1, ok2) ←
+      match o with
+      | none => ok (out, false)
+      | some x => do
+                  let out2 ← alloc.vec.Vec.push out x
+                  ok (out2, ok1)
+    let i2 ← i + 1#usize
+    ok (cont (out1, ok2, i2))
+  else ok (done (out, ok1))
+
+/-- [o5s_registry::{o5s_registry::Role}::from_rows]: loop 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 174:16-180:17
+    Visibility: public -/
+@[rust_loop]
+def Role.from_rows_loop
+  (rows : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val))
+  (out : alloc.vec.Vec Role) (ok1 : Bool) (i : Std.Usize) :
+  Result ((alloc.vec.Vec Role) × Bool)
+  := do
+  loop
+    (fun (out1, ok2, i1) => Role.from_rows_loop.body rows out1 ok2 i1)
+    (out, ok1, i)
+
+/-- [o5s_registry::{o5s_registry::Role}::from_rows]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 170:12-186:13
+    Visibility: public -/
+def Role.from_rows
+  (rows : alloc.vec.Vec (alloc.vec.Vec h5i_app_sql.Val)) :
+  Result (Option (alloc.vec.Vec Role))
+  := do
+  let (out, ok1) ←
+    Role.from_rows_loop rows (alloc.vec.Vec.new Role) true 0#usize
   if ok1
   then ok (some out)
   else ok none
@@ -1976,19 +1976,19 @@ def Body.sql_put (self : Body) : Result h5i_app_sql.Write := do
   let v ← Body.to_row self
   ok (h5i_app_sql.Write.Put Body.TABLE Body.KEY_LEN v)
 
-/-- [o5s_registry::{o5s_registry::Role}::sql_put]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 189:12-191:13
-    Visibility: public -/
-def Role.sql_put (self : Role) : Result h5i_app_sql.Write := do
-  let v ← Role.to_row self
-  ok (h5i_app_sql.Write.Put Role.TABLE Role.KEY_LEN v)
-
 /-- [o5s_registry::{o5s_registry::Listing}::sql_put]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 189:12-191:13
     Visibility: public -/
 def Listing.sql_put (self : Listing) : Result h5i_app_sql.Write := do
   let v ← Listing.to_row self
   ok (h5i_app_sql.Write.Put Listing.TABLE Listing.KEY_LEN v)
+
+/-- [o5s_registry::{o5s_registry::Role}::sql_put]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 189:12-191:13
+    Visibility: public -/
+def Role.sql_put (self : Role) : Result h5i_app_sql.Write := do
+  let v ← Role.to_row self
+  ok (h5i_app_sql.Write.Put Role.TABLE Role.KEY_LEN v)
 
 /-- [o5s_registry::{o5s_registry::Repository}::from_one]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 204:12-212:13
@@ -2454,51 +2454,6 @@ def Body.put
   (v : alloc.vec.Vec Body) (x : Body) : Result (alloc.vec.Vec Body) := do
   Body.put_loop v x 0#usize
 
-/-- [o5s_registry::{o5s_registry::Role}::put]: loop body 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 220:16-228:13
-    Visibility: public -/
-@[rust_loop_body]
-def Role.put_loop.body
-  (v : alloc.vec.Vec Role) (x : Role) (i : Std.Usize) :
-  Result (ControlFlow Std.Usize (alloc.vec.Vec Role))
-  := do
-  let i1 := alloc.vec.Vec.len v
-  if i < i1
-  then
-    let r ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Role) v i
-    if r.user = x.user
-    then
-      let (_, index_mut_back) ←
-        alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Role) v
-          i
-      let v1 := index_mut_back x
-      ok (done v1)
-    else let i2 ← i + 1#usize
-         ok (cont i2)
-  else let v1 ← alloc.vec.Vec.push v x
-       ok (done v1)
-
-/-- [o5s_registry::{o5s_registry::Role}::put]: loop 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 220:16-228:13
-    Visibility: public -/
-@[rust_loop]
-def Role.put_loop
-  (v : alloc.vec.Vec Role) (x : Role) (i : Std.Usize) :
-  Result (alloc.vec.Vec Role)
-  := do
-  loop
-    (fun i1 => Role.put_loop.body v x i1)
-    i
-
-/-- [o5s_registry::{o5s_registry::Role}::put]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 218:12-228:13
-    Visibility: public -/
-@[reducible]
-def Role.put
-  (v : alloc.vec.Vec Role) (x : Role) : Result (alloc.vec.Vec Role) := do
-  Role.put_loop v x 0#usize
-
 /-- [o5s_registry::{o5s_registry::Listing}::put]: loop body 0:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 220:16-228:13
     Visibility: public -/
@@ -2545,6 +2500,51 @@ def Listing.put
   Result (alloc.vec.Vec Listing)
   := do
   Listing.put_loop v x 0#usize
+
+/-- [o5s_registry::{o5s_registry::Role}::put]: loop body 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 220:16-228:13
+    Visibility: public -/
+@[rust_loop_body]
+def Role.put_loop.body
+  (v : alloc.vec.Vec Role) (x : Role) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize (alloc.vec.Vec Role))
+  := do
+  let i1 := alloc.vec.Vec.len v
+  if i < i1
+  then
+    let r ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Role) v i
+    if r.user = x.user
+    then
+      let (_, index_mut_back) ←
+        alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Role) v
+          i
+      let v1 := index_mut_back x
+      ok (done v1)
+    else let i2 ← i + 1#usize
+         ok (cont i2)
+  else let v1 ← alloc.vec.Vec.push v x
+       ok (done v1)
+
+/-- [o5s_registry::{o5s_registry::Role}::put]: loop 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 220:16-228:13
+    Visibility: public -/
+@[rust_loop]
+def Role.put_loop
+  (v : alloc.vec.Vec Role) (x : Role) (i : Std.Usize) :
+  Result (alloc.vec.Vec Role)
+  := do
+  loop
+    (fun i1 => Role.put_loop.body v x i1)
+    i
+
+/-- [o5s_registry::{o5s_registry::Role}::put]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 218:12-228:13
+    Visibility: public -/
+@[reducible]
+def Role.put
+  (v : alloc.vec.Vec Role) (x : Role) : Result (alloc.vec.Vec Role) := do
+  Role.put_loop v x 0#usize
 
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::PatchRow}::clone]:
     Source: 'crates/registry/src/lib.rs', lines 101:13-101:18
@@ -3076,60 +3076,8 @@ def Body.del
   := do
   Body.del_loop v patch (alloc.vec.Vec.new Body) 0#usize
 
-/-- [o5s_registry::{impl core::clone::Clone for o5s_registry::Role}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 175:13-175:18
-    Visibility: public -/
-def Role.Insts.CoreCloneClone.clone (self : Role) : Result Role := do
-  ok self
-
-/-- [o5s_registry::{o5s_registry::Role}::del]: loop body 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 234:16-239:17
-    Visibility: public -/
-@[rust_loop_body]
-def Role.del_loop.body
-  (v : alloc.vec.Vec Role) (user : Std.U64) (out : alloc.vec.Vec Role)
-  (i : Std.Usize) :
-  Result (ControlFlow ((alloc.vec.Vec Role) × Std.Usize) (alloc.vec.Vec Role))
-  := do
-  let i1 := alloc.vec.Vec.len v
-  if i < i1
-  then
-    let r ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Role) v i
-    let out1 ←
-      if r.user = user
-      then ok out
-      else
-        do
-        let r1 ← Role.Insts.CoreCloneClone.clone r
-        alloc.vec.Vec.push out r1
-    let i2 ← i + 1#usize
-    ok (cont (out1, i2))
-  else ok (done out)
-
-/-- [o5s_registry::{o5s_registry::Role}::del]: loop 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 234:16-239:17
-    Visibility: public -/
-@[rust_loop]
-def Role.del_loop
-  (v : alloc.vec.Vec Role) (user : Std.U64) (out : alloc.vec.Vec Role)
-  (i : Std.Usize) :
-  Result (alloc.vec.Vec Role)
-  := do
-  loop
-    (fun (out1, i1) => Role.del_loop.body v user out1 i1)
-    (out, i)
-
-/-- [o5s_registry::{o5s_registry::Role}::del]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 231:12-241:13
-    Visibility: public -/
-@[reducible]
-def Role.del
-  (v : alloc.vec.Vec Role) (user : Std.U64) : Result (alloc.vec.Vec Role) := do
-  Role.del_loop v user (alloc.vec.Vec.new Role) 0#usize
-
 /-- [o5s_registry::{impl core::clone::Clone for o5s_registry::Listing}::clone]:
-    Source: 'crates/registry/src/lib.rs', lines 183:13-183:18
+    Source: 'crates/registry/src/lib.rs', lines 174:13-174:18
     Visibility: public -/
 def Listing.Insts.CoreCloneClone.clone (self : Listing) : Result Listing := do
   let i ← lift (core.clone.impls.CloneU64.clone self.repo)
@@ -3184,6 +3132,58 @@ def Listing.del
   Result (alloc.vec.Vec Listing)
   := do
   Listing.del_loop v repo (alloc.vec.Vec.new Listing) 0#usize
+
+/-- [o5s_registry::{impl core::clone::Clone for o5s_registry::Role}::clone]:
+    Source: 'crates/registry/src/lib.rs', lines 183:13-183:18
+    Visibility: public -/
+def Role.Insts.CoreCloneClone.clone (self : Role) : Result Role := do
+  ok self
+
+/-- [o5s_registry::{o5s_registry::Role}::del]: loop body 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 234:16-239:17
+    Visibility: public -/
+@[rust_loop_body]
+def Role.del_loop.body
+  (v : alloc.vec.Vec Role) (user : Std.U64) (out : alloc.vec.Vec Role)
+  (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Role) × Std.Usize) (alloc.vec.Vec Role))
+  := do
+  let i1 := alloc.vec.Vec.len v
+  if i < i1
+  then
+    let r ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Role) v i
+    let out1 ←
+      if r.user = user
+      then ok out
+      else
+        do
+        let r1 ← Role.Insts.CoreCloneClone.clone r
+        alloc.vec.Vec.push out r1
+    let i2 ← i + 1#usize
+    ok (cont (out1, i2))
+  else ok (done out)
+
+/-- [o5s_registry::{o5s_registry::Role}::del]: loop 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 234:16-239:17
+    Visibility: public -/
+@[rust_loop]
+def Role.del_loop
+  (v : alloc.vec.Vec Role) (user : Std.U64) (out : alloc.vec.Vec Role)
+  (i : Std.Usize) :
+  Result (alloc.vec.Vec Role)
+  := do
+  loop
+    (fun (out1, i1) => Role.del_loop.body v user out1 i1)
+    (out, i)
+
+/-- [o5s_registry::{o5s_registry::Role}::del]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 231:12-241:13
+    Visibility: public -/
+@[reducible]
+def Role.del
+  (v : alloc.vec.Vec Role) (user : Std.U64) : Result (alloc.vec.Vec Role) := do
+  Role.del_loop v user (alloc.vec.Vec.new Role) 0#usize
 
 /-- [o5s_registry::{o5s_registry::PatchRow}::del_where]: loop body 0:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 247:16-252:17
@@ -3645,56 +3645,6 @@ def Body.del_where
   := do
   Body.del_where_loop v col val (alloc.vec.Vec.new Body) 0#usize
 
-/-- [o5s_registry::{o5s_registry::Role}::del_where]: loop body 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 247:16-252:17
-    Visibility: public -/
-@[rust_loop_body]
-def Role.del_where_loop.body
-  (v : alloc.vec.Vec Role) (col : Std.U32) (val : h5i_app_sql.Val)
-  (out : alloc.vec.Vec Role) (i : Std.Usize) :
-  Result (ControlFlow ((alloc.vec.Vec Role) × Std.Usize) (alloc.vec.Vec Role))
-  := do
-  let i1 := alloc.vec.Vec.len v
-  if i < i1
-  then
-    let r ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Role) v i
-    let v1 ← Role.to_row r
-    let b ← h5i_app_sql.has_col v1 col val
-    let out1 ←
-      if b
-      then ok out
-      else
-        do
-        let r1 ← Role.Insts.CoreCloneClone.clone r
-        alloc.vec.Vec.push out r1
-    let i2 ← i + 1#usize
-    ok (cont (out1, i2))
-  else ok (done out)
-
-/-- [o5s_registry::{o5s_registry::Role}::del_where]: loop 0:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 247:16-252:17
-    Visibility: public -/
-@[rust_loop]
-def Role.del_where_loop
-  (v : alloc.vec.Vec Role) (col : Std.U32) (val : h5i_app_sql.Val)
-  (out : alloc.vec.Vec Role) (i : Std.Usize) :
-  Result (alloc.vec.Vec Role)
-  := do
-  loop
-    (fun (out1, i1) => Role.del_where_loop.body v col val out1 i1)
-    (out, i)
-
-/-- [o5s_registry::{o5s_registry::Role}::del_where]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 244:12-254:13
-    Visibility: public -/
-@[reducible]
-def Role.del_where
-  (v : alloc.vec.Vec Role) (col : Std.U32) (val : h5i_app_sql.Val) :
-  Result (alloc.vec.Vec Role)
-  := do
-  Role.del_where_loop v col val (alloc.vec.Vec.new Role) 0#usize
-
 /-- [o5s_registry::{o5s_registry::Listing}::del_where]: loop body 0:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 247:16-252:17
     Visibility: public -/
@@ -3745,6 +3695,56 @@ def Listing.del_where
   Result (alloc.vec.Vec Listing)
   := do
   Listing.del_where_loop v col val (alloc.vec.Vec.new Listing) 0#usize
+
+/-- [o5s_registry::{o5s_registry::Role}::del_where]: loop body 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 247:16-252:17
+    Visibility: public -/
+@[rust_loop_body]
+def Role.del_where_loop.body
+  (v : alloc.vec.Vec Role) (col : Std.U32) (val : h5i_app_sql.Val)
+  (out : alloc.vec.Vec Role) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Role) × Std.Usize) (alloc.vec.Vec Role))
+  := do
+  let i1 := alloc.vec.Vec.len v
+  if i < i1
+  then
+    let r ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Role) v i
+    let v1 ← Role.to_row r
+    let b ← h5i_app_sql.has_col v1 col val
+    let out1 ←
+      if b
+      then ok out
+      else
+        do
+        let r1 ← Role.Insts.CoreCloneClone.clone r
+        alloc.vec.Vec.push out r1
+    let i2 ← i + 1#usize
+    ok (cont (out1, i2))
+  else ok (done out)
+
+/-- [o5s_registry::{o5s_registry::Role}::del_where]: loop 0:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 247:16-252:17
+    Visibility: public -/
+@[rust_loop]
+def Role.del_where_loop
+  (v : alloc.vec.Vec Role) (col : Std.U32) (val : h5i_app_sql.Val)
+  (out : alloc.vec.Vec Role) (i : Std.Usize) :
+  Result (alloc.vec.Vec Role)
+  := do
+  loop
+    (fun (out1, i1) => Role.del_where_loop.body v col val out1 i1)
+    (out, i)
+
+/-- [o5s_registry::{o5s_registry::Role}::del_where]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 244:12-254:13
+    Visibility: public -/
+@[reducible]
+def Role.del_where
+  (v : alloc.vec.Vec Role) (col : Std.U32) (val : h5i_app_sql.Val) :
+  Result (alloc.vec.Vec Role)
+  := do
+  Role.del_where_loop v col val (alloc.vec.Vec.new Role) 0#usize
 
 /-- [o5s_registry::{o5s_registry::PatchRow}::sql_del]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 257:12-261:13
@@ -3827,14 +3827,6 @@ def Body.sql_del (patch : Std.U64) : Result h5i_app_sql.Write := do
   let key ← alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Val) v
   ok (h5i_app_sql.Write.Del Body.TABLE key)
 
-/-- [o5s_registry::{o5s_registry::Role}::sql_del]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 257:12-261:13
-    Visibility: public -/
-def Role.sql_del (user : Std.U64) : Result h5i_app_sql.Write := do
-  let v ← U64.Insts.H5i_app_sqlColumn.to_val user
-  let key ← alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Val) v
-  ok (h5i_app_sql.Write.Del Role.TABLE key)
-
 /-- [o5s_registry::{o5s_registry::Listing}::sql_del]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 257:12-261:13
     Visibility: public -/
@@ -3842,6 +3834,14 @@ def Listing.sql_del (repo : Std.U64) : Result h5i_app_sql.Write := do
   let v ← U64.Insts.H5i_app_sqlColumn.to_val repo
   let key ← alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Val) v
   ok (h5i_app_sql.Write.Del Listing.TABLE key)
+
+/-- [o5s_registry::{o5s_registry::Role}::sql_del]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 257:12-261:13
+    Visibility: public -/
+def Role.sql_del (user : Std.U64) : Result h5i_app_sql.Write := do
+  let v ← U64.Insts.H5i_app_sqlColumn.to_val user
+  let key ← alloc.vec.Vec.push (alloc.vec.Vec.new h5i_app_sql.Val) v
+  ok (h5i_app_sql.Write.Del Role.TABLE key)
 
 /-- [o5s_registry::{o5s_registry::PatchRow}::sql_del_where]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 264:12-266:13
@@ -3906,19 +3906,19 @@ def Body.sql_del_where
   (col : Std.U32) (val : h5i_app_sql.Val) : Result h5i_app_sql.Write := do
   ok (h5i_app_sql.Write.DelWhere Body.TABLE col val)
 
-/-- [o5s_registry::{o5s_registry::Role}::sql_del_where]:
-    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 264:12-266:13
-    Visibility: public -/
-def Role.sql_del_where
-  (col : Std.U32) (val : h5i_app_sql.Val) : Result h5i_app_sql.Write := do
-  ok (h5i_app_sql.Write.DelWhere Role.TABLE col val)
-
 /-- [o5s_registry::{o5s_registry::Listing}::sql_del_where]:
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 264:12-266:13
     Visibility: public -/
 def Listing.sql_del_where
   (col : Std.U32) (val : h5i_app_sql.Val) : Result h5i_app_sql.Write := do
   ok (h5i_app_sql.Write.DelWhere Listing.TABLE col val)
+
+/-- [o5s_registry::{o5s_registry::Role}::sql_del_where]:
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 264:12-266:13
+    Visibility: public -/
+def Role.sql_del_where
+  (col : Std.U32) (val : h5i_app_sql.Val) : Result h5i_app_sql.Write := do
+  ok (h5i_app_sql.Write.DelWhere Role.TABLE col val)
 
 /-- [o5s_registry::Snapshot]
     Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-schema-0.1.1/src/lib.rs', lines 278:8-280:9
@@ -4142,18 +4142,18 @@ def Write.Insts.CoreCloneClone.clone (self : Write) : Result Write := do
     let r ← Role.Insts.CoreCloneClone.clone __self_0
     ok (Write.PutRole r)
 
-/-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::Listing}]
-    Source: 'crates/registry/src/lib.rs', lines 183:13-183:18 -/
-@[reducible]
-def Listing.Insts.CoreCloneClone : core.clone.Clone Listing := {
-  clone := Listing.Insts.CoreCloneClone.clone
-}
-
 /-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::Role}]
-    Source: 'crates/registry/src/lib.rs', lines 175:13-175:18 -/
+    Source: 'crates/registry/src/lib.rs', lines 183:13-183:18 -/
 @[reducible]
 def Role.Insts.CoreCloneClone : core.clone.Clone Role := {
   clone := Role.Insts.CoreCloneClone.clone
+}
+
+/-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::Listing}]
+    Source: 'crates/registry/src/lib.rs', lines 174:13-174:18 -/
+@[reducible]
+def Listing.Insts.CoreCloneClone : core.clone.Clone Listing := {
+  clone := Listing.Insts.CoreCloneClone.clone
 }
 
 /-- Trait implementation: [o5s_registry::{impl core::clone::Clone for o5s_registry::Body}]

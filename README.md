@@ -8,7 +8,7 @@
 
 - **No rebase loop:** Agents propose patches against what they saw. Patches that don't conflict are admitted in any order, and the result is the same. Edits to different lines of one file merge automatically.
 - **Conflicts are data:** Concurrent edits to the same lines are kept side by side as alternatives instead of stopping an agent. A resolution is one more patch, reviewed like any other.
-- **Review is enforced:** A patch enters a channel only with an approval and a passing check report from someone other than its author, and only after everything it depends on.
+- **Review is enforced:** A patch enters a channel only with an approval and a passing check report from someone other than its author, and only after everything it depends on. Repository roles limit who may read, propose, review and grant.
 - **Verified core:** Every registry decision is made by Rust code extracted to Lean, with proofs of the invariant, history, the admission gate and tenant isolation.
 - **Git at the edges:** Agents work in ordinary Git checkouts. Admitted snapshots export to bare Git repositories, or to Cloudflare Artifacts.
 
@@ -129,6 +129,7 @@ Set `O5S_TEST_DATABASE_URL` (for example from `scripts/postgres.sh`) to include 
 
 - [CLI manual](docs/cli.md): connecting Git repositories, proposing, reviewing, resolving and fetching
 - [Architecture](docs/architecture.md) and [patch model](docs/patch-model.md): channels, conflicts and document operations
+- [Access control, token revocation and limits](docs/access.md)
 - [Storage and transactions](docs/storage.md), [load testing](docs/load-testing.md) and [scaling](docs/scaling.md)
 - [Proof scope](docs/proofs.md) and [verification plan](docs/verification-plan.md)
 - [Status](docs/status.md) and [roadmap](docs/roadmap.md)

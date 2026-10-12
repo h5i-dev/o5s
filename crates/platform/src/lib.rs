@@ -917,7 +917,18 @@ impl Database {
                 s.listings
                     .iter()
                     .filter_map(|l| String::from_utf8(l.label.clone()).ok())
-                    .filter(|name| self.repo(actor, name).is_ok())
+                    // Names of restricted repositories stay listed to the
+                    // organization; their contents do not.
+                    .filter(|name| {
+                        let scope = repository_key(actor.tenant, name);
+                        self.registry.get(&scope).is_some_and(|s| {
+                            kernel::visible(
+                                &principal(actor, scope),
+                                &s.repository,
+                                &name.as_bytes().to_vec(),
+                            )
+                        })
+                    })
                     .collect()
             })
             .unwrap_or_default();

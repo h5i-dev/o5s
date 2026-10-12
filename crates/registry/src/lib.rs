@@ -170,6 +170,14 @@ h5i_app_schema::schema! {
         bytes: Text,
     }
 
+    /// A repository name in an organization's directory.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+    pub struct Listing in "o5s_listings" {
+        key { repo: u64 }
+        label: Text,
+    }
+
     /// A user's access level to a restricted repository (`READ`..`ADMIN`; `0`
     /// revokes).
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -177,14 +185,6 @@ h5i_app_schema::schema! {
     pub struct Role in "o5s_roles" {
         key { user: u64 }
         level: u64,
-    }
-
-    /// A repository name in an organization's directory.
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    pub struct Listing in "o5s_listings" {
-        key { repo: u64 }
-        label: Text,
     }
 }
 
