@@ -1359,6 +1359,7 @@ dependencies = [
  "h5i-app-token",
  "http-body-util",
  "libcrux-hmac",
+ "o5s-gitpush",
  "o5s-pgwire",
  "o5s-platform",
  "o5s-registry",

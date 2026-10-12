@@ -133,6 +133,8 @@ pub struct Repository {
     channel_names: BTreeMap<u64, String>,
     #[serde(skip)]
     by_hash: BTreeMap<String, u64>,
+    #[serde(skip)]
+    docs: documents::Memo,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Event {

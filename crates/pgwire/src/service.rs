@@ -359,9 +359,42 @@ struct Cached {
 /// More new patches than this load the whole tenant instead of one body each.
 const BODY_BATCH: usize = 32;
 
+/// Repository views by scope. A view is reused only after a probe shows its
+/// repository row (which every commit changes) and roles unchanged, so one
+/// cache can serve many `Service`s, such as a Worker isolate's requests.
+pub struct Cache {
+    views: Mutex<HashMap<u64, Arc<Cached>>>,
+    /// At most this many repositories; a new one evicts another.
+    limit: usize,
+}
+
+impl Cache {
+    pub fn new(limit: usize) -> Self {
+        Self {
+            views: Mutex::new(HashMap::new()),
+            limit: limit.max(1),
+        }
+    }
+
+    fn get(&self, scope: u64) -> Option<Arc<Cached>> {
+        self.views.lock().unwrap().get(&scope).cloned()
+    }
+
+    fn put(&self, scope: u64, cached: Arc<Cached>) {
+        let mut views = self.views.lock().unwrap();
+        if views.len() >= self.limit
+            && !views.contains_key(&scope)
+            && let Some(other) = views.keys().next().copied()
+        {
+            views.remove(&other);
+        }
+        views.insert(scope, cached);
+    }
+}
+
 pub struct Service<C: Connector, R: Runtime> {
     pub engine: Engine<C, R>,
-    cache: Mutex<HashMap<u64, Arc<Cached>>>,
+    cache: Arc<Cache>,
 }
 
 fn principal(actor: &Actor, scope: u64) -> kernel::Principal {
@@ -374,10 +407,12 @@ fn principal(actor: &Actor, scope: u64) -> kernel::Principal {
 
 impl<C: Connector, R: Runtime> Service<C, R> {
     pub fn new(engine: Engine<C, R>) -> Self {
-        Self {
-            engine,
-            cache: Mutex::new(HashMap::new()),
-        }
+        Self::with_cache(engine, Arc::new(Cache::new(usize::MAX)))
+    }
+
+    /// A service whose repository views live in `cache`, shared with others.
+    pub fn with_cache(engine: Engine<C, R>, cache: Arc<Cache>) -> Self {
+        Self { engine, cache }
     }
 
     /// Run an API command's kernel steps, each in its own transaction. A
@@ -458,7 +493,7 @@ impl<C: Connector, R: Runtime> Service<C, R> {
             }
             _ => {}
         }
-        let cached = self.cache.lock().unwrap().get(&scope).cloned();
+        let cached = self.cache.get(scope);
         if let Some(c) = cached
             && needed.iter().all(|id| c.view.patches.contains_key(id))
         {
@@ -501,7 +536,7 @@ impl<C: Connector, R: Runtime> Service<C, R> {
         if !kernel::readable(&p, &probe, &label) {
             return Err(not_found());
         }
-        let cached = self.cache.lock().unwrap().get(&scope).cloned();
+        let cached = self.cache.get(scope);
         if let Some(c) = &cached
             && c.rows.repository == probe.repository
             && c.rows.roles == probe.roles
@@ -564,7 +599,7 @@ impl<C: Connector, R: Runtime> Service<C, R> {
         view.project(&ordered)
             .map_err(|e| Failure::Unavailable(format!("stored registry is inconsistent: {e}")))?;
         let view = Arc::new(view);
-        self.cache.lock().unwrap().insert(
+        self.cache.put(
             scope,
             Arc::new(Cached {
                 rows,
@@ -581,5 +616,31 @@ impl<C: Connector, R: Runtime> Service<C, R> {
             .await
             .map(|_| ())
             .map_err(unavailable)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cached() -> Arc<Cached> {
+        Arc::new(Cached {
+            rows: kernel::Snapshot::default(),
+            view: Arc::new(Repository::default()),
+        })
+    }
+
+    #[test]
+    fn a_bounded_cache_keeps_at_most_its_limit_and_replaces_in_place() {
+        let cache = Cache::new(2);
+        cache.put(1, cached());
+        cache.put(2, cached());
+        // Replacing a cached repository evicts nothing.
+        cache.put(2, cached());
+        assert!(cache.get(1).is_some() && cache.get(2).is_some());
+        // A third repository evicts one of the others.
+        cache.put(3, cached());
+        assert!(cache.get(3).is_some());
+        assert_eq!(cache.views.lock().unwrap().len(), 2);
     }
 }

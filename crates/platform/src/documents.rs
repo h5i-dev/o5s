@@ -47,6 +47,26 @@ pub struct Docs {
     primed: u64,
 }
 
+/// The document identities a repository view has resolved, shared with its
+/// clones: an entry describes a committed patch, whose handle never names
+/// another patch, so a later view of the same repository reuses it and
+/// resolves only the patches committed since. Without it every proposal and
+/// document read resolved the whole history again.
+#[derive(Clone, Default)]
+pub(crate) struct Memo(std::sync::Arc<std::sync::Mutex<Docs>>);
+
+impl PartialEq for Memo {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+impl Eq for Memo {}
+impl std::fmt::Debug for Memo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Memo")
+    }
+}
+
 impl Docs {
     /// The document of patch `id`'s edit at `path`, once resolved.
     pub fn get(&self, id: u64, path: &str) -> Option<&DocId> {
@@ -62,6 +82,9 @@ impl Docs {
 
     /// Resolve every graph edit of patches up to `upto`, in handle order.
     pub fn prime(&mut self, repo: &Repository, upto: u64) -> Result<(), Refusal> {
+        if upto < self.primed {
+            return Ok(());
+        }
         let ids: Vec<u64> = repo
             .patches
             .range(self.primed..=upto)
@@ -264,6 +287,16 @@ pub fn apply_graph_patch(
 }
 
 impl Repository {
+    /// Document identities resolved for every patch up to `top`, from this
+    /// view's memo.
+    fn docs(&self, top: Option<u64>) -> Result<Docs, Refusal> {
+        let mut docs = self.docs.0.lock().unwrap();
+        if let Some(top) = top {
+            docs.prime(self, top)?;
+        }
+        Ok(docs.clone())
+    }
+
     pub fn validate_graph_edits(
         &self,
         deps: &[u64],
@@ -271,10 +304,7 @@ impl Repository {
         hash: &str,
     ) -> Result<(), Refusal> {
         let mut paths = BTreeSet::new();
-        let mut docs = Docs::default();
-        if let Some(top) = deps.iter().max() {
-            docs.prime(self, *top)?;
-        }
+        let docs = self.docs(deps.iter().max().copied())?;
         let mut moved = BTreeSet::new();
         let edited: BTreeSet<&String> = edits.iter().map(|e| &e.path).collect();
         if edits
@@ -348,10 +378,7 @@ impl Repository {
             }
             pending.extend(patch.dependencies.iter().copied());
         }
-        let mut docs = Docs::default();
-        if let Some(top) = observed.last() {
-            docs.prime(self, *top)?;
-        }
+        let docs = self.docs(observed.last().copied())?;
         let (doc, _) = docs.resolve(self, tips, path, "")?;
         let mut graph = DocumentGraph::default();
         for id in observed {

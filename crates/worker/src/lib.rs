@@ -85,7 +85,7 @@ impl AppState {
         // One Worker request runs its transactions one after another.
         let engine = Engine::new(Hyper(hyperdrive), Delay, SCHEMA, 1)
             .map_err(|e| Failure::Unavailable(e.to_string()))?;
-        Ok(Service::new(engine))
+        Ok(Service::with_cache(engine, views().clone()))
     }
 
     fn auth(&self) -> Result<auth::HmacAuth, Response> {
@@ -132,6 +132,15 @@ fn bearer(headers: &HeaderMap) -> String {
         .and_then(|h| h.strip_prefix("Bearer "))
         .unwrap_or_default()
         .to_owned()
+}
+
+/// Repository views kept by this isolate across requests. A request reuses
+/// one after probing that its repository has not changed, so it loads only
+/// the rows committed since instead of the whole repository. Bounded, since
+/// an isolate has 128 MB.
+fn views() -> &'static Arc<o5s_pgwire::service::Cache> {
+    static VIEWS: std::sync::OnceLock<Arc<o5s_pgwire::service::Cache>> = std::sync::OnceLock::new();
+    VIEWS.get_or_init(|| Arc::new(o5s_pgwire::service::Cache::new(8)))
 }
 
 /// Per isolate: requests reach many isolates, so the rate limit is per
