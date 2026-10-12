@@ -2,7 +2,7 @@
 //! push. Export refuses unresolved conflicts and records immutable patch hashes
 //! in the commit message. Cloudflare Artifacts stores the same Git projection.
 use o5s_gitpush as gitpush;
-use o5s_platform::{Kind, Mode, Refusal, Repository, valid_name, workspace};
+use o5s_platform::{Kind, Mode, Refusal, Repository, View, valid_name, workspace};
 use std::{
     collections::BTreeMap,
     io::Write,
@@ -81,10 +81,29 @@ pub fn export(
     channel: &str,
     repo: &Repository,
 ) -> Result<serde_json::Value, Refusal> {
+    export_view(
+        root,
+        tenant,
+        name,
+        channel,
+        repo,
+        repo.materialize(channel)?,
+    )
+}
+
+/// `export` of `view`, the channel's view of `repo` (the server keeps it
+/// incrementally, so an export does not materialize the whole history).
+pub fn export_view(
+    root: &Path,
+    tenant: u64,
+    name: &str,
+    channel: &str,
+    repo: &Repository,
+    view: View,
+) -> Result<serde_json::Value, Refusal> {
     if !valid_name(name) || !valid_name(channel) {
         return Err(Refusal("invalid name".into()));
     }
-    let view = repo.materialize(channel)?;
     if !view.conflicts.is_empty() {
         return Err(Refusal("resolve conflicts before Git export".into()));
     }
@@ -184,7 +203,28 @@ pub fn worktree(
     channel: &str,
     repo: &Repository,
 ) -> Result<serde_json::Value, Refusal> {
-    let exported = export(root, tenant, name, channel, repo)?;
+    worktree_view(
+        root,
+        tenant,
+        agent,
+        name,
+        channel,
+        repo,
+        repo.materialize(channel)?,
+    )
+}
+
+/// `worktree` of `view`, the channel's view of `repo`.
+pub fn worktree_view(
+    root: &Path,
+    tenant: u64,
+    agent: u64,
+    name: &str,
+    channel: &str,
+    repo: &Repository,
+    view: View,
+) -> Result<serde_json::Value, Refusal> {
+    let exported = export_view(root, tenant, name, channel, repo, view)?;
     let commit = exported["commit"]
         .as_str()
         .ok_or_else(|| Refusal("missing Git projection".into()))?;

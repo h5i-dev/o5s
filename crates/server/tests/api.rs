@@ -127,10 +127,11 @@ async fn authenticated_parallel_requests_restart_and_git_projection() {
     assert!(Store::open(dir.path()).is_err());
     drop(s);
     let s = reopen(dir.path()).await;
-    assert_eq!(
-        saved,
-        request(&s, 1, 1, "/api/state?repo=demo", None).await.1
-    );
+    // `work` is what this request's view cache had to process, which differs
+    // after a restart; the repository and its view do not.
+    let restored = request(&s, 1, 1, "/api/state?repo=demo", None).await.1;
+    assert_eq!(saved["repository"], restored["repository"]);
+    assert_eq!(saved["view"], restored["view"]);
     let before = std::fs::read(dir.path().join("registry.log")).unwrap();
     let (status, _) = request(
         &s,

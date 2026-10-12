@@ -310,6 +310,25 @@ async fn load(
 }
 
 /// Run `f` on the repository's channel cache off the async runtime.
+/// The channel's view from the server's incremental cache, as `with_view`
+/// keeps it. The cache lock is released before the caller's Git work.
+fn cached_view(
+    views: &Views,
+    a: &Actor,
+    name: &str,
+    channel: &str,
+    repo: &Repository,
+) -> Result<o5s_platform::View, Refusal> {
+    let key = (
+        o5s_platform::repository_key(a.tenant, name),
+        channel.to_string(),
+    );
+    let mut views = views.lock().unwrap();
+    let cache = views.entry(key).or_default();
+    cache.sync_append_only(repo, channel)?;
+    cache.view()
+}
+
 async fn with_view<F>(
     s: &AppState,
     a: &Actor,
@@ -437,9 +456,12 @@ async fn export(State(s): State<AppState>, headers: HeaderMap, bytes: Bytes) -> 
         Ok(x) => x,
         Err(e) => return e,
     };
-    let root = s.root.clone();
+    let (root, views) = (s.root.clone(), s.views.clone());
     blocking(
-        move || artifacts::export(&root, a.tenant, &q.repo, &q.channel, &repo),
+        move || {
+            let view = cached_view(&views, &a, &q.repo, &q.channel, &repo)?;
+            artifacts::export_view(&root, a.tenant, &q.repo, &q.channel, &repo, view)
+        },
         "export",
     )
     .await
@@ -454,9 +476,12 @@ async fn worktree(State(s): State<AppState>, headers: HeaderMap, bytes: Bytes) -
         Ok(x) => x,
         Err(e) => return e,
     };
-    let root = s.root.clone();
+    let (root, views) = (s.root.clone(), s.views.clone());
     blocking(
-        move || artifacts::worktree(&root, a.tenant, a.user, &q.repo, &q.channel, &repo),
+        move || {
+            let view = cached_view(&views, &a, &q.repo, &q.channel, &repo)?;
+            artifacts::worktree_view(&root, a.tenant, a.user, &q.repo, &q.channel, &repo, view)
+        },
         "workspace",
     )
     .await
