@@ -120,12 +120,10 @@ theorem liveness_inner_spec (dels : alloc.vec.Vec document.Deletion) (d : Usize)
            · intro i h1
              have := hrow i h1
              split_ifs <;> simp <;> omega)
-        | (trace_state; sorry)
     · h5i_step
       all_goals first
         | (simp_all [FoldStep]; done)
         | (simp only [FoldStep]; constructor <;> first | (simp; omega) | rfl)
-        | (trace_state; sorry)
 
 /-- Rows of the covering table, deletion by deletion. -/
 def coverUpTo (dels : List document.Deletion) (n j : Nat) : List (List Nat) :=
@@ -271,13 +269,11 @@ theorem liveness_outer_spec (dels : alloc.vec.Vec document.Deletion) (n : Nat)
              | (unfold coverUpTo
                 rw [List.range_succ, List.foldl_append]
                 simp [List.getElem?_eq_getElem hjd])
-             | (trace_state; sorry))
-        | (trace_state; sorry)
+            )
     · h5i_step
       all_goals first
         | (simp only [FoldStep]; exact ⟨by simp; omega, rfl⟩)
         | (simp_all [FoldStep]; done)
-        | (trace_state; sorry)
 
 /-- Atom `a` is live: not a sentinel, and every deletion covering it was restored. -/
 def liveM (rows : List (List Nat)) (restored : List Bool) (a : Nat) : Bool :=
@@ -312,7 +308,6 @@ theorem liveness_last_spec (atoms : alloc.vec.Vec (alloc.vec.Vec U8)) (restored 
          constructor
          · intro h; exact ⟨by omega, h⟩
          · intro h; exact h.2)
-      | (trace_state; sorry)
 
 theorem coverUpTo_mem_lt (dels : List document.Deletion) (n j a : Nat) (ha : a < n) (x : Nat)
     (hx : x ∈ (coverUpTo dels n j)[a]'(by rw [coverUpTo_length]; exact ha)) : x < dels.length := by
@@ -498,8 +493,7 @@ theorem all_rows_loop_spec (edges : alloc.vec.Vec (Usize × Usize × Usize)) (of
                 rw [rows1_post1 k (by omega), i2_post]
                 have := hinv.2 _ (List.getElem_mem (by omega : k < o.val.length))
                 split_ifs <;> simp <;> omega)
-           | (trace_state; sorry))
-      | (trace_state; sorry)
+          )
 
 /-! ## Rows of dead atoms -/
 
@@ -520,7 +514,6 @@ theorem dead_rows_inner_spec (rows : alloc.vec.Vec (alloc.vec.Vec Usize)) (a : U
     all_goals first
       | (simp_all [FoldStep]; done)
       | (simp only [FoldStep]; refine ⟨by scalar_tac, by simp_all, by scalar_tac, by simp_all⟩)
-      | (trace_state; sorry)
 
 /-- Rows of dead atoms, by index: empty for a live atom, its row otherwise. -/
 def deadRow (rows : List (alloc.vec.Vec Usize)) (live : List Bool) (a : Nat) : List Usize :=
@@ -559,7 +552,7 @@ theorem dead_rows_spec (rows : alloc.vec.Vec (alloc.vec.Vec Usize)) (live : allo
               unfold deadRow
               rw [List.getElem?_eq_getElem h1, Option.getD_some, hb, List.getElem?_eq_getElem h2]
               simp)
-           | (trace_state; sorry))
+          )
       | (simp only [FoldStep]
          refine ⟨by simp; scalar_tac, ?_, by scalar_tac, by simp_all⟩
          have h1 : a.val < live.val.length := by scalar_tac
@@ -575,6 +568,5 @@ theorem dead_rows_spec (rows : alloc.vec.Vec (alloc.vec.Vec Usize)) (live : allo
          unfold deadRow
          rw [List.getElem?_eq_getElem h1, Option.getD_some, hb, List.getElem?_eq_getElem h2]
          simp)
-      | (trace_state; sorry)
 
 end o5s_kernel.DocKernel

@@ -67,7 +67,6 @@ def checkRefM (r : document.Ref) (seen : List Bool) (count : Nat) (missing : U64
   all_goals first
     | (simp_all; done)
     | (split_ifs <;> simp_all <;> scalar_tac)
-    | (trace_state; sorry)
 
 theorem unknown_order_ne : document.UNKNOWN_ORDER.val ≠ 0 := by
   unfold document.UNKNOWN_ORDER; simp
@@ -109,8 +108,6 @@ def checkAnchorM (a : document.Anchor) (atoms : Nat) (seen : List Bool) : U64 :=
     unfold document.check_anchor checkAnchorM
     h5i_step
     all_goals simp_all
-    all_goals trace_state
-    all_goals sorry
   | _ => simp [document.check_anchor, checkAnchorM]
 
 @[step] theorem atoms_nonempty_spec (atoms : alloc.vec.Vec (alloc.vec.Vec U8)) :
@@ -135,7 +132,6 @@ def checkAnchorM (a : document.Anchor) (atoms : Nat) (seen : List Bool) : U64 :=
     all_goals first
       | (refine ⟨by scalar_tac, ?_⟩; simp [List.length_pos_iff])
       | (refine ⟨⟨by scalar_tac, ?_⟩, trivial⟩; simp [List.length_pos_iff])
-      | (trace_state; sorry)
 
 /-- Adding an edge appends `to` to row `from`. -/
 @[step] theorem add_edge_spec (rows : alloc.vec.Vec (alloc.vec.Vec Usize)) (src dst : Usize)
@@ -150,7 +146,6 @@ def checkAnchorM (a : document.Anchor) (atoms : Nat) (seen : List Bool) : U64 :=
        simp only [List.getElem_set]
        split_ifs
        all_goals first | omega | rfl | (subst_vars; exact v1_post) | (subst_vars; rw [v1_post]))
-    | (trace_state; sorry)
 
 @[step] theorem reaches_spec (rows : alloc.vec.Vec (alloc.vec.Vec Usize)) (src dst : Usize)
     (room : rows.val.length < Usize.max) (hs : src.val < rows.val.length)
@@ -160,7 +155,6 @@ def checkAnchorM (a : document.Anchor) (atoms : Nat) (seen : List Bool) : U64 :=
   h5i_step
   all_goals first
     | (intro v hv; simp)
-    | (trace_state; sorry)
 
 /-! ## Marks, chains and causal rows -/
 
@@ -198,7 +192,6 @@ theorem observed_loop_spec (found : indexed.Traversal) (out : alloc.vec.Vec Bool
     all_goals first
       | exact ⟨by scalar_tac, rfl⟩
       | (refine ⟨⟨by scalar_tac, rfl⟩, ?_⟩; simp [setT, hinv])
-      | (trace_state; sorry)
 
 theorem rowReach_lt {rows : List (alloc.vec.Vec Usize)} {seeds : List Usize}
     (sb : ∀ v ∈ seeds, v.val < rows.length) (bounds : ∀ row ∈ rows, ∀ v ∈ row.val, v.val < rows.length)
@@ -234,7 +227,6 @@ theorem rowReach_lt {rows : List (alloc.vec.Vec Usize)} {seeds : List Usize}
          · exact ⟨q, e, (found_post1 q).mp hq⟩
        · rintro ⟨v, e, hv⟩
          exact Or.inr ⟨v, (found_post1 v).mpr hv, e⟩)
-    | (trace_state; sorry)
 
 /-- One step of the chain: an edge from the previous anchor to atom `k`. -/
 def chainStep (first : Nat) (st : List (Nat × Nat) × Nat) (k : Nat) : List (Nat × Nat) × Nat :=
@@ -281,7 +273,6 @@ theorem chain_loop_spec (out : alloc.vec.Vec (Usize × Usize)) (left first n : U
     h5i_step
     all_goals first
       | (refine ⟨?_, by omega⟩; simp [chainStep, pairVal, i_post])
-      | (trace_state; sorry)
 
 @[step] theorem chain_spec (out : alloc.vec.Vec (Usize × Usize)) (left right first n : Usize)
     (room : first.val + n.val ≤ Usize.max) (room2 : out.val.length + n.val + 1 < Usize.max) :
@@ -303,7 +294,6 @@ theorem chain_loop_spec (out : alloc.vec.Vec (Usize × Usize)) (left first n : U
     | (have e : (fun e : Usize × Usize => (e.1.val, e.2.val)) = pairVal := rfl
        rw [e, h1, List.append_assoc]
        rfl)
-    | (trace_state; sorry)
 
 /-! ## Withdrawn edges and causal rows -/
 
@@ -363,7 +353,7 @@ theorem withdrawn_loop0_spec (retractions : alloc.vec.Vec (Usize × Usize)) (see
                 | (left; scalar_tac)
                 | (right; exact ⟨by scalar_tac, by simp_all⟩)
                 | (left; simp_all; done))
-           | (trace_state; sorry))
+          )
       | (refine ⟨by scalar_tac, ?_⟩
          rw [← e_post]
          simp only [withdrawStep]
@@ -373,7 +363,6 @@ theorem withdrawn_loop0_spec (retractions : alloc.vec.Vec (Usize × Usize)) (see
            · simp_all
            · first | omega | simp_all
          · rfl)
-      | (trace_state; sorry)
 
 theorem withdrawn_loop1_spec (own : alloc.vec.Vec Usize) (out : alloc.vec.Vec Bool)
     (hb : ∀ e ∈ own.val, e.val < out.val.length) :
@@ -389,7 +378,6 @@ theorem withdrawn_loop1_spec (own : alloc.vec.Vec Usize) (out : alloc.vec.Vec Bo
     all_goals first
       | exact ⟨by scalar_tac, rfl⟩
       | (refine ⟨⟨by scalar_tac, rfl⟩, ?_⟩; simp [setT, hinv])
-      | (trace_state; sorry)
 
 /-- `withdrawn`: edge `i` is off when a seen patch retracted it, or this
 patch's earlier operations did. -/
@@ -419,7 +407,6 @@ patch's earlier operations did. -/
          rw [← h1]; rw [foldl_setT_length] at hi1; exact hi1
        rw [List.getElem_of_eq h1, foldl_withdrawStep_get _ _ _ i hi2]
        simp [out_post])
-    | (trace_state; sorry)
 
 /-! ## Causal rows -/
 
@@ -535,8 +522,7 @@ theorem causal_rows_loop0_spec (edges : alloc.vec.Vec (Usize × Usize × Usize))
                 rw [rows1_post1 k (by omega), i2_post]
                 have := hinv.2 _ (List.getElem_mem (by omega : k < o.val.length))
                 split_ifs <;> simp <;> omega)
-           | (trace_state; sorry))
-      | (trace_state; sorry)
+          )
 
 theorem mem_fold_addL (l : List (Usize × Usize)) (rows : List (List Usize)) (b : Nat)
     (hb : b < rows.length) (w : Usize)
@@ -693,7 +679,6 @@ this patch's pending edges from `a`. -/
        · rintro (⟨i, hc, h1, h2⟩ | ⟨y, hy, h1⟩)
          · exact Or.inl ⟨i, hc.1, hc, h1, h2⟩
          · exact Or.inr ⟨(y, w), hy, h1, rfl⟩)
-    | (trace_state; sorry)
 
 
 /-! ## Validation state and the simple checks -/
@@ -729,7 +714,6 @@ def checkRestoreS (st : CheckS) (deletions : Nat) (seen : List Bool) (op : Nat)
   h5i_step
   all_goals first
     | (simp_all [absC, refuseS]; done)
-    | (trace_state; sorry)
 
 def checkRetractS (st : CheckS) (orders : List Usize) (seen : List Bool) (op : Nat)
     (order : document.Ref) : CheckS :=
@@ -748,7 +732,6 @@ def checkRetractS (st : CheckS) (orders : List Usize) (seen : List Bool) (op : N
     | exact (checkRefM_zero (missing := document.UNKNOWN_ORDER) unknown_order_ne (by assumption)).1
     | (have hz := checkRefM_zero (missing := document.UNKNOWN_ORDER) unknown_order_ne (by assumption)
        simp [absC, v_post, List.getElem?_eq_getElem hz.1])
-    | (trace_state; sorry)
 
 def checkKeepS (st : CheckS) (doc : document.Doc) (seen : List Bool) (op : Nat)
     (deletion insertion : document.Ref) : CheckS :=
@@ -774,7 +757,6 @@ def checkKeepS (st : CheckS) (doc : document.Doc) (seen : List Bool) (op : Nat)
   h5i_step
   all_goals first
     | (simp_all [absC, refuseS]; done)
-    | (trace_state; sorry)
 
 
 /-! ## Reachability along rows -/
@@ -979,7 +961,6 @@ def absR (r : document.Refusal) : U64 × Nat × Nat := (r.kind, r.op.val, r.item
                 split_ifs <;> simp_all [absR])
              | (rw [dif_neg (by simp_all [absR])]; simp_all [absR])
          · first | (simp_all; done) | (simp_all; scalar_tac) | scalar_tac)
-      | (trace_state; sorry)
 
 @[step] theorem check_delete_spec (st : document.Check) (doc : document.Doc) (seen : alloc.vec.Vec Bool)
     (op : Usize) (targets : alloc.vec.Vec document.Ref) :
@@ -992,7 +973,6 @@ def absR (r : document.Refusal) : U64 × Nat × Nat := (r.kind, r.op.val, r.item
     | (simp only [absC] at r_post ⊢
        rw [show ((r.kind, r.op.val, r.item.val) : U64 × Nat × Nat) = absR r from rfl, r_post]
        rfl)
-    | (trace_state; sorry)
 
 
 /-! ## Kernel specs of the insert and order checks -/
@@ -1246,8 +1226,7 @@ theorem reach_key (doc : document.Doc) (seen : alloc.vec.Vec Bool) (st : documen
                      | (have hpv : (pairVal : Usize × Usize → Nat × Nat) = fun e => (e.1.val, e.2.val) := rfl
                         simp only [absC, hpv]
                         rw [v_post, i5_post])
-                     | (trace_state; sorry))
-                | (trace_state; sorry)
+                    )
       · have hbf : bn = false := by
           cases bn
           · rfl
@@ -1322,8 +1301,7 @@ theorem reach_key (doc : document.Doc) (seen : alloc.vec.Vec Bool) (st : documen
              | (exfalso; exact hrt (key.mp b_post))
              | (exfalso; exact b_post (key.mpr hrt))
              | (simp_all [absC, pairVal]; done)
-             | (trace_state; sorry))
-        | (trace_state; sorry)
+            )
     · have e2 : (ka != 0#u64) = true := by simp [h2]
       have e2' : checkAnchorM (.Node after) doc.atoms.val.length seen.val ≠ 0#u64 := by rw [← hka]; exact h2
       rw [if_pos e2, if_pos e2']
@@ -1551,7 +1529,6 @@ def emptyL : DocL where
   h5i_step
   all_goals first
     | (simp_all [absD, emptyL, pairVal, document.START, document.END]; done)
-    | (trace_state; sorry)
 
 
 /-! ## Kernel specs of commit -/

@@ -164,26 +164,10 @@ noncomputable def decode (H : Hist) (v : document.View) : View where
 /-- The adapter's materialization bounds. -/
 def RoomM (d : document.Doc) : Prop :=
   d.atoms.val.length < Usize.max ∧ d.edges.val.length < Usize.max ∧
-  (d.atoms.val.map (·.val.length)).sum < Usize.max ∧ d.deps.val.length < Usize.max
+  (d.atoms.val.map (·.val.length)).sum < Usize.max ∧ d.deps.val.length < Usize.max ∧
+  (d.deletions.val.map (·.targets.val.length)).sum < Usize.max ∧
+  d.deletions.val.length * d.insertions.val.length < Usize.max
 
-/-- T2.0: the decoded kernel view is the specified view. -/
-theorem materialize_refines (d : document.Doc) (H : Hist) (hr : Replayed d H) (room : RoomM d) :
-    document.materialize d ⦃ v => IsView H (decode H v) ⦄ := by sorry
-
-/-- T3.5 (main, on the extracted code): two replicas that admitted the same
-patches, in any orders, materialize the same view. -/
-theorem extracted_view_converges (d₁ d₂ : document.Doc) (H₁ H₂ : Hist)
-    (r₁ : Replayed d₁ H₁) (r₂ : Replayed d₂ H₂) (same : ∀ P, P ∈ H₁ ↔ P ∈ H₂)
-    (u₁ : (ids H₁).Nodup) (u₂ : (ids H₂).Nodup) (room₁ : RoomM d₁) (room₂ : RoomM d₂) :
-    document.materialize d₁ ⦃ v₁ => document.materialize d₂ ⦃ v₂ =>
-      decode H₁ v₁ = decode H₂ v₂ ⦄ ⦄ := by
-  have n1 : H₁.Nodup := List.Nodup.of_map (·.id) (show (H₁.map (·.id)).Nodup from u₁)
-  have n2 : H₂.Nodup := List.Nodup.of_map (·.id) (show (H₂.map (·.id)).Nodup from u₂)
-  have hp : H₁.Perm H₂ := (List.perm_ext_iff_of_nodup n1 n2).mpr same
-  apply WP.spec_mono (materialize_refines d₁ H₁ r₁ room₁)
-  intro v₁ hv₁
-  apply WP.spec_mono (materialize_refines d₂ H₂ r₂ room₂)
-  intro v₂ hv₂
-  exact view_unique H₁ _ _ hv₁ ((view_perm u₁ hp _).mpr hv₂)
+-- `materialize_refines` (T2.0) and `extracted_view_converges` (T3.5) are in `DocMatRefine.lean`.
 
 end o5s_kernel.Document

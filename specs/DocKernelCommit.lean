@@ -72,7 +72,6 @@ theorem validate_loop_spec (doc : document.Doc) (ops : alloc.vec.Vec document.Op
              · rw [i2_post]; simp only [List.map_take]; rw [List.sum_take_succ _ _ (by simpa using hlt), List.getElem_map]; omega
              · rw [i2_post]; simp only [List.map_take]; rw [List.sum_take_succ _ _ (by simpa using hlt), List.getElem_map]; omega
              · rw [i2_post]; omega)
-        | (trace_state; sorry)
     · h5i_step
       all_goals first
         | (simp only [Indexed.FoldInvStep]
@@ -88,9 +87,7 @@ theorem validate_loop_spec (doc : document.Doc) (ops : alloc.vec.Vec document.Op
            refine ⟨cw, ?_, ?_, hr⟩
            · simpa [List.map_take] using hc
            · simpa [List.map_take] using hp)
-        | (simp only [Indexed.FoldInvStep]
-           trace_state
-           sorry)
+
 
 
 @[step] theorem has_pair_spec (pairs : alloc.vec.Vec (Usize × Usize)) (a b : Usize) :
@@ -161,7 +158,6 @@ theorem commit_insert_loop1_spec (edges : alloc.vec.Vec (Usize × Usize × Usize
       | (refine ⟨by simp; scalar_tac, ?_, by scalar_tac, ?_⟩
          · simp_all
          · simp [v1_post]; omega)
-      | (trace_state; sorry)
 
 /-- Room for one committed operation. -/
 def OpRoom (doc : document.Doc) : document.Op → Prop
@@ -202,7 +198,6 @@ theorem commit_op_spec (doc : document.Doc) (patch : Usize) (o : document.Op) (r
       | exact hv1
       | (rw [hv2, List.length_map, ← hl, List.map_map]; rfl)
       | (simp_all; done)
-      | (trace_state; sorry)
   | Delete ts =>
     simp only [OpRoom] at room
     obtain ⟨r1, r2, r3⟩ := room
@@ -214,7 +209,6 @@ theorem commit_op_spec (doc : document.Doc) (patch : Usize) (o : document.Op) (r
     congr 1
     all_goals first
       | (simp_all; done)
-      | (trace_state; sorry)
   | Restore d =>
     simp only [OpRoom] at room
     unfold document.commit_op
@@ -223,7 +217,6 @@ theorem commit_op_spec (doc : document.Doc) (patch : Usize) (o : document.Op) (r
     simp only [absD, commitOpL]
     all_goals first
       | (simp_all; done)
-      | (trace_state; sorry)
   | Order b a =>
     simp only [OpRoom] at room
     obtain ⟨r1, r2⟩ := room
@@ -233,7 +226,6 @@ theorem commit_op_spec (doc : document.Doc) (patch : Usize) (o : document.Op) (r
     simp only [absD, commitOpL]
     all_goals first
       | (simp_all; done)
-      | (trace_state; sorry)
   | Keep d i =>
     simp only [OpRoom] at room
     unfold document.commit_op
@@ -250,7 +242,6 @@ theorem commit_op_spec (doc : document.Doc) (patch : Usize) (o : document.Op) (r
       h5i_step
       all_goals first
         | (simp only [commitOpL, if_neg this]; simp [absD, v_post, pairVal])
-        | (trace_state; sorry)
   | Retract o =>
     simp only [OpRoom] at room
     obtain ⟨r1, r2⟩ := room
@@ -259,7 +250,6 @@ theorem commit_op_spec (doc : document.Doc) (patch : Usize) (o : document.Op) (r
     h5i_step
     all_goals first
       | (simp_all [absD, commitOpL, pairVal, getElem!_pos]; done)
-      | (trace_state; sorry)
 
 
 /-- How much one operation can grow any table. -/
@@ -389,7 +379,6 @@ theorem commit_loop1_spec (doc0 : document.Doc) (ops : alloc.vec.Vec document.Op
     · h5i_step
       all_goals first
         | (simp only [FoldStep]; exact ⟨by omega, rfl⟩)
-        | (trace_state; sorry)
 
 theorem foldl_pred_const (p : Nat) : ∀ (ops : List document.Op) (D : DocL), D.deps.length = p + 1 →
     ops.foldl (fun D o => commitOpL D D.deps.length.pred o) D = ops.foldl (fun D o => commitOpL D p o) D
@@ -418,7 +407,6 @@ theorem commit_loop0_spec (p : document.Patch) :
       | (refine ⟨rfl, ?_⟩
          rw [hinv]
          exact List.take_of_length_le (by scalar_tac))
-      | (trace_state; sorry)
   · simp
   · simp
 
