@@ -2,8 +2,13 @@
 //! with ordinary Git, and the proposal its changes become. The native server
 //! keeps workspaces as local worktrees; the Worker keeps them as Artifacts
 //! repositories. Both read the snapshot's patch set from its commit message
-//! and turn changed files into one whole-file proposal through this module.
-use crate::{Command, Edit, Refusal, Repository, base64_encode, valid_path};
+//! and turn changed files into one proposal through this module: graph
+//! operations for text documents, as `o5s propose` sends, and whole-file
+//! edits for binary files and for repositories that predate graph documents.
+use crate::documents::GraphEdit;
+use crate::{Command, Edit, Kind, Refusal, Repository, base64_encode, valid_path};
+use o5s_kernel::model::{Anchor, DocumentGraph, NodeId, Operation};
+use std::collections::BTreeSet;
 
 /// The first line of every projection commit message.
 pub const TITLE: &str = "o5s verified-admission projection";
@@ -134,12 +139,148 @@ pub fn proposal(
     if edits.is_empty() || edits.len() > MAX_FILES {
         return Err(Refusal(format!("1..{MAX_FILES} changed files required")));
     }
-    Ok(Command::Propose {
+    let dependencies = dependencies(repo, channel, &hashes)?;
+    let Some((graph, files)) = graph_edits(repo, &dependencies, edits.clone())? else {
+        return Ok(Command::Propose {
+            repo: repo_name.into(),
+            intent: intent.into(),
+            dependencies,
+            edits,
+        });
+    };
+    Ok(Command::ProposeGraph {
         repo: repo_name.into(),
         intent: intent.into(),
-        dependencies: dependencies(repo, channel, &hashes)?,
-        edits,
+        dependencies,
+        edits: graph,
+        files,
     })
+}
+
+/// Graph edits for text documents, and whole-file edits for binary files,
+/// symlinks, submodules and paths that hold legacy documents, against the
+/// snapshot `deps`. `None` keeps a legacy repository's representation: one
+/// that has whole-file documents and none of whose graph documents changed.
+/// This is the rule `o5s propose` applies.
+fn graph_edits(
+    repo: &Repository,
+    deps: &[u64],
+    edits: Vec<Edit>,
+) -> Result<Option<(Vec<GraphEdit>, Vec<Edit>)>, Refusal> {
+    let graph_paths: BTreeSet<&str> = repo
+        .patches
+        .values()
+        .flat_map(|p| &p.graph_edits)
+        .map(|e| e.path.as_str())
+        .collect();
+    let legacy_paths: BTreeSet<&str> = repo
+        .patches
+        .values()
+        .flat_map(|p| &p.edits)
+        .map(|e| e.path.as_str())
+        .collect();
+    if !legacy_paths.is_empty() && !edits.iter().any(|e| graph_paths.contains(e.path.as_str())) {
+        return Ok(None);
+    }
+    let mut graph = Vec::new();
+    let mut files = Vec::new();
+    for edit in edits {
+        let path = edit.path.as_str();
+        let special = edit.base64 || edit.kind != Kind::File;
+        if legacy_paths.contains(path) || (!graph_paths.contains(path) && special) {
+            files.push(edit);
+            continue;
+        }
+        let Some(text) = &edit.content else {
+            graph.push(GraphEdit {
+                path: edit.path,
+                remove: true,
+                ..GraphEdit::default()
+            });
+            continue;
+        };
+        if special {
+            return Err(Refusal(format!(
+                "{path} is a text graph document; binary content, a symlink or a submodule needs a new path"
+            )));
+        }
+        let operations = operations(&repo.document_at(path, deps)?, path, text)?;
+        graph.push(GraphEdit {
+            path: edit.path,
+            operations,
+            executable: edit.executable,
+            ..GraphEdit::default()
+        });
+    }
+    Ok(Some((graph, files)))
+}
+
+/// The graph operations that turn a document's snapshot into `updated`.
+/// Unchanged atoms at either end are kept; the atoms between them are deleted
+/// and the new text is inserted as lines, so later edits have line anchors.
+fn operations(graph: &DocumentGraph, path: &str, updated: &str) -> Result<Vec<Operation>, Refusal> {
+    let view = graph.materialize();
+    let unambiguous = view.conflicts.is_empty() && view.layers.iter().all(|l| l.len() == 1);
+    let (true, Some(rendered)) = (unambiguous, view.bytes) else {
+        return Err(Refusal(format!(
+            "{path} has unresolved conflicts; resolve them with explicit graph operations"
+        )));
+    };
+    let atoms: Vec<(NodeId, &[u8])> = view
+        .layers
+        .iter()
+        .map(|l| {
+            let id = l[0];
+            (id, graph.atom(id).unwrap_or_default())
+        })
+        .collect();
+    if atoms.iter().any(|(_, b)| b.is_empty())
+        || atoms.iter().flat_map(|(_, b)| b.iter()).ne(&rendered)
+    {
+        return Err(Refusal(format!(
+            "{path}: graph atoms do not match its rendered bytes"
+        )));
+    }
+    let target = updated.as_bytes();
+    let (mut start, mut left) = (0, 0);
+    while start < atoms.len() && target[left..].starts_with(atoms[start].1) {
+        left += atoms[start].1.len();
+        start += 1;
+    }
+    let (mut end, mut right) = (atoms.len(), target.len());
+    while end > start
+        && right >= left + atoms[end - 1].1.len()
+        && target[..right].ends_with(atoms[end - 1].1)
+    {
+        right -= atoms[end - 1].1.len();
+        end -= 1;
+    }
+    let mut ops = Vec::new();
+    if start < end {
+        ops.push(Operation::Delete {
+            targets: atoms[start..end].iter().map(|(id, _)| *id).collect(),
+        });
+    }
+    if left < right {
+        let anchor = |i: usize| Anchor::Node(atoms[i].0);
+        ops.push(Operation::Insert {
+            left: if start == 0 {
+                Anchor::Start
+            } else {
+                anchor(start - 1)
+            },
+            right: if end == atoms.len() {
+                Anchor::End
+            } else {
+                anchor(end)
+            },
+            atoms: target[left..right]
+                .split_inclusive(|b| *b == b'\n')
+                .map(<[u8]>::to_vec)
+                .collect(),
+        });
+    }
+    Ok(ops)
 }
 
 #[cfg(test)]
