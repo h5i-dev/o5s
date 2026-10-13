@@ -40,22 +40,24 @@ Web UI: **http://127.0.0.1:3000** (paste a printed token).
 
 ---
 
-## 2. Concepts
+## 2. Architecture
 
-| Term | In one line |
-|---|---|
-| **Patch** | An immutable change, identified by the SHA-256 of its content and dependencies |
-| **Channel** | A set of admitted patches, always including their dependencies (`main`, forks) |
-| **Admission** | Approval + passing check + dependencies present → the patch joins the channel |
-| **View** | The files a channel produces; concurrent edits of the same text show as conflicts |
-| **Document** | Text as a graph of stable atoms, so concurrent edits and renames merge |
-| **Workspace** | A Git checkout of a snapshot; edits there come back as one proposal |
-
-```text
-agent A ──── propose ───┐                                ┌──► view (files, conflicts)
-agent B ──── propose ───┼──► registry ── admit ──► channel ─┤
-reviewer, checks ───────┘    (verified kernel)              └──► Git export, workspaces
+```mermaid
+flowchart LR
+    A[Agents, reviewers and web UI] --> L[Local server: axum API]
+    A --> W[Cloudflare Worker: same API]
+    L --> K[Verified registry kernel: o5s_registry::transition]
+    W --> K
+    P[Lean 4 proofs] -. about the extracted Rust .-> K
+    K --> S[Local write-ahead log]
+    K --> Q[PostgreSQL via o5s_pgwire, Hyperdrive on Workers]
+    L --> V[Causal file view and explicit conflicts]
+    W --> V
+    V --> E[Bare Git export and workspaces]
+    V --> G[Cloudflare Artifacts Git projections]
 ```
+
+Details: [architecture](docs/architecture.md) · [patch model](docs/patch-model.md).
 
 ---
 
