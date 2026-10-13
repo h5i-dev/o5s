@@ -116,9 +116,7 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--ink-2);font:400 11px 
 .guide-say{order:1;max-width:340px;margin-bottom:22px;background:rgba(10,10,12,.97);border:1px solid var(--line-strong);border-left:2px solid var(--accent);padding:14px 16px}
 .guide-say .mono{color:var(--accent)}.guide-say p{margin:8px 0 12px;color:var(--ink);font:400 12px/1.65 var(--mono)}
 .guide-actions{display:flex;gap:6px;justify-content:flex-end}
-.tentacle{position:fixed;inset:0;width:100vw;height:100vh;z-index:39;pointer-events:none;overflow:visible}
-#tentacle-arm{fill:none;stroke:#c81e17;stroke-linecap:round;stroke-width:6;filter:drop-shadow(0 0 8px rgba(255,98,88,.35))}
-#tentacle-cups{fill:none;stroke:#ff8a82;stroke-linecap:round;stroke-width:2.6;stroke-dasharray:0 11;opacity:.85}
+.tentacle{position:fixed;inset:0;width:100vw;height:100vh;z-index:39;pointer-events:none}
 @media(max-width:1000px){.facts{grid-template-columns:repeat(2,minmax(0,1fr))}.how{grid-template-columns:1fr}.how>div+div{border-left:0;border-top:1px solid var(--line)}.grid{grid-template-columns:1fr}}
 @media(max-width:640px){.frame-top{padding:10px 16px}.brand span{display:none}.hero{left:16px;bottom:90px;max-width:calc(100% - 32px)}.enter{right:16px}.note{left:16px}.facts{grid-template-columns:1fr}.fact{border-right:0;border-bottom:1px solid var(--line);padding:26px 16px}.how>div{padding:26px 16px}.console{padding:84px 16px 32px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metric+.metric{padding-left:14px}.site-foot{padding:18px 16px;flex-direction:column}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
@@ -207,7 +205,7 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--ink-2);font:400 11px 
   <div class="context" id="work"></div>
 </main>
 <div id="status" class="status" role="status"></div>
-<svg class="tentacle" id="tentacle" aria-hidden="true"><path id="tentacle-arm"/><path id="tentacle-cups"/></svg>
+<canvas class="tentacle" id="tentacle" aria-hidden="true"></canvas>
 <aside class="guide" id="guide" hidden aria-live="polite" aria-label="Guide">
   <canvas id="guide-octopus" aria-hidden="true"></canvas>
   <div class="guide-say" id="guide-say" hidden><div class="mono" id="guide-step"></div><p id="guide-text"></p>
@@ -737,7 +735,17 @@ const guide = (() => {
   ];
   const box = $('guide'), canvas = $('guide-octopus'), c = canvas.getContext('2d', {willReadFrequently: true});
   const shape = document.createElement('canvas'), sc = shape.getContext('2d', {willReadFrequently: true});
-  const arm = $('tentacle-arm'), cups = $('tentacle-cups');
+  // The arm is drawn like the octopus: a shape in character cells, lit code.
+  const arm = $('tentacle'), ac = arm.getContext('2d'), ashape = document.createElement('canvas'), as = ashape.getContext('2d', {willReadFrequently: true});
+  const ACW = 7.2, ACH = 13;
+  let acols = 0, arows = 0, aw = 0, ah = 0;
+  function fitArm() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    aw = window.innerWidth; ah = window.innerHeight;
+    arm.width = Math.round(aw * dpr); arm.height = Math.round(ah * dpr); ac.setTransform(dpr, 0, 0, dpr, 0, 0);
+    acols = Math.ceil(aw / ACW); arows = Math.ceil(ah / ACH); ashape.width = acols; ashape.height = arows;
+  }
+  fitArm(); window.addEventListener('resize', fitArm);
   const COLS = 34, ROWS = 20, CW = 5.6, CH = 9;
   let step = -1, target = null, grown = 0, on = false, blink = 0, pointer = null;
   window.addEventListener('pointermove', e => { pointer = {x: e.clientX, y: e.clientY}; });
@@ -797,19 +805,43 @@ const guide = (() => {
     }
   }
   function drawArm(t) {
-    if (!target) { arm.setAttribute('d', ''); cups.setAttribute('d', ''); return; }
+    ac.clearRect(0, 0, aw, ah);
+    if (!target) return;
     const o = origin(), a = aim();
     const dx = a.x - o.x, dy = a.y - o.y, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
     const wob = Math.sin(t * 0.003) * Math.min(40, len * 0.08), wob2 = Math.cos(t * 0.0023) * Math.min(30, len * 0.06);
     const c1 = {x: o.x + dx * 0.3 + nx * (len * 0.18 + wob), y: o.y + dy * 0.3 + ny * (len * 0.18 + wob)};
     const c2 = {x: o.x + dx * 0.72 - nx * (len * 0.1 + wob2), y: o.y + dy * 0.72 - ny * (len * 0.1 + wob2)};
-    const d = `M ${o.x} ${o.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${a.x} ${a.y}`;
-    arm.setAttribute('d', d); cups.setAttribute('d', d);
-    const total = arm.getTotalLength();
-    grown = Math.min(1, grown + 0.035);
-    const e = 1 - Math.pow(1 - grown, 3);
-    for (const path of [arm]) { path.style.strokeDasharray = `${total}`; path.style.strokeDashoffset = `${total * (1 - e)}`; }
-    cups.style.opacity = e > 0.95 ? '0.85' : '0';
+    grown = Math.min(1, grown + 0.03);
+    const reach = 1 - Math.pow(1 - grown, 3), n = 48;
+    const at = u => {
+      const v = 1 - u;
+      return {x: v * v * v * o.x + 3 * v * v * u * c1.x + 3 * v * u * u * c2.x + u * u * u * a.x,
+              y: v * v * v * o.y + 3 * v * v * u * c1.y + 3 * v * u * u * c2.y + u * u * u * a.y};
+    };
+    // Rasterize the grown part into cells, tapering toward the tip.
+    as.fillStyle = '#000'; as.fillRect(0, 0, acols, arows);
+    as.lineCap = 'round';
+    let prev = at(0);
+    for (let k = 1; k <= n; k++) {
+      const u = k / n * reach, p = at(u), w = (1 - k / n) * 3.6 + 1.1;
+      as.strokeStyle = `rgb(${Math.round(255 - 110 * (k / n))},0,0)`;
+      as.lineWidth = w;
+      as.beginPath(); as.moveTo(prev.x / ACW, prev.y / ACH); as.lineTo(p.x / ACW, p.y / ACH); as.stroke();
+      prev = p;
+    }
+    const px = as.getImageData(0, 0, acols, arows).data, src = octopus.source;
+    ac.font = '12px "IBM Plex Mono", Menlo, monospace'; ac.textBaseline = 'top';
+    const flow = Math.floor(t / 120);
+    for (let y = 0; y < arows; y++) for (let x = 0; x < acols; x++) {
+      const r = px[(y * acols + x) * 4];
+      if (r < 40) continue;
+      const k = r / 255, ch = src[(y * 131 + x + flow) % src.length];
+      // A dark cell under each character, so the arm reads over the panels.
+      ac.fillStyle = 'rgba(5,5,6,0.88)'; ac.fillRect(x * ACW, y * ACH, ACW, ACH);
+      ac.fillStyle = `rgba(${Math.round(170 + 85 * k)},${Math.round(28 + 70 * k * k)},${Math.round(24 + 64 * k * k)},${0.5 + k * 0.5})`;
+      ac.fillText(ch === ' ' ? '·' : ch, x * ACW, y * ACH);
+    }
   }
   function loop(t) {
     if (!on) return;
