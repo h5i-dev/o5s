@@ -1,6 +1,6 @@
 # Document graph operations
 
-`crates/kernel/src/model.rs` defines immutable operations for one document. Its `DocumentGraph` validates causal references, retains deleted anchors and materializes bytes only when the surviving graph has an unambiguous order. Materialization calls the extracted `indexed::boundary`, `order::frontier_counts` and `tags::visible` functions. Validation, the dense-index adapter and the complete text/conflict semantics still need extraction and Lean proofs.
+`crates/kernel/src/model.rs` defines immutable operations for one document. Its `DocumentGraph` validates causal references, retains deleted anchors and materializes bytes only when the surviving graph has an unambiguous order. Validation, commit and materialization (text and conflicts) are made by the extracted `document` kernel and proved against an identity-level model (`DocRefine.apply_refines`, `DocMatRefine.materialize_refines`, `extracted_view_converges`; see [proofs](proofs.md)). The native adapter that interns identities as dense indices is not extracted.
 
 This module covers a document subset of M1 and M2 in [the production roadmap](roadmap.md). File identity, path changes, mode changes and operation-block splitting remain unspecified. It does not implement Pijul's complete data model.
 

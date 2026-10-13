@@ -11,7 +11,8 @@ channel holds an experiment. Files are graph documents, edited the way
 
 O5S_SERVER is the o5s-server binary that signs tokens (default
 target/debug/o5s-server); O5S_ORG the organization (default 1); O5S_REPO the
-repository name (default octo-parser). Prints a token for a viewer.
+repository name (default octo-parser). Prints a token for a viewer, whose
+role is read-only.
 """
 import json, os, pathlib, subprocess, sys, urllib.error, urllib.request
 
@@ -37,7 +38,9 @@ def token(user):
 def api(user, route, body=None):
     request = urllib.request.Request(
         ORIGIN + route, data=None if body is None else json.dumps(body).encode(),
-        headers={'Authorization': 'Bearer ' + token(user), 'Content-Type': 'application/json'})
+        headers={'Authorization': 'Bearer ' + token(user), 'Content-Type': 'application/json',
+                 # Cloudflare refuses urllib's default agent (error 1010).
+                 'User-Agent': 'o5s-seed-demo'})
     try:
         with urllib.request.urlopen(request) as response:
             return json.load(response)
@@ -45,8 +48,8 @@ def api(user, route, body=None):
         sys.exit(f'{route} {body}: {e.code} {e.read().decode()}')
 
 
-def cmd(user, **body):
-    return api(user, '/api/command', dict(repo=REPO, **body))
+def cmd(actor, **body):
+    return api(actor, '/api/command', dict(repo=REPO, **body))
 
 
 def document(path, patches):
@@ -179,6 +182,9 @@ A small arithmetic parser, written by many agents at once.
 
 def main():
     cmd(OWNER, cmd='create')
+    # Restrict the repository: the viewer can read and nothing else.
+    for user, role in [(REVIEWER, 'review'), (CHECKS, 'review'), (VIEWER, 'read')] + [(a, 'write') for a in AGENTS]:
+        cmd(OWNER, cmd='grant', user=user, role=role)
     base = propose(OWNER, 'Start the parser: lexer, parser, evaluator and README', [],
                    {'src/lexer.rs': LEXER, 'src/parser.rs': PARSER, 'src/eval.rs': EVAL, 'README.md': README})
     review(base)
