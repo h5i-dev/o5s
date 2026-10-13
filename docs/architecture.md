@@ -2,16 +2,17 @@
 
 ```mermaid
 flowchart LR
-    A[Agents and web UI] --> W[Cloudflare Worker adapter]
-    A --> L[Local axum API]
-    W --> L
-    W --> G[Cloudflare Artifacts Git projections]
+    A[Agents, reviewers and web UI] --> L[Local server: axum API]
+    A --> W[Cloudflare Worker: same API]
     L --> K[Verified registry kernel: o5s_registry::transition]
-    K --> P[Extracted Lean 4 proofs]
+    W --> K
+    P[Lean 4 proofs] -. about the extracted Rust .-> K
     K --> S[Local write-ahead log]
-    K --> Q[PostgreSQL via h5i_app_pg::Engine]
+    K --> Q[PostgreSQL via o5s_pgwire, Hyperdrive on Workers]
     L --> V[Causal file view and explicit conflicts]
-    V --> E[Local bare Git export]
+    W --> V
+    V --> E[Bare Git export and workspaces]
+    V --> G[Cloudflare Artifacts Git projections]
 ```
 
 The local UI and API work without Cloudflare. On Cloudflare, the Rust Worker in `crates/worker` serves the same API over PostgreSQL through Hyperdrive. It keeps Git projections and agent workspaces in Cloudflare Artifacts, and resolves the caller's organization and repository before it touches Artifacts.
