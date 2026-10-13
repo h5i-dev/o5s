@@ -11,7 +11,7 @@
 
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -107,6 +107,7 @@ if (stills) {
 
 const nFrames = Math.ceil((TOTAL / 1000) * FPS);
 const outFile = path.join(outDir, BASE === 'index' ? 'o5s-demo.mp4' : `o5s-${BASE}.mp4`);
+const renderingFile = outFile.replace(/\.mp4$/, '.rendering.mp4');
 const capH = HEIGHT * SCALE;
 const outH = OUT_HEIGHT || capH;
 console.log(
@@ -125,7 +126,7 @@ const ff = spawn('ffmpeg', [
   '-c:v', 'libx264', '-preset', FAST ? 'veryfast' : 'slow', '-crf', String(CRF),
   ...vf,
   ...(withAudio ? ['-c:a', 'aac', '-b:a', '160k'] : []),
-  '-pix_fmt', 'yuv420p', '-movflags', '+faststart', outFile,
+  '-pix_fmt', 'yuv420p', '-movflags', '+faststart', renderingFile,
 ], { stdio: ['pipe', 'inherit', 'inherit'] });
 const ffDone = new Promise((res, rej) =>
   ff.on('close', c => (c === 0 ? res() : rej(new Error('ffmpeg exit ' + c)))));
@@ -145,4 +146,5 @@ for (let i = 0; i < nFrames; i++) {
 ff.stdin.end();
 await ffDone;
 await browser.close();
+renameSync(renderingFile, outFile);
 console.log(`\ndone -> ${outFile}`);
