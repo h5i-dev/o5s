@@ -36,7 +36,7 @@ deriving instance DecidableEq for PatchRow, Dependency, Approval, CheckReport, C
   Listing
 
 /-- More keys than this load the whole table (`POINT_LOADS`). -/
-def pointLoads : Nat := 32
+def pointLoads : Nat := 16
 
 /-- PostgreSQL's answer to a filtered, primary-key-ordered `SELECT`. -/
 def query {α κ} [LinearOrder κ] (key : α → κ) (table : List α) (P : α → Bool) : List α :=
