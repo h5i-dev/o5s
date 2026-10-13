@@ -2,17 +2,17 @@
   {
     "start": 0,
     "end": 25,
-    "text": "One thousand agents edit one file. Can a version control system integrate their work? Is that version control system correctly implemented? Meet o5s, a patch-theory VCS for concurrent agents. Our recorded workload reaches sixty times Git's integration throughput. Lean four proves all defined critical security properties of its Rust core. Here's how."
+    "text": "One thousand agents edit one file. Can a version control system integrate their work? Is that version control system correctly implemented? Meet o5s, a patch-theory VCS for concurrent agents. In our benchmark, o5s reaches sixty times Git's integration throughput. Lean four proves all defined critical security properties of its Rust core. Here's how."
   },
   {
     "start": 25,
     "end": 90,
-    "text": "Let's start with the workflow. Three agents have separate Git worktrees based on the same channel snapshot, patch forty-two. Their terminals propose changes to parser, API, and tests almost together. Watch the real repository UI: proposals one, two, and three appear before the channel advances. The graph below records that all three depend on the same base, not on each other's latest commit. A separate reviewer approves each proposal, and an independent check reporter records passing checks. Then one merge command admits all three as a batch. The channel and file view update in the embedded UI. Each agent can fetch the new main ref while its own head stays put. The commands are actual o5s CLI syntax; the repository data is illustrative. This is the behavior we want at agent scale: fast concurrent proposals, explicit causal dependencies, and one reviewed result. In the UI, the file list grows from the base readme to parser, API, and tests. The graph still shows one shared cause for all three."
+    "text": "Let's start with the workflow. Three agents have separate Git worktrees based on the same channel snapshot, patch forty-two. Their terminals propose changes to parser, API, and tests almost together. Watch the repository UI: proposals one, two, and three appear before the channel advances. The graph below records that all three depend on the same base, not on each other's latest commit. A separate reviewer approves each proposal, and an independent check reporter records passing checks. Then one merge command admits all three as a batch. The channel and file view update in the embedded UI. Each agent can fetch the new main ref while its own head stays put. The reviewer can trace every proposal back to the exact snapshot its agent saw. Agents propose concurrently, reviewers inspect causal dependencies, and one checked merge advances the shared channel. In the UI, the file list grows from the base readme to parser, API, and tests. The graph still shows one shared cause for all three."
   },
   {
     "start": 90,
     "end": 120,
-    "text": "One thousand agents, sixty-four in flight. For adjacent-line edits in one file, o5s integrated five hundred seventy-four patches per second; unattended Git integrated nine point eight. That is fifty-eight point six times faster. For one new file per agent in the same repository, o5s reached one thousand eighty-three per second; Git reached nine point zero. That is almost one hundred twenty times Git's integration throughput."
+    "text": "We tested one thousand agents, with sixty-four proposals in flight at once. For adjacent-line edits in one file, o5s integrated five hundred seventy-four patches per second; unattended Git integrated nine point eight. That is fifty-eight point six times faster. For one new file per agent in the same repository, o5s reached one thousand eighty-three per second; Git reached nine point zero. That is almost one hundred twenty times Git's integration throughput."
   },
   {
     "start": 120,
@@ -22,7 +22,7 @@
   {
     "start": 150,
     "end": 180,
-    "text": "The other problem is trust. Millions of teams rely on version control, so its core must be secure and reliable. Git fixed twelve security flaws in 2024 and 2025; GitHub disclosed a critical push flaw. OpenAI, Claude, and Gemini agents reached real systems in evaluations. Version-control software needs machine-checked correctness properties. o5s uses Lean four to verify its Rust decision core under stated assumptions."
+    "text": "The other problem is trust. Millions of teams rely on version control, so its core must be secure and reliable. Git fixed twelve security flaws in 2024 and 2025; GitHub disclosed a critical push flaw. OpenAI, Claude, and Gemini agents reached real systems in evaluations. Version-control software needs machine-checked correctness properties. o5s uses Lean four to verify critical properties of its Rust decision core."
   },
   {
     "start": 180,
@@ -32,7 +32,7 @@
   {
     "start": 225,
     "end": 260,
-    "text": "Nine hundred fifteen Lean four theorems check the Rust decision core. H five I app translates the Rust code that runs into Lean four. We prove properties of that translated code: the admission gate, refinement of Rust transitions, convergence of document views, and preservation of causal heads. Lean checks these proofs under explicit assumptions, without sorry or new axioms. Admission requires separate approvals and passing checks; convergence means delivery order cannot change the final view."
+    "text": "Nine hundred fifteen Lean four theorems check the Rust decision core. H five I app translates the Rust code that runs into Lean four. We prove properties of that translated code: the admission gate, refinement of Rust transitions, convergence of document views, and preservation of causal heads. Lean checks these proofs without sorry or new axioms. Admission requires separate approvals and passing checks; convergence means delivery order cannot change the final view."
   },
   {
     "start": 260,
@@ -52,6 +52,6 @@
   {
     "start": 370,
     "end": 405,
-    "text": "o5s is fully open source under Apache two point zero. Its code, Lean proofs, and comparison logs are public. The Worker and Hyperdrive path has been exercised end to end. Live Artifacts workspaces and full distributed scale still need validation. o5s pairs immutable patches and explicit conflicts with a verified decision kernel. On Cloudflare Workers and Artifacts, agents keep familiar Git workspaces while a proved patch core decides shared history."
+    "text": "o5s is fully open source under Apache two point zero. Its Rust code, Lean proofs, and benchmarks are public. The architecture puts the verified decision kernel in a Cloudflare Worker, atomic state behind Hyperdrive, and Git workspaces in Artifacts. Agents keep ordinary Git tools while immutable patches preserve dependencies and conflicts. Every shared update passes through a precise admission decision. Explore the source and help build version control for concurrent agents."
   }
 ]
