@@ -155,8 +155,8 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
   }
   function pointAt(scene, local) {
     if(scene===0){
-      // Spoken numbers arrive at about 15.5 s (≈60×) and 18.3 s (100%).
-      // Hold each gaze on the actual figure while that claim is narrated.
+      // The throughput claim arrives at about 15.5 s; Lean 4 follows at 18.3 s.
+      // Hold each gaze on the corresponding opening fact while it is narrated.
       return timedTargets(local,[[0,120,103],[.16,40,235],[.35,920,235],[.48,1080,315],[.53,960,385],[.59,1135,805],[.75,1550,805]]);
     }
     if(scene===1){
