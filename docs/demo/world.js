@@ -130,38 +130,63 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
   // what it is looking at without drawing through any labels or body text.
   const cues = [
     [[120,103],[40,235],[920,235],[1080,315],[960,385]],
+    [[1370,620],[280,480],[280,570],[280,660],[430,895],[1450,770]],
+    [[850,600],[850,790]],
     [[830,605],[1260,605],[1140,690],[1140,775],[1140,858]],
     [[675,597],[675,638],[675,678],[675,718],[675,758],[1430,665]],
     [[520,505],[520,615],[965,615],[1425,665],[520,615],[965,615],[1425,580],[1425,680]],
     [[490,500],[1160,500],[1190,690]],
-    [[490,500],[1160,500],[490,675],[1160,675]],
+    [[790,750],[1490,680],[790,560],[790,650]],
     [[490,640],[950,640],[1390,640],[1635,640]],
     [[620,640],[930,640],[1260,640],[1610,640]],
-    [[720,665],[1160,665],[1430,780]],
-    [[890,650],[890,740],[1550,740]],
     [[485,510],[485,660],[1100,470]],
   ];
   function smooth(x) { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); }
+  function timedTargets(local, stops) {
+    for(let i=0;i<stops.length-1;i++){
+      const next=stops[i+1];
+      if(local<next[0]-.035)return stops[i].slice(1);
+      if(local<next[0]){
+        const f=smooth((local-(next[0]-.035))/.035);
+        return [stops[i][1]*(1-f)+next[1]*f,stops[i][2]*(1-f)+next[2]*f];
+      }
+    }
+    return stops.at(-1).slice(1);
+  }
   function pointAt(scene, local) {
     if(scene===0){
-      // Self-introduction, agents, shared file, integration, and the proof
-      // problem each have their own precise headline focus.
       return local<.16 ? [120,103] : local<.35 ? [40,235] : local<.48 ? [920,235] : local<.72 ? [1080,315] : [960,385];
     }
     if(scene===1){
+      return timedTargets(local,[[0,1370,620],[.13,280,480],[.20,280,570],[.27,280,660],[.40,1370,620],[.46,430,895],[.58,270,760],[.73,1430,620],[.84,680,895],[.92,1500,770]]);
+    }
+    if(scene===2){
+      return timedTargets(local,[[0,850,570],[.32,980,625],[.53,850,765],[.75,980,820]]);
+    }
+    if(scene===3){
       const path=[[0,830,605],[.18,1265,605],[.30,830,605],[.40,1147,690],[.50,830,605],[.58,1147,775],[.66,830,605],[.75,1147,858],[.86,1545,690],[1,1430,858]];
       const i=Math.max(0,path.findIndex((p,j)=>j<path.length-1&&local>=p[0]&&local<=path[j+1][0]));
       const a=path[i],b=path[i+1],f=smooth((local-a[0])/(b[0]-a[0]));
       return [a[1]+(b[1]-a[1])*f,a[2]+(b[2]-a[2])*f];
     }
-    if(scene===2){
+    if(scene===4){
       return local<.18 ? [675,597] : local<.32 ? [675,638] : local<.48 ? [675,678] : local<.6 ? [675,718] : local<.72 ? [675,758] : [1430,665];
     }
-    if(scene===3){
-      const path=[[0,520,505],[.12,520,615],[.23,965,615],[.34,1425,665],[.37,520,615],[.49,965,615],[.59,1425,580],[1,1425,680]];
+    if(scene===5){
+      const path=[[0,520,505],[.16,520,615],[.31,965,615],[.45,1425,665],[.49,520,615],[.65,965,615],[.78,1425,580],[1,1425,680]];
       const i=Math.max(0,path.findIndex((p,j)=>j<path.length-1&&local>=p[0]&&local<=path[j+1][0]));
       const a=path[i],b=path[i+1],f=smooth((local-a[0])/(b[0]-a[0]));
       return [a[1]+(b[1]-a[1])*f,a[2]+(b[2]-a[2])*f];
+    }
+    if(scene===6){
+      return timedTargets(local,[[0,520,620],[.20,1140,720],[.31,1250,625],[.35,520,470],[.44,850,470],[.53,1190,470],[.62,1550,470]]);
+    }
+    if(scene===7){
+      return timedTargets(local,[[0,790,750],[.27,1490,675],[.66,790,555],[.80,790,650],[.91,790,840]]);
+    }
+    if(scene===8){
+      // Each change leads the corresponding noun in the Cloudflare voice-over.
+      return timedTargets(local,[[0,650,640],[.11,1050,640],[.25,1390,640],[.32,1635,640],[.43,650,640],[.58,1050,640],[.70,1635,640]]);
     }
     const targets = cues[scene];
     const u = Math.max(0, Math.min(targets.length - 1, (local - .12) / .75 * (targets.length - 1)));
@@ -189,11 +214,6 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
       gc.bezierCurveTo(x-80,y+90,1010,405,700,405);
       gc.bezierCurveTo(390,405,35,405,35,360);
       gc.lineTo(tx,ty);
-    } else if(scene===2 && local>=.72){
-      // Reach the Lean example from below so the sight line never runs over
-      // the theorem-prover headline or its supporting copy.
-      gc.bezierCurveTo(1820,390,1865,500,1865,690);
-      gc.lineTo(1430,690);gc.lineTo(tx,ty);
     } else gc.lineTo(tx,ty);
     gc.stroke();gc.restore();
   }
@@ -216,7 +236,7 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
     ctx.drawImage(back, 0, 0);
     const px = form(t, scene, local);
     ctx.save();
-    ctx.globalAlpha = scene === 0 || scene === 12 ? .2 : .13;
+    ctx.globalAlpha = scene === 0 || scene === 10 ? .2 : .13;
     ctx.filter = 'blur(28px)';
     ctx.drawImage(shape, 0, 0, 1920, 1080);
     ctx.restore();

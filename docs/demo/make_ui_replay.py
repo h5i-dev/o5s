@@ -31,32 +31,50 @@ window.addEventListener('message', event => {
   const step = event.data.step;
   if (step === demoStep) return;
   demoStep = step;
-  const proposed = step >= 1, approved = step >= 2,
-        checked = step >= 3, admitted = step >= 4;
-  const patch = {
-    id: 1, author: 1, hash: 'a71c' + '0'.repeat(60),
-    intent: 'Fix parser', dependencies: [],
-    approvals: approved ? [2] : [], checks_passed: checked,
-    edits: [{path: 'parser.rs', content: 'parse_call()?;\\n'}], graph_edits: []
+  const proposedCount = Math.max(0, Math.min(3, step + 1));
+  const approved = step >= 3, admitted = step >= 4;
+  const base = {
+    id: 42, author: 4, hash: 'b42e' + '0'.repeat(60),
+    intent: 'Base snapshot', dependencies: [], approvals: [5], checks_passed: true,
+    edits: [{path: 'README.md', content: 'o5s demo\\n'}], graph_edits: []
   };
+  const specs = [
+    ['Parser guard', 'parser.rs', 'parse_call()?;\\n'],
+    ['API timeout', 'api.rs', 'timeout_ms = 500;\\n'],
+    ['Parser tests', 'tests.rs', 'assert_parse_ok();\\n']
+  ];
+  const proposals = specs.map(([intent,path,content],i) => ({
+    id: i+1, author: i+1, hash: ['a71c','b82d','c93e'][i] + '0'.repeat(60),
+    intent, dependencies: [42], approvals: approved ? [4] : [],
+    checks_passed: approved, edits: [{path,content}], graph_edits: []
+  }));
+  const patches = {'42': base};
+  for(let i=0;i<proposedCount;i++) patches[String(i+1)] = proposals[i];
   data = {
     repository: {
-      channels: {main: admitted ? [1] : []},
-      patches: proposed ? {'1': patch} : {},
+      channels: {main: admitted ? [42,1,2,3] : [42]},
+      patches,
       events: [
-        ...(proposed ? [{actor: 1, action: 'propose', patch: 1}] : []),
-        ...(approved ? [{actor: 2, action: 'approve', patch: 1}] : []),
-        ...(checked ? [{actor: 3, action: 'check', patch: 1}] : []),
-        ...(admitted ? [{actor: 2, action: 'merge', patch: 1, channel: 'main'}] : [])
+        ...proposals.slice(0,proposedCount).map(p => ({actor:p.author,action:'propose',patch:p.id})),
+        ...(approved ? proposals.flatMap(p => [
+          {actor:4,action:'approve',patch:p.id},
+          {actor:5,action:'check',patch:p.id}
+        ]) : []),
+        ...(admitted ? proposals.map(p => ({actor:4,action:'merge',patch:p.id,channel:'main'})) : [])
       ]
     },
     view: {
-      patches: admitted ? [1] : [],
-      files: admitted ? {'parser.rs': '10 | parse_call()?;\\n18 | return Ok(node);\\n'} : {},
+      patches: admitted ? [42,1,2,3] : [42],
+      files: admitted ? {
+        'README.md': 'o5s demo\\n',
+        'parser.rs': 'parse_call()?;\\n',
+        'api.rs': 'timeout_ms = 500;\\n',
+        'tests.rs': 'assert_parse_ok();\\n'
+      } : {'README.md': 'o5s demo\\n'},
       conflicts: {}, binary: [], executable: []
     }
   };
-  $('identity').textContent = 'org demo · user 1';
+  $('identity').textContent = 'org demo · 3 authors';
   const option = document.createElement('option');
   option.value = 'demo'; option.textContent = 'demo';
   $('repositories').replaceChildren(option);

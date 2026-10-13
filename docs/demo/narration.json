@@ -1,13 +1,57 @@
 [
-  {"start":0,"end":25,"text":"I am the octopus in o5s. Imagine one thousand agents editing one file. Can one version control system integrate their work as every agent pushes? That is the concurrency problem. But its merge and admission algorithms are complex. Can we prove that their critical decisions are correct and safe? A system used by millions needs both answers. Let me show you."},
-  {"start":25,"end":55,"text":"Git has a simple rule for updating a branch: your commit must build on its current tip. Agent A pushes, and the tip moves. The other agents now have old bases. They fetch, rebase, and try again. Agent B's next push fails because main has already advanced. Under heavy concurrency, this loop dominates the work. A textual conflict can stop an unattended agent entirely. Before making progress, it must reconcile the new history with the change it originally prepared."},
-  {"start":55,"end":85,"text":"Millions of teams rely on VCS. Git fixed twelve security flaws across 2024 and 2025; GitHub disclosed a critical push flaw. OpenAI, Claude, and Gemini agents have reached real systems during evaluations. Critical middleware needs machine-checked correctness properties. o5s uses Lean four to verify its Rust decision core under stated assumptions."},
-  {"start":85,"end":145,"text":"o5s records changes as immutable patches with explicit dependencies. Look at the actual line edit shape: a file path, base patch, half-open line range, and replacement content. A changes line ten of parser dot R S, and B changes line eighteen from the same base. Their ranges do not overlap, so the channel can admit both in either order. Now use exactly the same fields for C and D. Both replace line ten from base forty-two, but propose different text. The channel retains both patches and presents a conflict instead of silently choosing one. A later resolution patch can select the intended line after independent review and a passing check."},
-  {"start":145,"end":180,"text":"Nine hundred fifteen Lean four theorems prove stated properties of the Rust decision core, across thirty modules. Three hundred ninety-seven cover the registry, and five hundred eighteen cover the kernels. The proved properties include the admission gate, refinement of Rust transitions, convergence of concurrent document views, and preservation of causal heads. Charon and Aeneas translate the Rust function that runs into Lean definitions; the proofs connect those definitions to a readable model. The claims hold under explicit assumptions. Adapters and deployment need their own validation."},
-  {"start":180,"end":210,"text":"Return to parser dot R S. The Lean four convergence proof says valid delivery orders of the same patches yield the same view in the graph-document model. A then B agrees with B then A. C and D remain a visible conflict. Separate proofs cover the admission gate, refinement, and causal heads. They keep dependencies closed, preserve the past seen by a workspace, and relate Rust transitions to the readable model."},
-  {"start":210,"end":245,"text":"The deployment separates decisions from familiar workspaces. A Cloudflare Worker runs the Rust admission kernel and reaches atomic state in Postgres through Hyperdrive. Cloudflare Artifacts holds Git projections and per-agent workspaces. Agents can keep using ordinary Git tools to propose and fetch work. The Worker decides what enters a channel; the projections make that decision useful to developers and agents."},
-  {"start":245,"end":290,"text":"Follow one change through Cloudflare. Each agent has an Artifacts Git workspace. The Worker creates a branch from the channel snapshot; the agent commits normally and pushes a work branch. On a worktree-propose request, the Worker reads the changed tree and blobs from Artifacts without cloning the repository. It converts the diff to a patch that depends on the snapshot's causal heads. Review and checks are recorded; the Worker makes an atomic admission decision in Postgres through Hyperdrive. Then it exports a conflict-free Git projection back to Artifacts, where the next agent can fetch it. The Git view is a projection of the admitted patch graph."},
-  {"start":290,"end":340,"text":"Watch the actual o5s CLI workflow, replayed beside its repository UI. First connect an ordinary Git checkout. Then propose a parser change. The UI gains proposal number one, but the channel still has zero patches: the proposal has not been admitted. A separate reviewer approves it, and an independent check reports a pass. Watch the status badges change in the same repository view. Merge admits the patch to main; the channel count and parser dot R S file view update together. Finally, fetch updates refs slash o5s slash main while leaving the local head and working files alone. The commands and the embedded UI are real; the repository data in this replay is illustrative."},
-  {"start":340,"end":370,"text":"In one recorded local workload, o5s reached about sixty times the integration throughput of unattended Git. A thousand agents changed different lines of one file, with sixty-four operations in flight on one host. The measured rates were five hundred seventy-four integrations per second for the o5s API and nine point eight for Git, a ratio of fifty-eight point six. This is a local comparison, not a Cloudflare throughput result."},
-  {"start":370,"end":405,"text":"The source, proof files, local run instructions, and comparison logs are available to inspect. The Worker and Hyperdrive path has been exercised end to end. The live Artifacts workspace flow and complete distributed scale remain work to validate. o5s shows a path toward version control for agent concurrency: immutable patches, explicit conflicts, a verified decision kernel, and Cloudflare infrastructure around it."}
+  {
+    "start": 0,
+    "end": 25,
+    "text": "One thousand agents edit one file. Can a VCS integrate their work and prove its rules? That is why we are building o5s, a patch-theory VCS for concurrent agents. Our recorded local workload reaches about sixty times Git's integration throughput. Lean four proves all defined critical security properties of its Rust decision core. Here's how."
+  },
+  {
+    "start": 25,
+    "end": 90,
+    "text": "Let's start with the workflow. Three agents have separate Git worktrees based on the same channel snapshot, patch forty-two. Their terminals propose changes to parser, API, and tests almost together. Watch the real repository UI: proposals one, two, and three appear before the channel advances. The graph below records that all three depend on the same base, not on each other's latest commit. A separate reviewer approves each proposal, and an independent check reporter records passing checks. Then one merge command admits all three as a batch. The channel and file view update in the embedded UI. Each agent can fetch the new main ref while its own head stays put. The commands are actual o5s CLI syntax; the repository data is illustrative. This is the behavior we want at agent scale: fast concurrent proposals, explicit causal dependencies, and one reviewed result. In the UI, the file list grows from the base readme to parser, API, and tests. The graph still shows one shared cause for all three."
+  },
+  {
+    "start": 90,
+    "end": 120,
+    "text": "One thousand agents, sixty-four in flight. For adjacent-line edits in one file, o5s integrated five hundred seventy-four patches per second; unattended Git integrated nine point eight. That is fifty-eight point six times faster. For one new file per agent in the same repository, o5s reached one thousand eighty-three per second; Git reached nine point zero. That is almost one hundred twenty times Git's integration throughput."
+  },
+  {
+    "start": 120,
+    "end": 150,
+    "text": "Git has a simple rule for updating a branch: your commit must build on its current tip. Agent A pushes, and the tip moves. The other agents now have old bases. They fetch, rebase, and try again. Agent B's next push fails because main has already advanced. Under heavy concurrency, this loop dominates the work. A textual conflict can stop an unattended agent entirely. Before making progress, it must reconcile the new history with the change it originally prepared."
+  },
+  {
+    "start": 150,
+    "end": 180,
+    "text": "Millions of teams rely on VCS. Git fixed twelve security flaws across 2024 and 2025; GitHub disclosed a critical push flaw. OpenAI, Claude, and Gemini agents have reached real systems during evaluations. Critical middleware needs machine-checked correctness properties. o5s uses Lean four to verify its Rust decision core under stated assumptions."
+  },
+  {
+    "start": 180,
+    "end": 225,
+    "text": "o5s records changes as immutable patches with explicit dependencies. Look at the actual line edit shape: a file path, base patch, half-open line range, and replacement content. A changes line ten of parser dot R S, and B changes line eighteen from the same base. Their ranges do not overlap, so the channel can admit both in either order. Now use exactly the same fields for C and D. Both replace line ten from base forty-two, but propose different text. The channel retains both patches and presents a conflict instead of silently choosing one. A later resolution patch can select the intended line after independent review and a passing check."
+  },
+  {
+    "start": 225,
+    "end": 260,
+    "text": "Nine hundred fifteen Lean four theorems check the Rust decision core. Charon and Aeneas extract the Rust that runs; Lean connects it to a readable model. The proofs cover the admission gate, refinement of Rust transitions, convergence of document views, and preservation of causal heads. Those are machine checked under explicit assumptions, without sorry or new axioms. Adapters and deployment need separate validation. You can trace admission to separate approvals and passing checks, while convergence means valid delivery order cannot alter the final view."
+  },
+  {
+    "start": 260,
+    "end": 290,
+    "text": "Return to parser dot R S. The Lean four convergence proof says valid delivery orders of the same patches yield the same view in the graph-document model. A then B agrees with B then A. C and D remain a visible conflict. Separate proofs cover the admission gate, refinement, and causal heads. They keep dependencies closed, preserve the past seen by a workspace, and relate Rust transitions to the readable model."
+  },
+  {
+    "start": 290,
+    "end": 325,
+    "text": "The deployment separates decisions from familiar workspaces. A Cloudflare Worker runs the Rust admission kernel and reaches atomic state in Postgres through Hyperdrive. Cloudflare Artifacts holds Git projections and per-agent workspaces. Agents can keep using ordinary Git tools to propose and fetch work. The Worker decides what enters a channel; the projections make that decision useful to developers and agents. The patch graph remains the source of truth. Git repositories are projections for familiar tools; the Worker checks the rules whenever it admits a patch."
+  },
+  {
+    "start": 325,
+    "end": 370,
+    "text": "Follow one change through Cloudflare. Each agent has an Artifacts Git workspace. The Worker creates a branch from the channel snapshot; the agent commits normally and pushes a work branch. On a worktree-propose request, the Worker reads the changed tree and blobs from Artifacts without cloning the repository. It converts the diff to a patch that depends on the snapshot's causal heads. Review and checks are recorded; the Worker makes an atomic admission decision in Postgres through Hyperdrive. Then it exports a conflict-free Git projection back to Artifacts, where the next agent can fetch it. The Git view is a projection of the admitted patch graph."
+  },
+  {
+    "start": 370,
+    "end": 405,
+    "text": "The source, proof files, local run instructions, and comparison logs are available to inspect. The Worker and Hyperdrive path has been exercised end to end. The live Artifacts workspace flow and complete distributed scale remain work to validate. o5s shows a path toward version control for agent concurrency: immutable patches, explicit conflicts, a verified decision kernel, and Cloudflare infrastructure around it. With Workers and Artifacts, agents keep familiar Git workspaces while a proved patch core decides shared history."
+  }
 ]

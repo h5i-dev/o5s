@@ -61,7 +61,7 @@ def main():
     filters.append("".join(f"[a{i}]" for i in range(len(clips))) +
                    f"amix=inputs={len(clips)}:duration=longest:normalize=0," +
                    "aresample=48000[out]")
-    args += ["-filter_complex", ";".join(filters), "-map", "[out]", "-t", "405",
+    args += ["-filter_complex", ";".join(filters), "-map", "[out]", "-t", str(SEGMENTS[-1]["end"]),
              "-c:a", "libmp3lame", "-b:a", "128k", str(DEST)]
     subprocess.run(args, check=True)
     print(f"wrote {DEST}")
