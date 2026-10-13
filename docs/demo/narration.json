@@ -12,7 +12,7 @@
   {
     "start": 90,
     "end": 120,
-    "text": "We tested one thousand agents, with sixty-four proposals in flight at once. For adjacent-line edits in one file, o5s integrated five hundred seventy-four patches per second; unattended Git integrated nine point eight. That is fifty-eight point six times faster. For one new file per agent in the same repository, o5s reached one thousand eighty-three per second; Git reached nine point zero. That is almost one hundred twenty times Git's integration throughput."
+    "text": "We tested one thousand agents, with sixty-four proposals in flight at once. For adjacent-line edits in one file, o5s integrated five hundred seventy-four patches per second, versus nine point eight for unattended Git. That is fifty-eight point six times faster. With one new file per agent in the same repository, o5s reached one thousand eighty-three per second, versus nine for Git. That is almost one hundred twenty times Git's integration throughput."
   },
   {
     "start": 120,
@@ -22,7 +22,7 @@
   {
     "start": 150,
     "end": 180,
-    "text": "The other problem is trust. Millions of teams rely on version control, so its core must be secure and reliable. Git fixed twelve security flaws in 2024 and 2025; GitHub disclosed a critical push flaw. OpenAI, Claude, and Gemini agents reached real systems in evaluations. Version-control software needs machine-checked correctness properties. o5s uses Lean four to verify critical properties of its Rust decision core."
+    "text": "The other problem is trust. Millions of teams rely on version control, so its core must be secure and reliable. Git fixed twelve security flaws in 2024 and 2025. GitHub also disclosed a critical push flaw. OpenAI, Claude, and Gemini agents reached real systems in evaluations. Version-control software needs machine-checked correctness properties. o5s uses Lean four to verify critical properties of its Rust decision core."
   },
   {
     "start": 180,
@@ -32,7 +32,7 @@
   {
     "start": 225,
     "end": 260,
-    "text": "Nine hundred fifteen Lean four theorems check the Rust decision core. High five app translates the Rust code that runs into Lean four. We prove properties of that translated code: the admission gate, refinement of Rust transitions, convergence of document views, and preservation of causal heads. Lean checks these proofs without sorry or new axioms. Admission requires separate approvals and passing checks; convergence means delivery order cannot change the final view."
+    "text": "Nine hundred fifteen Lean four theorems check the Rust decision core. High five app translates the Rust code that runs into Lean four. We prove properties of that translated code: the admission gate, refinement of Rust transitions, convergence of document views, and preservation of causal heads. Lean checks these proofs without sorry or new axioms. One proof requires separate approvals and passing checks before admission. Another shows that valid delivery orders of the same patches yield the same view."
   },
   {
     "start": 260,
@@ -47,7 +47,7 @@
   {
     "start": 325,
     "end": 370,
-    "text": "Follow one change through Cloudflare. Each agent has an Artifacts Git workspace. The Worker creates a branch from the channel snapshot; the agent commits normally and pushes a work branch. On a worktree-propose request, the Worker reads the changed tree and blobs from Artifacts without cloning the repository. It converts the diff to a patch that depends on the snapshot's causal heads. Review and checks are recorded; the Worker makes an atomic admission decision in Postgres through Hyperdrive. Then it exports a conflict-free Git projection back to Artifacts, where the next agent can fetch it. The Git view is a projection of the admitted patch graph."
+    "text": "Follow one change through Cloudflare. Each agent has an Artifacts Git workspace. First, the Worker creates a branch from the channel snapshot. The agent then commits normally and pushes a work branch. On a worktree-propose request, the Worker reads the changed tree and blobs from Artifacts without cloning the repository. It converts the diff to a patch that depends on the snapshot's causal heads. Review and checks are recorded. After that, the Worker makes an atomic admission decision in Postgres through Hyperdrive. It exports a conflict-free Git projection back to Artifacts, where the next agent can fetch it. The Git view is a projection of the admitted patch graph."
   },
   {
     "start": 370,
