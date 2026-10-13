@@ -11,15 +11,21 @@ STYLE = """<style>
    verbatim from crates/server/src/index.html. */
 html,body{overflow:hidden}
 .frame-top{position:absolute;padding:2px 18px}
-.console{padding:52px 18px 12px;max-width:none}
-.console-head{margin-bottom:8px}.console-head h1{font-size:21px}
+.console{padding:46px 18px 8px;max-width:none}
+.console-head{margin-bottom:5px}.console-head h1{font-size:18px}
 .session,.guide,.tentacle,.backdrop{display:none!important}
-.toolbar{padding:6px 0}.metrics{margin-bottom:10px}
-.metric{padding:7px 0}.metric strong{font-size:22px;margin-top:2px}
-.grid{gap:10px;grid-template-columns:1fr 1fr}.stack{gap:10px}
-.panel-head{padding:7px 10px}.panel-body,.card{padding:8px 10px}
-.card p{margin:3px 0}.hash{display:none}.chips{margin-top:4px}
-.activity{max-height:85px}
+.toolbar{padding:4px 0}.metrics{margin-bottom:7px}
+.metric{padding:5px 0}.metric strong{font-size:21px;margin-top:2px}
+.grid{gap:9px;grid-template-columns:1fr 1.1fr}.stack{gap:8px}
+.panel-head{padding:6px 9px}.panel-body,.card{padding:7px 9px}
+.card p{margin:2px 0}.hash{display:none}.chips{margin-top:4px;gap:4px}
+#patches .card details,.pager,.activity{display:none}
+#graph{padding:5px 8px;overflow:hidden}#graph svg{height:89px}
+#graph svg text{font-size:17px}#graph svg circle{stroke:#b1a19a;stroke-width:2px}
+#graph svg path{stroke:#a85a50;stroke-width:2px}
+#files{max-height:150px;overflow:auto;padding:6px 9px}
+#files details{margin-top:5px}
+#files details:not(:first-child) summary{color:var(--green)}
 </style>"""
 
 BRIDGE = """
@@ -80,7 +86,38 @@ window.addEventListener('message', event => {
   $('repositories').replaceChildren(option);
   $('repositories').value = 'demo';
   render();
-  if (admitted) $('files').querySelector('details')?.setAttribute('open', '');
+  // Film framing: keep the genuine graph and all three proposal cards visible.
+  graph([base, ...proposals.slice(0,proposedCount)], new Set(data.view.patches));
+  const svg = $('graph').querySelector('svg');
+  svg.setAttribute('viewBox', '0 0 760 130');
+  const positions = [[45,65],[240,25],[430,65],[620,105]];
+  const labels = ['#42 · base','#1 · agent A','#2 · agent B','#3 · agent C'];
+  [...svg.querySelectorAll('path')].forEach((edge,i) => {
+    const [x,y] = positions[i+1];
+    edge.setAttribute('d', `M 45 65 C 120 65 ${x-80} ${y} ${x} ${y}`);
+  });
+  [...svg.querySelectorAll('circle')].forEach((circle,i) => {
+    circle.setAttribute('cx', positions[i][0]); circle.setAttribute('cy', positions[i][1]);
+    circle.setAttribute('r', '8');
+  });
+  [...svg.querySelectorAll('text')].forEach((label,i) => {
+    label.setAttribute('x', positions[i][0]+(i ? 16 : -4));
+    label.setAttribute('y', positions[i][1]+(i ? 5 : -15));
+    label.textContent = labels[i];
+  });
+  const graphPanel = $('graph').closest('details');
+  graphPanel.open = true;
+  graphPanel.parentElement.prepend(graphPanel);
+  for (const card of [...$('patches').children]) {
+    if (card.querySelector('h3')?.textContent.startsWith('#42')) card.remove();
+  }
+  $('patches').replaceChildren(...[...$('patches').children].reverse());
+  if (!proposedCount) $('patches').append(el('div', 'Awaiting agent proposals.', 'empty'));
+  $('count').textContent = proposedCount + ' proposals';
+  $('m-patches').textContent = proposedCount;
+  $('m-merged').textContent = admitted ? proposedCount : 0;
+  document.querySelector('#metrics .metric:first-child span').textContent = 'proposals';
+  document.querySelector('#metrics .metric:nth-child(2) span').textContent = 'admitted';
 });
 """
 
