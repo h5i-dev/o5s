@@ -158,7 +158,7 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
       return local<.18 ? [675,597] : local<.32 ? [675,638] : local<.48 ? [675,678] : local<.6 ? [675,718] : local<.72 ? [675,758] : [1430,665];
     }
     if(scene===3){
-      const path=[[0,520,505],[.14,520,615],[.28,965,615],[.43,1425,665],[.5,520,615],[.65,965,615],[.79,1425,580],[1,1425,680]];
+      const path=[[0,520,505],[.12,520,615],[.23,965,615],[.34,1425,665],[.37,520,615],[.49,965,615],[.59,1425,580],[1,1425,680]];
       const i=Math.max(0,path.findIndex((p,j)=>j<path.length-1&&local>=p[0]&&local<=path[j+1][0]));
       const a=path[i],b=path[i+1],f=smooth((local-a[0])/(b[0]-a[0]));
       return [a[1]+(b[1]-a[1])*f,a[2]+(b[2]-a[2])*f];
