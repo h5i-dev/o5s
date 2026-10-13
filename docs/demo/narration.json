@@ -2,7 +2,7 @@
   {
     "start": 0,
     "end": 25,
-    "text": "One thousand agents edit one file. Can a VCS integrate their work and prove its rules? That is why we are building o5s, a patch-theory VCS for concurrent agents. Our recorded local workload reaches about sixty times Git's integration throughput. Lean four proves all defined critical security properties of its Rust decision core. Here's how."
+    "text": "One thousand agents edit one file. Can a version control system integrate their work? Can we prove its implementation is actually correct? Meet o5s, a patch-theory VCS for concurrent agents. Our recorded workload reaches sixty times Git's integration throughput. Lean four proves all defined critical security properties of its Rust core. Here's how."
   },
   {
     "start": 25,
@@ -52,6 +52,6 @@
   {
     "start": 370,
     "end": 405,
-    "text": "The source, proof files, local run instructions, and comparison logs are available to inspect. The Worker and Hyperdrive path has been exercised end to end. The live Artifacts workspace flow and complete distributed scale remain work to validate. o5s shows a path toward version control for agent concurrency: immutable patches, explicit conflicts, a verified decision kernel, and Cloudflare infrastructure around it. With Workers and Artifacts, agents keep familiar Git workspaces while a proved patch core decides shared history."
+    "text": "o5s is fully open source under Apache two point zero. Its code, Lean proofs, and comparison logs are public. The Worker and Hyperdrive path has been exercised end to end. Live Artifacts workspaces and full distributed scale still need validation. o5s pairs immutable patches and explicit conflicts with a verified decision kernel. On Cloudflare Workers and Artifacts, agents keep familiar Git workspaces while a proved patch core decides shared history."
   }
 ]
