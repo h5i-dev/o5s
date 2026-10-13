@@ -31,27 +31,27 @@
   },
   {
     "start": 225,
-    "end": 260,
-    "text": "Nine hundred fifteen Lean four theorems check the Rust decision core. High five app translates the Rust code that runs into Lean four. We prove properties of that translated code: the admission gate, refinement of Rust transitions, convergence of document views, and preservation of causal heads. Lean checks these proofs without sorry or new axioms. One proof requires separate approvals and passing checks before admission. Another shows that valid delivery orders of the same patches yield the same view."
+    "end": 247,
+    "text": "Nine hundred fifteen Lean four theorems check the Rust decision core. High five app translates the Rust code that runs into Lean four. We prove properties of that translated code: the admission gate, refinement of Rust transitions, convergence of document views, and preservation of causal heads."
   },
   {
-    "start": 260,
-    "end": 290,
+    "start": 247,
+    "end": 277,
     "text": "Let's look more closely at the parser dot R S example. The Lean four convergence proof says valid delivery orders of the same patches yield the same view in the graph-document model. A then B agrees with B then A. C and D remain a visible conflict. Separate proofs cover the admission gate, refinement, and causal heads. They keep dependencies closed, preserve the past seen by a workspace, and relate Rust transitions to the readable model."
   },
   {
-    "start": 290,
-    "end": 325,
+    "start": 277,
+    "end": 312,
     "text": "Cloudflare separates decisions from workspaces. A Worker runs the Rust admission kernel and records atomic state in Postgres through Hyperdrive. Artifacts holds per-agent Git workspaces and channel projections. Agents propose and fetch with ordinary Git commands. The patch graph is the source of truth. For each proposal, the Worker checks the admission rules, updates the graph, and exports the admitted result as a Git projection to Artifacts. Agents then fetch the new shared state using Git."
   },
   {
-    "start": 325,
-    "end": 370,
+    "start": 312,
+    "end": 357,
     "text": "Follow one change through Cloudflare. Each agent has an Artifacts Git workspace. First, the Worker creates a branch from the channel snapshot. The agent then commits normally and pushes a work branch. On a worktree-propose request, the Worker reads the changed tree and blobs from Artifacts without cloning the repository. It converts the diff to a patch that depends on the snapshot's causal heads. Review and checks are recorded. After that, the Worker makes an atomic admission decision in Postgres through Hyperdrive. It exports a conflict-free Git projection back to Artifacts, where the next agent can fetch it. The Git view is a projection of the admitted patch graph."
   },
   {
-    "start": 370,
-    "end": 405,
+    "start": 357,
+    "end": 392,
     "text": "o5s is fully open source under Apache two point zero. Its Rust code, Lean proofs, and benchmarks are public. The architecture puts the verified decision kernel in a Cloudflare Worker, atomic state behind Hyperdrive, and Git workspaces in Artifacts. Agents keep ordinary Git tools while immutable patches preserve dependencies and conflicts. Every shared update passes through a precise admission decision. Explore the source and help build version control for concurrent agents."
   }
 ]

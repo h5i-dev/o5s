@@ -181,7 +181,9 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
       return [a[1]+(b[1]-a[1])*f,a[2]+(b[2]-a[2])*f];
     }
     if(scene===6){
-      return timedTargets(local,[[0,520,620],[.20,1140,720],[.31,1250,625],[.35,520,470],[.44,850,470],[.53,1190,470],[.62,1550,470]]);
+      // The four property names are spoken at ~238, 239, 241, and 244 s.
+      // Follow their cards in that order, after showing Rust and translation.
+      return timedTargets(local,[[0,490,250],[.16,710,710],[.25,1100,710],[.32,1500,710],[.58,650,475],[.65,990,475],[.75,1330,475],[.86,1670,475]]);
     }
     if(scene===7){
       return timedTargets(local,[[0,790,750],[.27,1490,675],[.66,790,555],[.80,790,650],[.91,790,840]]);
