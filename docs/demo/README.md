@@ -1,6 +1,6 @@
 # o5s demo film — Eight arms, one channel
 
-This is a **6:32 HTML film** for Cloudflare's [Build the next Git platform](https://blog.cloudflare.com/next-git-platform-on-cloudflare/) submission. It opens with the octopus and a three-agent CLI/UI walkthrough, shows measured performance, then explains the problem, patch model, verified Rust core, and Workers + Artifacts design. English Kokoro narration accompanies the octopus; the on-screen captions also carry the main points.
+This is a **6:27 HTML film** for Cloudflare's [Build the next Git platform](https://blog.cloudflare.com/next-git-platform-on-cloudflare/) submission. It opens with the octopus and a three-agent CLI/UI walkthrough, shows measured performance, then explains the problem, patch model, verified Rust core, and Workers + Artifacts design. English Kokoro narration accompanies the octopus; the on-screen captions also carry the main points.
 
 Open `index.html` in a browser and press **Play**. Use **Space** to pause, **←/→** to move five seconds, or the scrub bar. The music-note button mutes narration. Playback starts on a click so browsers can play audio. Every frame is a function of time exposed as `window.SEEK(milliseconds)`, so captures can be reproduced exactly.
 
@@ -10,29 +10,29 @@ Open `index.html` in a browser and press **Play**. Use **Space** to pause, **←
 
 ```sh
 cd docs/demo
-node render.mjs --stills 12,34,73,103,195,237,262,292,329,372
+node render.mjs --stills 12,34,73,98,190,232,257,287,324,367
 node render.mjs                           # 1080p, 24 fps -> out/o5s-demo.mp4
 node render.mjs --scale 2 --out-height 1080  # supersampled 1080p
 node render.mjs --fps 8 --width 960 --fast    # faster 540p draft
 ```
 
-The MP4 includes the generated narration. To regenerate the voice track, install PyTorch, `kokoro`, and `soundfile` in a Python environment, then run `python narrate.py`. After changing one scene, `python narrate.py --scene 3` regenerates that clip and remixes the track. Kokoro downloads its model and `af_heart` voice on first use. The copy and scene timing live in `narration.json`; the output is `audio/narration.mp3`. `out/` contains temporary voice clips, stills, and MP4 renders and is ignored by Git.
+The MP4 includes the generated narration. To regenerate the voice track, install PyTorch, `kokoro`, and `soundfile` in a Python environment, then run `python narrate.py`. After changing one scene, `python narrate.py --scene 3` regenerates that clip and remixes the track. For timing changes alone, `python narrate.py --remix-only` reuses the existing clips. Kokoro downloads its model and `af_heart` voice on first use. The copy and scene timing live in `narration.json`; optional `lead` and `tail` offsets control the pause at a scene boundary. The output is `audio/narration.mp3`. `out/` contains temporary voice clips, stills, and MP4 renders and is ignored by Git.
 
 ## Timeline
 
 | Time | Beat |
 | --- | --- |
 | 0:00–0:25 | Introduce the octopus and the 1,000-agent question. |
-| 0:25–1:30 | Three simultaneous agent terminals, independent review/checks, a dependency graph, and the embedded repository UI. |
-| 1:30–2:00 | Recorded adjacent-line and one-new-file-per-agent comparisons. |
-| 2:00–2:30 | Problem: a Git commit graph shows the moving branch and stale agent bases. |
-| 2:30–3:00 | Problem: critical VCS vulnerabilities and agent attacks make correctness vital. |
-| 3:00–3:45 | One immutable patch model: disjoint edits integrate; overlapping edits remain visible as a conflict. |
-| 3:45–4:07 | Rust decision kernel, Lean 4 verification, and four example proof properties. |
-| 4:07–4:37 | Refinement, gate, convergence, and causal heads, beside a real Lean 4 theorem excerpt. |
-| 4:37–5:12 | Worker, Hyperdrive/Postgres, and Artifacts. |
-| 5:12–5:57 | Artifacts workspaces, Worker's tree diff, causal heads, and Git projection. |
-| 5:57–6:32 | Source and current scope of assurance. |
+| 0:25–1:25 | Three simultaneous agent terminals, independent review/checks, a dependency graph, and the embedded repository UI. |
+| 1:25–1:55 | Recorded adjacent-line and one-new-file-per-agent comparisons. |
+| 1:55–2:25 | Problem: a Git commit graph shows the moving branch and stale agent bases. |
+| 2:25–2:55 | Problem: critical VCS vulnerabilities and agent attacks make correctness vital. |
+| 2:55–3:40 | One immutable patch model: disjoint edits integrate; overlapping edits remain visible as a conflict. |
+| 3:40–4:02 | Rust decision kernel, Lean 4 verification, and four example proof properties. |
+| 4:02–4:32 | Refinement, gate, convergence, and causal heads, beside a real Lean 4 theorem excerpt. |
+| 4:32–5:07 | Worker, Hyperdrive/Postgres, and Artifacts. |
+| 5:07–5:52 | Artifacts workspaces, Worker's tree diff, causal heads, and Git projection. |
+| 5:52–6:27 | Source and current scope of assurance. |
 
 ## Evidence and claim boundaries
 

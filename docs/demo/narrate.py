@@ -19,7 +19,11 @@ SAMPLE_RATE = 24000
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scene", type=int, action="append", help="regenerate this 1-based scene; repeat to select more")
-    selected = parser.parse_args().scene
+    parser.add_argument("--remix-only", action="store_true", help="reuse the existing clips after timing changes")
+    args = parser.parse_args()
+    if args.remix_only and args.scene:
+        parser.error("--remix-only cannot be combined with --scene")
+    selected = [] if args.remix_only else args.scene
     if selected is not None and any(not 1 <= scene <= len(SEGMENTS) for scene in selected):
         parser.error(f"--scene must be between 1 and {len(SEGMENTS)}")
     WORK.mkdir(parents=True, exist_ok=True)
@@ -44,7 +48,9 @@ def main():
                 raise RuntimeError(f"Scene {i + 1}: clip has {sample_rate} Hz")
         clips.append(clip)
         duration = len(voice) / SAMPLE_RATE
-        available = segment["end"] - segment["start"] - 2
+        lead = segment.get("lead", 1)
+        tail = segment.get("tail", 1)
+        available = segment["end"] - segment["start"] - lead - tail
         speed = max(1, duration / available)
         if speed > 1.25:
             raise RuntimeError(f"Scene {i + 1}: speech requires {speed:.2f}x; shorten copy")
@@ -56,7 +62,7 @@ def main():
         args += ["-i", str(clip)]
     filters = []
     for i, segment in enumerate(SEGMENTS):
-        delay = (segment["start"] + 1) * 1000
+        delay = round((segment["start"] + segment.get("lead", 1)) * 1000)
         filters.append(f"[{i}:a]atempo={tempo[i]:.5f},aresample=48000,adelay={delay}|{delay}[a{i}]")
     filters.append("".join(f"[a{i}]" for i in range(len(clips))) +
                    f"amix=inputs={len(clips)}:duration=longest:normalize=0," +

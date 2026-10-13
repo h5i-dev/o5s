@@ -6,52 +6,54 @@
   },
   {
     "start": 25,
-    "end": 90,
+    "end": 85,
+    "tail": 0,
     "text": "Let's start with the workflow. Three agents have separate Git worktrees based on the same channel snapshot, patch forty-two. Their terminals propose changes to parser, API, and tests almost together. Watch the repository UI: proposals one, two, and three appear before the channel advances. The graph below records that all three depend on the same base, not on each other's latest commit. A separate reviewer approves each proposal, and an independent check reporter records passing checks. Then one merge command admits all three as a batch. The channel and file view update in the embedded UI. Each agent can fetch the new main ref while its own head stays put. The reviewer can trace every proposal back to the exact snapshot its agent saw. Agents propose concurrently, reviewers inspect causal dependencies, and one checked merge advances the shared channel. In the UI, the file list grows from the base readme to parser, API, and tests. The graph still shows one shared cause for all three."
   },
   {
-    "start": 90,
-    "end": 120,
+    "start": 85,
+    "end": 115,
+    "lead": -0.6,
     "text": "We tested one thousand agents, with sixty-four proposals in flight at once. For adjacent-line edits in one file, o5s integrated five hundred seventy-four patches per second, versus nine point eight for unattended Git. That is fifty-eight point six times faster. With one new file per agent in the same repository, o5s reached one thousand eighty-three per second, versus nine for Git. That is almost one hundred twenty times Git's integration throughput."
   },
   {
-    "start": 120,
-    "end": 150,
+    "start": 115,
+    "end": 145,
     "text": "o5s solves two problems. First, Git cannot absorb thousands of concurrent agent edits. A branch accepts only commits built on its current tip. Agent A pushes, and the tip moves. Others now have stale bases. They fetch, rebase, and try again. Agent B's push fails because main has advanced. At this scale, the loop dominates. A textual conflict can stop an unattended agent until it reconciles the new history with its original change."
   },
   {
-    "start": 150,
-    "end": 180,
+    "start": 145,
+    "end": 175,
     "text": "The other problem is trust. Millions of teams rely on version control, so its core must be secure and reliable. Git fixed twelve security flaws in 2024 and 2025. GitHub also disclosed a critical push flaw. OpenAI, Claude, and Gemini agents reached real systems in evaluations. Version-control software needs machine-checked correctness properties. o5s uses Lean four to verify critical properties of its Rust decision core."
   },
   {
-    "start": 180,
-    "end": 225,
+    "start": 175,
+    "end": 220,
     "text": "o5s records changes as immutable patches with explicit dependencies. Look at the actual line edit shape: a file path, base patch, half-open line range, and replacement content. A changes line ten of parser dot R S, and B changes line eighteen from the same base. Their ranges do not overlap, so the channel can admit both in either order. Now use exactly the same fields for C and D. Both replace line ten from base forty-two, but propose different text. The channel retains both patches and presents a conflict instead of silently choosing one. A later resolution patch can select the intended line after independent review and a passing check."
   },
   {
-    "start": 225,
-    "end": 247,
+    "start": 220,
+    "end": 242,
     "text": "Nine hundred fifteen Lean four theorems check the Rust decision core. High five app translates the Rust code that runs into Lean four. We prove properties of that translated code: the admission gate, refinement of Rust transitions, convergence of document views, and preservation of causal heads."
   },
   {
-    "start": 247,
-    "end": 277,
+    "start": 242,
+    "end": 272,
     "text": "Let's look more closely at the parser dot R S example. The Lean four convergence proof says valid delivery orders of the same patches yield the same view in the graph-document model. A then B agrees with B then A. C and D remain a visible conflict. Separate proofs cover the admission gate, refinement, and causal heads. They keep dependencies closed, preserve the past seen by a workspace, and relate Rust transitions to the readable model."
   },
   {
-    "start": 277,
-    "end": 312,
+    "start": 272,
+    "end": 307,
     "text": "Cloudflare separates decisions from workspaces. A Worker runs the Rust admission kernel and records atomic state in Postgres through Hyperdrive. Artifacts holds per-agent Git workspaces and channel projections. Agents propose and fetch with ordinary Git commands. The patch graph is the source of truth. For each proposal, the Worker checks the admission rules, updates the graph, and exports the admitted result as a Git projection to Artifacts. Agents then fetch the new shared state using Git."
   },
   {
-    "start": 312,
-    "end": 357,
+    "start": 307,
+    "end": 352,
     "text": "Follow one change through Cloudflare. Each agent has an Artifacts Git workspace. First, the Worker creates a branch from the channel snapshot. The agent then commits normally and pushes a work branch. On a worktree-propose request, the Worker reads the changed tree and blobs from Artifacts without cloning the repository. It converts the diff to a patch that depends on the snapshot's causal heads. Review and checks are recorded. After that, the Worker makes an atomic admission decision in Postgres through Hyperdrive. It exports a conflict-free Git projection back to Artifacts, where the next agent can fetch it. The Git view is a projection of the admitted patch graph."
   },
   {
-    "start": 357,
-    "end": 392,
+    "start": 352,
+    "end": 387,
     "text": "o5s is fully open source under Apache two point zero. Its Rust code, Lean proofs, and benchmarks are public. The architecture puts the verified decision kernel in a Cloudflare Worker, atomic state behind Hyperdrive, and Git workspaces in Artifacts. Agents keep ordinary Git tools while immutable patches preserve dependencies and conflicts. Every shared update passes through a precise admission decision. Explore the source and help build version control for concurrent agents."
   }
 ]
