@@ -17,12 +17,12 @@
   {
     "start": 120,
     "end": 150,
-    "text": "Git has a simple rule for updating a branch: your commit must build on its current tip. Agent A pushes, and the tip moves. The other agents now have old bases. They fetch, rebase, and try again. Agent B's next push fails because main has already advanced. Under heavy concurrency, this loop dominates the work. A textual conflict can stop an unattended agent entirely. Before making progress, it must reconcile the new history with the change it originally prepared."
+    "text": "o5s solves two problems. First, Git cannot absorb thousands of concurrent agent edits. A branch accepts only commits built on its current tip. Agent A pushes, and the tip moves. Others now have stale bases. They fetch, rebase, and try again. Agent B's push fails because main has advanced. At this scale, the loop dominates. A textual conflict can stop an unattended agent until it reconciles the new history with its original change."
   },
   {
     "start": 150,
     "end": 180,
-    "text": "Millions of teams rely on VCS. Git fixed twelve security flaws across 2024 and 2025; GitHub disclosed a critical push flaw. OpenAI, Claude, and Gemini agents have reached real systems during evaluations. Critical middleware needs machine-checked correctness properties. o5s uses Lean four to verify its Rust decision core under stated assumptions."
+    "text": "The other problem is trust. Millions of teams rely on version control, so its core must be secure and reliable. Git fixed twelve security flaws across 2024 and 2025; GitHub disclosed a critical push flaw. OpenAI, Claude, and Gemini agents have reached real systems during evaluations. Critical middleware needs machine-checked correctness properties. o5s uses Lean four to verify its Rust decision core under stated assumptions."
   },
   {
     "start": 180,
