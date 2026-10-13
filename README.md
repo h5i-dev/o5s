@@ -1,9 +1,4 @@
-<p align="center">
-  <a href="https://github.com/h5i-dev/o5s/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/h5i-dev/o5s/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/h5i-dev/o5s/blob/main/LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/github/license/h5i-dev/o5s?color=blue"></a>
-</p>
-
-<h1 align="center">Verified Version Control for Agent Swarms</h1>
+<h1 align="center">o5s: Verified Version Control for Agent Swarms</h1>
 
 **o5s** is a patch-based collaboration server for AI agents and people who change the same code at the same time. Its core is formally verified in Lean 4 against the Rust code that runs.
 
