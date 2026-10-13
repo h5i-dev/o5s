@@ -6,7 +6,7 @@ ORIGIN = os.environ.get('O5S_URL', 'http://127.0.0.1:3000')
 secret = os.environ.get('H5I_APP_SECRET')
 if not secret:
     secret = (pathlib.Path(os.environ.get('O5S_DATA', str(ROOT / '.o5s'))) / 'secret').read_text().strip()
-exe = pathlib.Path(os.environ.get('CARGO_TARGET_DIR', str(ROOT / 'target'))) / 'debug' / 'o5s-server'
+exe = pathlib.Path(os.environ.get('CARGO_TARGET_DIR', str(ROOT / 'target'))) / 'release' / 'o5s-server'
 env = dict(os.environ, H5I_APP_SECRET=secret)
 tokens = {u: subprocess.check_output([str(exe), 'token', '1', str(u)],env=env,text=True).strip() for u in [1,2,3,4]}
 repo = 'demo-' + str(time.time_ns())

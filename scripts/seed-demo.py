@@ -10,7 +10,7 @@ channel holds an experiment. Files are graph documents, edited the way
     O5S_URL=http://127.0.0.1:3000 H5I_APP_SECRET=... scripts/seed-demo.py
 
 O5S_SERVER is the o5s-server binary that signs tokens (default
-target/debug/o5s-server); O5S_ORG the organization (default 1); O5S_REPO the
+target/release/o5s-server, as scripts/dev.sh builds it); O5S_ORG the organization (default 1); O5S_REPO the
 repository name (default octo-parser). Prints a token for a viewer, whose
 role is read-only.
 """
@@ -20,7 +20,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ORIGIN = os.environ.get('O5S_URL', 'http://127.0.0.1:3000').rstrip('/')
 ORG = os.environ.get('O5S_ORG', '1')
 REPO = os.environ.get('O5S_REPO', 'octo-parser')
-SERVER = os.environ.get('O5S_SERVER', str(ROOT / 'target' / 'debug' / 'o5s-server'))
+SERVER = os.environ.get('O5S_SERVER', str(ROOT / 'target' / 'release' / 'o5s-server'))
 if 'H5I_APP_SECRET' not in os.environ:
     sys.exit('set H5I_APP_SECRET to the server\'s signing key')
 
