@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>o5s · Eight arms, one channel</title>
+<meta name="description" content="A six-minute, self-playing film about verified version control for agent swarms, built with Cloudflare Workers and Artifacts.">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+:root{--bg:#050506;--panel:#0d0d10;--raised:#16161a;--line:#2c2b30;--ink:#ebe6db;--muted:#a9a49a;--dim:#77736d;--red:#ff6258;--green:#5cbf88;--amber:#d9a441;--blue:#7db8d3;--mono:'IBM Plex Mono',monospace;--sans:'Archivo',Arial,sans-serif}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;color:var(--ink)}body{font-family:var(--mono)}button,input{font:inherit}button{cursor:pointer}
+#stage{position:absolute;width:1920px;height:1080px;left:50%;top:50%;margin:-540px 0 0 -960px;background:var(--bg);overflow:hidden;transform-origin:center center}
+#stage:before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 14% 73%,rgba(217,35,27,.11),transparent 48%),linear-gradient(90deg,transparent 97%,rgba(235,230,219,.025) 98%);background-size:auto,100px 100px;pointer-events:none}
+#grain{position:absolute;inset:0;z-index:15;opacity:.1;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E")}
+.top{position:absolute;top:35px;left:60px;right:60px;z-index:12;display:flex;align-items:center;justify-content:space-between;height:50px;border-bottom:1px solid var(--line)}.brand{display:flex;align-items:center;gap:14px;font:600 19px var(--sans);letter-spacing:.19em}.brand svg{width:28px;height:28px}.top-right{display:flex;gap:36px;color:var(--dim);font-size:12px;letter-spacing:.18em;text-transform:uppercase}.top-right b{color:var(--red);font-weight:500}
+.scene{position:absolute;inset:0;opacity:0;visibility:hidden;transition:none}.scene.live{visibility:visible}.scene .eyebrow{position:absolute;left:60px;top:124px;color:var(--red);font-size:14px;letter-spacing:.25em;text-transform:uppercase}.scene h1{position:absolute;left:60px;top:160px;margin:0;max-width:1100px;font:600 84px/1.04 var(--sans);font-stretch:115%;letter-spacing:-.045em}.scene h1 em{font-style:normal;color:var(--red)}.scene h1.small{font-size:69px}.scene .deck{position:absolute;left:62px;top:358px;max-width:1050px;color:var(--muted);font:18px/1.65 var(--mono)}
+.scene:first-of-type h1{font-size:70px;max-width:1650px}
+.scene:first-of-type .visual{left:485px}
+.visual{position:absolute;left:485px;right:60px;top:470px;bottom:142px;display:flex;align-items:stretch;gap:18px}.visual.high{top:280px}.visual.mid{top:420px}.visual.full{left:60px;top:460px}.tile{position:relative;min-width:0;background:rgba(13,13,16,.93);border:1px solid var(--line);padding:26px;overflow:hidden}.tile.flex{flex:1}.tile.wide{flex:1.5}.tile.narrow{flex:.65}.tile .label{color:var(--red);font:12px var(--mono);letter-spacing:.17em;text-transform:uppercase;margin-bottom:22px}.tile h2{font:600 32px/1.15 var(--sans);letter-spacing:-.02em;margin:0 0 14px}.tile p{font:16px/1.55 var(--mono);color:var(--muted);margin:0}.tile .large{font:600 95px/1 var(--sans);letter-spacing:-.06em}.tile .foot{position:absolute;left:26px;right:26px;bottom:22px;color:var(--dim);font:12px/1.5 var(--mono)}.line{height:1px;background:var(--line);margin:17px 0}.code{font:16px/1.72 var(--mono);white-space:pre-wrap;color:#dad4c8}.code .red,.red{color:var(--red)}.code .green,.green{color:var(--green)}.code .blue,.blue{color:var(--blue)}.code .amber,.amber{color:var(--amber)}.faint{color:var(--dim)}
+.speech{position:absolute;z-index:11;left:60px;bottom:385px;width:395px;min-height:158px;background:rgba(13,13,16,.97);border:1px solid #55403d;border-left:3px solid var(--red);padding:22px 25px;box-shadow:0 18px 65px #000a}.speech .who{font-size:12px;color:var(--red);letter-spacing:.24em;text-transform:uppercase}.speech p{font:17px/1.52 var(--mono);margin:15px 0 0;color:var(--ink)}#octo{position:absolute;left:8px;bottom:0;width:460px;height:400px;z-index:10;overflow:visible;filter:drop-shadow(0 18px 40px #c52b1940)}.arm{fill:none;stroke:url(#armGrad);stroke-linecap:round;stroke-width:13}.arm.light{stroke:#ff6258;stroke-width:4}.octo-body{fill:url(#bodyGrad)}.octo-face{fill:#ed5248}.octo-eye{fill:#ebe6db}.octo-pupil{fill:#050506}.octo-mark{fill:#ff8a82;opacity:.4}
+.bottom{position:absolute;bottom:36px;left:60px;right:60px;z-index:12;height:43px;border-top:1px solid var(--line);display:flex;align-items:end;gap:20px;color:var(--dim);font:12px var(--mono)}.bottom .section{color:var(--ink);min-width:260px;text-transform:uppercase;letter-spacing:.13em}.progress{height:4px;background:#252428;flex:1;align-self:center;margin-top:16px}.progress i{display:block;height:100%;width:0;background:var(--red)}.clock{min-width:110px;text-align:right}.source{position:absolute;right:60px;bottom:104px;color:var(--dim);font:11px var(--mono);z-index:11}
+.agents{display:grid;grid-template-columns:repeat(8,1fr);gap:10px;width:100%}.agent{border:1px solid var(--line);background:#151418;padding:15px 8px;text-align:center;color:var(--muted);font:13px var(--mono)}.agent:before{content:'◉';display:block;color:var(--red);font-size:30px;margin-bottom:15px}.agent b{display:block;color:var(--ink);margin-top:10px;font-weight:500}.agent:nth-child(2n):before{color:var(--blue)}
+.git-graph{display:block;width:100%;height:352px;overflow:visible}.git-graph .rail{fill:none;stroke:#605957;stroke-width:2.3}.git-graph .branch{fill:none;stroke:#8b625c;stroke-width:2.3}.git-graph .rebase{fill:none;stroke:var(--red);stroke-width:2;stroke-dasharray:6 7}.git-graph .node{fill:#09090b;stroke:#cbbfb4;stroke-width:2.5}.git-graph .accepted{fill:var(--red);stroke:var(--red)}.git-graph .stale{fill:#09090b;stroke:var(--amber)}.git-graph text{fill:var(--muted);font:14px var(--mono)}.git-graph .title{fill:var(--ink);font-weight:600}.git-graph .warning{fill:var(--amber)}.git-graph .redtext{fill:var(--red)}.git-graph .git-step{opacity:0}
+.patches{width:100%;display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.patch{padding:26px;border:1px solid #4a3331;background:#161011}.patch .hash{color:var(--red);letter-spacing:.14em;font-size:13px}.patch h2{font:600 31px var(--sans);margin:26px 0 15px}.patch p{color:var(--muted);font:14px/1.6 var(--mono)}.patch .dep{margin-top:20px;color:var(--dim);font:12px var(--mono)}
+.flow{width:100%;display:flex;align-items:center;justify-content:space-between;gap:14px}.flow .node{min-width:170px;flex:1;background:#121215;border:1px solid var(--line);padding:24px 18px;text-align:center}.flow .node strong{display:block;color:var(--ink);font:600 26px var(--sans);margin-bottom:12px}.flow .node span{font:13px/1.4 var(--mono);color:var(--muted)}.flow .arrow{color:var(--red);font:28px var(--mono)}
+.cloud-flow{width:100%;display:grid;grid-template-columns:1fr 45px 1fr 45px 1.6fr;align-items:center;gap:10px}.cloud-flow>.arrow{text-align:center;color:var(--red);font-size:28px}.cloud-flow .node{background:#121215;border:1px solid var(--line);padding:24px 18px;text-align:center}.cloud-flow .node strong{display:block;font:600 26px var(--sans);margin-bottom:12px}.cloud-flow .node span{font:13px/1.4 var(--mono);color:var(--muted)}.cloud-flow .backends{display:grid;grid-template-columns:1fr 1fr;gap:12px}.cloud-flow .backends .node{border-color:#4a3331}
+.cloud-detail{width:100%;display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.cloud-step{border-top:2px solid #74504b;background:rgba(10,10,12,.95);padding:24px 20px;opacity:0}.cloud-step .label{font:13px/1.3 var(--mono);color:var(--red);letter-spacing:.08em;min-height:36px}.cloud-step .code{font:18px/1.55 var(--mono);margin:26px 0 28px;white-space:normal}.cloud-step p{font:16px/1.5 var(--mono);color:var(--muted);margin:0}
+.checks{display:grid;gap:14px;width:100%}.check{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--line);padding:18px 24px;background:#111114;font-size:17px}.check b{font-weight:500;color:var(--green)}.check .pending{color:var(--dim)}
+.stack{display:grid;gap:14px;width:100%;grid-template-columns:1fr 1fr}.stack .tile{min-height:165px}.stack .tile h2{font-size:29px}.stack .tile p{font-size:14px}
+.bars{width:100%;display:flex;flex-direction:column;justify-content:center;gap:40px}.barrow{display:grid;grid-template-columns:250px 1fr 150px;align-items:center;gap:20px;font:20px var(--mono)}.barrow .bar{height:30px;background:#242326;position:relative}.barrow .bar i{display:block;height:100%;background:var(--red)}.barrow .bar.git i{background:#77736d}.barrow strong{font-weight:500;text-align:right}.barrow.o strong{color:var(--red)}
+.ui{width:100%;background:#09090b;border:1px solid #3a3737;display:grid;grid-template-columns:230px 1fr;overflow:hidden}.ui-side{border-right:1px solid var(--line);padding:24px;font:13px var(--mono);color:var(--dim)}.ui-side b{color:var(--red)}.ui-side div{padding:13px 0}.ui-side .active{color:var(--ink);border-left:2px solid var(--red);padding-left:12px}.ui-main{padding:24px 28px}.ui-main .head{display:flex;justify-content:space-between;font:13px var(--mono);color:var(--red);border-bottom:1px solid var(--line);padding-bottom:16px}.ui-main h2{font:600 26px var(--sans);margin:22px 0 20px}.ui-columns{display:grid;grid-template-columns:1.2fr 1fr;gap:15px}.ui-card{border:1px solid var(--line);background:#121215;padding:18px;min-height:214px}.ui-card h3{color:var(--red);font:12px var(--mono);letter-spacing:.14em;margin:0 0 14px}.ui-card .row{padding:10px 0;border-top:1px solid var(--line);font:13px var(--mono);display:flex;justify-content:space-between}.ui-card .row span:last-child{color:var(--green)}.ui-card .row.warn span:last-child{color:var(--amber)}
+.demo-pair{width:100%;display:grid;grid-template-columns:.9fr 1.1fr;gap:18px}.terminal,.live-ui{background:#09090b;border:1px solid #51403d;min-width:0;padding:23px 27px}.terminal .label,.live-ui .label{margin-bottom:15px}.terminal .cmd-entry{height:55px;border-bottom:1px solid #242227;opacity:0;transform:translateY(6px);font:14px/1.55 var(--mono)}.terminal .cmd-entry:last-child{border:0}.terminal .cmd-entry code{color:var(--ink)}.terminal .cmd-entry .prompt{color:var(--red)}.terminal .cmd-entry .result{color:var(--dim);padding-left:16px}.terminal .cmd-entry.current .result{color:var(--green)}.live-ui .ui-meta{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:17px;font:14px var(--mono)}.live-ui .ui-meta b{color:var(--red);font-weight:500}.live-ui .metrics{display:flex;gap:20px;padding:20px 0}.live-ui .metric{border:1px solid var(--line);padding:13px 17px;min-width:155px}.live-ui .metric span{display:block;color:var(--dim);font:11px var(--mono)}.live-ui .metric strong{font:600 29px var(--sans);color:var(--ink)}.live-ui .ui-card{min-height:0;margin-bottom:14px}.live-ui .ui-card .row{font-size:14px}.live-ui .ui-card .row span:last-child{color:var(--amber)}.live-ui .ui-card .row span.good:last-child{color:var(--green)}.live-ui #demo-file{white-space:pre;font:13px/1.35 var(--mono);color:var(--muted);min-height:36px}
+.demo-pair .terminal,.demo-pair .live-ui{padding:17px 22px}.demo-pair .label{margin-bottom:10px}.demo-pair .terminal .cmd-entry{height:51px}.demo-pair .live-ui .ui-meta{padding-bottom:10px}.demo-pair .live-ui .metrics{padding:12px 0;gap:10px}.demo-pair .live-ui .metric{padding:8px 12px;min-width:130px}.demo-pair .live-ui .ui-card{padding:12px;margin-bottom:10px}.demo-pair .live-ui .ui-card .row{padding:6px 0}
+#stage.scene-8 .visual{left:60px}.demo-pair{grid-template-columns:650px 1fr}.real-ui{position:relative;min-width:0;background:#050506;border:1px solid #51403d;overflow:hidden}.real-ui>.label{position:absolute;top:5px;left:17px;z-index:2;color:var(--red);font:10px var(--mono);letter-spacing:.12em;pointer-events:none}.real-ui iframe{display:block;width:100%;height:100%;border:0;background:#050506}.cmd-entry.typing .cmd-text:after{content:'▌';color:var(--red)}
+#stage.scene-8 .speech{display:none}
+.browser-chrome{height:34px;display:flex;align-items:center;gap:15px;padding:0 13px;background:#202024;border-bottom:1px solid #464147}.browser-lights{display:flex;gap:7px}.browser-lights i{display:block;width:10px;height:10px;border-radius:50%;background:#ff5f57;box-shadow:inset 0 0 0 1px #0002}.browser-lights i:nth-child(2){background:#febc2e}.browser-lights i:nth-child(3){background:#28c840}.browser-address{height:22px;flex:1;max-width:480px;margin:auto;border:1px solid #454146;border-radius:5px;background:#161619;color:#a8a2a1;text-align:center;font:11px/20px var(--mono)}.real-ui iframe{height:calc(100% - 34px)}
+.proof-stage{width:100%;display:grid;grid-template-columns:1fr 115px 1.12fr;gap:0;align-items:stretch}.proof-editor,.proof-lean{border:1px solid #58433f;background:#09090b;min-width:0}.proof-editor .editor-bar,.proof-lean .editor-bar{display:flex;justify-content:space-between;align-items:center;height:42px;padding:0 17px;border-bottom:1px solid #332b2b;color:var(--red);font:12px var(--mono);letter-spacing:.07em}.proof-editor .editor-bar em,.proof-lean .editor-bar em{color:var(--dim);font-style:normal}.proof-editor pre,.proof-lean pre{margin:0;padding:24px 18px;font:14px/1.75 var(--mono);color:var(--ink);white-space:pre-wrap}.proof-editor pre .kw,.proof-lean pre .kw{color:var(--red)}.proof-editor pre .cm,.proof-lean pre .cm{color:var(--dim)}.proof-bridge{position:relative;display:flex;align-items:center;justify-content:center;flex-direction:column;color:var(--red);font:11px var(--mono);text-align:center;letter-spacing:.07em}.proof-bridge .beam{width:100%;height:1px;background:linear-gradient(90deg,#ff6258,transparent);position:relative;margin:18px 0}.proof-bridge .beam:after{content:'›';position:absolute;right:-2px;top:-16px;font:31px var(--mono)}.proof-receipt{border-top:1px solid #332b2b;padding:16px 19px}.proof-receipt .count{font:600 57px/.9 var(--sans);letter-spacing:-.06em;color:var(--red)}.proof-receipt .count small{font:12px var(--mono);letter-spacing:0;color:var(--muted)}.proof-receipt .properties{display:flex;gap:8px;flex-wrap:wrap;margin-top:15px}.proof-receipt .properties span{border:1px solid #425448;color:var(--green);padding:6px 8px;font:11px var(--mono)}.proof-receipt .note{display:block;margin-top:12px;color:var(--dim);font:11px var(--mono)}.proof-stage [data-proof-at]{opacity:0}
+.proof-bridge .beam:before{content:'';position:absolute;top:-4px;left:calc(var(--scan,0)*100%);width:8px;height:8px;border-radius:50%;background:#ffd0bd;box-shadow:0 0 13px 6px #ff625888}
+.citation{position:absolute;right:60px;top:348px;color:var(--dim);font:12px var(--mono)}
+#controls{position:fixed;z-index:30;bottom:14px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:14px;width:min(780px,90vw);padding:9px 15px;background:#151518ec;border:1px solid #34343c;color:var(--ink);box-shadow:0 12px 40px #0009}#controls button{background:none;border:0;color:var(--ink);min-width:48px;height:30px}#scrub{flex:1;accent-color:var(--red)}#control-time{font:12px var(--mono);min-width:100px;text-align:right}
+@media(max-width:700px){#controls{bottom:4px}}body.render #controls{display:none}
+/* Film layer: the real UI's octopus is made from code cells. Let that world
+   carry the story; diagrams sit lightly over it. */
+#world{position:absolute;inset:0;width:1920px;height:1080px;display:block}
+#guide{position:absolute;inset:0;width:1920px;height:1080px;z-index:8;pointer-events:none}
+#stage:before{z-index:1;background:linear-gradient(90deg,rgba(5,5,6,.52),rgba(5,5,6,.14) 56%,transparent);pointer-events:none}
+#grain{opacity:.035}
+.scene{z-index:3}
+.scene h1{max-width:1580px;font-size:68px;line-height:1.08;text-wrap:balance;text-shadow:0 8px 32px #000}
+.scene h1.small{font-size:68px}
+.scene .deck{top:338px;text-shadow:0 3px 18px #000}
+.scene:first-of-type h1{top:200px;max-width:1250px;font-size:68px}
+.scene:first-of-type .deck{top:480px;max-width:850px}
+.scene:first-of-type .visual{display:none}
+.tile{background:linear-gradient(135deg,rgba(13,13,16,.98),rgba(5,5,6,.95));border:0;border-top:1px solid #65504b;box-shadow:0 30px 75px #0008}
+.patch,.flow .node,.cloud-flow .node,.check,.ui{background:rgba(8,8,10,.94);border-color:#453533}
+.speech{background:rgba(5,5,6,.83);border:0;border-left:2px solid var(--red)}
+#octo{display:none}
+#stage.scene-0 .speech,#stage.scene-10 .speech{bottom:145px;width:600px}
+#stage.scene-0 .top,#stage.scene-0 .bottom{border-color:#403b39}
+.security-examples h2{font-size:26px;margin-bottom:14px}.security-examples .incident{display:grid;grid-template-columns:164px 1fr;gap:12px;align-items:baseline;border-top:1px solid var(--line);padding:10px 0;font:14px/1.35 var(--mono);color:var(--muted)}.security-examples .incident b{color:var(--red);font-weight:500}.security-answer h2{font-size:35px;line-height:1.16;margin:24px 0}.security-answer .prov{font:600 40px/1.2 var(--sans);color:var(--ink);margin:23px 0}.security-answer .prov span{color:var(--red)}.security-answer p{font-size:15px;line-height:1.55}
+.case-b,.case-b-deck{display:none}
+.hero-facts{position:absolute;right:60px;bottom:155px;width:820px;z-index:4;display:grid;grid-template-columns:1fr 1fr;gap:24px}.hero-fact{border-top:1px solid #a85a50;padding-top:16px;background:linear-gradient(180deg,#09090bd9,transparent)}.hero-fact strong{display:block;color:var(--red);font:600 78px/.95 var(--sans);letter-spacing:-.065em}.hero-fact span{display:block;margin-top:13px;color:var(--ink);font:18px/1.3 var(--mono)}.hero-fact small{display:block;margin-top:8px;color:var(--dim);font:12px/1.45 var(--mono)}
+</style>
+</head>
+<body>
+<div id="stage">
+<canvas id="world" width="1920" height="1080" aria-hidden="true"></canvas>
+<canvas id="guide" width="1920" height="1080" aria-hidden="true"></canvas>
+<div id="grain"></div>
+<header class="top"><div class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#ff6258" d="M12 2c4.4 0 7.5 3.1 7.5 7.3 0 2.4-1 4.2-2.6 5.4.5 1.8 1.9 3 3.6 3.3-1.3 1.2-3.6 1.3-5.2.1-.3 1.6-1.4 3-3.3 3.6.3-1.4-.1-2.7-1-3.6-.9.9-1.3 2.2-1 3.6-1.9-.6-3-2-3.3-3.6-1.6 1.2-3.9 1.1-5.2-.1 1.7-.3 3.1-1.5 3.6-3.3C3.5 13.5 4.5 11.7 4.5 9.3 4.5 5.1 7.6 2 12 2z"/><circle cx="9.3" cy="9.6" r="1.5" fill="#050506"/><circle cx="14.7" cy="9.6" r="1.5" fill="#050506"/></svg> o5s</div><div class="top-right"><span id="phase">octopus / field guide</span><b>the next Git platform</b></div></header>
+
+<section class="scene" data-start="0" data-end="25" data-name="opening"><div class="eyebrow">01 / The invitation</div><h1 class="small"><em>1,000 agents</em> edit one file.<br>Can one VCS integrate their work?<br>Can we prove its rules correct?</h1><div class="deck">Concurrency and correctness are both infrastructure problems.</div><div class="hero-facts"><div class="hero-fact"><strong>≈60×</strong><span>integration throughput</span><small>recorded local workload vs unattended Git</small></div><div class="hero-fact"><strong>3,084</strong><span>Rust LoC formally verified by Lean 4</span><small>for stated properties of the extracted core</small></div></div><div class="visual full"><div class="agents"><div class="agent">agent 001<b>edit</b></div><div class="agent">agent 002<b>edit</b></div><div class="agent">agent 003<b>edit</b></div><div class="agent">agent 004<b>edit</b></div><div class="agent">agent 005<b>edit</b></div><div class="agent">agent 006<b>edit</b></div><div class="agent">agent 007<b>edit</b></div><div class="agent">agent 008<b>edit</b></div></div></div></section>
+
+<section class="scene" data-start="25" data-end="55" data-name="the Git loop"><div class="eyebrow">Problem 01 / concurrency</div><h1>Each push moves the branch.<br><em>Other agents rebase.</em></h1><div class="deck">All four agents start from the same commit. Only the first push can advance <code>main</code> without fetching again.</div><div class="visual"><div class="tile flex"><div class="label">Unattended Git workflow · commit graph</div><svg class="git-graph" viewBox="0 0 1300 352" role="img" aria-label="Git graph: agents A, B, C, and D branch from base 42; A advances main, while the other pushes have stale bases and must rebase or stop on conflict">
+<defs><marker id="git-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 1 L8 4.5 L0 8" fill="none" stroke="#ff6258" stroke-width="1.5"/></marker></defs>
+<g class="git-step" data-at="0"><path class="rail" d="M90 72 H318"/><circle class="node" cx="318" cy="72" r="9"/><text class="title" x="266" y="35">base #42</text><text x="90" y="95">main</text></g>
+<g class="git-step" data-at=".16"><path class="rail" d="M318 72 H744"/><circle class="node accepted" cx="744" cy="72" r="10"/><text class="title" x="697" y="35">A · push accepted</text><text class="redtext" x="792" y="78">main → A</text></g>
+<g class="git-step" data-at=".33"><path class="branch" d="M318 72 C370 72 370 155 430 155 H625"/><circle class="node stale" cx="625" cy="155" r="9"/><text x="438" y="140">B edits from #42</text><text class="warning" x="680" y="161">push rejected · stale base</text></g>
+<g class="git-step" data-at=".45"><path class="branch" d="M318 72 C378 72 365 240 430 240 H625"/><circle class="node stale" cx="625" cy="240" r="9"/><text x="438" y="225">C edits from #42</text><text class="warning" x="680" y="246">push rejected · stale base</text></g>
+<g class="git-step" data-at=".57"><path class="branch" d="M318 72 C388 72 355 325 430 325 H625"/><circle class="node stale" cx="625" cy="325" r="9"/><text x="438" y="310">D edits from #42</text><text class="warning" x="680" y="331">rebase conflict · agent stops</text></g>
+<g class="git-step" data-at=".72"><path class="rebase" d="M744 82 C840 102 907 148 1020 155" marker-end="url(#git-arrow)"/><circle class="node accepted" cx="1035" cy="155" r="8"/><text class="redtext" x="1030" y="126">B′ after fetch + rebase</text></g>
+</svg></div></div></section>
+
+<section class="scene" data-start="55" data-end="85" data-name="why trust matters"><div class="eyebrow">Problem 02 / security</div><h1>Millions of teams rely on VCS.<br><em>Its core needs proof.</em></h1><div class="deck">Widely used middleware needs the strongest evidence of security and reliability.</div><div class="visual">
+<div class="tile flex security-examples"><div class="label">Observed failures</div><h2>Vulnerabilities keep arriving.</h2><div class="incident"><b>Git · 2024 / 2025</b><span>5 + 7 security flaws fixed</span></div><div class="incident"><b>GitHub · 2026</b><span>Critical push-pipeline RCE</span></div><div class="incident"><b>OpenAI · 2026</b><span>Agents reached Hugging Face</span></div><div class="incident"><b>Claude · 2026</b><span>Evaluation reached real systems</span></div><div class="incident"><b>Gemini · 2026</b><span>Evaluation reached real systems</span></div><div class="foot">GitHub · OpenAI · Anthropic · Irregular · Google</div></div>
+<div class="tile flex security-answer"><div class="label">What critical software needs</div><h2>Prove correctness properties with a theorem prover.</h2><div class="prov">e.g. <span>Lean 4</span></div><p>State the rules precisely. Machine-check that the core preserves them under explicit assumptions. o5s uses Lean 4 to verify its Rust decision kernel.</p><div class="foot">Proofs of defined properties—not a claim that every system bug is gone</div></div>
+</div></section>
+
+<section class="scene" data-start="85" data-end="145" data-name="patches and conflicts"><div class="eyebrow">Solution 01 / immutable patches</div><h1>One patch model integrates edits<br><em>and preserves conflicts.</em></h1><div class="deck case-a-deck">First, A and B edit different lines of <code>parser.rs</code> from base patch 42.</div><div class="deck case-b-deck">Then C and D edit the same line from patch 42. Both alternatives remain visible.</div><div class="visual patch-example case-a"><div class="patches"><div class="patch"><div class="hash">PATCH A · deps [42]</div><div class="code">{
+  "path": "parser.rs",
+  "base": 42,
+  "start": 10,
+  "end": 11,
+  "content": "parse_call()?;\n"
+}</div><div class="dep">patch body hashed to SHA-256</div></div><div class="patch"><div class="hash">PATCH B · deps [42]</div><div class="code">{
+  "path": "parser.rs",
+  "base": 42,
+  "start": 18,
+  "end": 19,
+  "content": "return Ok(node);\n"
+}</div><div class="dep">LineEdit · different range</div></div><div class="patch"><div class="hash">CHANNEL main</div><div class="code"><span class="green">admit(A)</span>
+<span class="green">admit(B)</span>
+
+main = { 42, A, B }
+
+<span class="green">parser.rs after merge</span>
+10│ parse_call()?;
+  │ ...
+18│ return Ok(node);</div><div class="dep">same result for A→B or B→A</div></div></div></div>
+
+<div class="visual patch-example case-b"><div class="patches">
+<div class="patch"><div class="hash">PATCH C · deps [42]</div><div class="code">{
+  "path": "parser.rs",
+  "base": 42,
+  "start": 10,
+  "end": 11,
+  "content": "parse_expr()?;\n"
+}</div><div class="dep">agent C · line 10</div></div>
+<div class="patch"><div class="hash">PATCH D · deps [42]</div><div class="code">{
+  "path": "parser.rs",
+  "base": 42,
+  "start": 10,
+  "end": 11,
+  "content": "parse_call()?;\n"
+}</div><div class="dep">agent D · same range, different bytes</div></div>
+<div class="patch"><div class="hash">CHANNEL VIEW / PARSER.RS</div><div class="code"><span class="amber">conflict at line 10</span>
+
+<span class="red">C │ parse_expr()?;</span>
+<span class="blue">D │ parse_call()?;</span>
+
+<span class="green">resolution patch →</span>
+  reviewed choice</div><div class="dep">both patches retained until a resolution is admitted</div></div>
+</div></div></section>
+
+<section class="scene" data-start="145" data-end="180" data-name="Lean proofs"><div class="eyebrow">Solution 02 / verified core</div>
+<h1><em>915 Lean theorems</em> check the core.</h1>
+<div class="deck">Charon and Aeneas extract the Rust that runs. Lean checks the stated rules against it.</div>
+<div class="visual"><div class="proof-stage">
+<div class="proof-editor" data-proof-at=".04"><div class="editor-bar"><span>01 / RUST KERNEL · lib.rs</span><em>NORMAL</em></div><pre><span class="kw">pub fn</span> transition(
+  actor: &amp;Principal,
+  state: &amp;Snapshot,
+  cmd: &amp;Command
+) -&gt; Outcome {
+  <span class="kw">match</span> cmd {
+    Command::Merge { name, patches } =&gt;
+      merge(actor, state, name, patches),
+    <span class="cm">// other registry commands</span>
+  }
+}</pre></div>
+<div class="proof-bridge" data-proof-at=".29"><span>CHARON<br>+ AENEAS</span><div class="beam"></div><span>extract</span></div>
+<div class="proof-lean" data-proof-at=".48"><div class="editor-bar"><span>02 / LEAN 4 · Guarantees.lean</span><em>PROVEN</em></div><pre><span class="kw">theorem</span> merge_gate
+  <span class="cm">-- admitted patches must pass the gate</span>
+  admitted p c s' →
+    approved p s ∧ checked p s ∧
+    closed (deps p) c
+
+<span class="kw">theorem</span> transition_refines
+<span class="kw">theorem</span> extracted_view_converges</pre>
+<div class="proof-receipt" data-proof-at=".68"><div class="count">915 <small>theorems / 30 modules</small></div><div class="properties"><span>✓ admission gate</span><span>✓ refinement</span><span>✓ convergence</span><span>✓ causal heads</span></div><span class="note">397 registry + 518 kernel theorems · checked without sorry or new axioms</span></div>
+</div></div></div></section>
+
+<section class="scene" data-start="180" data-end="210" data-name="proof guarantees"><div class="eyebrow">Solution 03 / guarantees</div><h1>Example Lean 4 proof:<br><em>same patches, same view.</em></h1><div class="deck">The earlier <code>parser.rs</code> cases illustrate the graph-document theorem: valid delivery orders agree, including open conflicts.</div><div class="visual"><div class="stack"><div class="tile"><div class="label">01 / refinement</div><h2>Rust transition follows the model</h2><p>Registry commands preserve the reachable-state invariant.</p></div><div class="tile"><div class="label">02 / policy</div><h2>Admission gate holds</h2><p>Independent approval, passing check, closed dependencies.</p></div><div class="tile"><div class="label">03 / previous example</div><h2>A → B = B → A</h2><p>C and D remain a visible conflict in the proved model.</p></div><div class="tile"><div class="label">04 / snapshot</div><h2>Causal heads cover the past</h2><p>Workspace proposals name the snapshot they saw.</p></div></div></div></section>
+
+<section class="scene" data-start="210" data-end="245" data-name="Cloudflare architecture"><div class="eyebrow">Solution 04 / Cloudflare design</div><h1>A Worker admits patches;<br><em>Artifacts stores Git.</em></h1><div class="deck">The same verified kernel runs in the Rust Worker; ordinary Git remains the agent-facing workspace.</div><div class="visual"><div class="cloud-flow"><div class="node"><strong>Agent</strong><span>Git workspace<br>propose / fetch</span></div><span class="arrow">→</span><div class="node"><strong>Worker</strong><span>Rust decision kernel<br>review + admission</span></div><span class="arrow">→</span><div class="backends"><div class="node"><strong>Postgres</strong><span>via Hyperdrive<br>atomic state</span></div><div class="node"><strong>Artifacts</strong><span>Git projections<br>agent repos</span></div></div></div></div></section>
+
+<section class="scene" data-start="245" data-end="290" data-name="Artifacts workspaces"><div class="eyebrow">Solution 05 / from Git branch to patch</div>
+<h1>Artifacts stores the Git workspaces.<br><em>The Worker reads their changes.</em></h1>
+<div class="deck">An agent pushes a normal Git branch; the Worker turns its changed tree into a causally linked proposal.</div>
+<div class="visual"><div class="cloud-detail">
+<div class="cloud-step" data-cloud-at=".05"><div class="label">01 / ARTIFACTS WORKSPACE</div><div class="code">o5s/main → work<br><span class="green">git push origin work</span></div><p>Each agent works from a channel snapshot.</p></div>
+<div class="cloud-step" data-cloud-at=".27"><div class="label">02 / WORKER READS GIT</div><div class="code">POST /api/worktree/<br>propose<br><span class="red">readTree · readBlob</span></div><p>Read changed files; skip unchanged subtrees.</p></div>
+<div class="cloud-step" data-cloud-at=".49"><div class="label">03 / CAUSAL PATCH</div><div class="code">graph edits + deps<br><span class="blue">heads(snapshot)</span></div><p>Dependencies capture the snapshot's past.</p></div>
+<div class="cloud-step" data-cloud-at=".71"><div class="label">04 / ADMIT + PROJECT</div><div class="code">Worker → Hyperdrive<br><span class="green">main → Artifacts Git</span></div><p>Commit the decision; export the Git view.</p></div>
+</div></div></section>
+
+<section class="scene" data-start="290" data-end="340" data-name="CLI + UI walkthrough">
+<div class="eyebrow">Solution 06 / watch it work</div><h1>The CLI acts. <em>The UI changes.</em></h1>
+<div class="deck">Real CLI commands beside the embedded o5s UI; sample repository data advances with each command.</div>
+<div class="visual"><div class="demo-pair">
+<div class="terminal"><div class="label">TERMINAL / ORDINARY GIT CHECKOUT</div>
+<div class="cmd-entry" data-step="0"><code><span class="prompt">$</span> <span class="cmd-text" data-full="o5s connect demo"></span></code><div class="result">repository connected</div></div>
+<div class="cmd-entry" data-step="1"><code><span class="prompt">$</span> <span class="cmd-text" data-full="o5s propose --intent 'Fix parser'"></span></code><div class="result">proposal #1 created · parser.rs</div></div>
+<div class="cmd-entry" data-step="2"><code><span class="prompt">$</span> <span class="cmd-text" data-full="o5s --profile reviewer approve 1"></span></code><div class="result">independent approval recorded</div></div>
+<div class="cmd-entry" data-step="3"><code><span class="prompt">$</span> <span class="cmd-text" data-full="o5s --profile checks check 1 --pass"></span></code><div class="result">passing check recorded</div></div>
+<div class="cmd-entry" data-step="4"><code><span class="prompt">$</span> <span class="cmd-text" data-full="o5s --profile reviewer merge 1"></span></code><div class="result">patch #1 admitted to main</div></div>
+<div class="cmd-entry" data-step="5"><code><span class="prompt">$</span> <span class="cmd-text" data-full="o5s fetch"></span></code><div class="result">refs/o5s/main updated · HEAD preserved</div></div>
+</div>
+<div class="real-ui"><div class="browser-chrome" aria-hidden="true"><span class="browser-lights"><i></i><i></i><i></i></span><span class="browser-address">localhost:8787/#/repos/demo</span></div><iframe id="demo-iframe" src="ui-replay.html#/repos" title="The actual o5s repository UI showing the CLI workflow"></iframe></div></div></div></section>
+
+<section class="scene" data-start="340" data-end="370" data-name="measured evidence"><div class="eyebrow">Evidence / recorded comparison</div><h1><em>≈60×</em> Git's integration throughput.</h1><div class="deck">1,000 agents editing different lines of one file, 64 in flight, on one host.</div><div class="visual"><div class="tile flex"><div class="label">Integrations / second · 58.6× measured ratio</div><div class="bars"><div class="barrow"><span>unattended Git</span><div class="bar git"><i style="width:1.71%"></i></div><strong>9.8 / s</strong></div><div class="barrow o"><span>o5s API</span><div class="bar"><i style="width:100%"></i></div><strong>574 / s</strong></div></div><div class="foot">Local log, same host. Git used pre-created clones and file://, with no server or network. Not a Cloudflare throughput claim.</div></div></div></section>
+
+<section class="scene" data-start="370" data-end="405" data-name="closing"><div class="eyebrow">Scope / source and next steps</div><h1>The source and proofs<br><em>are open to inspect.</em></h1><div class="deck">Keep changes immutable. Preserve conflicts. Prove the decisions. Build on Cloudflare.</div><div class="visual"><div class="tile flex"><div class="label">Explore the source</div><h2>github.com/h5i-dev/o5s</h2><p>Apache-2.0 · source, Lean proofs, local run instructions, and recorded comparisons</p><div class="line"></div><p class="green">Worker + Hyperdrive + Artifacts: implemented; distributed scale and full end-to-end assurance remain future work.</p></div></div></section>
+
+<div class="speech"><div class="who">Octopus says</div><p id="speech-text"></p></div>
+<div class="source" id="source"></div><footer class="bottom"><span class="section" id="section-name"></span><span class="progress"><i id="progress-bar"></i></span><span class="clock" id="clock"></span></footer>
+</div>
+<div id="controls"><button id="play" aria-label="Play or pause">▶</button><input id="scrub" type="range" min="0" max="405000" step="100" value="0" aria-label="Seek video"><span id="control-time">0:00 / 6:45</span><button id="sound" aria-label="Toggle narration" title="Toggle narration">♪</button></div>
+<audio id="narration" src="audio/narration.mp3" preload="auto"></audio>
+<script src="world.js"></script>
+<script>
+const TOTAL=405000;
+const scenes=[...document.querySelectorAll('.scene')];
+const lines=[
+ ['I am the octopus in o5s. Imagine 1,000 agents editing one file.','Can a VCS integrate their work? Can we prove its rules correct?'],
+ ['With a moving Git branch, a successful push makes the next push stale.','An unattended agent can rebase, until a textual conflict makes it stop.'],
+ ['A VCS may serve millions. Its security and reliability need the strongest evidence.','These failures show why its critical decisions need proofs with a theorem prover such as Lean 4.'],
+ ['An immutable patch records a file, base, range, content, and dependencies. A and B edit different lines of parser.rs.','The same fields handle C and D on line ten. Their conflicting lines remain visible until a reviewed resolution patch.'],
+ ['915 Lean 4 theorems prove stated properties of the Rust decision core.','They cover admission, refinement, convergence, and causal heads. Charon and Aeneas connect the running Rust to Lean.'],
+ ['Return to parser.rs: A then B and B then A agree in the proved graph-document model.','C and D remain a visible conflict. Other proofs cover admission, refinement, and causal heads.'],
+ ['On Cloudflare, my Rust Worker runs the admission kernel through Hyperdrive.','Artifacts holds Git projections and per-agent workspaces. Git is still familiar to agents.'],
+ ['An agent pushes an ordinary Git branch into its Artifacts workspace. The Worker reads the changed tree.','That proposal names the snapshot it saw. After admission, the Worker exports a Git projection back to Artifacts.'],
+ ['Watch the real o5s commands: connect a Git checkout, then propose a parser change. The UI shows it as proposed.','An independent reviewer and check make it ready. Merge admits it; fetch updates refs/o5s/main without moving HEAD.'],
+ ['The recorded local workload shows about sixty times Git’s integration throughput.','That is 574 integrations per second versus 9.8, on one host with 1,000 agents.'],
+ ['The core decisions have machine-checked proofs; the surrounding system has honest boundaries.','The source and run instructions are open. Eight arms, one channel. Let us build the next Git platform.']
+];
+const sources={2:'GitHub Security Blog · OpenAI · Anthropic · Irregular',4:'docs/proofs.md · docs/o5s-short-paper-v5.pdf',5:'docs/proofs.md · docs/o5s-short-paper-v5.pdf',6:'docs/status.md · crates/worker',7:'crates/worker/README.md · docs/status.md',9:'docs/evidence/git-comparison/local-cmp1000/'};
+const $=id=>document.getElementById(id);const clamp=(x,a,b)=>Math.min(b,Math.max(a,x));const fmt=s=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+function fit(){const scale=Math.min(innerWidth/1920,innerHeight/1080);$('stage').style.transform=`scale(${scale})`}
+addEventListener('resize',fit);fit();
+function drawDemo(local){
+  const starts=[.04,.18,.34,.50,.66,.82];
+  const step=starts.reduce((n,at,i)=>local>=at?i:n,-1);
+  const executed=starts.reduce((n,at,i)=>local>=at+.075?i:n,-1);
+  document.querySelectorAll('.cmd-entry').forEach((el,i)=>{
+    const amount=clamp((local-starts[i])/.065,0,1);
+    const command=el.querySelector('.cmd-text');
+    command.textContent=command.dataset.full.slice(0,Math.round(command.dataset.full.length*amount));
+    el.style.opacity=clamp((local-starts[i])/.012,0,1);
+    el.style.transform=`translateY(${(1-amount)*6}px)`;
+    el.classList.toggle('current',i===step);
+    el.classList.toggle('typing',i===step&&amount<1);
+    el.querySelector('.result').style.opacity=clamp((local-starts[i]-.075)/.025,0,1);
+  });
+  $('demo-iframe').contentWindow?.postMessage({type:'o5s-film-step',step:executed},'*');
+}
+function draw(ms){ms=clamp(ms,0,TOTAL);const s=ms/1000;let index=scenes.findIndex(el=>s>=+el.dataset.start&&s<+el.dataset.end);if(index<0)index=scenes.length-1;const active=scenes[index],start=+active.dataset.start,end=+active.dataset.end,local=clamp((s-start)/(end-start),0,1);$('stage').className=`scene-${index}`;for(let i=0;i<scenes.length;i++){const on=i===index;scenes[i].classList.toggle('live',on);scenes[i].style.opacity=on?String(Math.min(1,(s-start)/.85,(end-s)/.85+.2)):0}active.style.setProperty('--local',local);if(index===3){const caseB=local>=.5;active.querySelector('.case-a').style.display=caseB?'none':'flex';active.querySelector('.case-b').style.display=caseB?'flex':'none';active.querySelector('.case-a-deck').style.display=caseB?'none':'block';active.querySelector('.case-b-deck').style.display=caseB?'block':'none'}const reveals=active.querySelectorAll('.tile,.patch,.agent,.flow .node,.cloud-flow .node,.check,.ui-card,.barrow');reveals.forEach((el,i)=>{const q=clamp((local-(.035+i*.055))/.1,0,1),e=1-(1-q)**3;el.style.opacity=e;el.style.transform=`translateY(${(1-e)*24}px)`});active.querySelectorAll('.git-step').forEach(el=>{el.style.opacity=clamp((local-Number(el.dataset.at))/.09,0,1)});active.querySelectorAll('[data-cloud-at]').forEach(el=>{el.style.opacity=clamp((local-Number(el.dataset.cloudAt))/.1,0,1)});active.querySelectorAll('[data-proof-at]').forEach(el=>{el.style.opacity=clamp((local-Number(el.dataset.proofAt))/.12,0,1)});if(index===4)active.querySelector('.proof-stage').style.setProperty('--scan',clamp((local-.3)/.3,0,1));active.querySelectorAll('.bar i').forEach(el=>{el.style.transform=`scaleX(${clamp((local-.15)/.45,0,1)})`;el.style.transformOrigin='left'});$('phase').textContent=index===0?'octopus / field guide':index<3?'THE PROBLEM':index<9?'THE SOLUTION':index===9?'THE EVIDENCE':'SOURCE & SCOPE';$('speech-text').textContent=lines[index][local<.52?0:1];$('section-name').textContent=`${String(index+1).padStart(2,'0')} / ${active.dataset.name}`;$('progress-bar').style.width=`${ms/TOTAL*100}%`;$('clock').textContent=`${fmt(s)} / 6:45`;$('control-time').textContent=`${fmt(s)} / 6:45`;$('scrub').value=Math.round(ms);$('source').textContent=sources[index]||'';if(index===8)drawDemo(local);window.drawWorld(ms,index,local)}
+window.TOTAL=TOTAL;window.SEEK=draw;
+const RENDER=new URLSearchParams(location.search).has('render');if(RENDER)document.body.classList.add('render');
+let playing=false,base=0,start=performance.now(),soundOn=true;const voice=$('narration');if(RENDER)voice.pause();let wantedVoiceTime=0;function syncVoice(ms){if(RENDER)return;wantedVoiceTime=ms/1000;voice.pause();if(voice.readyState<1){voice.load();return}voice.currentTime=Math.min(wantedVoiceTime,voice.duration||wantedVoiceTime);if(playing&&soundOn)voice.play().catch(()=>{})}voice.addEventListener('loadedmetadata',()=>syncVoice(+$('scrub').value));function tick(now){if(playing){let ms=base+now-start;if(ms>=TOTAL){ms=TOTAL;playing=false;$('play').textContent='↺';voice.pause()}draw(ms)}requestAnimationFrame(tick)}requestAnimationFrame(tick);draw(0);
+function toggle(){base=+$('scrub').value;if(base>=TOTAL){base=0;draw(0)}playing=!playing;start=performance.now();$('play').textContent=playing?'Ⅱ':'▶';syncVoice(base)}$('play').onclick=toggle;$('sound').onclick=()=>{soundOn=!soundOn;$('sound').textContent=soundOn?'♪':'♪̸';syncVoice(+$('scrub').value)};$('scrub').oninput=e=>{base=+e.target.value;start=performance.now();draw(base);syncVoice(base)};addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();toggle()}else if(e.code==='ArrowRight'||e.code==='ArrowLeft'){e.preventDefault();base=clamp(+$('scrub').value+(e.code==='ArrowRight'?5000:-5000),0,TOTAL);start=performance.now();draw(base);syncVoice(base)}});
+</script>
+</body>
+</html>
