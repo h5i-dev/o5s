@@ -112,7 +112,7 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--ink-2);font:400 11px 
 .guide-key{border-color:rgba(255,98,88,.45);color:var(--accent)}
 .guided{outline:1px solid var(--accent)!important;outline-offset:6px;box-shadow:0 0 0 10px rgba(255,98,88,.05),0 0 48px rgba(255,98,88,.14);transition:box-shadow .3s}
 .guide{position:fixed;right:20px;bottom:16px;z-index:40;display:flex;align-items:flex-end;gap:10px}
-#guide-octopus{width:190px;height:180px;display:block;order:2;margin-right:-14px;background:radial-gradient(closest-side,rgba(5,5,6,.95),rgba(5,5,6,.7) 70%,rgba(5,5,6,0))}
+#guide-octopus{cursor:pointer;width:190px;height:180px;display:block;order:2;margin-right:-14px;background:radial-gradient(closest-side,rgba(5,5,6,.95),rgba(5,5,6,.7) 70%,rgba(5,5,6,0))}
 .guide-say{order:1;max-width:340px;margin-bottom:22px;background:rgba(10,10,12,.97);border:1px solid var(--line-strong);border-left:2px solid var(--accent);padding:14px 16px}
 .guide-say .mono{color:var(--accent)}.guide-say p{margin:8px 0 12px;color:var(--ink);font:400 12px/1.65 var(--mono)}
 .guide-actions{display:flex;gap:6px;justify-content:flex-end}
@@ -210,7 +210,7 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--ink-2);font:400 11px 
 <svg class="tentacle" id="tentacle" aria-hidden="true"><path id="tentacle-arm"/><path id="tentacle-cups"/></svg>
 <aside class="guide" id="guide" hidden aria-live="polite" aria-label="Guide">
   <canvas id="guide-octopus" aria-hidden="true"></canvas>
-  <div class="guide-say"><div class="mono" id="guide-step"></div><p id="guide-text"></p>
+  <div class="guide-say" id="guide-say" hidden><div class="mono" id="guide-step"></div><p id="guide-text"></p>
     <div class="guide-actions"><button class="btn small" type="button" id="guide-back">back</button><button class="btn small" type="button" id="guide-next">next</button><button class="btn small" type="button" id="guide-done">close</button></div></div>
 </aside>
 
@@ -739,7 +739,8 @@ const guide = (() => {
   const shape = document.createElement('canvas'), sc = shape.getContext('2d', {willReadFrequently: true});
   const arm = $('tentacle-arm'), cups = $('tentacle-cups');
   const COLS = 34, ROWS = 20, CW = 5.6, CH = 9;
-  let step = -1, target = null, grown = 0, on = false, blink = 0;
+  let step = -1, target = null, grown = 0, on = false, blink = 0, pointer = null;
+  window.addEventListener('pointermove', e => { pointer = {x: e.clientX, y: e.clientY}; });
   canvas.width = COLS * CW * 2; canvas.height = ROWS * CH * 2; c.scale(2, 2);
   shape.width = COLS; shape.height = ROWS;
   function origin() {
@@ -772,6 +773,7 @@ const guide = (() => {
     sc.beginPath(); sc.ellipse(cx, cy + 1.5, 7, 3.6, 0, 0, Math.PI * 2); sc.fill();
     // Eyes turn toward what it points at.
     let gx = -1, gy = 0;
+    if (!target && pointer) { const o = origin(), d = Math.hypot(pointer.x - o.x, pointer.y - o.y) || 1; gx = (pointer.x - o.x) / d; gy = (pointer.y - o.y) / d; }
     if (target) { const a = aim(), o = origin(), d = Math.hypot(a.x - o.x, a.y - o.y) || 1; gx = (a.x - o.x) / d; gy = (a.y - o.y) / d; }
     const lid = t < blink + 320 ? Math.sin((t - blink) / 320 * Math.PI) : 0;
     if (t > blink + 4000 + Math.random() * 4000) blink = t;
@@ -826,29 +828,39 @@ const guide = (() => {
     $('guide-back').disabled = step === 0;
     $('guide-next').textContent = step === STEPS.length - 1 ? 'done' : 'next';
   }
+  // The octopus stays in its corner while the viewer is open; the guide
+  // (speech and arm) comes and goes.
+  function idle(visible) {
+    box.hidden = !visible;
+    if (visible && !on) { on = true; requestAnimationFrame(loop); }
+    if (!visible) on = false;
+  }
   function stop() {
-    on = false; box.hidden = true;
+    $('guide-say').hidden = true;
     if (target) target.classList.remove('guided');
-    target = null; drawArm(0);
+    target = null; step = -1; drawArm(0);
     try { localStorage.setItem('o5s.guide', 'seen'); } catch (_) {}
   }
   function start() {
-    box.hidden = false;
-    if (!on) { on = true; requestAnimationFrame(loop); }
+    idle(true);
+    $('guide-say').hidden = false;
     show(0);
   }
   $('guide-next').onclick = () => step === STEPS.length - 1 ? stop() : show(step + 1);
   $('guide-back').onclick = () => show(step - 1);
   $('guide-done').onclick = stop;
   $('guide-start').onclick = start;
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && on) stop(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && step >= 0) stop(); });
+  canvas.onclick = () => step >= 0 ? stop() : start();
+  canvas.title = 'Guide';
   return {
     start,
     maybe(visible) {
-      if (!visible) { if (on) stop(); return; }
+      if (!visible) { if (step >= 0) stop(); idle(false); return; }
+      idle(true);
       let seen = null;
       try { seen = localStorage.getItem('o5s.guide'); } catch (_) {}
-      if (!seen && !on) setTimeout(start, 700);
+      if (!seen && step < 0) setTimeout(start, 700);
     }
   };
 })();
