@@ -153,12 +153,17 @@ Done in the round of October 12, 2026:
 - **Kernel.** Acknowledged pairs are compared field by field, so the extracted kernel declares no axiom.
 - **Document kernel.** The extracted `document` functions are proved against `DocModel` and gated: validation refuses exactly what the model refuses (`DocRefine.validate_refines`), a validated patch commits (`commit_succeeds`), and the decoded `materialize` result is the specified view (`DocMatRefine.materialize_refines`), so replicas with the same patches converge (`extracted_view_converges`).
 
+- **Deployment.** The `authz` tables were created on PlanetScale and the deployed Worker passed an end-to-end check of roles and token revocation.
+- **Workspaces** (branch `workspace-graph`). Ordinary Git edits of graph documents in a workspace become graph operations, as `o5s propose` makes them, so agents editing different lines of one file merge; before, the kernel refused them. Projection messages and workspace proposals name only the snapshot's causal heads (`causality::heads`, proved in `Heads.heads_keep_past`), not every admitted patch.
+- **History length.** `o5s-load history` times single operations as a repository grows. It found per-request work over the whole history: graph proposals and document reads re-resolved every document identity (O(N²); now memoized per view), the native export started one Git process per file (now one pack), and the Worker rebuilt its repository cache per request (now kept per isolate).
+
 Next:
 
-1. Run the new DDL (`o5s_roles`, revocation tables) on the deployed database, then merge and deploy the `authz` branch.
-2. Run the Worker workspace flow, the Artifacts clone and the pipelined engine against the live deployment.
-3. A single hot repository on PostgreSQL saturates near 500 proposals/s with group commit (`docs/load-testing.md`). Multi-row writes would cut the statements per group further.
-4. Multi-host and 10,000-client runs need more than one machine.
+1. Run the Worker workspace flow, the Artifacts clone and the pipelined engine against the live deployment.
+2. Deliver Git exports that fail after a merge: compare the admitted generation with the one the Artifacts head records and export again on a schedule (Cron Trigger), instead of relying on `waitUntil` alone.
+3. Exports still write the whole tree (one pack of missing objects natively, every object on Workers) and materialize the whole channel; history-length measurements should decide whether trees are updated incrementally.
+4. A single hot repository on PostgreSQL saturates near 500 proposals/s with group commit (`docs/load-testing.md`). Multi-row writes would cut the statements per group further.
+5. Multi-host and 10,000-client runs need more than one machine.
 
 The local PostgreSQL 17 development container is `o5s-platform-pg`, bound to `127.0.0.1:15438`; `scripts/postgres.sh` starts an equivalent one.
 

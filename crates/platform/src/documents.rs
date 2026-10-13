@@ -45,6 +45,37 @@ pub struct Docs {
     memo: HashMap<(u64, String), (DocId, bool)>,
     /// Every patch below this handle has been resolved.
     primed: u64,
+    /// Indexes of `memo`, so causal searches start from the few patches that
+    /// can stop them: the patches editing each document (and whether with
+    /// operations), the patches writing each document's location, and the
+    /// patches whose edits name each path (as `path` or `from`).
+    editors: HashMap<DocId, Vec<(u64, bool)>>,
+    movers: HashMap<DocId, Vec<u64>>,
+    touching: HashMap<String, Vec<u64>>,
+    /// Dense dependency rows (`rows`) of the patches seen so far, and how
+    /// many patches they hold. Rows of committed patches never change.
+    rows: Vec<Vec<usize>>,
+    counted: usize,
+}
+
+/// The document identities a repository view has resolved, shared with its
+/// clones: an entry describes a committed patch, whose handle never names
+/// another patch, so a later view of the same repository reuses it and
+/// resolves only the patches committed since. Without it every proposal and
+/// document read resolved the whole history again.
+#[derive(Clone, Default)]
+pub(crate) struct Memo(std::sync::Arc<std::sync::Mutex<Docs>>);
+
+impl PartialEq for Memo {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+impl Eq for Memo {}
+impl std::fmt::Debug for Memo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Memo")
+    }
 }
 
 impl Docs {
@@ -62,6 +93,10 @@ impl Docs {
 
     /// Resolve every graph edit of patches up to `upto`, in handle order.
     pub fn prime(&mut self, repo: &Repository, upto: u64) -> Result<(), Refusal> {
+        self.sync_rows(repo);
+        if upto < self.primed {
+            return Ok(());
+        }
         let ids: Vec<u64> = repo
             .patches
             .range(self.primed..=upto)
@@ -80,11 +115,90 @@ impl Docs {
                     .len()
                     > 1;
                 let writes = created || e.from.is_some() || settles;
+                self.editors
+                    .entry(doc.clone())
+                    .or_default()
+                    .push((id, !e.operations.is_empty()));
+                if writes {
+                    self.movers.entry(doc.clone()).or_default().push(id);
+                }
                 self.memo.insert((id, e.path.clone()), (doc, writes));
+            }
+            for e in &p.graph_edits {
+                self.touching.entry(e.path.clone()).or_default().push(id);
+                if let Some(from) = &e.from {
+                    self.touching.entry(from.clone()).or_default().push(id);
+                }
             }
         }
         self.primed = self.primed.max(upto.saturating_add(1));
         Ok(())
+    }
+
+    /// Extend the dependency rows to every patch of `repo`. A view of the same
+    /// repository with fewer patches reuses longer rows: their extra patches
+    /// are newer than all of its own, so no search from it reaches them.
+    fn sync_rows(&mut self, repo: &Repository) {
+        let n = repo
+            .patches
+            .keys()
+            .next_back()
+            .map_or(0, |h| *h as usize + 1);
+        let added = if n > self.rows.len() {
+            repo.patches.range(self.rows.len() as u64..).count()
+        } else {
+            0
+        };
+        if self.counted + added == repo.patches.len() {
+            if added > 0 {
+                let from = self.rows.len() as u64;
+                self.rows.resize(n, Vec::new());
+                for (h, p) in repo.patches.range(from..) {
+                    self.rows[*h as usize] = p.dependencies.iter().map(|d| *d as usize).collect();
+                }
+                self.counted += added;
+            }
+        } else if repo.patches.len() > self.counted {
+            self.rows = rows(repo);
+            self.counted = repo.patches.len();
+        }
+    }
+
+    /// The nearest of `stops` on each causal path from `initial` (the
+    /// extracted `causality::frontier`), ascending.
+    fn nearest_of(
+        &self,
+        repo: &Repository,
+        initial: &[u64],
+        stops: &[u64],
+    ) -> Result<Vec<u64>, Refusal> {
+        if initial.iter().any(|h| !repo.patches.contains_key(h)) {
+            return Err(Refusal("unknown graph dependency".into()));
+        }
+        if stops.is_empty() {
+            return Ok(Vec::new());
+        }
+        if initial.iter().any(|h| *h as usize >= self.rows.len()) {
+            return Err(Refusal(
+                "graph document resolved out of causal order".into(),
+            ));
+        }
+        let mut stop = vec![false; self.rows.len()];
+        for s in stops {
+            if let Some(b) = stop.get_mut(*s as usize) {
+                *b = true;
+            }
+        }
+        let roots = initial.iter().map(|h| *h as usize).collect();
+        let found = o5s_kernel::causality::frontier(
+            &self.rows,
+            &stop,
+            &roots,
+            vec![false; self.rows.len()],
+        );
+        let mut out: Vec<u64> = found.queue.into_iter().map(|h| h as u64).collect();
+        out.sort_unstable();
+        Ok(out)
     }
 
     /// The location heads of `doc` in the causal past of `deps`: the nearest
@@ -95,13 +209,9 @@ impl Docs {
         deps: &[u64],
         doc: &str,
     ) -> Result<BTreeMap<u64, String>, Refusal> {
-        let writes = |p: &Patch| {
-            p.graph_edits.iter().any(|e| {
-                self.moves(p.id, &e.path) && self.get(p.id, &e.path).is_some_and(|d| d == doc)
-            })
-        };
+        let writes = self.movers.get(doc).map_or(&[][..], Vec::as_slice);
         let mut out = BTreeMap::new();
-        for y in nearest_by(repo, deps, writes)? {
+        for y in self.nearest_of(repo, deps, writes)? {
             for e in &repo.patches[&y].graph_edits {
                 if self.moves(y, &e.path) && self.get(y, &e.path).is_some_and(|d| d == doc) {
                     out.insert(y, e.path.clone());
@@ -120,12 +230,8 @@ impl Docs {
         path: &str,
         creator: &str,
     ) -> Result<(DocId, bool), Refusal> {
-        let touches = |p: &Patch| {
-            p.graph_edits
-                .iter()
-                .any(|e| e.path == path || e.from.as_deref() == Some(path))
-        };
-        let near = nearest_by(repo, deps, touches)?;
+        let touches = self.touching.get(path).map_or(&[][..], Vec::as_slice);
+        let near = self.nearest_of(repo, deps, touches)?;
         let mut candidates = BTreeSet::new();
         for y in &near {
             for e in &repo.patches[y].graph_edits {
@@ -170,34 +276,6 @@ pub(crate) fn rows(repo: &Repository) -> Vec<Vec<usize>> {
     rows
 }
 
-/// The nearest patches satisfying `stop` on each causal path from `initial`
-/// (the extracted `causality::frontier`), in ascending order.
-fn nearest_by(
-    repo: &Repository,
-    initial: &[u64],
-    stop: impl Fn(&Patch) -> bool,
-) -> Result<Vec<u64>, Refusal> {
-    let rows = rows(repo);
-    if initial.iter().any(|h| !repo.patches.contains_key(h)) {
-        return Err(Refusal("unknown graph dependency".into()));
-    }
-    let stops = (0..rows.len())
-        .map(|h| repo.patches.get(&(h as u64)).is_some_and(&stop))
-        .collect();
-    let roots = initial.iter().map(|h| *h as usize).collect();
-    let found = o5s_kernel::causality::frontier(&rows, &stops, &roots, vec![false; rows.len()]);
-    let mut out: Vec<u64> = found.queue.into_iter().map(|h| h as u64).collect();
-    out.sort_unstable();
-    Ok(out)
-}
-
-/// Whether patch `p` edits document `doc` (with operations, if `ops`).
-fn edits_doc(docs: &Docs, p: &Patch, doc: &str, ops: bool) -> bool {
-    p.graph_edits.iter().any(|e| {
-        (!ops || !e.operations.is_empty()) && docs.get(p.id, &e.path).is_some_and(|d| d == doc)
-    })
-}
-
 /// The handles of the nearest patches editing document `doc` on each causal
 /// path from `initial`.
 pub fn nearest(
@@ -206,7 +284,11 @@ pub fn nearest(
     initial: &[u64],
     doc: &str,
 ) -> Result<Vec<u64>, Refusal> {
-    nearest_by(repo, initial, |p| edits_doc(docs, p, doc, false))
+    let editors: Vec<u64> = docs
+        .editors
+        .get(doc)
+        .map_or(Vec::new(), |e| e.iter().map(|(id, _)| *id).collect());
+    docs.nearest_of(repo, initial, &editors)
 }
 
 pub fn identity(hash: &str) -> Result<PatchId, Refusal> {
@@ -231,7 +313,13 @@ fn dependencies(
     initial: &[u64],
     doc: &str,
 ) -> Result<Vec<PatchId>, Refusal> {
-    let near = nearest_by(repo, initial, |p| edits_doc(docs, p, doc, true))?;
+    let editors: Vec<u64> = docs.editors.get(doc).map_or(Vec::new(), |e| {
+        e.iter()
+            .filter(|(_, ops)| *ops)
+            .map(|(id, _)| *id)
+            .collect()
+    });
+    let near = docs.nearest_of(repo, initial, &editors)?;
     let mut ids = near
         .iter()
         .map(|h| identity(&repo.patches[h].hash))
@@ -264,6 +352,16 @@ pub fn apply_graph_patch(
 }
 
 impl Repository {
+    /// Document identities resolved for every patch up to `top`, from this
+    /// view's memo.
+    fn docs(&self, top: Option<u64>) -> Result<Docs, Refusal> {
+        let mut docs = self.docs.0.lock().unwrap();
+        if let Some(top) = top {
+            docs.prime(self, top)?;
+        }
+        Ok(docs.clone())
+    }
+
     pub fn validate_graph_edits(
         &self,
         deps: &[u64],
@@ -271,10 +369,7 @@ impl Repository {
         hash: &str,
     ) -> Result<(), Refusal> {
         let mut paths = BTreeSet::new();
-        let mut docs = Docs::default();
-        if let Some(top) = deps.iter().max() {
-            docs.prime(self, *top)?;
-        }
+        let docs = self.docs(deps.iter().max().copied())?;
         let mut moved = BTreeSet::new();
         let edited: BTreeSet<&String> = edits.iter().map(|e| &e.path).collect();
         if edits
@@ -348,10 +443,7 @@ impl Repository {
             }
             pending.extend(patch.dependencies.iter().copied());
         }
-        let mut docs = Docs::default();
-        if let Some(top) = observed.last() {
-            docs.prime(self, *top)?;
-        }
+        let docs = self.docs(observed.last().copied())?;
         let (doc, _) = docs.resolve(self, tips, path, "")?;
         let mut graph = DocumentGraph::default();
         for id in observed {

@@ -10,7 +10,15 @@
 //! ```sh
 //! H5I_APP_SECRET=... o5s-load compare --url http://127.0.0.1:3000 --agents 1000 --concurrency 64 --workload disjoint
 //! ```
+//!
+//! `history` times single operations as one repository's history grows
+//! (`history.rs`):
+//!
+//! ```sh
+//! H5I_APP_SECRET=... o5s-load history --url http://127.0.0.1:3000 --sizes 1000,10000 --shape chain
+//! ```
 mod git;
+mod history;
 
 use futures::{StreamExt, stream};
 use o5s_server::auth::HmacAuth;
@@ -512,6 +520,7 @@ async fn main() {
         rate: None,
     };
     let (mut url, mut tenant, mut dir) = ("http://127.0.0.1:3000".to_string(), 1u64, None);
+    let (mut sizes, mut chain, mut samples) = (vec![1000u64, 10_000], false, 10usize);
     for pair in v.chunks(2) {
         let value = pair.get(1).cloned().unwrap_or_default();
         match pair[0].as_str() {
@@ -525,6 +534,14 @@ async fn main() {
             "--dir" => dir = Some(std::path::PathBuf::from(value)),
             "--cli" => w.cli = Some(std::fs::canonicalize(value).expect("--cli PATH")),
             "--rate" => w.rate = Some(value.parse().expect("--rate PROPOSALS_PER_SECOND")),
+            "--sizes" => {
+                sizes = value
+                    .split(',')
+                    .map(|n| n.parse().expect("--sizes N,N,..."))
+                    .collect()
+            }
+            "--shape" => chain = value == "chain",
+            "--samples" => samples = value.parse().expect("--samples N"),
             other => panic!("unknown argument {other}"),
         }
     }
@@ -543,13 +560,24 @@ async fn main() {
     let report = match mode.as_str() {
         "o5s" => json!({"settings": settings, "o5s": o5s(&w, &url, tenant).await}),
         "git" => json!({"settings": settings, "git": git::run(&w, &dir).await}),
+        "history" => {
+            let secret =
+                std::env::var("H5I_APP_SECRET").expect("H5I_APP_SECRET must sign test tokens");
+            let c = std::sync::Arc::new(Client {
+                http: reqwest::Client::new(),
+                url: url.trim_end_matches('/').into(),
+                auth: HmacAuth::new(secret),
+                tenant,
+            });
+            json!({"history": history::run(c, &sizes, chain, samples, w.concurrency).await})
+        }
         "compare" => {
             let g = git::run(&w, &dir).await;
             let o = o5s(&w, &url, tenant).await;
             eprintln!("{}\n{}", summary(&g), summary(&o));
             json!({"settings": settings, "git": g, "o5s": o})
         }
-        other => panic!("unknown mode {other}: o5s, git or compare"),
+        other => panic!("unknown mode {other}: o5s, git, compare or history"),
     };
     let _ = std::fs::remove_dir_all(&dir);
     println!("{}", serde_json::to_string_pretty(&report).unwrap());

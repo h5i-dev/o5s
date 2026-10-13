@@ -2,8 +2,13 @@
 //! with ordinary Git, and the proposal its changes become. The native server
 //! keeps workspaces as local worktrees; the Worker keeps them as Artifacts
 //! repositories. Both read the snapshot's patch set from its commit message
-//! and turn changed files into one whole-file proposal through this module.
-use crate::{Command, Edit, Refusal, Repository, base64_encode, valid_path};
+//! and turn changed files into one proposal through this module: graph
+//! operations for text documents, as `o5s propose` sends, and whole-file
+//! edits for binary files and for repositories that predate graph documents.
+use crate::documents::GraphEdit;
+use crate::{Command, Edit, Kind, Refusal, Repository, base64_encode, valid_path};
+use o5s_kernel::model::{Anchor, DocumentGraph, NodeId, Operation};
+use std::collections::BTreeSet;
 
 /// The first line of every projection commit message.
 pub const TITLE: &str = "o5s verified-admission projection";
@@ -14,7 +19,9 @@ pub const MAX_FILES: usize = 1024;
 pub const MAX_BYTES: usize = 4 * 1024 * 1024;
 
 /// The message of a projection commit: optionally its registry generation,
-/// then the hashes of the admitted patches in channel order.
+/// then the hashes of the snapshot's causal heads (`heads`), whose causal
+/// past is the admitted patch set. Older projections list every admitted
+/// patch; both read back as the same snapshot.
 pub fn message(generation: Option<u64>, hashes: &[&str]) -> String {
     let mut m = String::from(TITLE);
     if let Some(g) = generation {
@@ -51,32 +58,63 @@ pub fn parse(message: &str) -> Option<(Option<u64>, Vec<&str>)> {
     Some((generation, hashes))
 }
 
-/// The registry handles of a snapshot's patches, each of which must be a
-/// member of `channel`: a workspace proposal depends on exactly what it saw.
+/// The causal heads of a set of patches: the members no member depends on,
+/// ascending. Their causal past is the set's, so for a dependency-closed set
+/// such as a channel it is the set itself (`causality::heads`).
+pub fn heads(repo: &Repository, members: &[u64]) -> Result<Vec<u64>, Refusal> {
+    let corrupt = || Refusal("corrupt patch registry".into());
+    let mut members = members.to_vec();
+    members.sort_unstable();
+    members.dedup();
+    let len = members.last().map_or(0, |m| *m as usize + 1);
+    let mut rows = vec![Vec::new(); len];
+    for m in &members {
+        let p = repo.patches.get(m).ok_or_else(corrupt)?;
+        if p.dependencies.iter().any(|d| d >= m) {
+            return Err(corrupt());
+        }
+        rows[*m as usize] = p.dependencies.iter().map(|d| *d as usize).collect();
+    }
+    let dense: Vec<usize> = members.iter().map(|m| *m as usize).collect();
+    let heads = o5s_kernel::causality::heads(&rows, &dense, vec![false; len]);
+    Ok(heads.into_iter().map(|h| h as u64).collect())
+}
+
+/// The hashes a projection commit of the admitted set `patches` records.
+pub fn snapshot<'a>(repo: &'a Repository, patches: &[u64]) -> Result<Vec<&'a str>, Refusal> {
+    Ok(heads(repo, patches)?
+        .iter()
+        .map(|h| repo.patches[h].hash.as_str())
+        .collect())
+}
+
+/// The dependencies of a proposal from a snapshot: the causal heads of its
+/// recorded patches, each of which must be a member of `channel`. Their
+/// causal past is that of the recorded patches, so the proposal depends on
+/// exactly what it saw.
 pub fn dependencies(
     repo: &Repository,
     channel: &str,
     hashes: &[&str],
 ) -> Result<Vec<u64>, Refusal> {
-    let members = repo
+    let members: std::collections::HashSet<u64> = repo
         .channels
         .get(channel)
-        .ok_or_else(|| Refusal("channel not found".into()))?;
-    hashes
+        .ok_or_else(|| Refusal("channel not found".into()))?
         .iter()
-        .map(|h| {
-            let id = repo
-                .patches
-                .values()
-                .find(|p| p.hash == *h)
-                .map(|p| p.id)
-                .ok_or_else(|| Refusal("workspace patch identity not found".into()))?;
-            if !members.contains(&id) {
-                return Err(Refusal("workspace snapshot is outside this channel".into()));
-            }
-            Ok(id)
-        })
-        .collect()
+        .copied()
+        .collect();
+    let mut seen = Vec::with_capacity(hashes.len());
+    for h in hashes {
+        let id = repo
+            .handle(h)
+            .ok_or_else(|| Refusal("workspace patch identity not found".into()))?;
+        if !members.contains(&id) {
+            return Err(Refusal("workspace snapshot is outside this channel".into()));
+        }
+        seen.push(id);
+    }
+    heads(repo, &seen)
 }
 
 /// A changed file as a whole-file edit: UTF-8 as text, anything else as
@@ -134,12 +172,148 @@ pub fn proposal(
     if edits.is_empty() || edits.len() > MAX_FILES {
         return Err(Refusal(format!("1..{MAX_FILES} changed files required")));
     }
-    Ok(Command::Propose {
+    let dependencies = dependencies(repo, channel, &hashes)?;
+    let Some((graph, files)) = graph_edits(repo, &dependencies, edits.clone())? else {
+        return Ok(Command::Propose {
+            repo: repo_name.into(),
+            intent: intent.into(),
+            dependencies,
+            edits,
+        });
+    };
+    Ok(Command::ProposeGraph {
         repo: repo_name.into(),
         intent: intent.into(),
-        dependencies: dependencies(repo, channel, &hashes)?,
-        edits,
+        dependencies,
+        edits: graph,
+        files,
     })
+}
+
+/// Graph edits for text documents, and whole-file edits for binary files,
+/// symlinks, submodules and paths that hold legacy documents, against the
+/// snapshot `deps`. `None` keeps a legacy repository's representation: one
+/// that has whole-file documents and none of whose graph documents changed.
+/// This is the rule `o5s propose` applies.
+fn graph_edits(
+    repo: &Repository,
+    deps: &[u64],
+    edits: Vec<Edit>,
+) -> Result<Option<(Vec<GraphEdit>, Vec<Edit>)>, Refusal> {
+    let graph_paths: BTreeSet<&str> = repo
+        .patches
+        .values()
+        .flat_map(|p| &p.graph_edits)
+        .map(|e| e.path.as_str())
+        .collect();
+    let legacy_paths: BTreeSet<&str> = repo
+        .patches
+        .values()
+        .flat_map(|p| &p.edits)
+        .map(|e| e.path.as_str())
+        .collect();
+    if !legacy_paths.is_empty() && !edits.iter().any(|e| graph_paths.contains(e.path.as_str())) {
+        return Ok(None);
+    }
+    let mut graph = Vec::new();
+    let mut files = Vec::new();
+    for edit in edits {
+        let path = edit.path.as_str();
+        let special = edit.base64 || edit.kind != Kind::File;
+        if legacy_paths.contains(path) || (!graph_paths.contains(path) && special) {
+            files.push(edit);
+            continue;
+        }
+        let Some(text) = &edit.content else {
+            graph.push(GraphEdit {
+                path: edit.path,
+                remove: true,
+                ..GraphEdit::default()
+            });
+            continue;
+        };
+        if special {
+            return Err(Refusal(format!(
+                "{path} is a text graph document; binary content, a symlink or a submodule needs a new path"
+            )));
+        }
+        let operations = operations(&repo.document_at(path, deps)?, path, text)?;
+        graph.push(GraphEdit {
+            path: edit.path,
+            operations,
+            executable: edit.executable,
+            ..GraphEdit::default()
+        });
+    }
+    Ok(Some((graph, files)))
+}
+
+/// The graph operations that turn a document's snapshot into `updated`.
+/// Unchanged atoms at either end are kept; the atoms between them are deleted
+/// and the new text is inserted as lines, so later edits have line anchors.
+fn operations(graph: &DocumentGraph, path: &str, updated: &str) -> Result<Vec<Operation>, Refusal> {
+    let view = graph.materialize();
+    let unambiguous = view.conflicts.is_empty() && view.layers.iter().all(|l| l.len() == 1);
+    let (true, Some(rendered)) = (unambiguous, view.bytes) else {
+        return Err(Refusal(format!(
+            "{path} has unresolved conflicts; resolve them with explicit graph operations"
+        )));
+    };
+    let atoms: Vec<(NodeId, &[u8])> = view
+        .layers
+        .iter()
+        .map(|l| {
+            let id = l[0];
+            (id, graph.atom(id).unwrap_or_default())
+        })
+        .collect();
+    if atoms.iter().any(|(_, b)| b.is_empty())
+        || atoms.iter().flat_map(|(_, b)| b.iter()).ne(&rendered)
+    {
+        return Err(Refusal(format!(
+            "{path}: graph atoms do not match its rendered bytes"
+        )));
+    }
+    let target = updated.as_bytes();
+    let (mut start, mut left) = (0, 0);
+    while start < atoms.len() && target[left..].starts_with(atoms[start].1) {
+        left += atoms[start].1.len();
+        start += 1;
+    }
+    let (mut end, mut right) = (atoms.len(), target.len());
+    while end > start
+        && right >= left + atoms[end - 1].1.len()
+        && target[..right].ends_with(atoms[end - 1].1)
+    {
+        right -= atoms[end - 1].1.len();
+        end -= 1;
+    }
+    let mut ops = Vec::new();
+    if start < end {
+        ops.push(Operation::Delete {
+            targets: atoms[start..end].iter().map(|(id, _)| *id).collect(),
+        });
+    }
+    if left < right {
+        let anchor = |i: usize| Anchor::Node(atoms[i].0);
+        ops.push(Operation::Insert {
+            left: if start == 0 {
+                Anchor::Start
+            } else {
+                anchor(start - 1)
+            },
+            right: if end == atoms.len() {
+                Anchor::End
+            } else {
+                anchor(end)
+            },
+            atoms: target[left..right]
+                .split_inclusive(|b| *b == b'\n')
+                .map(<[u8]>::to_vec)
+                .collect(),
+        });
+    }
+    Ok(ops)
 }
 
 #[cfg(test)]

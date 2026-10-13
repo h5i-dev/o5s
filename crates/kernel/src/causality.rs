@@ -59,6 +59,34 @@ pub fn sole_head(
     (ok, ancestors.marks)
 }
 
+/// The causal heads of `members`: the members that are no member's
+/// dependency, in `members` order. Their causal past is that of `members`
+/// (for a dependency-closed set such as a channel, the set itself), so a
+/// proposal that saw the set needs only them as dependencies. `covered` must
+/// be all false and as long as `rows`; it is consumed.
+pub fn heads(rows: &Vec<Vec<usize>>, members: &Vec<usize>, covered: Vec<bool>) -> Vec<usize> {
+    let mut covered = covered;
+    let mut i = 0;
+    while i < members.len() {
+        let deps = &rows[members[i]];
+        let mut j = 0;
+        while j < deps.len() {
+            covered[deps[j]] = true;
+            j += 1;
+        }
+        i += 1;
+    }
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < members.len() {
+        if !covered[members[i]] {
+            out.push(members[i]);
+        }
+        i += 1;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,6 +143,41 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn heads_keep_the_causal_past_on_small_dags() {
+        // Every DAG on 5 vertices whose edges point to smaller indices, and
+        // every subset of it: the heads have the subset's causal past.
+        let pairs: Vec<(usize, usize)> = (0..5).flat_map(|v| (0..v).map(move |u| (v, u))).collect();
+        for edges in 0u32..(1 << pairs.len()) {
+            let mut rows = vec![Vec::new(); 5];
+            for (k, (v, u)) in pairs.iter().enumerate() {
+                if edges & (1 << k) != 0 {
+                    rows[*v].push(*u);
+                }
+            }
+            for set in 0u32..32 {
+                let members: Vec<usize> = (0..5).filter(|v| set & (1 << v) != 0).collect();
+                let hs = super::heads(&rows, &members, vec![false; 5]);
+                let past = |from: &[usize]| {
+                    let mut seen = BTreeSet::new();
+                    let mut stack = from.to_vec();
+                    while let Some(v) = stack.pop() {
+                        if seen.insert(v) {
+                            stack.extend(rows[v].iter().copied());
+                        }
+                    }
+                    seen
+                };
+                assert_eq!(past(&hs), past(&members));
+                assert!(hs.iter().all(|h| members.contains(h)));
+                assert!(
+                    hs.iter()
+                        .all(|h| members.iter().all(|m| !rows[*m].contains(h)))
+                );
             }
         }
     }

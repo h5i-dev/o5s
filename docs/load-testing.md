@@ -64,6 +64,59 @@ With group commit, 2,000 agents proposing to one file each in one repository, at
 
 Up to 300 per second, a proposal costs about one uncontended transaction. Near 400 per second, the queue starts to form, and past about 500 per second (the closed-loop maximum above) it grows for the whole run. No request failed and every content check passed.
 
+### Where a hot repository's time goes
+
+`/metrics` reports how long committed groups spend in each phase under the lock (`o5s_pg_group_seconds_total`). On October 12, 2026 the open-loop run above (2,000 agents, one file each, one repository) was repeated at 400 and 800 offered proposals/s with commit `5a1a6a5`, once through Docker's port proxy as before and once with the container on the host network (`O5S_PG_NETWORK=host scripts/postgres.sh`):
+
+| PostgreSQL reached | 400/s offered: achieved (p50) | 800/s offered: achieved (p50, p95) |
+|---|---:|---:|
+| Docker port proxy | 395 (118 ms) | 436 (1,074 ms, 1,993 ms) |
+| Host network | 399 (6 ms) | 696 (255 ms, 384 ms) |
+
+Per grouped command, over both runs:
+
+| Phase | Port proxy | Host network |
+|---|---:|---:|
+| Loads (the command's narrow reads) | 1.20 ms | 0.65 ms |
+| Writes (3.7 statements per command) | 0.75 ms | 0.40 ms |
+| Kernel transition | 0.001 ms | 0.001 ms |
+| `BEGIN`, lock and `COMMIT`, per group of 18–24 commands | 0.9 ms | 0.6 ms |
+
+The lock is held for about 2.0 ms per command through the proxy and 1.1 ms on the host network, which bounds one repository near 500 and 900 commands/s. Almost all of it is PostgreSQL executing each command's own reads and writes one command after another; the kernel is negligible. Fewer statements per group (one read per table for the whole group, multi-row writes) would cut it most. That needs set-valued filters and multi-row statements in `h5i_app_sql`, which plans every registry statement. Sending a whole group's reads and writes in one flush each would save only the per-command waits.
+
+With statements kept prepared on each connection (commit `ee4dc71`; `O5S_PREPARED=0` turns it off), the same workload with 3,000 agents on the host network:
+
+| Statements | 800/s offered: achieved (p50) | 1,200/s offered: achieved (p50) | Write time per command |
+|---|---:|---:|---:|
+| Unnamed | 643 (372 ms) | 618 (1,306 ms) | 0.40 ms |
+| Prepared | 758 (59 ms) | 740 (718 ms) | 0.25 ms |
+
+Loads, about 0.7 ms per command, are now most of the lock time.
+
+With the repository row kept in memory across a group and each command's writes sent with the next command's reads (commit after `687590d`), 3,000 agents on the host network:
+
+| Version | 800/s offered: achieved (p50) | 1,200/s offered: achieved (p50) | Lock time per command |
+|---|---:|---:|---:|
+| Prepared statements | 727 (191 ms) | 774 (726 ms) | 0.99 ms |
+| Grouped repository row | 748 (65 ms) | 894 (241 ms) | 0.86 ms |
+
+### History length
+
+`o5s-load history` grows one repository through given sizes of admitted graph-document patches, each creating its own file, and at each size times single operations ten times with the whole history in place: a proposal, the admission of one approved patch, the channel view, one document, a Git export, and a workspace round trip (create it, edit a line, propose). `--shape chain` makes each patch depend on the previous one; `independent` patches have no dependencies, so each is a causal head.
+
+On October 12, 2026, against a native server on the local PostgreSQL 17 container (through Docker's port proxy), before (commit `0cbb68e`) and after (`5a1a6a5`) the fixes the runs led to, p50 in milliseconds:
+
+| Shape | Patches | Proposal | Document | Export | Workspace proposal |
+|---|---:|---:|---:|---:|---:|
+| Chain | 1,000 | 644 → 6.3 | 325 → 3.2 | 5,014 → 36 | 1,036 → 75 |
+| Chain | 2,000 | – → 9.7 | – → 4.7 | – → 52 | – → 128 |
+| Chain | 5,000 | – → 25 | – → 11 | – → 81 | – → 241 |
+| Independent | 1,000 | 2.5 → 2.2 | 166 → 3.3 | 3,861 → 36 | 722 → 153 |
+| Independent | 2,000 | – → 4.8 | – → 5.4 | – → 52 | – → 261 |
+| Independent | 5,000 | – → 8.1 | – → 7.5 | – → 98 | – → 592 |
+
+Before, every graph proposal and document read resolved the document identity of every patch again, each export materialized the channel from an empty view, every causal search rebuilt the repository's dependency rows, and the native export started one Git process per file. Proposals, document reads and exports therefore grew with the square of the history: growing the chain to 1,000 patches took 197 s, against 17 s after, and the "before" runs stop at 1,000 because larger ones take hours. Admitting one patch stays linear: its transaction loads every member row of the channel (the narrow load of `Merge`), 9.8 ms at 1,000 patches and 94 ms at 5,000. The channel view grows with the number of files (23 ms and a 134 KB reply for 5,000). Creating a workspace (export plus `git worktree add`) still writes every file, and a workspace proposal from independent patches depends on all of them, since each is a causal head.
+
 ## Python driver
 
 `scripts/load.py` drives the same HTTP commands as clients. It creates one identity per author and separate identities for review and check reports. Proposals run concurrently, followed by concurrent review/check reports and admission batches. Each run compares forward and reverse admission orders, checks every admitted patch's membership, and checks output bytes or retained conflict alternatives. It also checks that self-approval and unreviewed admission are refused without changing the channel view. A failed check gives a nonzero exit status.

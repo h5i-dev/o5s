@@ -31,3 +31,13 @@ id = "09738769027849ffb2cd540155d430c9"
 [[artifacts]]
 binding = "ARTIFACTS"
 namespace = "default"
+
+# Deliver Git projections whose export after an admission failed or never
+# ran: the `scheduled` handler exports what `o5s_export_pending` still holds.
+[triggers]
+crons = ["*/5 * * * *"]
+
+# The token signing key must be a Worker secret (`scripts/worker-secrets.sh`):
+# deploys fail without it, instead of serving `503 secret not configured`.
+[secrets]
+required = ["H5I_APP_SECRET"]

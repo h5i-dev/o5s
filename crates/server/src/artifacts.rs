@@ -1,7 +1,8 @@
 //! Local Git objects and detached workspaces. No network commands or remote
 //! push. Export refuses unresolved conflicts and records immutable patch hashes
 //! in the commit message. Cloudflare Artifacts stores the same Git projection.
-use o5s_platform::{Kind, Mode, Refusal, Repository, valid_name, workspace};
+use o5s_gitpush as gitpush;
+use o5s_platform::{Kind, Mode, Refusal, Repository, View, valid_name, workspace};
 use std::{
     collections::BTreeMap,
     io::Write,
@@ -22,62 +23,50 @@ fn git(path: &Path, args: &[&str], input: &[u8]) -> Result<String, Refusal> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| Refusal(e.to_string()))?;
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(input)
-        .map_err(|e| Refusal(e.to_string()))?;
+    // Feed stdin from another thread: a batch command (`cat-file`) answers
+    // while it reads, and could fill its output pipe before taking all input.
+    let mut stdin = child.stdin.take().unwrap();
+    let input = input.to_vec();
+    let writer = std::thread::spawn(move || stdin.write_all(&input));
     let output = child
         .wait_with_output()
+        .map_err(|e| Refusal(e.to_string()))?;
+    writer
+        .join()
+        .map_err(|_| Refusal("Git input writer panicked".into()))?
         .map_err(|e| Refusal(e.to_string()))?;
     if !output.status.success() {
         return Err(Refusal(String::from_utf8_lossy(&output.stderr).into()));
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().into())
 }
-#[derive(Default)]
-struct Tree {
-    /// Object id (a commit for a submodule) and mode.
-    files: BTreeMap<String, (String, Mode)>,
-    dirs: BTreeMap<String, Tree>,
-}
-impl Tree {
-    fn add(&mut self, path: &str, blob: String, mode: Mode) {
-        match path.split_once('/') {
-            Some((head, tail)) => self
-                .dirs
-                .entry(head.into())
-                .or_default()
-                .add(tail, blob, mode),
-            None => {
-                self.files.insert(path.into(), (blob, mode));
-            }
-        }
+/// Write the objects of `files`' tree into the bare repository at `path`
+/// and return the tree id. The objects are built in process (`o5s-gitpush`);
+/// those the repository lacks go in as one pack, so an export costs a few
+/// Git processes however many files and directories it has.
+fn store(path: &Path, files: &BTreeMap<String, gitpush::File>) -> Result<String, Refusal> {
+    let (tree, objects) = gitpush::tree(files).map_err(Refusal)?;
+    let ids: String = objects
+        .iter()
+        .map(|o| format!("{}\n", gitpush::hex(&o.id())))
+        .collect();
+    let known = git(
+        path,
+        &["cat-file", "--batch-check=%(objectname)"],
+        ids.as_bytes(),
+    )?;
+    let missing: std::collections::BTreeSet<&str> = known
+        .lines()
+        .filter_map(|l| l.strip_suffix(" missing"))
+        .collect();
+    let new: Vec<gitpush::Object> = objects
+        .into_iter()
+        .filter(|o| missing.contains(gitpush::hex(&o.id()).as_str()))
+        .collect();
+    if !new.is_empty() {
+        git(path, &["index-pack", "--stdin"], &gitpush::pack(&new))?;
     }
-    fn write(&self, path: &Path) -> Result<String, Refusal> {
-        let mut entries = BTreeMap::new();
-        for (name, (id, mode)) in &self.files {
-            let (mode, kind) = match mode {
-                Mode::Regular => ("100644", "blob"),
-                Mode::Executable => ("100755", "blob"),
-                Mode::Symlink => ("120000", "blob"),
-                Mode::Gitlink => ("160000", "commit"),
-            };
-            entries.insert(name.clone(), format!("{mode} {kind} {id}\t{name}\0"));
-        }
-        for (name, dir) in &self.dirs {
-            entries.insert(
-                format!("{name}/"),
-                format!("040000 tree {}\t{name}\0", dir.write(path)?),
-            );
-        }
-        git(
-            path,
-            &["mktree", "-z"],
-            entries.values().cloned().collect::<String>().as_bytes(),
-        )
-    }
+    Ok(gitpush::hex(&tree))
 }
 fn write_mark(mark: &Path, generation: u64) -> Result<(), Refusal> {
     let staged = mark.with_extension("tmp");
@@ -92,10 +81,29 @@ pub fn export(
     channel: &str,
     repo: &Repository,
 ) -> Result<serde_json::Value, Refusal> {
+    export_view(
+        root,
+        tenant,
+        name,
+        channel,
+        repo,
+        repo.materialize(channel)?,
+    )
+}
+
+/// `export` of `view`, the channel's view of `repo` (the server keeps it
+/// incrementally, so an export does not materialize the whole history).
+pub fn export_view(
+    root: &Path,
+    tenant: u64,
+    name: &str,
+    channel: &str,
+    repo: &Repository,
+    view: View,
+) -> Result<serde_json::Value, Refusal> {
     if !valid_name(name) || !valid_name(channel) {
         return Err(Refusal("invalid name".into()));
     }
-    let view = repo.materialize(channel)?;
     if !view.conflicts.is_empty() {
         return Err(Refusal("resolve conflicts before Git export".into()));
     }
@@ -138,26 +146,24 @@ pub fn export(
             "stale":true,"generation":exported}),
         );
     }
-    let mut tree = Tree::default();
+    let mut files = BTreeMap::new();
     for name in view.files.keys() {
         let (bytes, mode) = view
             .entry(name)
             .ok_or_else(|| Refusal("corrupt binary file or submodule id".into()))?;
-        let id = if mode == Mode::Gitlink {
-            view.files[name].clone()
-        } else {
-            git(&path, &["hash-object", "-w", "--stdin"], &bytes)?
+        let mode = match mode {
+            Mode::Regular => gitpush::Mode::Regular,
+            Mode::Executable => gitpush::Mode::Executable,
+            Mode::Symlink => gitpush::Mode::Symlink,
+            Mode::Gitlink => gitpush::Mode::Gitlink,
         };
-        tree.add(name, id, mode);
+        files.insert(name.clone(), (bytes, mode));
     }
-    let tree = tree.write(&path)?;
+    let tree = store(&path, &files)?;
     let reference = format!("refs/heads/{channel}");
     let parent = git(&path, &["rev-parse", "--verify", &reference], &[]).ok();
-    let hashes: Vec<&str> = view
-        .patches
-        .iter()
-        .map(|id| repo.patches[id].hash.as_str())
-        .collect();
+    // The causal heads stand for the whole admitted set.
+    let hashes = workspace::snapshot(repo, &view.patches)?;
     if let Some(p) = &parent {
         // Unchanged when the files and the admitted patch set are the same
         // (equal bytes can still come from a different patch set).
@@ -197,7 +203,28 @@ pub fn worktree(
     channel: &str,
     repo: &Repository,
 ) -> Result<serde_json::Value, Refusal> {
-    let exported = export(root, tenant, name, channel, repo)?;
+    worktree_view(
+        root,
+        tenant,
+        agent,
+        name,
+        channel,
+        repo,
+        repo.materialize(channel)?,
+    )
+}
+
+/// `worktree` of `view`, the channel's view of `repo`.
+pub fn worktree_view(
+    root: &Path,
+    tenant: u64,
+    agent: u64,
+    name: &str,
+    channel: &str,
+    repo: &Repository,
+    view: View,
+) -> Result<serde_json::Value, Refusal> {
+    let exported = export_view(root, tenant, name, channel, repo, view)?;
     let commit = exported["commit"]
         .as_str()
         .ok_or_else(|| Refusal("missing Git projection".into()))?;

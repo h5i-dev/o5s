@@ -1,144 +1,124 @@
 <p align="center">
+  <a href="https://github.com/h5i-dev/o5s/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/h5i-dev/o5s/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/h5i-dev/o5s/blob/main/LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/github/license/h5i-dev/o5s?color=blue"></a>
 </p>
 
-<h1 align="center">Version Control for Many Concurrent Agents</h1>
+<h1 align="center">Verified Version Control for Agent Swarms</h1>
 
-**o5s** is a patch-based collaboration server for teams of AI agents and people who change the same code at the same time. Every change is an immutable patch with a content hash and explicit dependencies. Changes are integrated without rebasing, and its core is formally verified in Lean 4 against the Rust code that runs.
+**o5s** is a patch-based collaboration server for AI agents and people who change the same code at the same time. Its core is formally verified in Lean 4 against the Rust code that runs.
 
-- **No rebase loop:** Agents propose patches against what they saw. Patches that don't conflict are admitted in any order, and the result is the same. Edits to different lines of one file merge automatically.
-- **Conflicts are data:** Concurrent edits to the same lines are kept side by side as alternatives instead of stopping an agent. A resolution is one more patch, reviewed like any other.
-- **Review is enforced:** A patch enters a channel only with an approval and a passing check report from someone other than its author, and only after everything it depends on. Repository roles limit who may read, propose, review and grant.
-- **Verified core:** Every registry decision is made by Rust code extracted to Lean, with proofs of the invariant, history, the admission gate and tenant isolation.
-- **Git at the edges:** Agents work in ordinary Git checkouts. Admitted snapshots export to bare Git repositories, or to Cloudflare Artifacts.
+- **No rebase loop:** non-conflicting patches merge in any order, with the same result.
+- **Line-level merging:** agents editing different lines of one file both get in.
+- **Conflicts are data:** overlapping edits stay side by side until a reviewed resolution patch.
+- **Enforced review:** admission needs an independent approval and a passing check.
+- **Verified core:** every registry decision is extracted Rust, proved in Lean.
+- **Plain Git at the edges:** agents work in ordinary checkouts; snapshots export to Git.
 
 ```bash
-./scripts/dev.sh                              # Start the server and print three tokens
+./scripts/dev.sh                              # Start a local server; prints three tokens
 cd my-project && o5s connect demo             # Attach an ordinary Git repository
 o5s propose --intent 'Add the parser'         # Propose your working-tree changes
 o5s --profile reviewer approve 1              # An independent reviewer approves
-o5s --profile checks check 1 --pass           # An independent check report
+o5s --profile checks check 1 --pass           # An independent check passes
 o5s --profile reviewer merge 1                # Admit it to the main channel
-o5s fetch                                     # Fetch the snapshot to refs/o5s/main
+o5s fetch                                     # Fetch the admitted snapshot (refs/o5s/main)
 ```
 
 ---
 
 ## 1. Quick Start
 
-Requires Rust stable, Git and Python 3. No database or Cloudflare account is needed.
+Needs Rust stable, Git and Python 3.
 
 ```bash
-./scripts/dev.sh                 # Local write-ahead log in .o5s/
-./scripts/dev.sh --postgres      # Or PostgreSQL 17 in Docker
+./scripts/dev.sh                              # Local write-ahead log in .o5s/
+./scripts/dev.sh --postgres                   # Or PostgreSQL 17 in Docker
+python3 scripts/demo.py                       # Conflict → resolution → convergence → Git export
+cargo install --path crates/cli --locked      # The agent CLI
+o5s login                                     # Paste the author token (reviewer: --profile reviewer)
 ```
 
-Open **http://127.0.0.1:3000** and paste one of the printed tokens: author, reviewer or check reporter. The web UI shows repositories, patches, channels, conflicts and the activity log.
-
-To see a full merge cycle, run the demo while the server is up:
-
-```bash
-python3 scripts/demo.py
-```
-
-It creates two conflicting changes and admits them in opposite orders on two channels, which show the same conflict. It then resolves the conflict with a reviewed patch, checks that both channels converge, and exports a local bare Git repository you can clone.
-
-Install the agent CLI with `cargo install --path crates/cli --locked`, then save each printed token under its role. Each command reads its token from stdin:
-
-```bash
-o5s login                        # author
-o5s --profile reviewer login     # reviewer
-o5s --profile checks login       # check reporter
-```
-
-See the [CLI manual](docs/cli.md) for line and graph edits, conflict resolution and history.
+Web UI: **http://127.0.0.1:3000** (paste a printed token).
 
 ---
 
-## 2. How It Works
+## 2. Concepts
 
-| Concept | Meaning |
+| Term | In one line |
 |---|---|
-| **Patch** | An immutable change: author, intent, the ids of its dependencies, and its edits. Its id is the SHA-256 of that content, so the same change always has the same id. |
-| **Channel** | A named set of admitted patches that always includes every dependency of its members. `main` is created with the repository; `fork` copies a channel. |
-| **Admission** | A patch joins a channel when it has an independent approval and a passing check report, and its dependencies are already members. A batch is admitted all or nothing. |
-| **View** | The files a channel's patches produce. Concurrent edits of the same text stay visible as conflict alternatives until a resolution patch is admitted. |
-| **Documents** | Text can be edited by line ranges on an earlier version, or as a graph of stable text atoms that survive concurrent insertions and deletions. A renamed graph document keeps its identity, so concurrent edits of the old path follow it. Binary and executable files, symlinks and submodules are supported. |
+| **Patch** | An immutable change, identified by the SHA-256 of its content and dependencies |
+| **Channel** | A set of admitted patches, always including their dependencies (`main`, forks) |
+| **Admission** | Approval + passing check + dependencies present → the patch joins the channel |
+| **View** | The files a channel produces; concurrent edits of the same text show as conflicts |
+| **Document** | Text as a graph of stable atoms, so concurrent edits and renames merge |
+| **Workspace** | A Git checkout of a snapshot; edits there come back as one proposal |
 
-Agents keep using Git for their working copies. `o5s propose` reads staged, unstaged and untracked changes without touching the index; `o5s fetch` writes the admitted snapshot to `refs/o5s/main` without moving `HEAD`. `o5s ci --command CMD` runs a check command on the immutable snapshot each proposal defines and reports the result as an independent check.
+```text
+agent A ──── propose ───┐                                ┌──► view (files, conflicts)
+agent B ──── propose ───┼──► registry ── admit ──► channel ─┤
+reviewer, checks ───────┘    (verified kernel)              └──► Git export, workspaces
+```
 
 ---
 
 ## 3. Compared with Git
 
-The same edits by the same number of agents, on one host, with final contents checked on both sides. Git agents `push`, and on rejection `pull --rebase` and push again. o5s agents propose, are independently reviewed and checked, and are admitted in batches. The table shows 1,000 agents with at most 64 in flight.
+1,000 agents, at most 64 in flight, one host, final contents checked.
 
-| Workload | Git: integrated | Git: integrations/s | o5s: integrated | o5s: integrations/s |
-|---|---|---|---|---|
-| Each agent edits a different line of one file | 431 of 1,000 (569 stopped by rebase conflicts) | 9.8 | 1,000 | 574 |
-| Each agent adds its own file | 1,000 | 9.0 | 1,000 | 1,083 |
-| Each agent has its own repository | 1,000 | 691 | 1,000 | 896 |
+| Workload | Git integrated | Git /s | o5s integrated | o5s /s |
+|---|---:|---:|---:|---:|
+| Different lines of one file | 431 (569 hit rebase conflicts) | 9.8 | 1,000 | 574 |
+| One new file each | 1,000 | 9.0 | 1,000 | 1,083 |
+| One repository each | 1,000 | 691 | 1,000 | 896 |
 
-The o5s figures use its HTTP API with the local storage backend. Through its CLI, which starts a process per agent, they are about 4× lower. Method, all workloads and limits are in the [comparison with Git](docs/git-comparison.md).
+Method and limits: [comparison with Git](docs/git-comparison.md). Throughput and history-length figures: [load testing](docs/load-testing.md).
 
 ---
 
 ## 4. What Is Proved
 
-The registry kernel ([`crates/registry`](crates/registry)) makes every committed decision: repository directory, patch registration, reviews and check reports, forks and admission. It is written in the Rust subset that [Aeneas](https://github.com/AeneasVerif/aeneas) translates to Lean 4. The proofs in [`crates/registry/proofs`](crates/registry/proofs) are about that translation, and `h5i app check` rejects any `sorry` or added axiom.
+All proofs are about the Rust code as extracted by [Aeneas](https://github.com/AeneasVerif/aeneas); `h5i app check` rejects `sorry` and new axioms.
 
 | Guarantee | Theorem |
 |---|---|
-| The extracted `transition` computes a pure model of every command | `Refine.transition_refines` |
-| Every reachable state keeps the invariant: dependency-closed channels, independent reviews and checks, unique and fresh ids | `Invariant.inv_preserved`, `reachable_inv` |
-| Registered patches never change; channel membership only grows | `patches_immutable`, `members_append_only` |
-| Only approved patches with a passing check report are admitted | `Guarantees.merge_gate` |
-| A repository is visible only to its own organization | `isolation`, `scopes_separate` |
-| PostgreSQL's partial, per-command loads compute what the whole repository specifies | `frame`, `Narrow.narrow_load` |
-| The store holds what committing computes | `Storage.stored` |
+| The kernel computes the specified model of every command | `Refine.transition_refines` |
+| Channels stay dependency-closed; reviews and checks stay independent | `Invariant.inv_preserved` |
+| Patches never change; channels only grow | `patches_immutable`, `members_append_only` |
+| Only approved, checked patches are admitted | `Guarantees.merge_gate` |
+| Organizations never see each other's repositories | `isolation`, `scopes_separate` |
+| PostgreSQL's partial loads and grouped transactions decide correctly | `Served.pg_served`, `Group.group_served` |
+| Line merges and graph documents converge in any order | `LinesModel`, `DocMatRefine.extracted_view_converges` |
+| Workspace dependencies name exactly what the agent saw | `Heads.heads_keep_past` |
 
-The kernels in [`proofs/`](proofs) prove admission, graph traversal, interval conflicts, checked rendering, frontiers and deletion tags. They also prove line merging: it never fails spuriously, and any order of the same concurrent edits merges to the same result (`LinesModel`).
-
-Graph documents, line ranges and causal head searches run on extracted kernels (`document`, `lines`, `causality`). The extracted `document` kernel is proved against the document model: validation refuses exactly what the model refuses, a validated patch commits, and the decoded `materialize` result is the specified view, so replicas with the same patches converge ([proof scope](docs/proofs.md), [verification plan](docs/verification-plan.md)). Hashing, authentication and Git export are tested native code.
+Full list and scope: [proofs](docs/proofs.md).
 
 ---
 
-## 5. Storage and Deployment
+## 5. Run It
 
-| Backend | How it stores | Use |
+| Backend | Use | Set |
 |---|---|---|
-| Local log (default) | A checksummed write-ahead log of committed kernel writes in `O5S_DATA`; `o5s-server verify`, `backup` and `import-json` | One server, development, tests |
-| PostgreSQL | One transaction per command under a per-repository lock, loading only the rows the command reads; idempotency keys and retries | Several server replicas sharing one database |
-| Cloudflare Workers | The same kernel and PostgreSQL service through Hyperdrive. Git projections, clone access and per-agent workspaces live in Cloudflare Artifacts | [`crates/worker`](crates/worker/README.md) |
-
-Set `O5S_DATABASE_URL` to use PostgreSQL; `O5S_DATA`, `O5S_BIND` and `H5I_APP_SECRET` set the data directory, listen address and token signing key. The server serves `/healthz`, `/readyz`, `/metrics` and request IDs. [Storage and transactions](docs/storage.md) covers backups, secret rotation and the Git export guard. [Load testing](docs/load-testing.md) has throughput figures for both backends.
-
----
-
-## 6. Verify
+| Local log | One server, development | default (`O5S_DATA`) |
+| PostgreSQL | Several replicas, one database | `O5S_DATABASE_URL` |
+| Cloudflare Workers | Hosted, Git in Artifacts | [`crates/worker`](crates/worker/README.md) |
 
 ```bash
-./scripts/verify.sh              # Formatting, all tests, UI and Worker checks, both Lean projects
-h5i app doctor .                 # Check the pinned Charon, Aeneas and Lean toolchain
-h5i app mutate . --only merge_   # Inject bugs that the proofs must reject
+./scripts/verify.sh                           # Format, tests, UI and Worker checks, both Lean projects
+export O5S_TEST_DATABASE_URL=$(scripts/postgres.sh)  # Then verify.sh includes PostgreSQL
+h5i app mutate . --only merge_                # Inject bugs the proofs must reject
 ```
 
-Set `O5S_TEST_DATABASE_URL` (for example from `scripts/postgres.sh`) to include the PostgreSQL tests.
+---
+
+## 6. Documentation
+
+- [CLI manual](docs/cli.md): connect, propose, review, resolve, fetch
+- [Architecture](docs/architecture.md) · [patch model](docs/patch-model.md)
+- [Access control](docs/access.md) · [storage](docs/storage.md) · [load testing](docs/load-testing.md)
+- [Proofs](docs/proofs.md) · [status](docs/status.md) · [roadmap](docs/roadmap.md)
 
 ---
 
-## 7. Documentation
+## 7. License
 
-- [CLI manual](docs/cli.md): connecting Git repositories, proposing, reviewing, resolving and fetching
-- [Architecture](docs/architecture.md) and [patch model](docs/patch-model.md): channels, conflicts and document operations
-- [Access control, token revocation and limits](docs/access.md)
-- [Storage and transactions](docs/storage.md), [load testing](docs/load-testing.md) and [scaling](docs/scaling.md)
-- [Proof scope](docs/proofs.md) and [verification plan](docs/verification-plan.md)
-- [Status](docs/status.md) and [roadmap](docs/roadmap.md)
-- [Cloudflare Worker](crates/worker/README.md), with Git projections and agent workspaces in Artifacts
-
----
-
-## 8. License
-
-o5s is licensed under the Apache License 2.0. See [LICENSE](LICENSE). It draws on ideas from [Pijul](https://pijul.org/) but contains no Pijul code.
+Apache License 2.0 ([LICENSE](LICENSE)). Inspired by [Pijul](https://pijul.org/); contains no Pijul code.

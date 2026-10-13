@@ -127,10 +127,11 @@ async fn authenticated_parallel_requests_restart_and_git_projection() {
     assert!(Store::open(dir.path()).is_err());
     drop(s);
     let s = reopen(dir.path()).await;
-    assert_eq!(
-        saved,
-        request(&s, 1, 1, "/api/state?repo=demo", None).await.1
-    );
+    // `work` is what this request's view cache had to process, which differs
+    // after a restart; the repository and its view do not.
+    let restored = request(&s, 1, 1, "/api/state?repo=demo", None).await.1;
+    assert_eq!(saved["repository"], restored["repository"]);
+    assert_eq!(saved["view"], restored["view"]);
     let before = std::fs::read(dir.path().join("registry.log")).unwrap();
     let (status, _) = request(
         &s,
@@ -504,6 +505,133 @@ async fn workspace_import_records_snapshot_dependencies_without_altering_files()
         before,
         std::fs::read(dir.path().join("registry.log")).unwrap()
     );
+}
+
+#[tokio::test]
+async fn workspace_edits_of_graph_documents_merge_by_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = state(dir.path());
+    command(&s, 1, serde_json::json!({"cmd":"create","repo":"g"})).await;
+    let lines: Vec<&[u8]> = vec![b"one\n", b"two\n", b"three\n"];
+    command(&s,1,serde_json::json!({"cmd":"propose_graph","repo":"g","intent":"base","dependencies":[],"edits":[{"path":"a.txt","operations":[{"kind":"insert","left":"Start","right":"End","atoms":lines}]}]})).await;
+    let admit = async |patch: u64| {
+        command(
+            &s,
+            2,
+            serde_json::json!({"cmd":"approve","repo":"g","patch":patch}),
+        )
+        .await;
+        command(
+            &s,
+            3,
+            serde_json::json!({"cmd":"check","repo":"g","patch":patch,"passed":true}),
+        )
+        .await;
+        command(
+            &s,
+            1,
+            serde_json::json!({"cmd":"merge","repo":"g","channel":"main","patch":patch}),
+        )
+        .await;
+    };
+    admit(1).await;
+    // Two agents edit different lines of the same graph document with Git.
+    let mut proposals = Vec::new();
+    for (agent, edit) in [(1, ("one\n", "ONE\n")), (4, ("three\n", "THREE\n"))] {
+        let (status, workspace) = request(
+            &s,
+            agent,
+            1,
+            "/api/worktree",
+            Some(serde_json::json!({"repo":"g"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{workspace}");
+        let path = std::path::Path::new(workspace["path"].as_str().unwrap());
+        let text = std::fs::read_to_string(path.join("a.txt")).unwrap();
+        assert_eq!(text, "one\ntwo\nthree\n");
+        std::fs::write(path.join("a.txt"), text.replace(edit.0, edit.1)).unwrap();
+        if agent == 1 {
+            std::fs::write(path.join("new.txt"), "new\n").unwrap();
+        }
+        let body =
+            serde_json::json!({"repo":"g","commit":workspace["commit"],"intent":"edit a line"});
+        let (status, proposed) = request(&s, agent, 1, "/api/worktree/propose", Some(body)).await;
+        assert_eq!(status, StatusCode::OK, "{proposed}");
+        proposals.push(proposed["patch"].as_u64().unwrap());
+    }
+    let (_, detail) = request(
+        &s,
+        1,
+        1,
+        &format!("/api/patch?repo=g&id={}", proposals[0]),
+        None,
+    )
+    .await;
+    let graph = detail["patch"]["graph_edits"].as_array().unwrap();
+    assert_eq!(graph.len(), 2, "{detail}");
+    assert!(
+        detail["patch"]["edits"]
+            .as_array()
+            .is_none_or(Vec::is_empty),
+        "{detail}"
+    );
+    for p in &proposals {
+        admit(*p).await;
+    }
+    // The next snapshot records only its causal heads, the two concurrent
+    // edits, and a proposal from it depends on just those.
+    let (_, workspace) = request(
+        &s,
+        5,
+        1,
+        "/api/worktree",
+        Some(serde_json::json!({"repo":"g"})),
+    )
+    .await;
+    let path = std::path::Path::new(workspace["path"].as_str().unwrap());
+    let log = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["log", "-1", "--format=%B"])
+        .output()
+        .unwrap();
+    let message = String::from_utf8(log.stdout).unwrap();
+    let recorded = message.split("Patch hashes:").nth(1).unwrap();
+    assert_eq!(recorded.split_whitespace().count(), 2, "{message}");
+    std::fs::write(path.join("a.txt"), "ONE\ntwo\nTHREE\nfour\n").unwrap();
+    let body = serde_json::json!({"repo":"g","commit":workspace["commit"],"intent":"append"});
+    let (status, proposed) = request(&s, 5, 1, "/api/worktree/propose", Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{proposed}");
+    let (_, detail) = request(
+        &s,
+        1,
+        1,
+        &format!("/api/patch?repo=g&id={}", proposed["patch"]),
+        None,
+    )
+    .await;
+    assert_eq!(
+        detail["patch"]["dependencies"],
+        serde_json::json!(proposals),
+        "{detail}"
+    );
+    for (path, text) in [("a.txt", "ONE\ntwo\nTHREE\n"), ("new.txt", "new\n")] {
+        let (status, doc) = request(
+            &s,
+            1,
+            1,
+            &format!("/api/document?repo=g&channel=main&path={path}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{doc}");
+        assert_eq!(
+            doc["bytes"],
+            serde_json::json!(text.as_bytes()),
+            "{path}: {doc}"
+        );
+    }
 }
 
 #[tokio::test]

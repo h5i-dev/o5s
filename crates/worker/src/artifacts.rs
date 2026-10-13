@@ -18,15 +18,13 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
 /// The commit message of a snapshot: its generation and patch identities.
-pub fn message(generation: u64, repo: &Repository, view: &View) -> String {
-    workspace::message(Some(generation), &hashes(repo, view))
+pub fn message(generation: u64, repo: &Repository, view: &View) -> Result<String, String> {
+    Ok(workspace::message(Some(generation), &hashes(repo, view)?))
 }
 
-fn hashes<'a>(repo: &'a Repository, view: &View) -> Vec<&'a str> {
-    view.patches
-        .iter()
-        .filter_map(|id| repo.patches.get(id).map(|p| p.hash.as_str()))
-        .collect()
+/// The causal heads of the view's patches, which stand for all of them.
+fn hashes<'a>(repo: &'a Repository, view: &View) -> Result<Vec<&'a str>, String> {
+    workspace::snapshot(repo, &view.patches).map_err(|e| e.0)
 }
 
 /// The generation an o5s commit message records, if any.
@@ -340,8 +338,8 @@ async fn push(
 ) -> Result<serde_json::Value, String> {
     let files = files(view)?;
     let (tree, objects) = git::tree(&files)?;
-    let hashes = hashes(repo, view);
-    let message = message(repo.generation, repo, view);
+    let hashes = hashes(repo, view)?;
+    let message = workspace::message(Some(repo.generation), &hashes);
     let (token, _) = token(artifact, "write", 300).await?;
     let remote = remote.trim_end_matches('/');
     for _ in 0..3 {
@@ -418,7 +416,7 @@ mod tests {
     fn generations_round_trip_through_messages() {
         let repo = Repository::default();
         let view = View::default();
-        assert_eq!(generation_of(&message(42, &repo, &view)), Some(42));
+        assert_eq!(generation_of(&message(42, &repo, &view).unwrap()), Some(42));
         assert_eq!(
             generation_of("o5s verified-admission projection\n\nPatch hashes:\n"),
             None

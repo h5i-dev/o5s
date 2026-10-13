@@ -9,6 +9,7 @@ publish = false
 o5s-platform = { path = "../platform" }
 o5s-registry = { path = "../registry", features = ["serde"] }
 o5s-pgwire = { path = "../pgwire", features = ["native"] }
+o5s-gitpush = { path = "../gitpush" }
 sha2 = "0.11"
 h5i-app-core = "0.1.1"
 h5i-app-json = "0.1.1"
