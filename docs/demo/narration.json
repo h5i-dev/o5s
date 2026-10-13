@@ -22,7 +22,7 @@
   {
     "start": 150,
     "end": 180,
-    "text": "The other problem is trust. Millions of teams rely on version control, so its core must be secure and reliable. Git fixed twelve security flaws across 2024 and 2025; GitHub disclosed a critical push flaw. OpenAI, Claude, and Gemini agents have reached real systems during evaluations. Critical middleware needs machine-checked correctness properties. o5s uses Lean four to verify its Rust decision core under stated assumptions."
+    "text": "The other problem is trust. Millions of teams rely on version control, so its core must be secure and reliable. Git fixed twelve security flaws in 2024 and 2025; GitHub disclosed a critical push flaw. OpenAI, Claude, and Gemini agents reached real systems in evaluations. Version-control software needs machine-checked correctness properties. o5s uses Lean four to verify its Rust decision core under stated assumptions."
   },
   {
     "start": 180,
@@ -32,7 +32,7 @@
   {
     "start": 225,
     "end": 260,
-    "text": "Nine hundred fifteen Lean four theorems check the Rust decision core. Charon and Aeneas extract the Rust that runs; Lean connects it to a readable model. The proofs cover the admission gate, refinement of Rust transitions, convergence of document views, and preservation of causal heads. Those are machine checked under explicit assumptions, without sorry or new axioms. Adapters and deployment need separate validation. You can trace admission to separate approvals and passing checks, while convergence means valid delivery order cannot alter the final view."
+    "text": "Nine hundred fifteen Lean four theorems check the Rust decision core. H five I app translates the Rust code that runs into Lean four. We prove properties of that translated code: the admission gate, refinement of Rust transitions, convergence of document views, and preservation of causal heads. Lean checks these proofs under explicit assumptions, without sorry or new axioms. Admission requires separate approvals and passing checks; convergence means delivery order cannot change the final view."
   },
   {
     "start": 260,
