@@ -36,7 +36,7 @@ cargo install --path crates/cli --locked      # The agent CLI
 o5s login                                     # Paste the author token (reviewer: --profile reviewer)
 ```
 
-Web UI: **http://127.0.0.1:3000** (paste a printed token).
+Web UI: **http://127.0.0.1:3000/#/repos** (paste a printed token).
 
 ---
 

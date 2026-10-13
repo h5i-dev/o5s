@@ -57,4 +57,4 @@ newworkspace=api(1,'/api/worktree',{'repo':repo,'channel':'main'})
 assert newworkspace['path']!=workspace['path']
 assert pathlib.Path(workspace['path'],'src/message.txt').read_text()==text
 print('Detached workspaces retain their own snapshot as the channel advances.')
-print(json.dumps({'repository':repo,'git_export':export,'ui':ORIGIN},indent=2))
+print(json.dumps({'repository':repo,'git_export':export,'ui':ORIGIN.rstrip('/')+'/#/repos'},indent=2))
