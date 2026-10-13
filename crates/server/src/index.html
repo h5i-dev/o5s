@@ -817,7 +817,7 @@ const guide = (() => {
     as.lineCap = 'round';
     let prev = at(0);
     for (let k = 1; k <= n; k++) {
-      const u = k / n * reach, p = at(u), w = (1 - k / n) * 3.6 + 1.1;
+      const u = k / n * reach, p = at(u), w = (1 - k / n) * 2.2 + 0.8;
       as.strokeStyle = `rgb(${Math.round(255 - 110 * (k / n))},0,0)`;
       as.lineWidth = w;
       as.beginPath(); as.moveTo(prev.x / ACW, prev.y / ACH); as.lineTo(p.x / ACW, p.y / ACH); as.stroke();
