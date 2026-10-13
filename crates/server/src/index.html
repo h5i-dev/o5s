@@ -43,7 +43,7 @@ a,button{color:inherit}button,input,select{font:inherit}
 .fact h2{margin:14px 0 10px;font:600 15px/1.3 var(--sans);font-stretch:110%;letter-spacing:.01em}
 .fact p{margin:0;color:var(--ink-2);font:400 12px/1.65 var(--mono)}
 .how{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0;border-top:1px solid var(--line)}
-.how>div{padding:40px}.how>div+div{border-left:1px solid var(--line)}
+.how>div{padding:40px;display:flex;flex-direction:column}.how>div+div{border-left:1px solid var(--line)}.how>div>.code{flex:1}
 .how h2{margin:0 0 16px;font:600 20px/1.2 var(--sans);font-stretch:112%}.how h2 i{font-style:normal;color:var(--accent)}
 .how p{color:var(--ink-2);margin:0 0 14px;max-width:56ch}
 .nums{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 28px;margin:4px 0 14px}
@@ -51,10 +51,10 @@ a,button{color:inherit}button,input,select{font:inherit}
 .nums strong span{color:var(--accent);font-size:.55em;margin-left:2px}
 .nums p{margin:6px 0 0;font:400 11.5px/1.5 var(--mono);color:var(--ink-2)}
 .code{margin:0;padding:22px 24px;background:var(--surface);border:1px solid var(--line);font:12.5px/1.9 var(--mono);color:var(--ink-2);overflow:auto;white-space:pre}
-.code.bars{white-space:normal;display:grid;gap:12px}
-.bar-row{display:grid;gap:4px}.bar-row>span{color:var(--ink-3)}
-.bar{position:relative;height:12px;width:max(var(--v),2px)}
-.bar i{position:absolute;left:calc(100% + 8px);top:-3px;white-space:nowrap;font:400 11px var(--mono);font-style:normal;color:var(--ink-2)}
+.code.bars{white-space:normal;display:grid;gap:8px;align-content:space-between}
+.bar-row{display:grid;gap:3px}.bar-row>span{color:var(--ink-3)}
+.bar{position:relative;height:9px;width:max(var(--v),2px)}
+.bar i{position:absolute;left:calc(100% + 8px);top:-5px;white-space:nowrap;font:400 11px var(--mono);font-style:normal;color:var(--ink-2)}
 .bar.git{background:var(--line-strong)}.bar.o5s{background:linear-gradient(90deg,#9c1510,var(--accent))}.bar.o5s i{color:var(--accent)}
 .site-foot{display:flex;justify-content:space-between;gap:16px;padding:22px 40px;border-top:1px solid var(--line);color:var(--ink-3);font:400 11px var(--mono);letter-spacing:.08em}
 
@@ -147,7 +147,7 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--ink-2);font:400 11px 
   <section class="how" aria-label="Comparison with Git, and how agents use o5s">
     <div>
       <div class="code bars" role="img" aria-label="Integrations per second, Git against o5s">
-      <em># integrations per second · 1,000 agents, 64 in flight, one host, contents checked</em>
+      <em># integrations/s · 1,000 agents, 64 in flight, one host</em>
       <div class="bar-row"><span>different lines, one file</span><div class="bar git" style="--v:1.5%"><i>git 9.8</i></div><div class="bar o5s" style="--v:37%"><i>o5s 574</i></div></div>
       <div class="bar-row"><span>one new file each</span><div class="bar git" style="--v:0.7%"><i>git 9.0</i></div><div class="bar o5s" style="--v:70%"><i>o5s 1,083</i></div></div>
       <div class="bar-row"><span>one repository each</span><div class="bar git" style="--v:45%"><i>git 691</i></div><div class="bar o5s" style="--v:58%"><i>o5s 896</i></div></div>
