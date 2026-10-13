@@ -42,24 +42,20 @@ a,button{color:inherit}button,input,select{font:inherit}
 .fact .mono{color:var(--accent)}
 .fact h2{margin:14px 0 10px;font:600 15px/1.3 var(--sans);font-stretch:110%;letter-spacing:.01em}
 .fact p{margin:0;color:var(--ink-2);font:400 12px/1.65 var(--mono)}
-.results{border-top:1px solid var(--line);padding:56px 40px 48px}
-.results-head .mono{color:var(--accent)}
-.results-head h2{margin:14px 0 36px;font:600 clamp(24px,3vw,40px)/1.1 var(--sans);font-stretch:112%}.results-head h2 i{font-style:normal;color:var(--accent)}
-.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-.stat{padding:30px 28px 32px 0}.stat+.stat{padding-left:28px;border-left:1px solid var(--line)}
-.stat strong{display:block;font:600 clamp(48px,6.4vw,96px)/.9 var(--sans);font-stretch:118%;letter-spacing:-.03em;color:var(--ink)}
-.stat strong span{color:var(--accent);font-size:.5em;letter-spacing:0;margin-left:4px}
-.stat .mono{color:var(--accent);margin-top:18px}
-.stat p{margin:12px 0 0;color:var(--ink-2);font:400 12px/1.6 var(--mono);max-width:32ch}
-.bars{display:grid;gap:18px;margin-top:40px}
-.bar-row{display:grid;grid-template-columns:220px minmax(0,1fr);gap:20px;align-items:center}
-.bar-row>.mono{color:var(--ink-3)}
-.bar-pair{display:grid;gap:6px}
-.bar{position:relative;height:22px;width:max(var(--v),2px);transition:width 1.2s cubic-bezier(.2,.8,.2,1)}
-.bar em{position:absolute;left:calc(100% + 10px);top:3px;white-space:nowrap;font:400 11px var(--mono);font-style:normal;color:var(--ink-2)}
-.bar.git{background:var(--line-strong)}.bar.o5s{background:linear-gradient(90deg,#9c1510,var(--accent))}
-.bar.o5s em{color:var(--accent)}
-.results-note{margin:34px 0 0;color:var(--ink-3);text-transform:none;letter-spacing:.06em}
+.how{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0;border-top:1px solid var(--line)}
+.how>div{padding:40px}.how>div+div{border-left:1px solid var(--line)}
+.how h2{margin:0 0 16px;font:600 20px/1.2 var(--sans);font-stretch:112%}.how h2 i{font-style:normal;color:var(--accent)}
+.how p{color:var(--ink-2);margin:0 0 14px;max-width:56ch}
+.nums{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 28px;margin:4px 0 14px}
+.nums strong{display:block;font:600 40px/1 var(--sans);font-stretch:118%;letter-spacing:-.02em;color:var(--ink)}
+.nums strong span{color:var(--accent);font-size:.55em;margin-left:2px}
+.nums p{margin:6px 0 0;font:400 11.5px/1.5 var(--mono);color:var(--ink-2)}
+.code{margin:0;padding:22px 24px;background:var(--surface);border:1px solid var(--line);font:12.5px/1.9 var(--mono);color:var(--ink-2);overflow:auto;white-space:pre}
+.code.bars{white-space:normal;display:grid;gap:12px}
+.bar-row{display:grid;gap:4px}.bar-row>span{color:var(--ink-3)}
+.bar{position:relative;height:12px;width:max(var(--v),2px)}
+.bar i{position:absolute;left:calc(100% + 8px);top:-3px;white-space:nowrap;font:400 11px var(--mono);font-style:normal;color:var(--ink-2)}
+.bar.git{background:var(--line-strong)}.bar.o5s{background:linear-gradient(90deg,#9c1510,var(--accent))}.bar.o5s i{color:var(--accent)}
 .site-foot{display:flex;justify-content:space-between;gap:16px;padding:22px 40px;border-top:1px solid var(--line);color:var(--ink-3);font:400 11px var(--mono);letter-spacing:.08em}
 
 /* Repositories */
@@ -123,8 +119,8 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--ink-2);font:400 11px 
 .tentacle{position:fixed;inset:0;width:100vw;height:100vh;z-index:39;pointer-events:none;overflow:visible}
 #tentacle-arm{fill:none;stroke:#c81e17;stroke-linecap:round;stroke-width:6;filter:drop-shadow(0 0 8px rgba(255,98,88,.35))}
 #tentacle-cups{fill:none;stroke:#ff8a82;stroke-linecap:round;stroke-width:2.6;stroke-dasharray:0 11;opacity:.85}
-@media(max-width:1000px){.facts{grid-template-columns:repeat(2,minmax(0,1fr))}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.stat:nth-child(3){padding-left:0;border-left:0}.stat:nth-child(n+3){border-top:1px solid var(--line)}.grid{grid-template-columns:1fr}}
-@media(max-width:640px){.frame-top{padding:10px 16px}.brand span{display:none}.hero{left:16px;bottom:90px;max-width:calc(100% - 32px)}.enter{right:16px}.note{left:16px}.facts{grid-template-columns:1fr}.fact{border-right:0;border-bottom:1px solid var(--line);padding:26px 16px}.results{padding:40px 16px}.stats{grid-template-columns:1fr}.stat,.stat+.stat{padding:24px 0;border-left:0}.bar-row{grid-template-columns:1fr;gap:8px}.bar em{position:static;display:block;margin-top:2px}.console{padding:84px 16px 32px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metric+.metric{padding-left:14px}.site-foot{padding:18px 16px;flex-direction:column}}
+@media(max-width:1000px){.facts{grid-template-columns:repeat(2,minmax(0,1fr))}.how{grid-template-columns:1fr}.how>div+div{border-left:0;border-top:1px solid var(--line)}.grid{grid-template-columns:1fr}}
+@media(max-width:640px){.frame-top{padding:10px 16px}.brand span{display:none}.hero{left:16px;bottom:90px;max-width:calc(100% - 32px)}.enter{right:16px}.note{left:16px}.facts{grid-template-columns:1fr}.fact{border-right:0;border-bottom:1px solid var(--line);padding:26px 16px}.how>div{padding:26px 16px}.console{padding:84px 16px 32px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metric+.metric{padding-left:14px}.site-foot{padding:18px 16px;flex-direction:column}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 </style></head><body>
 <header class="frame-top">
@@ -150,20 +146,21 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--ink-2);font:400 11px 
     <div class="fact"><div class="mono">03 · review</div><h2>Gated admission.</h2><p>A patch enters a channel only with an independent approval and a passing check.</p></div>
     <div class="fact"><div class="mono">04 · proofs</div><h2>Verified core.</h2><p>Every registry decision is extracted Rust, proved in Lean: invariant, gate, isolation.</p></div>
   </section>
-  <section class="results" aria-labelledby="results-title">
-    <div class="results-head"><div class="mono">measured · 1,000 agents · 64 in flight · one host · contents checked</div><h2 id="results-title">Against plain Git, <i>same edits</i>.</h2></div>
-    <div class="stats">
-      <div class="stat"><strong>58<span>×</span></strong><div class="mono">faster integration</div><p>1,000 agents editing different lines of one file: 574 integrations/s against Git's 9.8.</p></div>
-      <div class="stat"><strong>100<span>%</span></strong><div class="mono">integrated, none stuck</div><p>Git integrated 43%; the other 57% stopped on rebase conflicts. o5s merged every line.</p></div>
-      <div class="stat"><strong>120<span>×</span></strong><div class="mono">one new file each</div><p>1,083 integrations/s against Git's 9.0, every proposal reviewed and checked.</p></div>
-      <div class="stat"><strong>1,649</strong><div class="mono">theorems in Lean 4</div><p>About the Rust that runs, extracted by Aeneas. No sorry, no axiom beyond Lean's three.</p></div>
-    </div>
-    <div class="bars" role="img" aria-label="Integrations per second, Git against o5s">
-      <div class="bar-row"><span class="mono">different lines, one file</span><div class="bar-pair"><div class="bar git" style="--v:1.5%"><em>git 9.8/s</em></div><div class="bar o5s" style="--v:45%"><em>o5s 574/s</em></div></div></div>
-      <div class="bar-row"><span class="mono">one new file each</span><div class="bar-pair"><div class="bar git" style="--v:0.7%"><em>git 9.0/s</em></div><div class="bar o5s" style="--v:85%"><em>o5s 1,083/s</em></div></div></div>
-      <div class="bar-row"><span class="mono">one repository each</span><div class="bar-pair"><div class="bar git" style="--v:54%"><em>git 691/s</em></div><div class="bar o5s" style="--v:70%"><em>o5s 896/s</em></div></div></div>
-    </div>
-    <p class="results-note mono">method, every workload and its limits: docs/git-comparison.md · storage and history-length figures: docs/load-testing.md</p>
+  <section class="how" aria-labelledby="results-title">
+    <div><h2 id="results-title">Against plain Git,<br><i>same edits</i>.</h2>
+      <div class="nums">
+        <div><strong>58<span>×</span></strong><p>faster: 1,000 agents on different lines of one file</p></div>
+        <div><strong>100<span>%</span></strong><p>integrated, none stuck; Git 43%, the rest on rebase conflicts</p></div>
+        <div><strong>120<span>×</span></strong><p>faster: a new file each, every proposal reviewed and checked</p></div>
+        <div><strong>1,649</strong><p>Lean 4 theorems about the extracted Rust; no sorry</p></div>
+      </div>
+      <p class="muted">1,000 agents, 64 in flight, one host, contents checked · docs/git-comparison.md</p></div>
+    <div><div class="code bars" role="img" aria-label="Integrations per second, Git against o5s">
+      <em># integrations per second</em>
+      <div class="bar-row"><span>different lines, one file</span><div class="bar git" style="--v:1.5%"><i>git 9.8</i></div><div class="bar o5s" style="--v:45%"><i>o5s 574</i></div></div>
+      <div class="bar-row"><span>one new file each</span><div class="bar git" style="--v:0.7%"><i>git 9.0</i></div><div class="bar o5s" style="--v:85%"><i>o5s 1,083</i></div></div>
+      <div class="bar-row"><span>one repository each</span><div class="bar git" style="--v:54%"><i>git 691</i></div><div class="bar o5s" style="--v:70%"><i>o5s 896</i></div></div>
+    </div></div>
   </section>
   <footer class="site-foot"><span>o5s · Apache-2.0</span><span>draws on Pijul's ideas · contains no Pijul code</span></footer>
 </main>
