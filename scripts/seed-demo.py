@@ -257,6 +257,7 @@ def main():
           f"{len(state['view']['patches'])} in main, {len(state['view']['conflicts'])} unresolved path(s)")
     print(f'viewer token (org {ORG}, user {VIEWER}):')
     print(token(VIEWER))
+    print(f'open {ORIGIN}/#/repos and paste it', file=sys.stderr)
 
 
 if __name__ == '__main__':

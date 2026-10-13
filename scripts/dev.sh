@@ -20,5 +20,5 @@ printf '\nAbove: author token. Reviewer token:\n'
 "$server" token 1 2
 printf '\nCheck reporter token:\n'
 "$server" token 1 3
-printf '\nOpen http://127.0.0.1:3000 and paste a token.\n'
+printf '\nOpen http://%s/#/repos and paste a token.\n' "${O5S_BIND:-127.0.0.1:3000}"
 exec "$server"
