@@ -146,15 +146,8 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--ink-2);font:400 11px 
   </section>
   <section class="how" aria-labelledby="results-title">
     <div><h2 id="results-title">Comparison against Git</h2>
-      <div class="nums">
-        <div><strong>58<span>×</span></strong><p>faster: 1,000 agents on different lines of one file</p></div>
-        <div><strong>100<span>%</span></strong><p>integrated, none stuck; Git 43%, the rest on rebase conflicts</p></div>
-        <div><strong>120<span>×</span></strong><p>faster: a new file each, every proposal reviewed and checked</p></div>
-        <div><strong>1,649</strong><p>Lean 4 theorems about the extracted Rust; no sorry</p></div>
-      </div>
-      <p class="muted">1,000 agents, 64 in flight, one host, contents checked</p>
       <div class="code bars" role="img" aria-label="Integrations per second, Git against o5s">
-      <em># integrations per second</em>
+      <em># integrations per second · 1,000 agents, 64 in flight, one host, contents checked</em>
       <div class="bar-row"><span>different lines, one file</span><div class="bar git" style="--v:1.5%"><i>git 9.8</i></div><div class="bar o5s" style="--v:37%"><i>o5s 574</i></div></div>
       <div class="bar-row"><span>one new file each</span><div class="bar git" style="--v:0.7%"><i>git 9.0</i></div><div class="bar o5s" style="--v:70%"><i>o5s 1,083</i></div></div>
       <div class="bar-row"><span>one repository each</span><div class="bar git" style="--v:45%"><i>git 691</i></div><div class="bar o5s" style="--v:58%"><i>o5s 896</i></div></div>
