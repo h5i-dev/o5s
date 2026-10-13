@@ -42,7 +42,7 @@
   {
     "start": 290,
     "end": 325,
-    "text": "The deployment separates decisions from familiar workspaces. A Cloudflare Worker runs the Rust admission kernel and reaches atomic state in Postgres through Hyperdrive. Cloudflare Artifacts holds Git projections and per-agent workspaces. Agents can keep using ordinary Git tools to propose and fetch work. The Worker decides what enters a channel; the projections make that decision useful to developers and agents. The patch graph remains the source of truth. Git repositories are projections for familiar tools; the Worker checks the rules whenever it admits a patch."
+    "text": "Cloudflare separates decisions from workspaces. A Worker runs the Rust admission kernel and records atomic state in Postgres through Hyperdrive. Artifacts holds per-agent Git workspaces and channel projections. Agents propose and fetch with ordinary Git commands. The patch graph is the source of truth. For each proposal, the Worker checks the admission rules, updates the graph, and exports the admitted result as a Git projection to Artifacts. Agents then fetch the new shared state using Git."
   },
   {
     "start": 325,
