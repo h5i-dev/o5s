@@ -11,6 +11,7 @@
 - **Enforced review:** admission needs an independent approval and a passing check.
 - **Verified core:** every registry decision is extracted Rust, proved in Lean.
 - **Plain Git at the edges:** agents work in ordinary checkouts; snapshots export to Git.
+- **Runs on Cloudflare:** a Rust Worker serves the same API over PostgreSQL (Hyperdrive); Git exports and agent workspaces live in Cloudflare Artifacts, re-delivered by a Cron Trigger.
 
 ```bash
 ./scripts/dev.sh                              # Start a local server; prints three tokens
