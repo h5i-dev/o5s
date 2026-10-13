@@ -96,6 +96,21 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--ink-2);font:400 11px 
 .empty{padding:26px 18px;color:var(--ink-3)}
 .status{position:fixed;left:40px;bottom:20px;z-index:30;max-width:560px;padding:10px 14px;border:1px solid var(--line-strong);background:var(--raised);font:12px var(--mono);display:none;white-space:pre-wrap}
 .status.error{border-color:var(--accent);color:var(--accent-hi)}
+.console{position:relative}.console>*:not(.backdrop){position:relative;z-index:1}
+.backdrop{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
+.panel{background:rgba(13,13,16,.94)}.panel-head h2::before{content:'// ';color:var(--accent);letter-spacing:0}
+.metric strong{transition:color .3s}.metrics,.toolbar{background:rgba(5,5,6,.6)}
+.pager{display:flex;justify-content:space-between;align-items:center;padding:10px 18px;border-top:1px solid var(--line)}.pager .mono{color:var(--ink-3)}
+.guide-key{border-color:rgba(255,98,88,.45);color:var(--accent)}
+.guided{outline:1px solid var(--accent)!important;outline-offset:6px;box-shadow:0 0 0 10px rgba(255,98,88,.05),0 0 48px rgba(255,98,88,.14);transition:box-shadow .3s}
+.guide{position:fixed;right:20px;bottom:16px;z-index:40;display:flex;align-items:flex-end;gap:10px}
+#guide-octopus{width:190px;height:180px;display:block;order:2;margin-right:-14px;background:radial-gradient(closest-side,rgba(5,5,6,.95),rgba(5,5,6,.7) 70%,rgba(5,5,6,0))}
+.guide-say{order:1;max-width:340px;margin-bottom:22px;background:rgba(10,10,12,.97);border:1px solid var(--line-strong);border-left:2px solid var(--accent);padding:14px 16px}
+.guide-say .mono{color:var(--accent)}.guide-say p{margin:8px 0 12px;color:var(--ink);font:400 12px/1.65 var(--mono)}
+.guide-actions{display:flex;gap:6px;justify-content:flex-end}
+.tentacle{position:fixed;inset:0;width:100vw;height:100vh;z-index:39;pointer-events:none;overflow:visible}
+#tentacle-arm{fill:none;stroke:#c81e17;stroke-linecap:round;stroke-width:6;filter:drop-shadow(0 0 8px rgba(255,98,88,.35))}
+#tentacle-cups{fill:none;stroke:#ff8a82;stroke-linecap:round;stroke-width:2.6;stroke-dasharray:0 11;opacity:.85}
 @media(max-width:1000px){.facts{grid-template-columns:repeat(2,minmax(0,1fr))}.how{grid-template-columns:1fr}.how>div+div{border-left:0;border-top:1px solid var(--line)}.grid{grid-template-columns:1fr}}
 @media(max-width:640px){.frame-top{padding:10px 16px}.brand span{display:none}.hero{left:16px;bottom:90px;max-width:calc(100% - 32px)}.enter{right:16px}.note{left:16px}.facts{grid-template-columns:1fr}.fact{border-right:0;border-bottom:1px solid var(--line);padding:26px 16px}.how>div{padding:26px 16px}.console{padding:84px 16px 32px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.metric+.metric{padding-left:14px}.site-foot{padding:18px 16px;flex-direction:column}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
@@ -139,18 +154,19 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--ink-2);font:400 11px 
 </main>
 
 <main id="repos-page" class="console" hidden aria-labelledby="repos-title">
+  <canvas class="backdrop" id="backdrop" aria-hidden="true"></canvas>
   <div class="console-head">
     <div><div class="mono">read only · repositories</div><h1 id="repos-title">Channels, patches <i>&amp;</i> conflicts.</h1></div>
-    <div class="session"><span class="identity mono" id="identity">disconnected</span><input id="token" type="password" placeholder="Bearer token" autocomplete="off" aria-label="Bearer token"><button class="btn" id="connect">Connect</button></div>
+    <div class="session" id="session"><button class="btn guide-key" id="guide-start" type="button" aria-label="Show the guide">? guide</button><span class="identity mono" id="identity">disconnected</span><input id="token" type="password" placeholder="Bearer token" autocomplete="off" aria-label="Bearer token"><button class="btn" id="connect">Connect</button></div>
   </div>
-  <div class="toolbar">
+  <div class="toolbar" id="toolbar">
     <select id="repositories" aria-label="Repository"><option value="">Repository</option></select>
     <select id="channel" aria-label="Channel"><option>main</option></select>
     <input id="search" type="search" placeholder="Find by intent, path or patch ID  ( / )" aria-label="Search patches">
     <select id="filter" aria-label="Patch filter"><option value="all">All patches</option><option value="pending">Not in this channel</option><option value="ready">Ready to admit</option><option value="conflicted">In conflict</option></select>
     <button class="btn" id="refresh">Refresh</button>
   </div>
-  <div class="metrics">
+  <div class="metrics" id="metrics">
     <div class="metric"><span class="mono">patches</span><strong id="m-patches">—</strong></div>
     <div class="metric"><span class="mono">in this channel</span><strong id="m-merged">—</strong></div>
     <div class="metric"><span class="mono">not admitted</span><strong id="m-pending">—</strong></div>
@@ -163,19 +179,26 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--ink-2);font:400 11px 
       <details class="panel"><summary class="panel-head" style="margin:0"><h2>Dependency graph · latest 80</h2></summary><div class="graph" id="graph"></div></details>
     </div>
     <div class="stack">
-      <section class="panel"><div class="panel-head"><h2>Patches</h2><span class="muted" id="count"></span></div><div id="patches"><div class="empty">Connect to view patches.</div></div></section>
+      <section class="panel" id="patches-panel"><div class="panel-head"><h2>Patches</h2><span class="muted" id="count"></span></div><div id="patches"><div class="empty">Connect to view patches.</div></div><div class="pager"><button class="btn small" type="button" id="patch-prev">← prev</button><span class="mono" id="patch-page">1 / 1</span><button class="btn small" type="button" id="patch-next">next →</button></div></section>
       <section class="panel"><div class="panel-head"><h2>Activity</h2><span class="muted">latest 30</span></div><div class="panel-body activity" id="activity"></div></section>
     </div>
   </div>
   <div class="context" id="work"></div>
 </main>
 <div id="status" class="status" role="status"></div>
+<svg class="tentacle" id="tentacle" aria-hidden="true"><path id="tentacle-arm"/><path id="tentacle-cups"/></svg>
+<aside class="guide" id="guide" hidden aria-live="polite" aria-label="Guide">
+  <canvas id="guide-octopus" aria-hidden="true"></canvas>
+  <div class="guide-say"><div class="mono" id="guide-step"></div><p id="guide-text"></p>
+    <div class="guide-actions"><button class="btn small" type="button" id="guide-back">back</button><button class="btn small" type="button" id="guide-next">next</button><button class="btn small" type="button" id="guide-done">close</button></div></div>
+</aside>
 
 <script>
 'use strict';
 // Repository viewer: read only. Every request is a GET.
 const $ = id => document.getElementById(id);
-let data = null, actor = null, token = '', busy = false, inspection = null;
+let data = null, actor = null, token = '', busy = false, inspection = null, page = 0;
+const PAGE = 6;
 const el = (tag, text, cls) => {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
@@ -328,8 +351,12 @@ function render() {
   const shown = all.filter(patch => (
     filter === 'all' || filter === 'pending' && !active.has(patch.id) || filter === 'ready' && ready.has(patch.id) || filter === 'conflicted' && conflicted.has(patch.id)
   ) && (!search || `${patch.id} ${patch.intent} ${pathsOf(patch).join(' ')}`.toLowerCase().includes(search)));
+  const pages = Math.max(1, Math.ceil(shown.length / PAGE));
+  page = Math.min(page, pages - 1);
   $('count').textContent = `${shown.length} of ${all.length}`;
-  $('patches').replaceChildren(...shown.slice(0, 80).map(patch => renderPatch(patch, active, ready)));
+  $('patch-page').textContent = `${page + 1} / ${pages}`;
+  $('patch-prev').disabled = page === 0; $('patch-next').disabled = page >= pages - 1;
+  $('patches').replaceChildren(...shown.slice(page * PAGE, (page + 1) * PAGE).map(patch => renderPatch(patch, active, ready)));
   if (!shown.length) $('patches').append(el('div', all.length ? 'No patches match.' : 'No patches yet.', 'empty'));
   renderFiles(view);
   $('activity').replaceChildren(...registry.events.slice(-30).reverse().map(event => el('div', `user ${event.actor} · ${event.action}${event.patch ? ' #' + event.patch : ''}${event.channel ? ' → ' + event.channel : ''}`)));
@@ -406,13 +433,15 @@ async function safe(action) {
   finally { busy = false; document.body.removeAttribute('aria-busy'); }
 }
 $('close-document').onclick = () => { closeDocument(); $('refresh').focus(); };
-$('search').oninput = () => { if (data) render(); };
-$('filter').onchange = () => { if (data) render(); };
+$('search').oninput = () => { page = 0; if (data) render(); };
+$('filter').onchange = () => { page = 0; if (data) render(); };
+$('patch-prev').onclick = () => { page = Math.max(0, page - 1); if (data) render(); };
+$('patch-next').onclick = () => { page += 1; if (data) render(); };
 $('connect').onclick = () => safe(connect);
 $('token').onkeydown = event => { if (event.key === 'Enter') safe(connect); };
 $('refresh').onclick = () => safe(load);
-$('repositories').onchange = () => safe(async () => { closeDocument(); $('channel').value = 'main'; await load(); });
-$('channel').onchange = () => safe(async () => { closeDocument(); await load(); });
+$('repositories').onchange = () => safe(async () => { closeDocument(); page = 0; $('channel').value = 'main'; await load(); });
+$('channel').onchange = () => safe(async () => { closeDocument(); page = 0; await load(); });
 document.addEventListener('keydown', event => {
   if (event.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(event.target.tagName)) { event.preventDefault(); $('search').focus(); }
   if (event.key === 'Escape' && inspection && !$('document-panel').hidden) { closeDocument(); $('refresh').focus(); }
@@ -425,6 +454,8 @@ function route() {
   $('nav-home').toggleAttribute('aria-current', !repos); $('nav-repos').toggleAttribute('aria-current', repos);
   if (repos) $('nav-repos').setAttribute('aria-current', 'page'); else $('nav-home').setAttribute('aria-current', 'page');
   octopus.running(!repos);
+  if (repos) backdrop();
+  guide.maybe(repos);
 }
 
 // The octopus: a wall of o5s's own code; the creature is the code's light.
@@ -432,7 +463,7 @@ function route() {
 // and each cell's character takes that pixel's brightness. Its arms reach
 // for drifting patches and carry them into the channel on the right.
 const octopus = (() => {
-  if (typeof window === 'undefined' || !window.requestAnimationFrame || !document.querySelector) return {running() {}};
+  if (typeof window === 'undefined' || !window.requestAnimationFrame || !document.querySelector) return {source: '', running() {}};
   const wall = $('wall'), ctx = wall.getContext('2d');
   const shape = document.createElement('canvas'), sctx = shape.getContext('2d', {willReadFrequently: true});
   const CW = 7.2, CH = 13, FONT = '12px "IBM Plex Mono", Menlo, monospace';
@@ -647,14 +678,162 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
   window.addEventListener('resize', () => { resize(); if (still) draw(0); });
   window.addEventListener('pointermove', e => { mouse = {x: e.clientX / Math.max(1, width), y: e.clientY / Math.max(1, height)}; });
   resize(); init();
-  return {running(want) {
+  return {source: SOURCE, running(want) {
     if (still) { if (want) { resize(); draw(0); } return; }
     if (want && !on) { on = true; last = 0; resize(); requestAnimationFrame(loop); }
     if (!want) on = false;
   }};
 })();
+// The viewer's backdrop: the same wall of code, much dimmer.
+function backdrop() {
+  if (typeof window === 'undefined' || !octopus.source) return;
+  const canvas = $('backdrop'), c = canvas.getContext('2d'), dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = window.innerWidth, h = window.innerHeight, CW = 7.2, CH = 13;
+  canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.fillStyle = '#050506'; c.fillRect(0, 0, w, h);
+  c.font = '12px "IBM Plex Mono", Menlo, monospace'; c.textBaseline = 'top';
+  const cols = Math.ceil(w / CW), rows = Math.ceil(h / CH), src = octopus.source;
+  for (let y = 0; y < rows; y++) {
+    // Brighter toward the edges, so the panels stay calm.
+    const edge = Math.abs(y / rows - 0.5) * 2;
+    c.fillStyle = `rgba(235,230,219,${0.025 + 0.03 * edge})`;
+    const start = (y * 131) % src.length;
+    c.fillText((src.slice(start) + src).slice(0, cols), 0, y * CH);
+  }
+}
+
+// A small octopus that walks a first-time visitor through the viewer: it
+// points an arm at each part and says what it is.
+const guide = (() => {
+  if (typeof window === 'undefined' || !window.requestAnimationFrame || !octopus.source) return {maybe() {}, start() {}};
+  const STEPS = [
+    ['session', 'Paste a bearer token and connect. A token names an organization and a user; this page only reads.'],
+    ['toolbar', 'Choose a repository and a channel. A channel is a set of admitted patches: main, or a fork for an experiment.'],
+    ['metrics', 'At a glance: every patch, those admitted to this channel, those still waiting, and paths in conflict.'],
+    ['files-panel', 'The channel\'s files. Edits to different lines merge on their own; a real conflict stays here, both sides kept, until a reviewed resolution is admitted. Open it.'],
+    ['patches-panel', 'Every proposal: its intent, content hash and dependencies, and whether it is approved and checked. Ready means it can be admitted.'],
+    ['search', 'Press / to search by intent, path or patch number. That is all: agents propose with the CLI; you watch them converge here.'],
+  ];
+  const box = $('guide'), canvas = $('guide-octopus'), c = canvas.getContext('2d', {willReadFrequently: true});
+  const shape = document.createElement('canvas'), sc = shape.getContext('2d', {willReadFrequently: true});
+  const arm = $('tentacle-arm'), cups = $('tentacle-cups');
+  const COLS = 34, ROWS = 20, CW = 5.6, CH = 9;
+  let step = -1, target = null, grown = 0, on = false, blink = 0;
+  canvas.width = COLS * CW * 2; canvas.height = ROWS * CH * 2; c.scale(2, 2);
+  shape.width = COLS; shape.height = ROWS;
+  function origin() {
+    const r = canvas.getBoundingClientRect();
+    return {x: r.left + r.width * 0.3, y: r.top + r.height * 0.72};
+  }
+  function aim() {
+    const r = target.getBoundingClientRect(), o = origin();
+    return {x: Math.max(r.left + 8, Math.min(r.right - 8, o.x)), y: Math.max(r.top + 8, Math.min(r.bottom - 8, o.y)), r};
+  }
+  function drawOctopus(t) {
+    sc.fillStyle = '#000'; sc.fillRect(0, 0, COLS, ROWS);
+    const cx = COLS * 0.55, cy = ROWS * 0.36;
+    sc.lineCap = 'round';
+    for (let i = 0; i < 7; i++) {
+      const base = (i - 3) / 3, sx = cx + base * 6, sy = cy + 4;
+      sc.strokeStyle = 'rgb(180,0,0)';
+      sc.beginPath(); sc.moveTo(sx, sy);
+      for (let u = 0.1; u <= 1; u += 0.1) {
+        const wave = Math.sin(t * 0.002 + i + u * 5) * 1.4 * u;
+        sc.lineWidth = (1 - u) * 2.2 + 0.4;
+        sc.lineTo(sx + base * 7 * u + wave, sy + u * 9 - Math.abs(base) * u * 2);
+      }
+      sc.stroke();
+    }
+    const grad = sc.createLinearGradient(cx, cy - 8, cx, cy + 5);
+    grad.addColorStop(0, 'rgb(130,0,0)'); grad.addColorStop(1, 'rgb(255,0,0)');
+    sc.fillStyle = grad;
+    sc.beginPath(); sc.ellipse(cx + 2, cy - 3, 8.5, 6.5, -0.4, 0, Math.PI * 2); sc.fill();
+    sc.beginPath(); sc.ellipse(cx, cy + 1.5, 7, 3.6, 0, 0, Math.PI * 2); sc.fill();
+    // Eyes turn toward what it points at.
+    let gx = -1, gy = 0;
+    if (target) { const a = aim(), o = origin(), d = Math.hypot(a.x - o.x, a.y - o.y) || 1; gx = (a.x - o.x) / d; gy = (a.y - o.y) / d; }
+    const lid = t < blink + 320 ? Math.sin((t - blink) / 320 * Math.PI) : 0;
+    if (t > blink + 4000 + Math.random() * 4000) blink = t;
+    for (const side of [-1, 1]) {
+      const ex = cx + side * 4.2, ey = cy + 1.2;
+      sc.fillStyle = 'rgb(0,200,0)';
+      sc.beginPath(); sc.ellipse(ex, ey, 1.8, 1.3 * (1 - lid * 0.9), 0, 0, Math.PI * 2); sc.fill();
+      if (lid < 0.6) { sc.fillStyle = 'rgb(0,0,255)'; sc.fillRect(ex - 1 + gx * 0.7, ey - 0.4 + gy * 0.5, 2, 0.8); }
+    }
+    const px = sc.getImageData(0, 0, COLS, ROWS).data, src = octopus.source;
+    c.clearRect(0, 0, COLS * CW, ROWS * CH);
+    c.font = '9px "IBM Plex Mono", Menlo, monospace'; c.textBaseline = 'top';
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const i = y * COLS + x, r = px[i * 4], g = px[i * 4 + 1], b = px[i * 4 + 2];
+      if (r < 30 && g < 100 && b < 120) continue;
+      const ch = src[(y * 53 + x + Math.floor(t / 1200)) % src.length];
+      if (b > 120) continue;
+      const k = r / 255;
+      c.fillStyle = g > 100 ? 'rgb(245,214,160)' : `rgba(${Math.round(170 + 85 * k)},${Math.round(28 + 70 * k * k)},${Math.round(24 + 64 * k * k)},${0.45 + k * 0.55})`;
+      c.fillText(ch === ' ' ? '·' : ch, x * CW, y * CH);
+    }
+  }
+  function drawArm(t) {
+    if (!target) { arm.setAttribute('d', ''); cups.setAttribute('d', ''); return; }
+    const o = origin(), a = aim();
+    const dx = a.x - o.x, dy = a.y - o.y, len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len;
+    const wob = Math.sin(t * 0.003) * Math.min(40, len * 0.08), wob2 = Math.cos(t * 0.0023) * Math.min(30, len * 0.06);
+    const c1 = {x: o.x + dx * 0.3 + nx * (len * 0.18 + wob), y: o.y + dy * 0.3 + ny * (len * 0.18 + wob)};
+    const c2 = {x: o.x + dx * 0.72 - nx * (len * 0.1 + wob2), y: o.y + dy * 0.72 - ny * (len * 0.1 + wob2)};
+    const d = `M ${o.x} ${o.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${a.x} ${a.y}`;
+    arm.setAttribute('d', d); cups.setAttribute('d', d);
+    const total = arm.getTotalLength();
+    grown = Math.min(1, grown + 0.035);
+    const e = 1 - Math.pow(1 - grown, 3);
+    for (const path of [arm]) { path.style.strokeDasharray = `${total}`; path.style.strokeDashoffset = `${total * (1 - e)}`; }
+    cups.style.opacity = e > 0.95 ? '0.85' : '0';
+  }
+  function loop(t) {
+    if (!on) return;
+    drawOctopus(t); drawArm(t);
+    requestAnimationFrame(loop);
+  }
+  function show(i) {
+    if (target) target.classList.remove('guided');
+    step = Math.max(0, Math.min(STEPS.length - 1, i));
+    const [id, text] = STEPS[step];
+    target = $(id); grown = 0;
+    target.classList.add('guided');
+    target.scrollIntoView({block: 'center', behavior: 'smooth'});
+    $('guide-step').textContent = `guide · ${step + 1} / ${STEPS.length}`;
+    $('guide-text').textContent = text;
+    $('guide-back').disabled = step === 0;
+    $('guide-next').textContent = step === STEPS.length - 1 ? 'done' : 'next';
+  }
+  function stop() {
+    on = false; box.hidden = true;
+    if (target) target.classList.remove('guided');
+    target = null; drawArm(0);
+    try { localStorage.setItem('o5s.guide', 'seen'); } catch (_) {}
+  }
+  function start() {
+    box.hidden = false;
+    if (!on) { on = true; requestAnimationFrame(loop); }
+    show(0);
+  }
+  $('guide-next').onclick = () => step === STEPS.length - 1 ? stop() : show(step + 1);
+  $('guide-back').onclick = () => show(step - 1);
+  $('guide-done').onclick = stop;
+  $('guide-start').onclick = start;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && on) stop(); });
+  return {
+    start,
+    maybe(visible) {
+      if (!visible) { if (on) stop(); return; }
+      let seen = null;
+      try { seen = localStorage.getItem('o5s.guide'); } catch (_) {}
+      if (!seen && !on) setTimeout(start, 700);
+    }
+  };
+})();
 if (typeof window !== 'undefined' && window.addEventListener && typeof location !== 'undefined') {
   window.addEventListener('hashchange', route);
+  window.addEventListener('resize', () => { if (!$('repos-page').hidden) backdrop(); });
   route();
 }
 </script></body></html>
