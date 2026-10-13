@@ -129,7 +129,7 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
   // The octopus gazes at the current subject. A small border mark reinforces
   // what it is looking at without drawing through any labels or body text.
   const cues = [
-    [[120,103],[40,235],[920,235],[1080,315],[960,385]],
+    [[120,103],[40,235],[920,235],[1080,315],[960,385],[1135,805],[1550,805]],
     [[1370,620],[280,480],[280,570],[280,660],[430,895],[1450,770]],
     [[850,600],[850,790]],
     [[830,605],[1260,605],[1140,690],[1140,775],[1140,858]],
@@ -155,7 +155,9 @@ theorem isolation : actor.org ≠ repo.org → ¬ visible actor repo
   }
   function pointAt(scene, local) {
     if(scene===0){
-      return local<.16 ? [120,103] : local<.35 ? [40,235] : local<.48 ? [920,235] : local<.72 ? [1080,315] : [960,385];
+      // Spoken numbers arrive at about 15.5 s (≈60×) and 18.3 s (100%).
+      // Hold each gaze on the actual figure while that claim is narrated.
+      return timedTargets(local,[[0,120,103],[.16,40,235],[.35,920,235],[.48,1080,315],[.53,960,385],[.59,1135,805],[.75,1550,805]]);
     }
     if(scene===1){
       return timedTargets(local,[[0,1370,620],[.08,280,480],[.13,280,570],[.18,280,660],[.23,1370,620],[.34,430,760],[.47,270,760],[.57,1430,620],[.72,680,895],[.84,1500,770],[.92,680,895]]);
