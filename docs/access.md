@@ -2,7 +2,7 @@
 
 ## Who a request is
 
-Every request carries `Authorization: Bearer v1.<organization>.<user>.<expiry>.<signature>`, an HMAC-SHA256 token signed with `H5I_APP_SECRET`. `o5s-server token ORG USER` issues one that lasts a day. The organization and user come only from the token, never from a request body. A repository belongs to one organization, and no other organization can see it (`Guarantees.isolation`).
+Every request carries `Authorization: Bearer v1.<organization>.<user>.<expiry>.<signature>`, an HMAC-SHA256 token signed with `H5I_APP_SECRET`. `o5s-server token ORG USER [SECONDS]` issues one that lasts a day, or SECONDS (`604800` for a week). The organization and user come only from the token, never from a request body. A repository belongs to one organization, and no other organization can see it (`Guarantees.isolation`).
 
 ## Repository roles
 
@@ -38,7 +38,7 @@ Independence of reviews is unchanged: an author still cannot approve or report c
 A token names no session, so revocation works at two granularities:
 
 - **One token**: `POST /api/tokens/revoke` with `{}` revokes the token presented. A client that suspects a leak revokes its own token.
-- **A user**: `POST /api/tokens/revoke` with `{"all":true}` revokes every token of the caller that expires no later than the one presented. An operator runs `o5s-server revoke ORG USER [NOT_AFTER]`, which by default covers every token `o5s-server token` has issued (they last a day). `o5s-server token` then issues tokens that expire after the revocation.
+- **A user**: `POST /api/tokens/revoke` with `{"all":true}` revokes every token of the caller that expires no later than the one presented. An operator runs `o5s-server revoke ORG USER [NOT_AFTER]`, which by default covers every token `o5s-server token` has issued for a day; pass NOT_AFTER to cover longer-lived ones. `o5s-server token` then issues tokens that expire after the revocation.
 
 Revoked tokens get `401 token revoked` on every route. The local backend keeps revocations in `revocations.json` in its data directory. The server rereads the file when it changes, so `o5s-server revoke` works while the server runs. PostgreSQL keeps them in `o5s_revoked_users` and `o5s_revoked_tokens`, shared by every replica and the Worker. A native server reuses a "not revoked" answer for up to 5 seconds. On Workers, Hyperdrive may cache the lookup for up to its query-cache lifetime, 60 seconds by default.
 

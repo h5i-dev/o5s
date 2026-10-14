@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var(k).ok()
     })?);
     if matches!(args.get(1).map(String::as_str), Some("token" | "revoke")) {
-        let usage = "token TENANT USER | revoke TENANT USER [NOT_AFTER]";
+        let usage = "token TENANT USER [SECONDS] | revoke TENANT USER [NOT_AFTER]";
         let tenant: u64 = args.get(2).ok_or(usage)?.parse()?;
         let user: u64 = args.get(3).ok_or(usage)?.parse()?;
         let now = h5i_app_core::Timestamp::now().secs();
@@ -90,7 +90,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map_err(|e| format!("{e:?}"))?
                 .first_valid_expiry(tenant, user),
         };
-        let exp = (now + 86400).max(floor);
+        // A day unless SECONDS says otherwise.
+        let lifetime: u64 = match args.get(4) {
+            Some(s) => s.parse()?,
+            None => 86400,
+        };
+        let exp = (now + lifetime).max(floor);
         println!("{}", HmacAuth::new(secret).issue(tenant, user, exp));
         return Ok(());
     }
