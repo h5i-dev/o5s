@@ -891,3 +891,47 @@ async fn revoked_tokens_are_refused_everywhere() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn read_only_tokens_read_and_change_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = state(dir.path());
+    command(&s, 1, serde_json::json!({"cmd":"create","repo":"demo"})).await;
+    let viewer = s.auth.issue_read_only(1, 9, u64::MAX);
+    let (status, v) = with_token(&s, &viewer, "/api/state?repo=demo", None).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (status, v) = with_token(&s, &viewer, "/api/repositories", None).await;
+    assert_eq!(
+        (status, v["repositories"].clone()),
+        (StatusCode::OK, serde_json::json!(["demo"]))
+    );
+    // An open repository would let any member write; this token still cannot,
+    // nor create a repository, export, or open a workspace.
+    for (url, body) in [
+        (
+            "/api/command",
+            serde_json::json!({"cmd":"create","repo":"other"}),
+        ),
+        (
+            "/api/command",
+            serde_json::json!({"cmd":"fork","repo":"demo","source":"main","channel":"x"}),
+        ),
+        (
+            "/api/export",
+            serde_json::json!({"repo":"demo","channel":"main"}),
+        ),
+        (
+            "/api/worktree",
+            serde_json::json!({"repo":"demo","channel":"main"}),
+        ),
+    ] {
+        let (status, v) = with_token(&s, &viewer, url, Some(body)).await;
+        assert_eq!(
+            (status, v["error"].as_str()),
+            (StatusCode::FORBIDDEN, Some("read-only token")),
+            "{url}"
+        );
+    }
+    let (_, v) = with_token(&s, &viewer, "/api/repositories", None).await;
+    assert_eq!(v["repositories"], serde_json::json!(["demo"]));
+}

@@ -2,7 +2,7 @@
 
 ## Who a request is
 
-Every request carries `Authorization: Bearer v1.<organization>.<user>.<expiry>.<signature>`, an HMAC-SHA256 token signed with `H5I_APP_SECRET`. `o5s-server token ORG USER [SECONDS]` issues one that lasts a day, or SECONDS (`604800` for a week). The organization and user come only from the token, never from a request body. A repository belongs to one organization, and no other organization can see it (`Guarantees.isolation`).
+Every request carries `Authorization: Bearer v1.<organization>.<user>.<expiry>.<signature>`, an HMAC-SHA256 token signed with `H5I_APP_SECRET`. `o5s-server token ORG USER [SECONDS] [--read-only]` issues one that lasts a day, or SECONDS (`604800` for a week). A `--read-only` token is signed with a key derived from the secret: it works for `GET` requests only, and both servers refuse anything else with 403 before any handler runs, so it can be shared to show repositories without letting its holder create one. The organization and user come only from the token, never from a request body. A repository belongs to one organization, and no other organization can see it (`Guarantees.isolation`).
 
 ## Repository roles
 

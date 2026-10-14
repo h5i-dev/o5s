@@ -72,6 +72,21 @@ impl AppState {
     }
 }
 
+/// Refuse every request but `GET` that carries a read-only token.
+async fn read_only_guard(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    if !state.auth.permits(request.method(), request.headers()) {
+        return json(
+            StatusCode::FORBIDDEN,
+            serde_json::json!({"error":"read-only token"}),
+        );
+    }
+    next.run(request).await
+}
+
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(|| async { Html(include_str!("index.html")) }))
@@ -93,6 +108,10 @@ pub fn router(state: AppState) -> Router {
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             revocation::guard,
+        ))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            read_only_guard,
         ))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

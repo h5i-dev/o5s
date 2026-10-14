@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var(k).ok()
     })?);
     if matches!(args.get(1).map(String::as_str), Some("token" | "revoke")) {
-        let usage = "token TENANT USER [SECONDS] | revoke TENANT USER [NOT_AFTER]";
+        let usage = "token TENANT USER [SECONDS] [--read-only] | revoke TENANT USER [NOT_AFTER]";
         let tenant: u64 = args.get(2).ok_or(usage)?.parse()?;
         let user: u64 = args.get(3).ok_or(usage)?.parse()?;
         let now = h5i_app_core::Timestamp::now().secs();
@@ -91,12 +91,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .first_valid_expiry(tenant, user),
         };
         // A day unless SECONDS says otherwise.
-        let lifetime: u64 = match args.get(4) {
+        let read_only = args[4..].iter().any(|a| a == "--read-only");
+        let lifetime: u64 = match args[4..].iter().find(|a| *a != "--read-only") {
             Some(s) => s.parse()?,
             None => 86400,
         };
         let exp = (now + lifetime).max(floor);
-        println!("{}", HmacAuth::new(secret).issue(tenant, user, exp));
+        let auth = HmacAuth::new(secret);
+        println!(
+            "{}",
+            if read_only {
+                auth.issue_read_only(tenant, user, exp)
+            } else {
+                auth.issue(tenant, user, exp)
+            }
+        );
         return Ok(());
     }
     std::fs::create_dir_all(&root)?;

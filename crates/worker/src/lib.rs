@@ -163,6 +163,10 @@ fn router(env: Env, ctx: Context) -> Router {
     {
         o5s_platform::limits::set(limits);
     }
+    let state = AppState {
+        env: Arc::new(env),
+        ctx: Arc::new(ctx),
+    };
     Router::new()
         .route(
             "/",
@@ -183,10 +187,30 @@ fn router(env: Env, ctx: Context) -> Router {
         .route("/api/tokens/revoke", post(revoke_token))
         .route("/api/worktree", post(worktree))
         .route("/api/worktree/propose", post(worktree_propose))
-        .with_state(AppState {
-            env: Arc::new(env),
-            ctx: Arc::new(ctx),
-        })
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            read_only_guard,
+        ))
+        .with_state(state)
+}
+
+/// Refuse every request but `GET` that carries a read-only token.
+async fn read_only_guard(
+    State(s): State<AppState>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let permitted = match s.auth() {
+        Ok(auth) => auth.permits(request.method(), request.headers()),
+        Err(e) => return e,
+    };
+    if !permitted {
+        return json(
+            StatusCode::FORBIDDEN,
+            serde_json::json!({"error":"read-only token"}),
+        );
+    }
+    next.run(request).await
 }
 
 /// Deliver the Git projections admissions left stale: their export after
