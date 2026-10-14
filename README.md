@@ -113,7 +113,7 @@ h5i app mutate . --only merge_                # Inject bugs the proofs must reje
 
 ## 6. Documentation
 
-- [CLI manual](docs/cli.md): connect, propose, review, resolve, fetch
+- [CLI manual](docs/cli.md) · [short paper](https://github.com/h5i-dev/o5s/blob/main/docs/o5s-short-paper.pdf)
 - [Architecture](docs/architecture.md) · [patch model](docs/patch-model.md)
 - [Access control](docs/access.md) · [storage](docs/storage.md) · [load testing](docs/load-testing.md)
 - [Proofs](docs/proofs.md) · [status](docs/status.md) · [roadmap](docs/roadmap.md)
