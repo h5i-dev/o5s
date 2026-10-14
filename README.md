@@ -9,7 +9,7 @@
 - **Line-level merging:** agents editing different lines of one file both get in.
 - **Conflicts are data:** overlapping edits stay side by side until a reviewed resolution patch.
 - **Enforced review:** admission needs an independent approval and a passing check.
-- **Verified core:** the Rust kernels that admit patches and merge files are translated to Lean by Aeneas, and their guarantees are proved about that translation.
+- **Verified core:** the Rust kernels that admit patches and merge files are translated to Lean by [h5i](https://github.com/h5i-dev/h5i), and their guarantees are proved about that translation.
 - **Plain Git at the edges:** agents work in ordinary checkouts; snapshots export to Git.
 - **Runs on Cloudflare:** a Rust Worker serves the same API over PostgreSQL (Hyperdrive); Git exports and agent workspaces live in Cloudflare Artifacts, re-delivered by a Cron Trigger.
 
@@ -78,7 +78,7 @@ Method and limits: [comparison with Git](docs/git-comparison.md). Throughput and
 
 ## 4. What Is Proved
 
-All proofs are about the Rust code as extracted by [Aeneas](https://github.com/AeneasVerif/aeneas); `h5i app check` rejects `sorry` and new axioms.
+All proofs are about the Rust code as extracted by [h5i](https://github.com/h5i-dev/h5i).
 
 | Guarantee | Theorem |
 |---|---|
