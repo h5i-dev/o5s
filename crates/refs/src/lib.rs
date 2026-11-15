@@ -62,6 +62,8 @@ pub enum Mutation {
     Batch(Vec<(Name, RefValue)>),
     /// Remove a name, remembering its last version (tombstone).
     Delete(Name, u64),
+    /// Several `Set`/`Delete`s committed atomically (API v1.6 `update_many`).
+    Txn(Vec<Mutation>),
 }
 
 impl RefState {
@@ -104,6 +106,59 @@ impl RefState {
             None => self.tombstones.get(name).map_or(1, |t| t + 1),
         };
         Ok(Ok(Mutation::Set(name.clone(), RefValue { hash: new, version })))
+    }
+
+    /// Decides an atomic multi-name update (pure), where `None` deletes.
+    /// Validation is as in [`RefState::decide_replace_many`]; each entry then follows
+    /// the single-name rules (`decide_replace` / `decide_delete`) against the
+    /// pre-state. Returns the mutation and the per-entry versions (deletes:
+    /// the deleted version, 0 if absent).
+    pub fn decide_update_many(
+        &self,
+        updates: &[(Name, Option<Hash>)],
+        read_set: &[(Name, Observed)],
+    ) -> Result<std::result::Result<(Mutation, Vec<u64>), ReplaceManyOutcome>> {
+        if updates.is_empty() || updates.len() > MAX_BATCH {
+            return Err(Error::Parse(format!("update_many takes 1..={MAX_BATCH} updates")));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for (n, _) in updates {
+            if !seen.insert(n) {
+                return Err(Error::Parse(format!("duplicate target {n} in update_many")));
+            }
+            if !read_set.iter().any(|(r, _)| r == n) {
+                return Err(Error::TargetNotInReadSet(n.clone()));
+            }
+        }
+        let mut stale: Vec<(Name, Observed)> =
+            read_set.iter().filter(|(n, o)| self.observe(n) != *o).map(|(n, _)| (n.clone(), self.observe(n))).collect();
+        if !stale.is_empty() {
+            stale.sort();
+            stale.dedup();
+            return Ok(Err(ReplaceManyOutcome::Conflict { stale }));
+        }
+        let mut ms = Vec::with_capacity(updates.len());
+        let mut versions = Vec::with_capacity(updates.len());
+        for (name, new) in updates {
+            match new {
+                Some(h) => match self.decide_replace(name, read_set, *h)? {
+                    Ok(Mutation::Set(n, v)) => {
+                        versions.push(v.version);
+                        ms.push(Mutation::Set(n, v));
+                    }
+                    _ => return Err(Error::Corrupt("unexpected decision in update_many".into())),
+                },
+                None => match self.decide_delete(name, read_set)? {
+                    Ok(Some(Mutation::Delete(n, v))) => {
+                        versions.push(v);
+                        ms.push(Mutation::Delete(n, v));
+                    }
+                    Ok(None) => versions.push(0),
+                    _ => return Err(Error::Corrupt("unexpected decision in update_many".into())),
+                },
+            }
+        }
+        Ok(Ok((Mutation::Txn(ms), versions)))
     }
 
     /// Decides an OCC delete (pure). Deleting an absent name is a no-op
@@ -156,6 +211,11 @@ impl RefState {
             Mutation::Delete(n, v) => {
                 self.refs.remove(&n);
                 self.tombstones.insert(n, v);
+            }
+            Mutation::Txn(ms) => {
+                for m in ms {
+                    self.apply(m);
+                }
             }
             Mutation::Rule(p, r) => {
                 self.rules.insert(p, r);
@@ -239,6 +299,15 @@ fn encode(m: &Mutation) -> Vec<u8> {
             p.extend_from_slice(n.as_str().as_bytes());
             p.extend_from_slice(&ver.to_le_bytes());
         }
+        Mutation::Txn(ms) => {
+            p.push(6);
+            p.extend_from_slice(&(ms.len() as u32).to_le_bytes());
+            for m in ms {
+                let inner = encode(m);
+                // Reuse the record framing: len u32 | crc u32 | payload.
+                p.extend_from_slice(&inner);
+            }
+        }
         Mutation::Batch(v) => {
             p.push(4);
             p.extend_from_slice(&(v.len() as u32).to_le_bytes());
@@ -261,6 +330,21 @@ fn encode(m: &Mutation) -> Vec<u8> {
 pub fn decode_payload(p: &[u8]) -> Result<Mutation> {
     let bad = |w: &str| Error::Corrupt(format!("ref journal: {w}"));
     let (&tag, rest) = p.split_first().ok_or_else(|| bad("empty record"))?;
+    if tag == 6 {
+        let cnt: [u8; 4] = rest.get(..4).and_then(|b| b.try_into().ok()).ok_or_else(|| bad("short txn"))?;
+        let cnt = u32::from_le_bytes(cnt) as usize;
+        if cnt > MAX_BATCH {
+            return Err(bad("bad txn size"));
+        }
+        let (inner, used, err) = parse_records(&rest[4..]);
+        if err.is_some() || used != rest.len() - 4 || inner.len() != cnt {
+            return Err(bad("bad txn body"));
+        }
+        if inner.iter().any(|m| !matches!(m, Mutation::Set(..) | Mutation::Delete(..))) {
+            return Err(bad("txn may only contain set/delete"));
+        }
+        return Ok(Mutation::Txn(inner));
+    }
     if tag == 4 {
         let cnt: [u8; 4] = rest.get(..4).and_then(|b| b.try_into().ok()).ok_or_else(|| bad("short batch"))?;
         let cnt = u32::from_le_bytes(cnt) as usize;
@@ -698,7 +782,11 @@ impl RefStore {
             Ok(m) => {
                 let version = match &m {
                     Mutation::Set(_, v) => v.version,
-                    Mutation::Rule(..) | Mutation::Rotated(_) | Mutation::Batch(_) | Mutation::Delete(..) => 0,
+                    Mutation::Rule(..)
+                    | Mutation::Rotated(_)
+                    | Mutation::Batch(_)
+                    | Mutation::Delete(..)
+                    | Mutation::Txn(_) => 0,
                 };
                 Ok((Some(m), ReplaceOutcome::Ok { version }))
             }
@@ -730,6 +818,29 @@ impl RefStore {
                 };
                 Ok((Some(m), ReplaceManyOutcome::Ok { versions }))
             }
+            Err(c) => Ok((None, c)),
+        })
+    }
+
+    /// Atomic multi-name update where `None` deletes (API v1.6).
+    pub fn update_many(
+        &self,
+        updates: &[(Name, Option<Hash>)],
+        read_set: &[(Name, Observed)],
+        exists: &dyn Fn(&Hash) -> Result<bool>,
+    ) -> Result<ReplaceManyOutcome> {
+        for (n, h) in updates {
+            if !read_set.iter().any(|(r, _)| r == n) {
+                return Err(Error::TargetNotInReadSet(n.clone()));
+            }
+            if let Some(h) = h
+                && !exists(h)?
+            {
+                return Err(Error::MissingObject(*h));
+            }
+        }
+        self.commit(|s| match s.decide_update_many(updates, read_set)? {
+            Ok((m, versions)) => Ok((Some(m), ReplaceManyOutcome::Ok { versions })),
             Err(c) => Ok((None, c)),
         })
     }

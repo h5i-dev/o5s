@@ -246,6 +246,21 @@ impl Repository for LocalRepo {
         self.refs.replace_many(updates, read_set, &|h| Ok(missing != Some(*h)))
     }
 
+    fn update_many(
+        &self,
+        updates: &[(Name, Option<Hash>)],
+        read_set: &[(Name, Observed)],
+    ) -> Result<pico2peta_core::ReplaceManyOutcome> {
+        let mut missing = Vec::new();
+        for h in updates.iter().filter_map(|(_, h)| h.as_ref()) {
+            if !self.packs.ensure_live(h)? {
+                missing.push(*h);
+            }
+        }
+        self.packs.flush()?;
+        self.refs.update_many(updates, read_set, &|h| Ok(!missing.contains(h)))
+    }
+
     fn delete_ref(&self, name: &Name, read_set: &[(Name, Observed)]) -> Result<ReplaceOutcome> {
         self.refs.delete(name, read_set)
     }
