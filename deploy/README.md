@@ -46,6 +46,7 @@ For large uploads, disable request buffering in the proxy (`proxy_request_buffer
 
 ## S3 backend
 - Create the bucket first. The server never creates buckets.
+- Credentials are resolved in this order: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (in `/etc/pico2peta/env`), then web identity (`AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN`, e.g. EKS IRSA), then the EC2 instance profile (IMDSv2). Temporary credentials refresh automatically. Prefer the instance profile or IRSA over static keys.
 - **Add a lifecycle rule that aborts incomplete multipart uploads** (for example after 1 day). If the process is killed in the middle of an upload, the parts stay billable until that rule removes them:
   ```json
   {"Rules":[{"ID":"abort-mpu","Status":"Enabled","Filter":{"Prefix":""},
@@ -60,7 +61,7 @@ SIGHUP (`systemctl reload`) re-reads the config file and applies **tokens, polic
 
 ## Observability
 - `GET /healthz` is liveness (the process is up). `GET /readyz` is readiness: it is 503 while draining, after an audit-log failure, or when the repository is unreachable. Neither needs credentials.
-- `GET /metrics` serves OpenMetrics text with no credentials, so restrict it at the proxy or firewall. Key series:
+- `GET /metrics` serves OpenMetrics text with no credentials. Set `server.metrics_listen` to a private address so it is served only there (the API port then returns 404 for it), or restrict it at the proxy or firewall. Key series:
   - `p2p_http_requests_total{method,route,status}` and `p2p_http_request_duration_seconds`
   - `p2p_http_in_flight`
   - `p2p_replace_total{outcome=ok|conflict|rejected}`
@@ -73,12 +74,15 @@ The log is append-only JSON lines at `audit.path`, fsync'd before each mutating 
 ```sh
 pico2peta-server verify-audit /var/log/pico2peta/audit.jsonl
 ```
-If an audit write fails (for example, the disk is full), the server refuses all further mutations, returns 503 from `/readyz`, and increments `p2p_audit_write_failures_total`. Rotation is not built in. To rotate, stop the server, move the file away, and start it again: a new chain starts in the new file. Archive the old file together with the last `prev` hash it ended on.
+If an audit write fails (for example, the disk is full), the server refuses all further mutations, returns 503 from `/readyz`, and increments `p2p_audit_write_failures_total`.
+
+Rotation: set `audit.rotate_bytes`. A full file is renamed to `audit.jsonl.<last seq>` (fsync'd), and the next file continues the same chain. You may archive or move the oldest rotated files away, and `verify-audit` then reports the sequence number the remaining chain starts at. Deleting a file from the middle is detected.
 
 ## Garbage collection
 With `gc.interval_secs > 0`, the server advances the GC protocol on that schedule: plan, then sweep and repack, then delete, with each phase at least `gc.grace_secs` after the previous one. Admins can also trigger it with `POST /v1/admin/gc` (`?dry_run=true` for a report only). GC is safe with concurrent writers, but it relies on the **put→replace lease**: a client must make a ref point at a newly put object within `grace_secs`. Results show up in `p2p_gc_runs_total`, `p2p_gc_deleted_bytes_total`, the logs, and the audit log (`action = "gc"`). Any `dangling_refs` in a report means the repository is corrupt, so investigate it before the next run.
 
 ## Capacity notes
 - Each transfer buffers at most about 2 MiB, whatever the object size. Measured: 19 MiB peak RSS growth while streaming 512 MiB up and back down (`crates/server/tests/memory.rs`).
+- `server.rate_limit = { per_sec, burst }` gives each principal (anonymous callers: each client IP) a token bucket. Excess requests get 429 with `Retry-After`.
 - `max_concurrent_requests` bounds concurrent requests, including those still streaming bodies. Beyond it, the server answers 503 with `Retry-After: 1`.
 - A client that stalls for 60 s in the middle of a transfer is disconnected.

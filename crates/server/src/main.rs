@@ -79,9 +79,13 @@ fn main() -> ExitCode {
             println!("{}", hex(&pico2peta_server::auth::sha256(s.trim().as_bytes())));
             ExitCode::SUCCESS
         }
-        Cmd::VerifyAudit { path } => match pico2peta_server::audit::verify(&path) {
-            Ok(n) => {
-                println!("ok: {n} records, chain intact");
+        Cmd::VerifyAudit { path } => match pico2peta_server::audit::verify_all(&path) {
+            Ok((n, first)) => {
+                if first > 1 {
+                    println!("ok: {n} records (seq {first}..), chain intact; earlier records were archived");
+                } else {
+                    println!("ok: {n} records, chain intact");
+                }
                 ExitCode::SUCCESS
             }
             Err(e) => {
@@ -141,6 +145,26 @@ fn serve(config: PathBuf) -> ExitCode {
                 }
             });
         }
+        // Shutdown fan-out: the API and the ops listener stop together.
+        let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn(async move {
+            pico2peta_server::shutdown_signal().await;
+            let _ = stop_tx.send(true);
+        });
+        let stopped = |mut rx: tokio::sync::watch::Receiver<bool>| async move {
+            let _ = rx.wait_for(|v| *v).await;
+        };
+        if let Some(addr) = cfg.server.metrics_listen {
+            let l = tokio::net::TcpListener::bind(addr).await.map_err(|e| format!("bind metrics {addr}: {e}"))?;
+            tracing::info!(listen = %addr, "metrics listening");
+            let st = state.clone();
+            let rx = stop_rx.clone();
+            tokio::spawn(async move {
+                if let Err(e) = pico2peta_server::serve_ops(l, st, stopped(rx)).await {
+                    tracing::error!(error = %e, "metrics listener failed");
+                }
+            });
+        }
         let timeout = Duration::from_secs(cfg.server.request_timeout_secs);
         let grace = Duration::from_secs(cfg.server.shutdown_grace_secs);
         let scheme = if cert.is_some() { "https" } else { "http" };
@@ -149,9 +173,9 @@ fn serve(config: PathBuf) -> ExitCode {
             Some(c) => {
                 let acceptor = pico2peta_server::tls::acceptor(c)?;
                 let l = pico2peta_server::tls::TlsListener::new(listener, acceptor).map_err(|e| e.to_string())?;
-                pico2peta_server::serve_on(l, state, timeout, grace, pico2peta_server::shutdown_signal()).await
+                pico2peta_server::serve_on(l, state, timeout, grace, stopped(stop_rx)).await
             }
-            None => pico2peta_server::serve(listener, state, timeout, grace, pico2peta_server::shutdown_signal()).await,
+            None => pico2peta_server::serve(listener, state, timeout, grace, stopped(stop_rx)).await,
         }
         .map_err(|e| e.to_string())
     });

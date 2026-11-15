@@ -13,6 +13,7 @@ pub mod error;
 pub mod git;
 pub mod metrics;
 pub mod oci;
+pub mod oidc;
 pub mod segmap;
 pub mod tls;
 
@@ -57,8 +58,8 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
                 c.pool_max_idle = n;
                 c.multipart_concurrency = c.multipart_concurrency.min(n);
             }
-            let creds = pico2peta_backend_s3::Credentials::from_env().map_err(|e| StartError::S3(e.to_string()))?;
-            let b = Arc::new(pico2peta_backend_s3::S3Backend::new(c, Arc::new(creds), 2)?);
+            // Env keys, then web identity (EKS/OIDC), then the EC2 instance profile.
+            let b = Arc::new(pico2peta_backend_s3::S3Backend::with_default_chain(c, 2)?);
             let client = b.client().clone();
             metrics = metrics.with_s3(Arc::new(move || client.stats().snapshot()));
             Some(b)
@@ -103,10 +104,17 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         None
     };
     let tokens = Arc::new(auth::TokenAuthenticator::new(&cfg.auth.tokens, cfg.auth.allow_anonymous));
-    let audit = audit::AuditLog::open(&cfg.audit.path).map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
+    let audit = audit::AuditLog::open_with(&cfg.audit.path, cfg.audit.rotate_bytes)
+        .map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
     Ok(Arc::new(AppState {
         repo,
-        authn: tokens.clone(),
+        authn: match &cfg.auth.oidc {
+            Some(o) => Arc::new(oidc::ChainAuthenticator {
+                tokens: tokens.clone(),
+                oidc: Arc::new(oidc::OidcAuthenticator::new(o.clone()).map_err(StartError::S3)?),
+            }),
+            None => tokens.clone(),
+        },
         tokens: Some(tokens),
         authz: auth::Authorizer::new(cfg.policy.clone()),
         audit,
@@ -116,6 +124,8 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         shutting_down: Arc::new(AtomicBool::new(false)),
         limiter: Arc::new(tokio::sync::Semaphore::new(cfg.server.max_concurrent_requests)),
         trust_forwarded_for: cfg.server.trust_forwarded_for,
+        limits: cfg.server.rate_limit.map(api::RateLimiter::new),
+        metrics_separate: cfg.server.metrics_listen.is_some(),
         local: Some(local),
         gc: cfg.gc.clone(),
         gc_running: Arc::new(AtomicBool::new(false)),
@@ -159,6 +169,16 @@ pub fn app(state: Arc<AppState>, request_timeout: Duration) -> axum::Router {
         .layer(SetSensitiveRequestHeadersLayer::new([axum::http::header::AUTHORIZATION]))
         .layer(PropagateRequestIdLayer::new(rid.clone()))
         .layer(SetRequestIdLayer::new(rid, RandomRequestId))
+}
+
+/// Serves the ops router (`/metrics`, `/healthz`, `/readyz`) on `listener`
+/// until `shutdown` resolves.
+pub async fn serve_ops(
+    listener: TcpListener,
+    state: Arc<AppState>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
+    axum::serve(listener, api::ops_router(state)).with_graceful_shutdown(shutdown).await
 }
 
 /// Serves plain HTTP on `listener` until `shutdown` resolves. See [`serve_on`].
@@ -351,6 +371,13 @@ pub mod fuzzing {
     /// Builds a valid receive-pack request body creating `refs/heads/main`.
     pub fn git_push_request(objects: &[(u8, Vec<u8>)], tip: usize) -> Vec<u8> {
         crate::git::fuzz_make_push(objects, tip)
+    }
+
+    /// `apply(base, encode(base, target)) == target` (panics otherwise).
+    pub fn git_delta_roundtrip(base: &[u8], target: &[u8]) {
+        let d = crate::git::encode_delta(base, target);
+        let back = crate::git::apply_delta(base, &d).unwrap_or_else(|e| panic!("encoded delta does not apply: {e}"));
+        assert!(back == target, "delta roundtrip mismatch");
     }
 
     pub fn git_parsers(data: &[u8]) {

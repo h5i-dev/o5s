@@ -105,6 +105,12 @@
   - Index: 62 B/object real vs the 48 B modeled in PLAN §4.4, and git's .idx is about 28 B/object.
 - I've reported this to the core lead to reconcile with the Exp1 harness (`bench/exp1`). Possible causes: frame boundaries, grouping keys that differ from the harness, and the cost of the index format.
 
+- S3 default credential chain (env, web identity, IMDSv2) with background refresh.
+- Separate metrics listener, and per-principal rate limiting (429 with `Retry-After`, `p2p_rate_limited_total`).
+- Audit log rotation with a continuous hash chain across files.
+- OIDC/JWT authentication (`tests/oidc.rs` against a mock issuer: valid token, wrong audience, expired, bad signature, tampered token, key rotation, unknown kid, static tokens alongside).
+- Git wire deltas: upload-pack deltifies blobs and trees against the previously sent version of the same path. A ripgrep clone (release) transfers 33.8 MB → **6.1 MB**, takes 3.65 s → 2.91 s, refs are identical and fsck is clean.
+
 ### Next
 - Goal 6: Git smart-HTTP and OCI distribution adapters. The hash-mapping design proposal is below, waiting for the lead's agreement.
 
@@ -174,22 +180,21 @@
 Plan: OCI first (smaller and well specified). It will be validated with the official OCI distribution-spec conformance suite (Go), built locally. Git smart HTTP comes second.
 
 ## Production gaps
-- **S3 credentials:** only static and environment credentials exist. There is no IMDSv2 instance profile, STS web identity or `~/.aws` profile support yet. These can plug into the `CredentialsProvider` trait.
+- **S3 credentials:** the default chain covers env keys, then web identity (EKS IRSA / OIDC via STS `AssumeRoleWithWebIdentity`), then the EC2 instance profile (IMDSv2). Temporary credentials refresh in the background 5 min before expiry. These are tested against mock IMDS and STS; this host has no instance role, so a live AWS run is still missing. Not supported: `~/.aws/config` profiles, SSO, and `credential_process`.
 - **Lost-response detection** relies on the ETag being the MD5 of the body, so it does not work with SSE-KMS or SSE-C. In that case a lost response is reported as `AlreadyExists`. That is still correct for content-addressed keys, but the count is wrong.
-- **Abandoned multipart uploads** (process killed mid-upload) are not cleaned up by the client. Deployments should set a bucket lifecycle rule `AbortIncompleteMultipartUpload` (for example, 1 day). This is documented in deploy/ (TODO).
+- **Abandoned multipart uploads** (process killed mid-upload) are not cleaned up by the client. Deployments should set a bucket lifecycle rule `AbortIncompleteMultipartUpload` (for example, 1 day); deploy/README.md documents it.
 - **GET checksums:** a GET is not checksummed end to end beyond TCP and TLS. Integrity of pack records relies on the core pack CRCs.
 - **Virtual-hosted style and real AWS:** neither has been tested, because no AWS credentials are available here. Only path style against MinIO has run.
 - **Extra copy:** `PutSource::Bytes` is copied once into the runtime, because `Backend` is sync and borrows the bytes.
-- **OIDC/JWT authenticator:** not implemented; the `Authenticator` trait is async and ready for it.
+- **OIDC/JWT:** `[auth.oidc]` validates bearer JWTs (RS/PS/ES algorithms; `iss`, `aud`, `exp` and `nbf` checks; JWKS discovery, caching and rotation), mapping a claim to a principal. Static tokens still work alongside it. Gaps: changes to the OIDC config need a restart (not SIGHUP), groups and roles claims are not mapped to policies, and there is no token introspection for opaque tokens.
 - **Token management:** tokens and policies live in config and reload on SIGHUP (revocation applies to the next request). There is no admin API to issue or revoke tokens.
-- **Audit log rotation and shipping:** manual (stop, move, start). There is no remote sink (syslog, S3).
-- **Unauthenticated `/metrics`:** restrict it at the network level. There is no separate metrics listener yet.
-- **Rate limiting:** only a global concurrency cap. There is no per-principal rate limit or quota.
+- **Audit log shipping:** size-based rotation is built in (`audit.rotate_bytes`). The chain continues across files, and `verify-audit` checks all files, so archiving the oldest ones is allowed but a gap is detected. Shipping to a remote sink (syslog, S3) is left to external tooling, for example tailing the JSONL files.
+- **Metrics and rate limits:** `/metrics` can move to a separate listener (`server.metrics_listen`), but is still unauthenticated there, so bind it to a private interface. Per-principal token-bucket rate limiting exists (`server.rate_limit`; anonymous callers keyed by IP). There are no byte or storage quotas per principal or namespace.
 - **Durability of server puts:** an unreferenced `put` becomes durable at the next replace or flush (core semantics, since the open pack is not fsynced per put). If the server crashes before that, the client's later `replace` gets `MissingObject` and must re-put. Clients needing durability without a replace call `POST /v1/flush`.
 - **Git adapter limits:**
   - SHA-1 repos only (no `object-format=sha256`). No protocol v2 server side (clients fall back to v0), and no shallow or partial clones.
-  - Served packs carry full objects, with no delta compression on the wire, so clones transfer more bytes than from git.
-  - Upload-pack walks the full reachable set per request (no bitmaps or commit-graph), which is O(history) per fetch.
+  - Served packs use OFS deltas against the previously sent version at the same path (greedy block matching, depth ≤ 50). They are not as tight as git's sliding-window search: a ripgrep clone transfers 6.1 MB vs git's 3.4 MB aggressive pack. Thin packs against the client's haves are not used.
+  - Upload-pack has no bitmaps or commit-graph. Incremental fetches exclude what the client has with git's no-bitmap edge strategy (the commit closure of common commits plus the trees of up to 16 boundary commits), so they cost O(commits) rather than O(objects). A clone still walks every object it sends.
   - Each push object is held in memory (cap 1 GiB per object).
   - Ref names outside the core grammar (`[A-Za-z0-9._+-]` segments) are rejected with `ng`.
 - **OCI adapter limits:** blob DELETE returns 405 (blobs are reclaimed by GC once no manifest references them), sha256 digests only, and upload sessions do not survive restarts.

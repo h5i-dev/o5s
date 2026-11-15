@@ -9,6 +9,8 @@
 //! shutdown_grace_secs = 30
 //! trust_forwarded_for = false      # true only behind a proxy that sets X-Forwarded-For
 //! # tls = { cert = "/etc/pico2peta/tls.crt", key = "/etc/pico2peta/tls.key" }  # native HTTPS
+//! # metrics_listen = "10.0.0.5:9100"   # /metrics only there
+//! # rate_limit = { per_sec = 50.0, burst = 200.0 }   # per principal
 //!
 //! [repo]
 //! path = "/var/lib/pico2peta/repo"
@@ -21,10 +23,15 @@
 //! bucket = "my-bucket"
 //! prefix = "pico2peta"
 //! path_style = false
-//! # credentials: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN
+//! # credentials: AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY[/AWS_SESSION_TOKEN], else
+//! # AWS_WEB_IDENTITY_TOKEN_FILE + AWS_ROLE_ARN (EKS IRSA), else the EC2 instance profile (IMDSv2)
 //!
 //! [auth]
 //! allow_anonymous = false
+//! # [auth.oidc]                     # optional: JWT bearer tokens
+//! # issuer = "https://accounts.example.com"
+//! # audience = "pico2peta"
+//! # principal_claim = "email"
 //! [[auth.tokens]]
 //! principal = "ci"
 //! sha256 = "<hex sha256 of the bearer token>"
@@ -37,6 +44,7 @@
 //! [audit]
 //! path = "/var/log/pico2peta/audit.jsonl"
 //! log_reads = false
+//! rotate_bytes = 1073741824        # optional: rotate at 1 GiB, chain continues
 //!
 //! [gc]
 //! interval_secs = 0                  # background GC period; 0 = off
@@ -169,6 +177,19 @@ pub struct ServerSection {
     pub trust_forwarded_for: bool,
     /// Serve HTTPS directly (otherwise plain HTTP behind a TLS proxy).
     pub tls: Option<TlsSection>,
+    /// Serve `/metrics` (plus `/healthz`, `/readyz`) on this separate address only,
+    /// e.g. a private interface for Prometheus. Unset: on the main listener.
+    pub metrics_listen: Option<SocketAddr>,
+    /// Per-principal request rate limit (anonymous callers are keyed by client address).
+    pub rate_limit: Option<RateLimit>,
+}
+
+/// Token bucket: `per_sec` sustained, `burst` peak.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RateLimit {
+    pub per_sec: f64,
+    pub burst: f64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -190,6 +211,8 @@ impl Default for ServerSection {
             shutdown_grace_secs: 30,
             trust_forwarded_for: false,
             tls: None,
+            metrics_listen: None,
+            rate_limit: None,
         }
     }
 }
@@ -241,6 +264,38 @@ pub struct AuthSection {
     /// Optional extra TOML file with `[[tokens]]` entries (kept out of the main config).
     #[serde(default)]
     pub token_file: Option<PathBuf>,
+    /// Accept OIDC/JWT bearer tokens from this issuer (in addition to static tokens).
+    #[serde(default)]
+    pub oidc: Option<OidcSection>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OidcSection {
+    /// Exact `iss` value, e.g. `https://accounts.example.com`.
+    pub issuer: String,
+    /// Required `aud` value.
+    pub audience: String,
+    /// JWKS location; default: discovered from `<issuer>/.well-known/openid-configuration`.
+    #[serde(default)]
+    pub jwks_url: Option<String>,
+    /// Claim used as the principal name (default `sub`; `email` is common).
+    #[serde(default = "default_claim")]
+    pub principal_claim: String,
+    /// Prefix added to the claim, e.g. `oidc:` (keeps namespaces apart from static principals).
+    #[serde(default)]
+    pub principal_prefix: String,
+    /// Minimum seconds between JWKS refetches triggered by unknown key ids.
+    #[serde(default = "default_refetch")]
+    pub min_refetch_secs: u64,
+}
+
+fn default_refetch() -> u64 {
+    30
+}
+
+fn default_claim() -> String {
+    "sub".into()
 }
 
 /// A bearer token, stored only as its SHA-256.
@@ -273,6 +328,10 @@ pub struct AuditSection {
     pub path: PathBuf,
     #[serde(default)]
     pub log_reads: bool,
+    /// Rotate the log at this size (renamed to `<path>.<last seq>`; the hash
+    /// chain continues). Unset: never rotate.
+    #[serde(default)]
+    pub rotate_bytes: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -331,6 +390,11 @@ impl Config {
         if self.server.max_concurrent_requests == 0 {
             return bad("server.max_concurrent_requests must be >= 1".into());
         }
+        if let Some(r) = self.server.rate_limit
+            && !(r.per_sec > 0.0 && r.burst >= 1.0 && r.per_sec.is_finite() && r.burst.is_finite())
+        {
+            return bad("server.rate_limit needs per_sec > 0 and burst >= 1".into());
+        }
         if self.server.request_timeout_secs == 0 {
             return bad("server.request_timeout_secs must be >= 1".into());
         }
@@ -339,6 +403,17 @@ impl Config {
         }
         if !(0.0..=1.0).contains(&self.gc.min_garbage_ratio) {
             return bad("gc.min_garbage_ratio must be in [0, 1]".into());
+        }
+        if let Some(o) = &self.auth.oidc {
+            let local = |u: &str| u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost");
+            for u in std::iter::once(&o.issuer).chain(o.jwks_url.iter()) {
+                if !(u.starts_with("https://") || local(u)) {
+                    return bad(format!("auth.oidc: {u:?} must be https"));
+                }
+            }
+            if o.audience.is_empty() || o.principal_claim.is_empty() {
+                return bad("auth.oidc: audience and principal_claim must be set".into());
+            }
         }
         let mut seen = std::collections::HashSet::new();
         for t in &self.auth.tokens {
@@ -365,12 +440,12 @@ impl Config {
     }
 }
 
-/// Principal names: `[A-Za-z0-9._@-]{1,128}`, not the reserved `anonymous`/`*`.
+/// Principal names: `[A-Za-z0-9._@:-]{1,128}`, not the reserved `anonymous`/`*`.
 pub fn valid_principal(p: &str) -> bool {
     !p.is_empty()
         && p.len() <= 128
         && p != crate::auth::ANONYMOUS
-        && p.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'@' | b'-'))
+        && p.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'@' | b':' | b'-'))
 }
 
 #[cfg(test)]

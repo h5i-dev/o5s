@@ -52,6 +52,7 @@ access = "read"
 [audit]
 path = "/var/lib/pico2peta/audit/audit.jsonl"
 log_reads = false                  # true: also audit every object read
+rotate_bytes = 1073741824          # rotate at 1 GiB; the hash chain continues
 
 # Garbage collection: unreferenced objects are reclaimed in three phases,
 # each at least grace_secs apart. Clients must point a ref at a new object

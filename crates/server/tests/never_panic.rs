@@ -25,6 +25,23 @@ proptest! {
     fn git_parsers_total(d in bytes(400)) { f::git_parsers(&d); }
 
     #[test]
+    fn git_delta_roundtrip(base in bytes(600), edits in proptest::collection::vec((any::<usize>(), any::<u8>(), 0u8..3), 0..20)) {
+        // Target = base with random substitutions, insertions and deletions.
+        let mut t = base.clone();
+        for (i, b, op) in edits {
+            let i = if t.is_empty() { 0 } else { i % (t.len() + 1) };
+            match op {
+                0 if i < t.len() => t[i] = b,
+                1 => t.insert(i, b),
+                _ if i < t.len() => { t.remove(i); }
+                _ => {}
+            }
+        }
+        f::git_delta_roundtrip(&base, &t);
+        f::git_delta_roundtrip(&t, &base);
+    }
+
+    #[test]
     fn oci_parsers_total(d in bytes(400)) { f::oci_parsers(&d); }
 
     #[test]

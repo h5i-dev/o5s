@@ -11,6 +11,7 @@
 mod backend;
 mod client;
 mod config;
+pub mod credentials;
 mod error;
 mod retry;
 mod sigv4;
@@ -30,5 +31,9 @@ pub mod fuzzing {
         let _ = crate::xml::parse_error(data);
         let _ = crate::xml::parse_upload_id(data);
         let _ = crate::xml::parse_complete(data);
+        let _ = crate::xml::find_text(data, "AccessKeyId");
+        if let Ok(s) = std::str::from_utf8(data) {
+            let _ = crate::credentials::parse_rfc3339(s);
+        }
     }
 }

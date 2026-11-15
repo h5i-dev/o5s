@@ -787,6 +787,209 @@ fn resolve(
 // Pack writing (upload-pack)
 // ---------------------------------------------------------------------------
 
+/// A previously sent object usable as a delta base: (pack offset, body, chain depth).
+type SentBase = (u64, Arc<Vec<u8>>, u32);
+
+const DELTA_BLOCK: usize = 16;
+/// Longest delta chain we emit (git's default `pack.depth` is 50).
+const MAX_SEND_DEPTH: u32 = 50;
+/// Objects larger than this are always sent whole.
+const MAX_DELTA_INPUT: usize = 8 << 20;
+/// Budget for delta-base bodies kept while writing one pack.
+const SEND_BASE_CACHE: usize = 256 << 20;
+
+fn block_hash(b: &[u8]) -> u64 {
+    let a = u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
+    let c = u64::from_le_bytes([b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]]);
+    (a ^ c.rotate_left(29)).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+}
+
+fn push_varint(out: &mut Vec<u8>, mut v: usize) {
+    loop {
+        let b = (v & 0x7f) as u8;
+        v >>= 7;
+        if v == 0 {
+            out.push(b);
+            return;
+        }
+        out.push(b | 0x80);
+    }
+}
+
+fn push_insert(out: &mut Vec<u8>, data: &[u8]) {
+    for c in data.chunks(127) {
+        out.push(c.len() as u8);
+        out.extend_from_slice(c);
+    }
+}
+
+fn push_copy(out: &mut Vec<u8>, mut off: usize, mut len: usize) {
+    while len > 0 {
+        let n = len.min(0xff_ffff);
+        let mut op = 0x80u8;
+        let mut args = Vec::with_capacity(7);
+        for i in 0..4 {
+            let b = ((off >> (8 * i)) & 0xff) as u8;
+            if b != 0 {
+                op |= 1 << i;
+                args.push(b);
+            }
+        }
+        for i in 0..3 {
+            let b = ((n >> (8 * i)) & 0xff) as u8;
+            if b != 0 {
+                op |= 0x10 << i;
+                args.push(b);
+            }
+        }
+        out.push(op);
+        out.extend_from_slice(&args);
+        off += n;
+        len -= n;
+    }
+}
+
+/// Encodes a git delta turning `base` into `target` (greedy block matching).
+pub fn encode_delta(base: &[u8], target: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(target.len() / 4 + 16);
+    push_varint(&mut out, base.len());
+    push_varint(&mut out, target.len());
+    if base.len() < DELTA_BLOCK || target.len() < DELTA_BLOCK {
+        push_insert(&mut out, target);
+        return out;
+    }
+    let mut index: HashMap<u64, usize> = HashMap::with_capacity(base.len() / DELTA_BLOCK + 1);
+    let mut p = 0;
+    while p + DELTA_BLOCK <= base.len() {
+        index.entry(block_hash(&base[p..p + DELTA_BLOCK])).or_insert(p);
+        p += DELTA_BLOCK;
+    }
+    let (mut i, mut pending) = (0usize, 0usize);
+    while i + DELTA_BLOCK <= target.len() {
+        let hit = index.get(&block_hash(&target[i..i + DELTA_BLOCK])).copied();
+        match hit {
+            Some(mut b) if base[b..b + DELTA_BLOCK] == target[i..i + DELTA_BLOCK] => {
+                let mut len = DELTA_BLOCK;
+                while b + len < base.len() && i + len < target.len() && base[b + len] == target[i + len] {
+                    len += 1;
+                }
+                while i > pending && b > 0 && base[b - 1] == target[i - 1] {
+                    i -= 1;
+                    b -= 1;
+                    len += 1;
+                }
+                push_insert(&mut out, &target[pending..i]);
+                push_copy(&mut out, b, len);
+                i += len;
+                pending = i;
+            }
+            _ => i += 1,
+        }
+    }
+    push_insert(&mut out, &target[pending..]);
+    out
+}
+
+/// Encodes an OFS_DELTA back-distance (inverse of the decoder in `read_entry_header`).
+fn ofs_encode(mut off: u64) -> Vec<u8> {
+    let mut b = vec![(off & 0x7f) as u8];
+    off >>= 7;
+    while off > 0 {
+        off -= 1;
+        b.push(0x80 | (off & 0x7f) as u8);
+        off >>= 7;
+    }
+    b.reverse();
+    b
+}
+
+/// What the client already has, cheaply (git's no-bitmap "edge" strategy):
+/// every commit reachable from `common` (commit objects only), plus the full
+/// trees of up to [`MAX_BOUNDARY`] common commits. Objects outside this set
+/// that the client has anyway may be re-sent, which is harmless.
+fn boundary_exclude(view: &View<'_>, common: &[Oid]) -> Result<HashSet<Oid>> {
+    let mut ex: HashSet<Oid> = HashSet::new();
+    let mut stack: Vec<Oid> = common.to_vec();
+    while let Some(o) = stack.pop() {
+        if !ex.insert(o) {
+            continue;
+        }
+        if let Some((Kind::Commit, body)) = view.load(&o)? {
+            stack.extend(refs_of(Kind::Commit, &body)?.into_iter().skip(1));
+        }
+    }
+    let commits: HashSet<Oid> = ex.clone();
+    for c in common.iter().take(MAX_BOUNDARY) {
+        if let Some((Kind::Commit, body)) = view.load(c)?
+            && let Some(tree) = refs_of(Kind::Commit, &body)?.first().copied()
+        {
+            let got = walk(view, &[tree], &ex, |_, _, _| Ok(()))?;
+            ex.extend(got);
+        }
+    }
+    debug_assert!(commits.is_subset(&ex));
+    Ok(ex)
+}
+
+const MAX_BOUNDARY: usize = 16;
+
+/// Objects to send with the path they were reached by (for delta pairing):
+/// reachable from `tips`, minus `exclude`. Newest history first.
+fn walk_paths(view: &View<'_>, tips: &[Oid], exclude: &HashSet<Oid>) -> Result<Vec<(Oid, Kind, String)>> {
+    let mut seen: HashSet<Oid> = HashSet::new();
+    let mut out = Vec::new();
+    let mut stack: Vec<(Oid, String)> =
+        tips.iter().filter(|o| !exclude.contains(*o)).map(|o| (*o, String::new())).collect();
+    stack.reverse();
+    while let Some((oid, path)) = stack.pop() {
+        if exclude.contains(&oid) || !seen.insert(oid) {
+            continue;
+        }
+        let (kind, body) =
+            view.load(&oid)?.ok_or_else(|| Error::Corrupt(format!("missing git object {}", hex(&oid))))?;
+        match kind {
+            Kind::Commit => {
+                let refs = refs_of(kind, &body)?;
+                // Parents go below the tree on the stack: content first, then history.
+                for p in refs.iter().skip(1).rev() {
+                    stack.push((*p, String::new()));
+                }
+                if let Some(t) = refs.first() {
+                    stack.push((*t, String::new()));
+                }
+            }
+            Kind::Tag => {
+                for o in refs_of(kind, &body)? {
+                    stack.push((o, String::new()));
+                }
+            }
+            Kind::Tree => {
+                let mut i = 0;
+                let mut kids = Vec::new();
+                while i < body.len() {
+                    let Some(sp) = body[i..].iter().position(|&c| c == b' ').map(|x| x + i) else { break };
+                    let Some(nul) = body[sp..].iter().position(|&c| c == 0).map(|x| x + sp) else { break };
+                    if nul + 21 > body.len() {
+                        break;
+                    }
+                    let mode = &body[i..sp];
+                    let mut o = [0u8; 20];
+                    o.copy_from_slice(&body[nul + 1..nul + 21]);
+                    if mode != b"160000" {
+                        let name = String::from_utf8_lossy(&body[sp + 1..nul]);
+                        kids.push((o, if path.is_empty() { name.to_string() } else { format!("{path}/{name}") }));
+                    }
+                    i = nul + 21;
+                }
+                stack.extend(kids.into_iter().rev());
+            }
+            Kind::Blob => {}
+        }
+        out.push((oid, kind, path));
+    }
+    Ok(out)
+}
+
 fn pack_entry_header(kind: Kind, size: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(10);
     let mut c = ((kind as u8) << 4) | (size & 15) as u8;
@@ -1109,14 +1312,10 @@ fn serve_upload(
     }
     send(tx, out)?;
     // Objects to send: reachable from wants minus reachable from common.
-    let exclude =
-        if common.is_empty() { HashSet::new() } else { walk(&view, &common, &HashSet::new(), |_, _, _| Ok(()))? };
-    let mut objs: Vec<Oid> = Vec::new();
-    walk(&view, &req.wants, &exclude, |oid, _, _| {
-        objs.push(oid);
-        Ok(())
-    })?;
-    // Stream the pack.
+    let exclude = if common.is_empty() { HashSet::new() } else { boundary_exclude(&view, &common)? };
+    let objs = walk_paths(&view, &req.wants, &exclude)?;
+    // Stream the pack. Blobs and trees are deltified against the previously
+    // sent version at the same path (newest first, so older versions are deltas).
     let mut h = Sha1::new();
     let mut buf = Vec::with_capacity(1 << 17);
     let mut header = b"PACK".to_vec();
@@ -1124,6 +1323,7 @@ fn serve_upload(
     header.extend_from_slice(&(objs.len() as u32).to_be_bytes());
     h.update(&header);
     buf.extend_from_slice(&header);
+    let mut offset = header.len() as u64;
     let flush = |buf: &mut Vec<u8>, force: bool| -> Result<()> {
         if buf.len() >= 1 << 16 || (force && !buf.is_empty()) {
             let mut framed = Vec::with_capacity(buf.len() + 64);
@@ -1134,15 +1334,54 @@ fn serve_upload(
         }
         Ok(())
     };
-    for oid in &objs {
-        let (kind, body) = view.load(oid)?.ok_or_else(|| Error::Corrupt(format!("object {} vanished", hex(oid))))?;
-        let eh = pack_entry_header(kind, body.len());
+    // (kind, path) -> (pack offset, body, chain depth)
+    let mut bases: HashMap<(Kind, String), SentBase> = HashMap::new();
+    let mut base_bytes = 0usize;
+    let mut deltas = 0usize;
+    let zlib = |data: &[u8]| -> Result<Vec<u8>> {
         let mut z =
-            flate2::write::ZlibEncoder::new(Vec::with_capacity(body.len() / 2 + 64), flate2::Compression::new(3));
-        z.write_all(&body)?;
-        let data = z.finish()?;
+            flate2::write::ZlibEncoder::new(Vec::with_capacity(data.len() / 2 + 64), flate2::Compression::new(3));
+        z.write_all(data)?;
+        Ok(z.finish()?)
+    };
+    for (oid, kind, path) in &objs {
+        let (k2, body) = view.load(oid)?.ok_or_else(|| Error::Corrupt(format!("object {} vanished", hex(oid))))?;
+        debug_assert_eq!(*kind, k2);
+        let body = Arc::new(body);
+        let key = (*kind, path.clone());
+        let deltable = matches!(kind, Kind::Blob | Kind::Tree) && body.len() >= 64 && body.len() <= MAX_DELTA_INPUT;
+        let mut entry: Option<(Vec<u8>, Vec<u8>, u32)> = None; // (header, data, depth)
+        if deltable
+            && !path.is_empty()
+            && let Some((boff, base, depth)) = bases.get(&key)
+            && *depth < MAX_SEND_DEPTH
+        {
+            let d = encode_delta(base, &body);
+            if d.len() < body.len() / 2 {
+                let mut eh = pack_entry_header(Kind::Commit, d.len()); // type patched below
+                eh[0] = (eh[0] & 0x8f) | (6 << 4);
+                eh.extend_from_slice(&ofs_encode(offset - boff));
+                entry = Some((eh, zlib(&d)?, depth + 1));
+                deltas += 1;
+            }
+        }
+        let (eh, data, depth) = match entry {
+            Some(e) => e,
+            None => (pack_entry_header(*kind, body.len()), zlib(&body)?, 0),
+        };
+        if deltable && !path.is_empty() {
+            let add = body.len();
+            let prev = bases.insert(key, (offset, body, depth));
+            base_bytes = base_bytes + add - prev.map_or(0, |p| p.1.len());
+            if base_bytes > SEND_BASE_CACHE {
+                // Over budget: stop remembering new bases (existing ones keep working).
+                bases.retain(|_, v| v.2 > 0);
+                base_bytes = bases.values().map(|v| v.1.len()).sum();
+            }
+        }
         h.update(&eh);
         h.update(&data);
+        offset += (eh.len() + data.len()) as u64;
         buf.extend_from_slice(&eh);
         buf.extend_from_slice(&data);
         flush(&mut buf, false)?;
@@ -1153,7 +1392,7 @@ fn serve_upload(
     if req.sideband {
         send(tx, FLUSH.to_vec())?;
     }
-    info!(repo, objects = objs.len(), "upload-pack served");
+    info!(repo, objects = objs.len(), deltas, bytes = offset + 20, "upload-pack served");
     Ok(())
 }
 
@@ -1672,6 +1911,12 @@ pub(crate) fn fuzz_parsers(data: &[u8]) {
     }
     let mut r = data;
     while let Ok(Some(_)) = read_pkt(&mut r) {}
+    if data.len() > 2 {
+        let split = data[1] as usize % data.len();
+        let (b, t) = data.split_at(split);
+        let back = apply_delta(b, &encode_delta(b, t)).unwrap_or_else(|e| panic!("encoded delta does not apply: {e}"));
+        assert!(back == t, "delta roundtrip mismatch");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1757,6 +2002,31 @@ mod tests {
         let commit = format!("tree {}\nparent {}\nauthor x\n\nmsg\nparent zzz\n", "aa".repeat(20), "bb".repeat(20));
         assert_eq!(refs_of(Kind::Commit, commit.as_bytes()).unwrap(), vec![[0xaa; 20], [0xbb; 20]]);
         assert!(refs_of(Kind::Commit, b"author x\n\nmsg").is_err());
+    }
+
+    #[test]
+    fn delta_roundtrip() {
+        let base: Vec<u8> = (0..5000u32).map(|i| (i * 31 % 251) as u8).collect();
+        let mut target = base.clone();
+        target.splice(100..100, b"inserted text".iter().copied());
+        target.drain(3000..3100);
+        target.extend_from_slice(b"tail");
+        let d = encode_delta(&base, &target);
+        assert!(d.len() < 100, "delta should be small: {}", d.len());
+        assert_eq!(apply_delta(&base, &d).unwrap(), target);
+        for (b, t) in [(&b""[..], &b"x"[..]), (b"short", b"shorter text here, longer than 16"), (&base[..], b"")] {
+            assert_eq!(apply_delta(b, &encode_delta(b, t)).unwrap(), t);
+        }
+        // Copies longer than 0xffffff split correctly.
+        let big = vec![7u8; 0x100_0100];
+        assert_eq!(apply_delta(&big, &encode_delta(&big, &big)).unwrap(), big);
+        for off in [1u64, 127, 128, 129, 16_511, 16_512, 1 << 20, u32::MAX as u64] {
+            let enc = ofs_encode(off);
+            let mut hdr = vec![0x60u8]; // OFS_DELTA, size 0
+            hdr.extend_from_slice(&enc);
+            let (_, _, base, _) = read_entry_header(&mut &hdr[..], off + 10).unwrap();
+            assert!(matches!(base, Base::Ofs(b) if b == 10), "{off}");
+        }
     }
 
     #[test]

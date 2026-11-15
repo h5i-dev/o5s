@@ -85,6 +85,11 @@ fn flatten(xml: &[u8]) -> S3Result<Vec<(String, String)>> {
     Ok(out)
 }
 
+/// Text of the first element named `tag` (at any depth).
+pub fn find_text(xml: &[u8], tag: &str) -> Option<String> {
+    flatten(xml).ok()?.into_iter().find(|(p, _)| p.rsplit('/').next() == Some(tag)).map(|(_, t)| t)
+}
+
 /// `<Error><Code>…</Code><Message>…</Message></Error>` → `(code, message)`.
 pub fn parse_error(xml: &[u8]) -> Option<(String, String)> {
     let f = flatten(xml).ok()?;

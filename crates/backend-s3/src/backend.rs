@@ -49,6 +49,21 @@ impl S3Backend {
         Ok(S3Backend { client, rt: Some(rt) })
     }
 
+    /// Like [`S3Backend::new`] with the default credential chain (env, web
+    /// identity, IMDSv2), with temporary credentials refreshed in the background.
+    pub fn with_default_chain(cfg: S3Config, worker_threads: usize) -> Result<S3Backend> {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(worker_threads.max(1))
+            .thread_name("p2p-s3")
+            .enable_all()
+            .build()?;
+        let handle = rt.handle().clone();
+        let region = cfg.region.clone();
+        let creds = rt.block_on(crate::credentials::default_chain(&region, &handle)).map_err(to_core)?;
+        let client = S3Client::new(cfg, creds).map_err(to_core)?;
+        Ok(S3Backend { client, rt: Some(rt) })
+    }
+
     /// The async client (shares the connection pool and counters).
     pub fn client(&self) -> &S3Client {
         &self.client
