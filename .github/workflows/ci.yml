@@ -46,6 +46,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # The HF front is tested with the real client (tests/hf.rs).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m venv "$RUNNER_TEMP/hfvenv"
+          "$RUNNER_TEMP/hfvenv/bin/pip" install --quiet huggingface_hub==2.4.0 hf_xet==1.8.0
+          echo "PICO2PETA_HF_PYTHON=$RUNNER_TEMP/hfvenv/bin/python" >> "$GITHUB_ENV"
       # S3 integration tests skip themselves here (no P2P_S3_ENDPOINT).
       - run: cargo test --workspace --locked
 

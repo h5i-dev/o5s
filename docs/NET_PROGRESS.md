@@ -185,6 +185,22 @@ The contended run checks that no update is lost: the final version equals the nu
 - **Per-namespace chunking in the server (core API v1.11):** `PUT /v1/objects?for_name=<name>` (write access on that name) and OCI blob uploads (namespace `oci/<repo>`) go through `LocalRepo::put_stream_for`, and `RemoteRepo::put_stream_for` exists. Test `put_for_name_uses_namespace_chunker`: the pack store's chunk record counts match `crates/chunk`'s Xet count for `alice/models/` and its FastCDC count elsewhere.
 - **C. Byte grouping: DONE.** `crates/weights/src/bytegroup.rs` (`group` / `ungroup`, with proptest round-trip and no-panic tests). Measured on real checkpoints: bf16 SmolLM2-135M → Instruct delta and raw, and fp32 GPT-2 raw. Per-block grouping (what the codec does) gains −8.8% / −12.5% on deltas and −0.6% to −10% on raw weights depending on the zstd level; see "Requests for core".
 
+## Phase 3 (2026-11-15): fronts (VISION.md)
+- **HF Hub front: LFS path DONE** (`crates/server/src/hf.rs`, `tests/hf.rs`, `tests/hf/client.py`).
+  - Tested with the real, unmodified `huggingface_hub` 2.4.0 and `HF_HUB_DISABLE_XET=1`:
+    - create_repo, upload_file (small and LFS), and upload_folder;
+    - list_repo_files and model_info(files_metadata);
+    - hf_hub_download, snapshot_download, and download of an old revision after delete_file;
+    - LFS dedup on re-upload.
+  - The HF repo is a real Git repo, `hf/<type>s/<ns>/<name>`:
+    - `git clone` of it passes `git fsck --strict`;
+    - a `git push` to it is visible via `resolve`, with a matching `X-Repo-Commit`;
+    - authz is on `git/hf/...`.
+  - GC: `GitTracer` now follows LFS pointer blobs into the `git/_lfs` index. Tested with zero-grace GC: committed LFS content survives and an uncommitted orphan is collected (the negative control).
+  - Signed LFS capability URLs (HMAC-SHA256 with a per-process key, one-hour expiry). A forged token gets 403. Because the key is per-process, URLs handed out before a restart stop working, and the client retries via the batch API.
+  - CI installs huggingface_hub 2.4.0 and hf_xet 1.8.0 for the test job.
+  - Next: the Xet CAS protocol (upload is Xet by default when hf_xet is installed). Then PyPI, npm and Maven.
+
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
 **Principles**

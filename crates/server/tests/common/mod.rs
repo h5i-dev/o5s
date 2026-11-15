@@ -58,6 +58,7 @@ impl TestServer {
             gc: Default::default(),
             oci: Default::default(),
             git: Default::default(),
+            hf: Default::default(),
         };
         tweak(&mut cfg);
         let state = pico2peta_server::build_state(&cfg).unwrap();

@@ -11,6 +11,7 @@ pub mod auth;
 pub mod config;
 pub mod error;
 pub mod git;
+pub mod hf;
 pub mod metrics;
 pub mod oci;
 pub mod oidc;
@@ -41,6 +42,8 @@ pub enum StartError {
     Audit(std::path::PathBuf, std::io::Error),
     #[error("s3 backend: {0}")]
     S3(String),
+    #[error("hf front: {0}")]
+    Hf(String),
 }
 
 /// Opens everything the server needs.
@@ -115,6 +118,10 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
     } else {
         None
     };
+    let hf = match (&git, cfg.hf.enabled) {
+        (Some(g), true) => Some(Arc::new(hf::HfState::new(g.clone()).map_err(StartError::Hf)?)),
+        _ => None,
+    };
     let tokens = Arc::new(auth::TokenAuthenticator::new(&cfg.auth.tokens, cfg.auth.allow_anonymous));
     let audit = audit::AuditLog::open_with(&cfg.audit.path, cfg.audit.rotate_bytes)
         .map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
@@ -164,6 +171,7 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         },
         oci,
         git,
+        hf,
     }))
 }
 

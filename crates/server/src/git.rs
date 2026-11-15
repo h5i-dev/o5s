@@ -253,8 +253,8 @@ fn sideband(out: &mut Vec<u8>, band: u8, data: &[u8], sideband: bool) {
 // ---------------------------------------------------------------------------
 
 pub struct GitState {
-    repo: Arc<dyn Repository>,
-    oidmap: Arc<SegMap>,
+    pub(crate) repo: Arc<dyn Repository>,
+    pub(crate) oidmap: Arc<SegMap>,
     spool: PathBuf,
     max_push_bytes: u64,
 }
@@ -272,19 +272,19 @@ impl GitState {
 }
 
 /// A consistent view of the oid map plus object loading.
-struct View<'a> {
+pub(crate) struct View<'a> {
     st: &'a GitState,
     root: Root,
     /// Objects added by the current push, not yet in the map.
-    extra: HashMap<Oid, (Kind, Hash)>,
+    pub(crate) extra: HashMap<Oid, (Kind, Hash)>,
 }
 
 impl<'a> View<'a> {
-    fn new(st: &'a GitState) -> Result<View<'a>> {
+    pub(crate) fn new(st: &'a GitState) -> Result<View<'a>> {
         Ok(View { st, root: st.oidmap.root_blocking()?.1, extra: HashMap::new() })
     }
 
-    fn lookup(&self, oid: &Oid) -> Result<Option<(Kind, Hash)>> {
+    pub(crate) fn lookup(&self, oid: &Oid) -> Result<Option<(Kind, Hash)>> {
         if let Some(x) = self.extra.get(oid) {
             return Ok(Some(*x));
         }
@@ -300,7 +300,7 @@ impl<'a> View<'a> {
 
     /// Present, and safe to reference: `ensure_live` rewrites the object if GC
     /// has condemned its only copy (the client assumes the server has it).
-    fn has(&self, oid: &Oid) -> Result<bool> {
+    pub(crate) fn has(&self, oid: &Oid) -> Result<bool> {
         Ok(match self.lookup(oid)? {
             Some((_, h)) => self.extra.contains_key(oid) || self.st.repo.ensure_live(&h)?,
             None => false,
@@ -308,7 +308,7 @@ impl<'a> View<'a> {
     }
 
     /// `(kind, body)` of `oid`, or `None` if unknown/collected.
-    fn load(&self, oid: &Oid) -> Result<Option<(Kind, Vec<u8>)>> {
+    pub(crate) fn load(&self, oid: &Oid) -> Result<Option<(Kind, Vec<u8>)>> {
         let Some((kind, h)) = self.lookup(oid)? else { return Ok(None) };
         let bytes = match self.st.repo.get(&h, None) {
             Ok(b) => b,
@@ -333,7 +333,7 @@ fn ns(repo: &str) -> String {
 }
 
 /// `git/<repo>/<gitref>` if `gitref` is representable as a core name.
-fn ref_name(repo: &str, gitref: &str) -> Option<Name> {
+pub(crate) fn ref_name(repo: &str, gitref: &str) -> Option<Name> {
     if !gitref.starts_with("refs/") || gitref.ends_with(".lock") || gitref.contains("..") {
         return None;
     }
@@ -341,7 +341,7 @@ fn ref_name(repo: &str, gitref: &str) -> Option<Name> {
 }
 
 /// Current refs of `repo`: `(gitref, oid, core value)`, sorted.
-fn list_refs(st: &GitState, repo: &str) -> Result<Vec<(String, Oid, RefValue)>> {
+pub(crate) fn list_refs(st: &GitState, repo: &str) -> Result<Vec<(String, Oid, RefValue)>> {
     let prefix = format!("git/{repo}/refs");
     let mut out = Vec::new();
     for (n, v) in st.repo.list_refs(&prefix)? {
@@ -2126,15 +2126,21 @@ pub(crate) fn fuzz_parsers(data: &[u8]) {
 pub struct GitTracer {
     oidmap: SegMap,
     root: Root,
+    /// Git LFS index (sha256 → content), written by the HF front.
+    lfs: SegMap,
+    lfs_root: Root,
 }
 
 impl GitTracer {
     /// Snapshots the oid map; objects pushed later are protected by the GC lease.
     pub fn new(repo: Arc<dyn Repository>) -> Result<GitTracer> {
         let n = Name::new("git/_oidmap").unwrap_or_else(|_| unreachable!("static name is valid"));
-        let oidmap = SegMap::new(repo, n, Arc::new(SegCache::default()));
+        let oidmap = SegMap::new(repo.clone(), n, Arc::new(SegCache::default()));
         let root = oidmap.root_blocking()?.1;
-        Ok(GitTracer { oidmap, root })
+        let n = Name::new("git/_lfs").unwrap_or_else(|_| unreachable!("static name is valid"));
+        let lfs = SegMap::new(repo, n, Arc::new(SegCache::default()));
+        let lfs_root = lfs.root_blocking()?.1;
+        Ok(GitTracer { oidmap, root, lfs, lfs_root })
     }
 
     /// Children of a canonical git object, or `None` if `h` is not one.
@@ -2146,6 +2152,19 @@ impl GitTracer {
             return Ok(None);
         }
         if kind == Kind::Blob {
+            // A Git LFS pointer keeps its content alive (LFS objects have no other referrer).
+            const LFS: &[u8] = b"version https://git-lfs";
+            let seen = &head[hl..];
+            let n = seen.len().min(LFS.len());
+            if body_len <= 512 && body_len >= LFS.len() && seen[..n] == LFS[..n] {
+                let bytes = store.get(h, None)?;
+                if let Some((sha, _)) = crate::hf::parse_lfs_pointer(&bytes[hl..])
+                    && let Some(k) = crate::hf::sha_key(&sha)
+                    && let Some(v) = self.lfs.get_in(&self.lfs_root, &k)?
+                {
+                    return Ok(Some(vec![v.hash]));
+                }
+            }
             return Ok(Some(Vec::new()));
         }
         let bytes = store.get(h, None)?;

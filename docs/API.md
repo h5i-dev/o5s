@@ -129,5 +129,18 @@ git push --atomic origin main v1.0 :old-branch
 - Served packs are deltified against the previous version of each path.
 - Limits are listed in `docs/NET_PROGRESS.md` under "Production gaps": SHA-1 repos only, no shallow or partial clones.
 
+## Hugging Face Hub (`/api`, `/<repo>/resolve`)
+```sh
+export HF_ENDPOINT=https://p2p.example.com HF_TOKEN=$TOKEN
+export HF_HUB_DISABLE_XET=1     # uploads: the Xet protocol is not served yet (downloads work either way)
+hf upload team/tiny ./model     # or HfApi().upload_folder(...); hf_hub_download / snapshot_download work too
+git clone https://any:$TOKEN@p2p.example.com/git/hf/models/team/tiny.git   # the same repo, as Git
+```
+- The HF repo `team/tiny` of type model/dataset/space is the Git repo `hf/<type>s/team/tiny`. Authorization uses its namespace `git/hf/models/team/tiny`, so one grant covers both the HF API and `git`.
+- Small files are Git blobs. Files of 64 KiB or more, or with NUL bytes, go through Git LFS: the repo holds pointer blobs, and the content is a core object stored with the namespace's chunker (`[chunking]`, e.g. Xet).
+- Supported: repo create, info (`siblings`, `files_metadata`), tree listing, preupload, the LFS batch API with signed one-hour upload and download URLs, NDJSON commits (add, LFS add, delete file, delete folder; `parentCommit` is checked), and `resolve` with `Range`, `ETag`, `X-Repo-Commit` and `X-Linked-*` headers. Any commit id or branch works as a revision.
+- Not yet: the Xet CAS protocol, pull requests, tags/branches via the HF API (use `git push`), and the repo settings and delete APIs.
+- Disable it with `[hf] enabled = false`. It requires `[git]`.
+
 ## Operations
 See `deploy/README.md` for install, TLS, reload (SIGHUP), S3 credentials and lifecycle rules, metrics, audit verification (`pico2peta-server verify-audit`) and capacity notes.
