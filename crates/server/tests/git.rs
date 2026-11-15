@@ -52,6 +52,14 @@ fn head(dir: &Path) -> String {
     ok(dir, &["rev-parse", "HEAD"]).trim().to_string()
 }
 
+/// The git oid a server ref points at.
+fn oid_of_ref(s: &TestServer, name: &str) -> String {
+    use sha1::Digest as _;
+    let c = s.client(ALICE);
+    let v = c.resolve(&n(name)).unwrap().unwrap();
+    hex(&sha1::Sha1::digest(c.get(&v.hash, None).unwrap()))
+}
+
 fn git_server() -> TestServer {
     TestServer::start(|c| {
         c.policy.push(grant("alice", "git/team", Access::Write));
@@ -205,7 +213,13 @@ fn grouped_repack_vs_git() {
     let mirror = std::path::PathBuf::from(mirror);
     let s = git_server();
     let u = url(&s, ALICE, "team/m");
-    ok(&mirror, &["push", "-q", &u, "refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"]);
+    // P2P_GIT_ALL_REFS=1: every ref (incl. refs/pull/*), i.e. the Experiment 1 corpus.
+    let all = std::env::var("P2P_GIT_ALL_REFS").is_ok_and(|v| v == "1");
+    let specs: Vec<&str> =
+        if all { vec!["refs/*:refs/*"] } else { vec!["refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"] };
+    let mut args = vec!["push", "-q", &u];
+    args.extend(specs.iter().copied());
+    ok(&mirror, &args);
     let objects = s.dir.path().join("repo/objects");
     let before = dir_bytes(&objects);
     let repo = pico2peta_repo::LocalRepo::open(s.dir.path().join("repo")).unwrap();
@@ -253,7 +267,9 @@ fn grouped_repack_vs_git() {
     let b = tempfile::tempdir().unwrap();
     ok(b.path(), &["init", "-q", "--bare", "base"]);
     let base = b.path().join("base");
-    ok(&base, &["fetch", "-q", mirror.to_str().unwrap(), "refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"]);
+    let mut fetch = vec!["fetch", "-q", mirror.to_str().unwrap()];
+    fetch.extend(specs.iter().copied());
+    ok(&base, &fetch);
     ok(&base, &["-c", "pack.threads=4", "gc", "-q", "--aggressive", "--prune=now"]);
     let sum = |ext: &str| -> u64 {
         std::fs::read_dir(base.join("objects/pack"))
@@ -275,7 +291,13 @@ fn grouped_repack_vs_git() {
     // Everything still clones identically.
     let w = tempfile::tempdir().unwrap();
     ok(w.path(), &["clone", "-q", "--mirror", &u, "c"]);
-    let list = |d: &Path| ok(d, &["for-each-ref", "--format=%(objectname) %(refname)", "refs/heads", "refs/tags"]);
+    let list = |d: &Path| {
+        let mut a = vec!["for-each-ref", "--format=%(objectname) %(refname)"];
+        if !all {
+            a.extend(["refs/heads", "refs/tags"]);
+        }
+        ok(d, &a)
+    };
     assert_eq!(list(&mirror), list(&w.path().join("c")));
     ok(&w.path().join("c"), &["fsck", "--full"]);
 }
@@ -300,4 +322,9 @@ fn branch_deletion() {
     // Re-create after delete.
     ok(&a, &["push", "-q", &u, "tmp"]);
     assert!(s.client(ALICE).resolve(&n("git/team/del/refs/heads/tmp")).unwrap().is_some());
+    // Atomic push mixing a delete and an update.
+    commit(&a, "f", "2", "two");
+    ok(&a, &["push", "-q", "--atomic", &u, "main", ":tmp"]);
+    assert!(s.client(ALICE).resolve(&n("git/team/del/refs/heads/tmp")).unwrap().is_none());
+    assert_eq!(oid_of_ref(&s, "git/team/del/refs/heads/main"), head(&a), "main moved in the same atomic update");
 }

@@ -10,6 +10,7 @@
 //! | `GET` | `/v1/refs?prefix=p` | [`RefList`] (only names the caller may read) |
 //! | `POST` | `/v1/replace` | [`ReplaceRequest`] → 200/409 [`ReplaceResponse`] |
 //! | `DELETE` | `/v1/refs/{name}` | [`DeleteRefRequest`] → 200/409 [`ReplaceResponse`] (OCC, rules apply) |
+//! | `POST` | `/v1/update_many` | [`UpdateManyRequest`] → 200/409 [`ReplaceManyResponse`] (atomic sets + deletes) |
 //! | `POST` | `/v1/replace_many` | [`ReplaceManyRequest`] → 200/409 [`ReplaceManyResponse`] (atomic) |
 //! | `GET` | `/v1/namespaces` | [`RuleList`] |
 //! | `PUT` | `/v1/namespaces/{prefix}` | [`SetRuleRequest`] (admin) |
@@ -96,6 +97,43 @@ pub struct DeleteRefRequest {
 pub struct UpdateJson {
     pub name: String,
     pub new: String,
+}
+
+/// Atomic multi-name update including deletes (`new: null`), API v1.6.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateManyRequest {
+    pub updates: Vec<MaybeUpdateJson>,
+    pub read_set: Vec<ReadSetEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MaybeUpdateJson {
+    pub name: String,
+    pub new: Option<String>,
+}
+
+/// `(updates, read_set)` of a parsed [`UpdateManyRequest`].
+pub type ParsedUpdateMany = (Vec<(Name, Option<Hash>)>, Vec<(Name, Observed)>);
+
+impl UpdateManyRequest {
+    pub fn from_core(updates: &[(Name, Option<Hash>)], read_set: &[(Name, Observed)]) -> Self {
+        UpdateManyRequest {
+            updates: updates
+                .iter()
+                .map(|(n, h)| MaybeUpdateJson { name: n.to_string(), new: h.map(|h| h.to_hex()) })
+                .collect(),
+            read_set: read_set.iter().map(|(n, o)| ReadSetEntry::from_core(n, *o)).collect(),
+        }
+    }
+    pub fn to_core(&self) -> Result<ParsedUpdateMany, Error> {
+        let u = self
+            .updates
+            .iter()
+            .map(|u| Ok((Name::new(&u.name)?, u.new.as_deref().map(str::parse).transpose()?)))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let rs = self.read_set.iter().map(ReadSetEntry::to_core).collect::<Result<Vec<_>, _>>()?;
+        Ok((u, rs))
+    }
 }
 
 /// Atomic multi-name update: every update target must be in `read_set`.
