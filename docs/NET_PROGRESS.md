@@ -257,6 +257,7 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
   | fp32 raw: GPT-2 (548 MB) | −0.6% | −7.8% | −8.0% | −9.8% |
 
   - At zstd level 3, per-block grouping only pays off on XOR deltas. At level 19 it recovers most of the tensor-grouped gain on raw weights as well. If the codec runs at a low level, raising the level for grouped records, or object-level grouping, is where the remaining gain lies.
+  - Scope of the numbers: they are whole-file (every tensor), but *blocks are tensor-aligned*: each tensor is cut into 64 KiB blocks from its own start. The store's content-defined chunks are not tensor-aligned. End to end, the core measures base −6.0% and delta −10.6% at its default `grouped_zstd_level = 6`. So my per-block column is an upper bound for chunk-level grouping, and tensor-aligned chunking is the lever that would close the gap.
   - The transform runs at 0.9–1.2 GB/s on one core, round trip verified.
   - There is no fp32 fine-tune pair, so the fp32 delta case is unmeasured.
 - **RESOLVED (2026-11-15):** a ref-log double-Ok regression (core 8e845fd) was caught by `two_servers_share_a_repo_via_s3`. 60 acknowledged commits had produced only 50–54 versions, because identical CAS records from two writers were both treated as "ours".
