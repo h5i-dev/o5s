@@ -13,6 +13,7 @@ pub mod error;
 pub mod fronts;
 pub mod git;
 pub mod hf;
+pub mod maven;
 pub mod metrics;
 pub mod npm;
 pub mod oci;
@@ -144,6 +145,13 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
     } else {
         None
     };
+    let maven = if cfg.maven.enabled {
+        let st = maven::MavenState::new(fronts.handle("maven")?, Some(local.clone()), cfg.maven.upstream.clone())
+            .map_err(StartError::Hf)?;
+        Some(Arc::new(st))
+    } else {
+        None
+    };
     let tokens = Arc::new(auth::TokenAuthenticator::new(&cfg.auth.tokens, cfg.auth.allow_anonymous));
     let audit = audit::AuditLog::open_with(&cfg.audit.path, cfg.audit.rotate_bytes)
         .map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
@@ -196,6 +204,7 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         hf,
         pypi,
         npm,
+        maven,
         fronts: Some(fronts),
     }))
 }

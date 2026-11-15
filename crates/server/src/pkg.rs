@@ -9,6 +9,7 @@ use axum::body::Bytes;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
+use md5::Md5;
 use pico2peta_core::{Error, Hash, Name, Observed, ReplaceOutcome, Repository, Result};
 use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha512};
@@ -56,6 +57,7 @@ pub(crate) struct Store {
 pub(crate) struct Stored {
     pub hash: Hash,
     pub size: u64,
+    pub md5: [u8; 16],
     pub sha1: [u8; 20],
     pub sha256: [u8; 32],
     pub sha512: [u8; 64],
@@ -77,6 +79,7 @@ impl Stored {
 
 struct Hashing<R> {
     inner: R,
+    md5: Md5,
     sha1: Sha1,
     sha256: Sha256,
     sha512: Sha512,
@@ -86,6 +89,7 @@ struct Hashing<R> {
 impl<R: Read> Read for Hashing<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let k = self.inner.read(buf)?;
+        self.md5.update(&buf[..k]);
         self.sha1.update(&buf[..k]);
         self.sha256.update(&buf[..k]);
         self.sha512.update(&buf[..k]);
@@ -97,7 +101,14 @@ impl<R: Read> Read for Hashing<R> {
 impl Store {
     /// Stores `src` under namespace `ns`'s encoding profile, hashing it.
     pub fn put_reader(&self, ns: &Name, src: impl Read) -> Result<Stored> {
-        let mut r = Hashing { inner: src, sha1: Sha1::new(), sha256: Sha256::new(), sha512: Sha512::new(), n: 0 };
+        let mut r = Hashing {
+            inner: src,
+            md5: Md5::new(),
+            sha1: Sha1::new(),
+            sha256: Sha256::new(),
+            sha512: Sha512::new(),
+            n: 0,
+        };
         let hash = match &self.local {
             Some(l) => l.put_stream_for(ns, &mut r)?,
             None => self.repo.put_stream(&mut r)?,
@@ -105,6 +116,7 @@ impl Store {
         Ok(Stored {
             hash,
             size: r.n,
+            md5: r.md5.finalize().into(),
             sha1: r.sha1.finalize().into(),
             sha256: r.sha256.finalize().into(),
             sha512: r.sha512.finalize().into(),

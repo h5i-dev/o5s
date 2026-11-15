@@ -165,5 +165,18 @@ npm install left-pad
 - Proxy-cache: `[npm.upstream.<registry>] url = "https://registry.npmjs.org"`. Upstream versions are merged in, and tarballs are fetched and integrity-checked on first install, then served from the store. When the upstream is unreachable, packuments list only cached versions, and `latest` falls back to the newest cached one.
 - Not yet: unpublish, deprecate, `npm dist-tag`, and search.
 
+## Maven (`/maven/<repo>`)
+```xml
+<!-- settings.xml: credentials (Basic, password = token) and Central through pico2peta -->
+<servers><server><id>p2p</id><username>token</username><password>${env.TOKEN}</password></server></servers>
+<mirrors><mirror><id>p2p</id><mirrorOf>central</mirrorOf><url>https://p2p.example.com/maven/central</url></mirror></mirrors>
+```
+```sh
+mvn deploy -DaltDeploymentRepository=p2p::https://p2p.example.com/maven/releases
+```
+- This is the plain repository layout (GET, HEAD, PUT). Checksums (`.md5`, `.sha1`, `.sha256`, `.sha512`) are computed from the stored file, and a checksum PUT must match it.
+- Release files are create-once: re-deploying with other bytes gets 409. `maven-metadata.xml` and `-SNAPSHOT` versions are mutable. Authorization is on `maven/<repo>`.
+- Proxy-cache: `[maven.upstream.central] url = "https://repo.maven.apache.org/maven2"`. A miss is fetched, checked against the upstream's `.sha1`, and stored. Mutable upstream files are refreshed after `ttl_secs`, and the cached copy is served if the upstream is down.
+
 ## Operations
 See `deploy/README.md` for install, TLS, reload (SIGHUP), S3 credentials and lifecycle rules, metrics, audit verification (`pico2peta-server verify-audit`) and capacity notes.

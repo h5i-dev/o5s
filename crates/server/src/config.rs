@@ -89,6 +89,24 @@ pub struct Config {
     pub pypi: PypiSection,
     #[serde(default)]
     pub npm: NpmSection,
+    #[serde(default)]
+    pub maven: MavenSection,
+}
+
+/// Maven-compatible repositories (`/maven/<repo>/`). Every repository accepts deploys; one
+/// with an upstream also proxies and caches it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct MavenSection {
+    pub enabled: bool,
+    /// `[maven.upstream.<repo>]` (e.g. `url = "https://repo.maven.apache.org/maven2"`)
+    pub upstream: std::collections::BTreeMap<String, Upstream>,
+}
+
+impl Default for MavenSection {
+    fn default() -> Self {
+        MavenSection { enabled: true, upstream: Default::default() }
+    }
 }
 
 /// npm-compatible registries (`/npm/<registry>/`). Every registry accepts publishes; one with

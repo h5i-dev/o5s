@@ -1292,6 +1292,7 @@ dependencies = [
  "http-body-util",
  "jsonwebtoken",
  "lz4_flex",
+ "md-5",
  "pico2peta-backend-s3",
  "pico2peta-chunk",
  "pico2peta-client",

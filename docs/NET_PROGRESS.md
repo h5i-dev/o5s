@@ -241,7 +241,16 @@ The contended run checks that no update is lost: the final version equals the nu
   - Storage: `npm/<r>/<seg>/<v>` → `P2PNPMV1` record (manifest + digests) → tarball; dist-tags are `npm/<r>/<seg>/_tags/<t>`. The `npm` front claims `npm/`.
   - Shared plumbing with PyPI lives in `pkg.rs`: a streaming put with sha1/sha256/sha512, create-once, and the HTTP client.
   - Not done: unpublish, deprecate, the dist-tag API, and search.
-- Next: Maven (repository layout PUT/GET + checksums + upstream proxy-cache, tested with real `mvn`).
+- **Maven front: DONE** (`crates/server/src/maven.rs`, `tests/maven.rs`).
+  - Tested with the real Maven 3.9.9; its plugins come from Maven Central through a pico2peta proxy:
+    - `deploy:deploy-file` of a release; two snapshots (mutable); release overwrite 409; reader 403;
+    - `dependency:get` of the release and of the latest snapshot.
+  - Proxy chain test: server B proxies server A's Central proxy and A's releases. A fresh client resolves through B; then A is stopped and B runs a zero-grace GC, and a fresh client still resolves the plugins and the artifact entirely from B.
+  - Storage: `maven/<repo>/<path>` → `P2PMVN01` record → content. The `maven` front claims `maven/`.
+  - The test needs network access to Maven Central and skips without it. The Maven distribution is at `/mnt/scratch/pico2peta/tools/maven` (sha512-verified 3.9.9).
+- The 401 for unauthenticated `/pypi/` and `/maven/` requests now carries a Basic challenge, as `/git/` already did: pip and Maven send credentials only after one.
+- **All Phase 3 (3) fronts are DONE:** HF (LFS + Xet upload), PyPI, npm, Maven, and OCI (conformance 73/0), each tested with its real client.
+- Next: Phase 3 (4), the comparison benchmarks against the specialist systems, in one batch per PLAN §6.5 (disk budget: clean up after each run). Then switch segmap to a re-export of `pico2peta_repo::idmap`.
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
