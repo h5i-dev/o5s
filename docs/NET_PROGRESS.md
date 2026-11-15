@@ -237,6 +237,10 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **Large listings:** `list()` buffers all keys in memory. The trait returns a `Vec`, so a paginated or streaming list would need a trait change if a prefix grows to millions of keys.
 
 ## Requests for core
+- **Byte-grouping pack codec (Phase 2 C, measured 2026-11-15):** please add a codec id that applies `pico2peta_weights::bytegroup::group(bytes, width)` before zstd. Width comes from the tensor dtype (`width_for_dtype`: bf16/f16 → 2, f32 → 4).
+  - Measured on a real bf16 pair (SmolLM2-135M → SmolLM2-135M-Instruct, 272 tensors, 269 MB tensor-aligned XOR delta, 43% zero bytes; `crates/weights/examples/bytegroup_measure.rs`, run under the bench lock).
+  - Gains: **zstd output −10.5% at level 3 and −14.0% at level 19** for 64 KiB blocks (the pack chunk granularity), and −9.7% / −14.0% per whole tensor.
+  - The transform runs at 1.06 GB/s on one core and its round trip is verified. Raw-checkpoint (no delta) and fp32 (GPT-2) numbers will follow.
 - **RESOLVED (2026-11-15):** a ref-log double-Ok regression (core 8e845fd) was caught by `two_servers_share_a_repo_via_s3`. 60 acknowledged commits had produced only 50–54 versions, because identical CAS records from two writers were both treated as "ours".
   - Fixed in core e7a75c4: each log entry now carries a per-attempt nonce, and only our own nonce counts as ours.
   - Re-verified on MinIO: 5 of 5 runs give 60 commits with final version 60 (75–83 conflicts), and `ref_log_commit_survives_lost_response` still passes.
