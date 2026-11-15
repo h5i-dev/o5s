@@ -514,6 +514,35 @@ paths):**
 - The 48 B/object index model (the production index is 44 B, plus record overhead).
 - Generalization corpora are small.
 
+### 6.7 Scale tests (ROADMAP item 4), pre-registered 2026-11-15, before any scale-test code
+
+**Goal.** Find the first bottleneck at each scale and fix it, then record the limits in ARCHITECTURE.md. This is not
+a pass/fail experiment on the product. The targets below say what counts as "a bottleneck to fix". A miss is
+analysed, fixed if it's a defect, and re-measured, and the before and after are both reported.
+
+**Workload** (`p2p-bench scale`, deterministic seed, local disk, bench lock, windows ≤ 60 min):
+- **Objects:** N distinct 64-byte objects (random, so incompressible and no dedup), written with `put` in batches,
+  `flush` every 10⁵. N = 10⁶, 10⁷, and 10⁸ only if the projected disk use (≈ 160 B per object, packs plus index)
+  fits in the space left after keeping 5 GB free. Otherwise that scale is reported as not run, with the reason.
+- **Names:** M names (`s/<i % 1000>/<i>`) set with `replace_many` in batches of 10⁴, M = 10⁶ and 10⁷ (same disk rule).
+- **Provenance:** R records (one input, one output, small meta), R = 10⁶.
+
+**Metrics and targets, per scale:**
+
+| metric | target |
+|---|---|
+| put throughput (objects/s, including flushes) | at N = 10⁷ ≥ 50 % of the rate at the first 10⁶ |
+| warm random `get`, p99 | ≤ 1 ms |
+| cold open (new handle, index load) | ≤ 30 s at N = 10⁷ |
+| RSS after open + 10⁵ gets, per object | ≤ 64 B/object (indexes are memory-mapped) |
+| `replace` (single name) at M names | ≥ 1,000 commits/s |
+| `resolve` p99 at M names | ≤ 1 ms |
+| ref store open at M names | ≤ 10 s at M = 10⁶ |
+| GC full cycle (plan, sweep, delete with zero grace) on N = 10⁷ (all live) | ≤ 30 min, RSS ≤ 6 GB |
+| provenance `load` at R = 10⁶ | ≤ 10 s |
+
+Each run reports load average, disk used, and the profile of whatever misses its target.
+
 ### 6.5 Net fronts, pre-registered 2026-11-15, before any front measurement code (net session)
 
 **Common rules.** Every check uses the **real, unmodified client**. Timing runs hold the bench lock. Each
