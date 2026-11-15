@@ -91,6 +91,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/refs", get(list_refs))
         .route("/v1/refs/{*name}", get(resolve))
         .route("/v1/replace", post(replace))
+        .route("/v1/replace_many", post(replace_many))
         .route("/v1/namespaces", get(list_rules))
         .route("/v1/namespaces/{*prefix}", put(set_rule))
         .route("/v1/whoami", get(whoami))
@@ -229,9 +230,9 @@ impl AppState {
     }
 }
 
-/// Namespaces owned by protocol adapters (OCI, Git).
+/// Namespaces owned by protocol adapters (OCI, Git) and the provenance log.
 pub fn is_reserved(name: &str) -> bool {
-    pico2peta_core::is_under(name, "oci") || pico2peta_core::is_under(name, "git")
+    ["oci", "git", "_prov"].iter().any(|p| pico2peta_core::is_under(name, p))
 }
 
 /// Runs a repository call on the blocking pool.
@@ -646,6 +647,57 @@ async fn replace(
     Ok((status, Json(wire::ReplaceResponse::from_core(&out))).into_response())
 }
 
+async fn replace_many(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let req: wire::ReplaceManyRequest =
+        serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("bad replace_many request: {e}")))?;
+    let (updates, read_set) = req.to_core().map_err(ApiError::from)?;
+    if updates.is_empty() {
+        return Err(ApiError::bad_request("replace_many needs at least one update"));
+    }
+    for (n, _) in &updates {
+        st.require(st.authz.allows(&p, n.as_str(), Access::Write), &p, &c, "replace", n.as_str())?;
+        if is_reserved(n.as_str()) {
+            st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "replace_reserved", n.as_str())?;
+        }
+    }
+    for (n, _) in &read_set {
+        st.require(st.authz.allows(&p, n.as_str(), Access::Read), &p, &c, "replace", n.as_str())?;
+    }
+    st.require_audit_healthy()?;
+    let repo = st.repo.clone();
+    let (u, rs) = (updates.clone(), read_set.clone());
+    let res = blocking(move || repo.replace_many(&u, &rs)).await;
+    let outcome = match &res {
+        Ok(pico2peta_core::ReplaceManyOutcome::Ok { .. }) => "ok",
+        Ok(pico2peta_core::ReplaceManyOutcome::Conflict { .. }) => "conflict",
+        Err(_) => "rejected",
+    };
+    st.metrics.replace.get_or_create(&OutcomeLabels { outcome: outcome.into() }).inc();
+    let targets: Vec<String> = updates.iter().map(|(n, h)| format!("{n}={h}")).collect();
+    st.audit_mutation(Event {
+        request_id: c.request_id.clone(),
+        principal: p.name.clone(),
+        action: "replace_many",
+        target: updates.first().map(|(n, _)| n.to_string()).unwrap_or_default(),
+        outcome: outcome.into(),
+        detail: Some(targets.join(" ")),
+        remote: c.remote.clone(),
+    })
+    .await?;
+    let out = res?;
+    let status = if matches!(out, pico2peta_core::ReplaceManyOutcome::Ok { .. }) {
+        StatusCode::OK
+    } else {
+        StatusCode::CONFLICT
+    };
+    Ok((status, Json(wire::ReplaceManyResponse::from_core(&out))).into_response())
+}
+
 // ---------------------------------------------------------------------------
 // Namespaces (admin)
 // ---------------------------------------------------------------------------
@@ -710,7 +762,8 @@ pub async fn run_gc(st: &AppState, dry_run: bool) -> ApiResult<wire::GcReportJso
     let opts = st.gc.options(dry_run);
     let running = st.gc_running.clone();
     let res = blocking(move || {
-        let tracer = crate::oci::OciTracer::new(Arc::new(local.clone()));
+        // Provenance records, then OCI manifests/segment maps; everything else is a leaf.
+        let tracer = pico2peta_prov::ProvTracer { inner: crate::oci::OciTracer::new(Arc::new(local.clone())) };
         let r = local.gc(&opts, &tracer);
         running.store(false, Ordering::Release);
         r

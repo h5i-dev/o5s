@@ -22,7 +22,9 @@
 pub mod wire;
 
 use bytes::Bytes;
-use pico2peta_core::{Error, Hash, Name, ObjectStore, Observed, RefValue, ReplaceOutcome, Repository, Result, Rule};
+use pico2peta_core::{
+    Error, Hash, Name, ObjectStore, Observed, RefValue, ReplaceManyOutcome, ReplaceOutcome, Repository, Result, Rule,
+};
 use reqwest::{Method, StatusCode};
 use std::future::Future;
 use std::io::Read;
@@ -612,6 +614,39 @@ impl Repository for RemoteRepo {
                     r.to_core()
                 }
                 _ => Err(error_from(resp, &Ctx { name: Some(&name), hash: Some(new), range: None }).await),
+            }
+        })
+    }
+
+    fn replace_many(&self, updates: &[(Name, Hash)], read_set: &[(Name, Observed)]) -> Result<ReplaceManyOutcome> {
+        let body = serde_json::to_vec(&wire::ReplaceManyRequest::from_core(updates, read_set))
+            .map_err(|e| Error::Parse(e.to_string()))?;
+        let first = updates.first().map(|(n, _)| n.clone());
+        let this = self.clone();
+        self.block(async move {
+            // Not idempotent: retry only when the connection was never established.
+            let mut attempt = 0;
+            let resp = loop {
+                let rb = this
+                    .request(Method::POST, "/v1/replace_many")
+                    .header("content-type", "application/json")
+                    .body(body.clone())
+                    .timeout(this.inner.cfg.request_timeout);
+                match rb.send().await {
+                    Ok(r) => break r,
+                    Err(e) if e.is_connect() && attempt + 1 < this.inner.cfg.max_attempts => {
+                        tokio::time::sleep(this.backoff(attempt)).await;
+                        attempt += 1;
+                    }
+                    Err(e) => return Err(transport(e)),
+                }
+            };
+            match resp.status() {
+                StatusCode::OK | StatusCode::CONFLICT => {
+                    let r: wire::ReplaceManyResponse = resp.json().await.map_err(transport)?;
+                    r.to_core()
+                }
+                _ => Err(error_from(resp, &Ctx { name: first.as_ref(), ..Default::default() }).await),
             }
         })
     }

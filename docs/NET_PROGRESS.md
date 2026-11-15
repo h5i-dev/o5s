@@ -81,7 +81,19 @@
 ### Next
 - Goal 6: Git smart-HTTP and OCI distribution adapters. The hash-mapping design proposal is below, waiting for the lead's agreement.
 
-## Design proposal: Git and OCI hash mapping (goal 6; status: PROPOSED, awaiting core lead)
+### Goal 6a: OCI distribution adapter (`crates/server/src/oci.rs`, `/v2`). Done.
+- Covers pull, push (monolithic and chunked with `Content-Range` checks), cross-repo mount, tags/list with pagination, and the OCI 1.1 referrers API (`OCI-Subject`, `artifactType` filter). Deletion returns 405.
+- Auth: Basic (any user, the token as password) or Bearer. Unauthenticated requests get a `WWW-Authenticate: Basic` challenge.
+- Mapping follows the agreed design, with the lead's amendment:
+  - The sha256 → BLAKE3 digest index (`oci/_digest`) and per-repo blob membership (`oci/<repo>/_blobs`) are **segment maps** (`segmap.rs`): content-addressed sorted segments behind one ref, OCC updates, tiered compaction, ranged binary search for large segments, and a cache.
+  - Tags, manifest links, media types and referrer links stay refs.
+  - Map values are weak. `OciTracer` keeps blobs alive through manifests, and is chained inside the core `ProvTracer` for server GC.
+  - Uploads spool to `<repo>.oci-uploads/` and hash incrementally (bounded memory). Sessions are per principal, with a TTL and a session cap.
+- **Passes the OCI distribution-spec v1.1.1 conformance suite: 64/64** across pull, push and content discovery (content-management is skipped because deletes are unsupported). It ran three times on fresh repositories. CI job: `scripts/oci-conformance.sh`.
+- `/v1` writes under `oci/`, `git/` and `_prov/` need global admin, which protects the digest↔content invariants.
+- `POST /v1/replace_many` (atomic, API v1.2), with `RemoteRepo` overriding `replace_many`.
+
+## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
 **Principles**
 1. Internal identity stays BLAKE3-256 of the exact stored bytes. Adapters never invent a second identity scheme inside the core.
@@ -139,6 +151,8 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 
 ## Requests for core
 - 2026-11-15: a streaming put, a backend error variant, and committing early. All three were delivered in API v1.
+- `Error::Unauthorized` (v1.1) and `replace_many` (v1.2) were delivered, and both are adopted.
+- Open question: does `ObjectStore::contains` (or `size`) report `false` for an object served **only** from a condemned pack? The OCI adapter accepts a manifest when `contains(blob)` is true, without re-putting the blob. If a condemned-only copy counts as present, a manifest pushed between GC's delete-phase mark and the pack deletion could reference a blob that then disappears. If the answer is yes, I need a `touch`/`ensure_live(hash)` primitive (rewrite if condemned-only), or `contains` must ignore condemned copies.
 - (none open)
 
 ## Small fixes made to core crates

@@ -389,3 +389,38 @@ fn admin_gc_endpoint() {
     assert!(audit.lines().any(|l| l.contains("\"action\":\"gc\"") && l.contains("\"principal\":\"admin\"")));
     assert!(audit.lines().any(|l| l.contains("\"action\":\"gc\"") && l.contains("\"outcome\":\"denied\"")));
 }
+
+#[test]
+fn replace_many_is_atomic_over_http() {
+    let s = TestServer::start(|_| {});
+    let c = s.client(ALICE);
+    let h1 = c.put(b"one").unwrap();
+    let h2 = c.put(b"two").unwrap();
+    let (a, b) = (n("alice/a"), n("alice/b"));
+    let out = c
+        .replace_many(
+            &[(a.clone(), h1), (b.clone(), h2)],
+            &[(a.clone(), Observed::Absent), (b.clone(), Observed::Absent)],
+        )
+        .unwrap();
+    assert!(matches!(out, pico2peta_core::ReplaceManyOutcome::Ok { ref versions } if versions.len() == 2), "{out:?}");
+    // One stale entry: nothing changes.
+    let out = c
+        .replace_many(
+            &[(a.clone(), h2), (b.clone(), h1)],
+            &[(a.clone(), Observed::Version(1)), (b.clone(), Observed::Absent)],
+        )
+        .unwrap();
+    assert!(matches!(out, pico2peta_core::ReplaceManyOutcome::Conflict { .. }));
+    assert_eq!(c.resolve(&a).unwrap().unwrap().hash, h1);
+    assert_eq!(c.resolve(&b).unwrap().unwrap().hash, h2);
+    // Authz is per target.
+    assert!(matches!(
+        c.replace_many(
+            &[(a.clone(), h2), (n("shared/x"), h1)],
+            &[(a.clone(), Observed::Version(1)), (n("shared/x"), Observed::Absent)]
+        ),
+        Err(Error::Unauthorized(_))
+    ));
+    assert_eq!(c.resolve(&a).unwrap().unwrap().hash, h1);
+}

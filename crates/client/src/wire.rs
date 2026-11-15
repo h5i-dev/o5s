@@ -9,6 +9,7 @@
 //! | `GET` | `/v1/refs/{name}` | [`RefJson`] or 404 |
 //! | `GET` | `/v1/refs?prefix=p` | [`RefList`] (only names the caller may read) |
 //! | `POST` | `/v1/replace` | [`ReplaceRequest`] → 200/409 [`ReplaceResponse`] |
+//! | `POST` | `/v1/replace_many` | [`ReplaceManyRequest`] → 200/409 [`ReplaceManyResponse`] (atomic) |
 //! | `GET` | `/v1/namespaces` | [`RuleList`] |
 //! | `PUT` | `/v1/namespaces/{prefix}` | [`SetRuleRequest`] (admin) |
 //! | `GET` | `/v1/whoami` | [`WhoAmI`] |
@@ -21,7 +22,7 @@
 //! Errors are `4xx/5xx` with an [`ErrorBody`]; `error.code` is
 //! `pico2peta_core::Error::code()` or one of the HTTP-only codes in [`codes`].
 
-use pico2peta_core::{Error, Hash, Name, Observed, RefValue, ReplaceOutcome, Rule};
+use pico2peta_core::{Error, Hash, Name, Observed, RefValue, ReplaceManyOutcome, ReplaceOutcome, Rule};
 use serde::{Deserialize, Serialize};
 
 /// API version prefix.
@@ -82,6 +83,66 @@ pub struct ReplaceRequest {
 pub enum ReplaceResponse {
     Ok { version: u64 },
     Conflict { stale: Vec<ReadSetEntry> },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateJson {
+    pub name: String,
+    pub new: String,
+}
+
+/// Atomic multi-name update: every update target must be in `read_set`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplaceManyRequest {
+    pub updates: Vec<UpdateJson>,
+    pub read_set: Vec<ReadSetEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum ReplaceManyResponse {
+    Ok { versions: Vec<u64> },
+    Conflict { stale: Vec<ReadSetEntry> },
+}
+
+/// `(updates, read_set)` of a parsed [`ReplaceManyRequest`].
+pub type ParsedReplaceMany = (Vec<(Name, Hash)>, Vec<(Name, Observed)>);
+
+impl ReplaceManyRequest {
+    pub fn from_core(updates: &[(Name, Hash)], read_set: &[(Name, Observed)]) -> Self {
+        ReplaceManyRequest {
+            updates: updates.iter().map(|(n, h)| UpdateJson { name: n.to_string(), new: h.to_hex() }).collect(),
+            read_set: read_set.iter().map(|(n, o)| ReadSetEntry::from_core(n, *o)).collect(),
+        }
+    }
+    pub fn to_core(&self) -> Result<ParsedReplaceMany, Error> {
+        let u = self
+            .updates
+            .iter()
+            .map(|u| Ok((Name::new(&u.name)?, u.new.parse()?)))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let rs = self.read_set.iter().map(ReadSetEntry::to_core).collect::<Result<Vec<_>, _>>()?;
+        Ok((u, rs))
+    }
+}
+
+impl ReplaceManyResponse {
+    pub fn from_core(o: &ReplaceManyOutcome) -> Self {
+        match o {
+            ReplaceManyOutcome::Ok { versions } => ReplaceManyResponse::Ok { versions: versions.clone() },
+            ReplaceManyOutcome::Conflict { stale } => ReplaceManyResponse::Conflict {
+                stale: stale.iter().map(|(n, o)| ReadSetEntry::from_core(n, *o)).collect(),
+            },
+        }
+    }
+    pub fn to_core(&self) -> Result<ReplaceManyOutcome, Error> {
+        Ok(match self {
+            ReplaceManyResponse::Ok { versions } => ReplaceManyOutcome::Ok { versions: versions.clone() },
+            ReplaceManyResponse::Conflict { stale } => ReplaceManyOutcome::Conflict {
+                stale: stale.iter().map(ReadSetEntry::to_core).collect::<Result<Vec<_>, _>>()?,
+            },
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
