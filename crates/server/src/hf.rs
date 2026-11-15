@@ -56,17 +56,58 @@ const DEFAULT_GITATTRIBUTES: &str = "*.bin filter=lfs diff=lfs merge=lfs -text\n
 
 pub struct HfState {
     git: Arc<GitState>,
+    /// The concrete repository, for named puts (namespace chunking profiles).
+    local: Option<pico2peta_repo::LocalRepo>,
+    /// sha256 → content (global; GC follows LFS pointers through it).
     lfs: Arc<SegMap>,
+    /// sha256(repo namespace, sha256) → content: the objects a repo may reference. Without it,
+    /// anyone who learned a sha256 could commit, and then read, another repo's private file.
+    acl: Arc<SegMap>,
+    /// Xet xorb hash → xorb record (see `xet.rs`).
+    pub(crate) xet: Arc<SegMap>,
     secret: [u8; 32],
 }
 
 impl HfState {
-    pub fn new(git: Arc<GitState>) -> std::result::Result<HfState, String> {
-        let n = Name::new("git/_lfs").map_err(|e| e.to_string())?;
-        let lfs = Arc::new(SegMap::new(git.repo.clone(), n, Arc::new(SegCache::default())));
+    pub fn new(git: Arc<GitState>, local: Option<pico2peta_repo::LocalRepo>) -> std::result::Result<HfState, String> {
+        let map = |n: &str| -> std::result::Result<Arc<SegMap>, String> {
+            let n = Name::new(n).map_err(|e| e.to_string())?;
+            Ok(Arc::new(SegMap::new(git.repo.clone(), n, Arc::new(SegCache::default()))))
+        };
+        let (lfs, acl, xet) = (map("git/_lfs")?, map("git/_lfsacl")?, map("git/_xet")?);
         let mut secret = [0u8; 32];
         getrandom::fill(&mut secret).map_err(|e| format!("no system randomness: {e}"))?;
-        Ok(HfState { git, lfs, secret })
+        Ok(HfState { git, local, lfs, acl, xet, secret })
+    }
+
+    pub(crate) fn git_repo(&self) -> &dyn pico2peta_core::Repository {
+        &*self.git.repo
+    }
+
+    /// Stores file content for `repo` (with its namespace's encoding profile when local).
+    pub(crate) fn put_content(&self, repo: &RepoId, src: &mut dyn Read) -> Result<Hash> {
+        match (&self.local, repo.content_name()) {
+            (Some(l), Some(n)) => l.put_stream_for(&n, src),
+            _ => self.git.repo.put_stream(src),
+        }
+    }
+
+    fn acl_key(repo: &RepoId, sha: &str) -> Key {
+        Sha256::new().chain_update(repo.authz()).chain_update([0u8]).chain_update(sha).finalize().into()
+    }
+
+    /// Makes `sha` (content `h`, `size` bytes) referencable from `repo`.
+    pub(crate) fn register_lfs(&self, repo: &RepoId, sha: &str, h: Hash, size: u64) -> Result<()> {
+        let key = sha_key(sha).ok_or_else(|| Error::Parse(format!("bad sha256 {sha}")))?;
+        let v = Value { hash: h, aux: size };
+        self.lfs.insert_blocking(vec![(key, v)])?;
+        self.acl.insert_blocking(vec![(Self::acl_key(repo, sha), v)])?;
+        Ok(())
+    }
+
+    /// The content of `sha` if `repo` may reference it (and it still exists).
+    fn lfs_for(&self, repo: &RepoId, sha: &str) -> Result<Option<Value>> {
+        self.acl.get_live_blocking(&Self::acl_key(repo, sha))
     }
 }
 
@@ -75,7 +116,7 @@ impl HfState {
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
-struct RepoId {
+pub(crate) struct RepoId {
     /// `model`, `dataset` or `space`.
     kind: &'static str,
     ns: String,
@@ -505,8 +546,7 @@ fn make_commit(
                     insert_path(&mut tree, path, Node::File { mode: "100644".into(), oid })?;
                 }
                 Op::AddLfs { path, sha, size } => {
-                    let key = sha_key(sha).ok_or_else(|| Error::Parse(format!("bad sha256 {sha}")))?;
-                    match hf.lfs.get_live_blocking(&key)? {
+                    match hf.lfs_for(repo, sha)? {
                         Some(v) if v.aux == *size => {}
                         _ => {
                             return Ok(Err((
@@ -665,10 +705,98 @@ pub async fn api(
                 }
                 (Method::POST, ["preupload", rev]) => preupload(&st, &hf, &p, &c, &repo, &dec(rev), body).await,
                 (Method::POST, ["commit", rev]) => commit(&st, &hf, &p, &c, &repo, &dec(rev), &headers, body).await,
+                (Method::GET, ["xet-write-token", ..]) => xet_token(&st, &hf, &p, &c, &repo, true, &headers),
+                (Method::GET, ["xet-read-token", ..]) => xet_token(&st, &hf, &p, &c, &repo, false, &headers),
                 _ => hf_err(StatusCode::NOT_FOUND, None, "unknown API"),
             }
         }
         _ => hf_err(StatusCode::NOT_FOUND, None, "unknown API"),
+    }
+}
+
+/// `{casUrl, accessToken, exp}` for `hf_xet`: an HMAC capability scoped to this repo.
+fn xet_token(
+    st: &AppState,
+    hf: &HfState,
+    p: &Principal,
+    c: &Caller,
+    repo: &RepoId,
+    write: bool,
+    headers: &HeaderMap,
+) -> Response {
+    if let Err(r) = check(st, p, c, repo, if write { Access::Write } else { Access::Read }) {
+        return r;
+    }
+    let tok = sign_token(hf, if write { "xet-w" } else { "xet-r" }, repo, "-", 0);
+    axum::Json(serde_json::json!({
+        "casUrl": format!("{}/xet", base_url(headers)), "accessToken": tok, "exp": now_secs() + TOKEN_TTL_SECS,
+    }))
+    .into_response()
+}
+
+/// `/xet/{*rest}`: the Xet CAS API, authorized by the bearer capability from [`xet_token`].
+pub async fn xet_cas(
+    State(st): State<Arc<AppState>>,
+    method: Method,
+    Path(rest): Path<String>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    let Some(hf) = st.hf.clone() else { return hf_err(StatusCode::NOT_FOUND, None, "HF front disabled") };
+    let bearer = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or_default();
+    let write = verify_token(&hf, "xet-w", bearer);
+    let Some((repo, _, _)) = write.clone().or_else(|| verify_token(&hf, "xet-r", bearer)) else {
+        return hf_err(StatusCode::UNAUTHORIZED, None, "invalid or expired xet token");
+    };
+    let parts: Vec<&str> = rest.split('/').collect();
+    let need_write = || hf_err(StatusCode::FORBIDDEN, None, "read-only xet token");
+    match (method, parts.as_slice()) {
+        (Method::POST, ["v1", "xorbs", "default", h]) => {
+            if write.is_none() {
+                return need_write();
+            }
+            let Some(xh) = crate::xet::from_hex(h) else {
+                return hf_err(StatusCode::BAD_REQUEST, None, "bad xorb hash");
+            };
+            let Ok(raw) = axum::body::to_bytes(body, crate::xet::MAX_XORB_BODY).await else {
+                return hf_err(StatusCode::PAYLOAD_TOO_LARGE, None, "xorb too large");
+            };
+            st.metrics.bytes_in.inc_by(raw.len() as u64);
+            let hf2 = hf.clone();
+            match blocking(move || crate::xet::put_xorb(&hf2, &repo, &xh, &raw)).await {
+                Ok(new) => axum::Json(serde_json::json!({ "was_inserted": new })).into_response(),
+                Err(r) => r,
+            }
+        }
+        (Method::POST, ["v1", "shards"]) => {
+            if write.is_none() {
+                return need_write();
+            }
+            let Ok(raw) = axum::body::to_bytes(body, crate::xet::MAX_SHARD_BODY).await else {
+                return hf_err(StatusCode::PAYLOAD_TOO_LARGE, None, "shard too large");
+            };
+            let hf2 = hf.clone();
+            let r2 = repo.clone();
+            match tokio::task::spawn_blocking(move || crate::xet::put_shard(&hf2, &r2, &raw)).await {
+                Ok(Ok(_)) => axum::Json(serde_json::json!({ "result": 1 })).into_response(),
+                Ok(Err(e)) => {
+                    tracing::warn!(repo = %repo.authz(), error = %e, "xet shard rejected");
+                    core_err(e)
+                }
+                Err(e) => internal(e),
+            }
+        }
+        // No global dedup index: "not tracked" makes the client upload what it lacks locally.
+        (Method::GET, ["v1", "chunks", ..]) => StatusCode::NOT_FOUND.into_response(),
+        (Method::POST, ["v1", "telemetry"]) => StatusCode::OK.into_response(),
+        (m, _) => {
+            tracing::warn!(method = %m, path = %rest, "unsupported xet endpoint");
+            hf_err(StatusCode::NOT_FOUND, None, "unsupported xet endpoint")
+        }
     }
 }
 
@@ -1019,8 +1147,9 @@ async fn lfs_batch(
             out.push(serde_json::json!({ "oid": sha, "size": size, "error": { "code": 422, "message": "bad oid" } }));
             continue;
         };
-        let lfs = hf.lfs.clone();
-        let have = match blocking(move || lfs.get_live_blocking(&key)).await {
+        let _ = key;
+        let (hf2, r2, s2) = (hf.clone(), repo.clone(), sha.clone());
+        let have = match blocking(move || hf2.lfs_for(&r2, &s2)).await {
             Ok(x) => x.is_some_and(|v| v.aux == size),
             Err(r) => return r,
         };
@@ -1116,13 +1245,10 @@ async fn lfs_upload(st: &Arc<AppState>, hf: &Arc<HfState>, token: &str, body: Bo
             }
         }
     });
-    let (repo_store, local, name) = (st.repo.clone(), st.local.clone(), repo.content_name());
+    let (hf2, r2) = (hf.clone(), repo.clone());
     let res = tokio::task::spawn_blocking(move || -> Result<(Hash, String, u64)> {
         let mut r = HashRead { inner: ChanRead { rx, cur: Bytes::new() }, sha: Sha256::new(), n: 0 };
-        let h = match (local, name) {
-            (Some(l), Some(n)) => l.put_stream_for(&n, &mut r)?,
-            _ => repo_store.put_stream(&mut r)?,
-        };
+        let h = hf2.put_content(&r2, &mut r)?;
         Ok((h, hex(&r.sha.finalize()), r.n))
     })
     .await;
@@ -1139,35 +1265,34 @@ async fn lfs_upload(st: &Arc<AppState>, hf: &Arc<HfState>, token: &str, body: Bo
             format!("content is sha256 {got} ({n} B), expected {sha} ({size} B)"),
         );
     }
-    let Some(key) = sha_key(&sha) else { return hf_err(StatusCode::BAD_REQUEST, None, "bad oid") };
-    let lfs = hf.lfs.clone();
-    if let Err(e) = lfs.insert(vec![(key, Value { hash: h, aux: size })]).await {
-        return core_err(e);
+    let hf2 = hf.clone();
+    if let Err(r) = blocking(move || hf2.register_lfs(&repo, &sha, h, size)).await {
+        return r;
     }
     StatusCode::OK.into_response()
 }
 
 async fn lfs_verify(hf: &Arc<HfState>, token: &str) -> Response {
-    let Some((_, sha, size)) = verify_token(hf, "verify", token) else {
+    let Some((repo, sha, size)) = verify_token(hf, "verify", token) else {
         return hf_err(StatusCode::FORBIDDEN, None, "invalid or expired verify token");
     };
-    let Some(key) = sha_key(&sha) else { return hf_err(StatusCode::BAD_REQUEST, None, "bad oid") };
-    match hf.lfs.get_live(key).await {
+    let hf2 = hf.clone();
+    match blocking(move || hf2.lfs_for(&repo, &sha)).await {
         Ok(Some(v)) if v.aux == size => StatusCode::OK.into_response(),
         Ok(_) => hf_err(StatusCode::NOT_FOUND, None, "object not uploaded"),
-        Err(e) => core_err(e),
+        Err(r) => r,
     }
 }
 
 async fn lfs_download(st: &Arc<AppState>, hf: &Arc<HfState>, token: &str, headers: &HeaderMap) -> Response {
-    let Some((_, sha, _)) = verify_token(hf, "down", token) else {
+    let Some((repo, sha, _)) = verify_token(hf, "down", token) else {
         return hf_err(StatusCode::FORBIDDEN, None, "invalid or expired download token");
     };
-    let Some(key) = sha_key(&sha) else { return hf_err(StatusCode::BAD_REQUEST, None, "bad oid") };
-    match hf.lfs.get_live(key).await {
+    let hf2 = hf.clone();
+    match blocking(move || hf2.lfs_for(&repo, &sha)).await {
         Ok(Some(v)) => serve_object(st, v.hash, headers, false, |_| {}).await,
         Ok(None) => hf_err(StatusCode::NOT_FOUND, None, "object not found"),
-        Err(e) => core_err(e),
+        Err(r) => r,
     }
 }
 
@@ -1252,11 +1377,8 @@ async fn resolve(
         let (_, blob) = view.load(&oid)?.ok_or_else(|| Error::Corrupt(format!("missing blob {}", hex(&oid))))?;
         let lfs = match parse_lfs_pointer(&blob) {
             Some((sha, size)) => {
-                let key = sha_key(&sha).ok_or_else(|| Error::Corrupt("bad LFS pointer".into()))?;
-                let v = hf2
-                    .lfs
-                    .get_live_blocking(&key)?
-                    .ok_or_else(|| Error::Corrupt(format!("LFS object {sha} missing")))?;
+                // Only objects uploaded to this repo: a pushed pointer can't expose others' files.
+                let Some(v) = hf2.lfs_for(&r2, &sha)? else { return Ok(Err("EntryNotFound")) };
                 Some((sha, size, v.hash))
             }
             None => None,
@@ -1379,8 +1501,9 @@ async fn commit(
                 // Size may be omitted (copies); take it from the index.
                 let size = match size {
                     Some(s) => s,
-                    None => match sha_key(&sha) {
-                        Some(k) => match hf.lfs.get_live(k).await {
+                    None => {
+                        let (hf2, r2, s2) = (hf.clone(), repo.clone(), sha.clone());
+                        match blocking(move || hf2.lfs_for(&r2, &s2)).await {
                             Ok(Some(v)) => v.aux,
                             _ => {
                                 return hf_err(
@@ -1389,9 +1512,8 @@ async fn commit(
                                     format!("LFS object {sha} unknown"),
                                 );
                             }
-                        },
-                        None => return hf_err(StatusCode::BAD_REQUEST, None, "bad oid"),
-                    },
+                        }
+                    }
                 };
                 ops.push(Op::AddLfs { path, sha, size });
             }

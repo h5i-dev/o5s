@@ -132,14 +132,15 @@ git push --atomic origin main v1.0 :old-branch
 ## Hugging Face Hub (`/api`, `/<repo>/resolve`)
 ```sh
 export HF_ENDPOINT=https://p2p.example.com HF_TOKEN=$TOKEN
-export HF_HUB_DISABLE_XET=1     # uploads: the Xet protocol is not served yet (downloads work either way)
 hf upload team/tiny ./model     # or HfApi().upload_folder(...); hf_hub_download / snapshot_download work too
 git clone https://any:$TOKEN@p2p.example.com/git/hf/models/team/tiny.git   # the same repo, as Git
 ```
 - The HF repo `team/tiny` of type model/dataset/space is the Git repo `hf/<type>s/team/tiny`. Authorization uses its namespace `git/hf/models/team/tiny`, so one grant covers both the HF API and `git`.
 - Small files are Git blobs. Files of 64 KiB or more, or with NUL bytes, go through Git LFS: the repo holds pointer blobs, and the content is a core object stored with the namespace's chunker (`[chunking]`, e.g. Xet).
 - Supported: repo create, info (`siblings`, `files_metadata`), tree listing, preupload, the LFS batch API with signed one-hour upload and download URLs, NDJSON commits (add, LFS add, delete file, delete folder; `parentCommit` is checked), and `resolve` with `Range`, `ETag`, `X-Repo-Commit` and `X-Linked-*` headers. Any commit id or branch works as a revision.
-- Not yet: the Xet CAS protocol, pull requests, tags/branches via the HF API (use `git push`), and the repo settings and delete APIs.
+- Xet uploads (the default with `hf_xet` installed) are served at `/xet` (`casUrl` from `xet-write-token`). Xorbs are checked against their Merkle hash, and shard segments against their verification hashes. Each file is rebuilt and checked against its Xet file hash and sha256, then stored like an LFS upload.
+- LFS objects are scoped to a repo: a commit, `resolve` or download can only reference an object uploaded to that repo, so knowing another repo's sha256 is not enough.
+- Not yet: Xet downloads (`resolve` serves plain HTTP), global Xet dedup queries, pull requests, tags/branches via the HF API (use `git push`), and the repo settings and delete APIs.
 - Disable it with `[hf] enabled = false`. It requires `[git]`.
 
 ## Operations

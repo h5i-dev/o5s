@@ -66,6 +66,25 @@ pub struct AppState {
     pub oci: Option<Arc<crate::oci::OciState>>,
     pub git: Option<Arc<crate::git::GitState>>,
     pub hf: Option<Arc<crate::hf::HfState>>,
+    /// The domain fronts and their write handles (`None` only in tests that build state by hand).
+    pub fronts: Option<Arc<crate::fronts::Fronts>>,
+}
+
+impl AppState {
+    /// Write handle of the OCI front (names under `oci/`).
+    pub(crate) fn oci_repo(&self) -> Arc<dyn Repository> {
+        self.fronts.as_ref().and_then(|f| f.handle("oci").ok()).unwrap_or_else(|| self.repo.clone())
+    }
+
+    /// Repository to move `names` with. Fronts own `git/` and `oci/`; a global admin who
+    /// passed the reserved-name check acts through the owning front's handle.
+    fn repo_for<'a>(&self, names: impl IntoIterator<Item = &'a str>) -> Arc<dyn Repository> {
+        let names: Vec<&str> = names.into_iter().collect();
+        match &self.fronts {
+            Some(f) if names.iter().any(|n| is_reserved(n)) => f.handle_for(names),
+            _ => self.repo.clone(),
+        }
+    }
 }
 
 type St = State<Arc<AppState>>;
@@ -140,6 +159,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/metrics", get(metrics_main))
         // Capability URLs (HMAC-signed by the HF front): the LFS client sends no credentials.
         .route("/api/_lfs/{op}/{token}", axum::routing::any(crate::hf::lfs_capability))
+        .route("/xet/{*rest}", axum::routing::any(crate::hf::xet_cas))
         .merge(api)
         .layer(middleware::from_fn_with_state(state.clone(), observe))
         .with_state(state)
@@ -759,7 +779,7 @@ async fn replace(
         st.require(st.authz.allows(&p, n.as_str(), Access::Read), &p, &c, "replace", n.as_str())?;
     }
     st.require_audit_healthy()?;
-    let repo = st.repo.clone();
+    let repo = st.repo_for([name.as_str()]);
     let (n, rs) = (name.clone(), read_set.clone());
     let res = blocking(move || repo.replace(&n, &rs, new)).await;
     let (outcome, detail) = match &res {
@@ -806,7 +826,7 @@ async fn delete_ref(
         st.require(st.authz.allows(&p, n.as_str(), Access::Read), &p, &c, "delete_ref", n.as_str())?;
     }
     st.require_audit_healthy()?;
-    let repo = st.repo.clone();
+    let repo = st.repo_for([name.as_str()]);
     let (n, rs) = (name.clone(), read_set.clone());
     let res = blocking(move || repo.delete_ref(&n, &rs)).await;
     let outcome = match &res {
@@ -877,7 +897,7 @@ async fn multi_update(
         st.require(st.authz.allows(p, n.as_str(), Access::Read), p, c, "replace", n.as_str())?;
     }
     st.require_audit_healthy()?;
-    let repo = st.repo.clone();
+    let repo = st.repo_for(updates.iter().map(|(n, _)| n.as_str()));
     let (u, rs) = (updates.clone(), read_set.clone());
     let res = blocking(move || {
         if allow_delete {
@@ -950,7 +970,8 @@ async fn set_rule(
     let rule = wire::rule_from_wire(&req.rule).map_err(ApiError::from)?;
     st.require(st.authz.allows(&p, &prefix, Access::Admin), &p, &c, "set_rule", &prefix)?;
     st.require_audit_healthy()?;
-    let repo = st.repo.clone();
+    // Rules under a front's claim (e.g. immutable git tags) are set through that front.
+    let repo = st.repo_for([prefix.as_str()]);
     let pf = prefix.clone();
     let res = blocking(move || repo.set_rule(&pf, rule)).await;
     st.audit_mutation(Event {
@@ -1161,17 +1182,10 @@ pub async fn run_gc(st: &AppState, dry_run: bool, repack_all: bool) -> ApiResult
     let grouped = st.gc.grouped;
     let running = st.gc_running.clone();
     let res = blocking(move || {
-        // Provenance records, then git objects, OCI manifests and segment maps;
-        // everything else is a leaf.
-        let shared: Arc<dyn Repository> = Arc::new(local.clone());
-        let tracer = pico2peta_prov::ProvTracer {
-            inner: AdapterTracer {
-                git: crate::git::GitTracer::new(shared.clone())?,
-                oci: crate::oci::OciTracer::new(shared),
-            },
-        };
-        let grouper = crate::git::GitGrouper;
-        let r = local.gc_with(&opts, &tracer, if grouped { Some(&grouper) } else { None });
+        // Provenance records here; git objects, OCI manifests and segment maps come from
+        // the fronts' per-run snapshot tracers (crate::fronts).
+        let prov = pico2peta_prov::ProvTracer { inner: crate::fronts::Leaves };
+        let r = local.gc_with_fronts(&opts, Some(&prov), grouped);
         running.store(false, Ordering::Release);
         r
     })
