@@ -14,6 +14,16 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
 
 **Process slip (2026-11-15, fixed):** commit `40e4194` (read-ahead) was pushed with a failing gate (one clippy `type_complexity` error). I had piped `scripts/check.sh` into `tail`, which hid its exit status. It was fixed and pushed in the next commit, with the gate's exit status checked directly. No test failed; it was a lint.
 
+**Phase 3 (docs/VISION.md, PLAN §6; 2026-11-15). Implementation first; measurements wait for the batch phase.**
+
+| item | state |
+|---|---|
+| P1 Front API (core) | **done**: API v1.14–v1.16. Profiles, fronts, nested prefix claims, front handles, the idmap, `put_named`, per-GC tracer snapshots. Net ported Git, OCI, HF (incl. Xet), PyPI, npm and Maven onto it. |
+| Ordering building block (ORDERING.md, replaces step 3) | **built**: `crates/order` (features, similarity order, frames with references), `bench/exp3`, and production grouped repack with Frame3 records. Exp3 is pre-registered (§6.6, with a dated dev-set amendment). Dev set only: no-hints A4 = ripgrep 0.847, jq 0.794 vs V2 0.850 / 0.928. **redis, git.git and weights are not run yet** (batch phase). Packages smoke: A4 = 0.806× archive order. |
+| Generic front (§6.4) | **harness written** (`p2p-bench generic`), not yet run at the pre-registered 1 GiB. The 64 MiB smoke run suggests storage passes (1.06× / 1.16× one copy), while the verified-read ratio may fail (see Questions). |
+| Perf pass (a)–(e) | (a) put is CPU-bound by host contention (schedstat), no change; (b) verified read 870 → 1,880 MB/s; (c) 1 KiB put 75k → 129k/s, get 97k → 286k/s; (d) group commit 1.76× at 4 threads, 2.04× at 8; (e) net (clone wire bytes 0.98× git-daemon in their smoke run). Plus: frame prefix decoding and a per-thread zstd decompression context (net's profile). |
+| Chunk-anchored XOR deltas | **done** (v1.16): generic derived objects for edits and insertions. |
+
 **Speed-up work (`docs/RESEARCH_SPEEDUP.md`, from the human; split with net on 2026-11-15)**
 - **§1 (core): done.** Streaming put pipeline, compressibility probe, incremental pack hash. On tmpfs (CPU-bound), incompressible `put_stream` went from 331 to **739 MB/s** (2.2×; median of 5 interleaved reps on a loaded host, load 2.9–5.2), text from 228 to 328 MB/s, dedup re-put from ~630 to ~900 MB/s. On NVMe, incompressible stays at the device's ~200 MB/s fsync ceiling. **§1a's ≥ 800 MB/s target was not met** (best run 791 MB/s); text is compression-bound in the workers. The probe gave no measurable gain (zstd already bails out fast on random data). Details, profiles and the ablation: `docs/BENCH.md`.
 - **§2 byte grouping: done.** Net built the transform (`crates/weights/src/bytegroup.rs`) and measured it; the core added record codec 2 `GroupedZstd` (`width | zstd(group(chunk))`), the hint plumbing (API v1.12) and `pack.grouped_zstd_level` (default 6). Measured end to end through the CLI on SmolLM2-135M → -Instruct (real bf16, 269 MB each; byte-exact round trip, fsck clean, identical hashes in every mode):
@@ -157,6 +167,7 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
 - (resolved 2026-11-15) `/mnt/scratch` hit 100%, and Exp1 died with ENOSPC at redis V0. I freed my own regenerable caches (`cargo-target/debug` 7.7 GB, `cargo-target-fuzz`) and made debug builds leaner in `scripts/env.sh` (no incremental cache, line-tables-only debug info). Exp1 was restarted for redis and git (`exp1-run2.log`).
 
 ## Questions for human
+- **Verified-read cost vs PLAN §6.4's "read ≥ 0.50× `cat`".** A whole read verifies every chunk's BLAKE3 before returning its bytes, and the whole-object BLAKE3 at EOF: two hash passes, ~1.9 GB/s with read-ahead, against `cat` at ~5 GB/s from page cache. Dropping the per-chunk hash on *whole* reads would roughly double throughput. Accidental corruption is still caught by each record's CRC32, and any corruption by the whole-object hash at EOF. But a caller could receive crafted, CRC-valid bytes before the EOF error, where today it never does. **Default until you decide: keep both checks** (the safer semantics), and report §6.4's read row as measured.
 - **Disk budget:** `/mnt/scratch` has much less headroom than the ~31 GB in AGENT_TASK.md (24 GB → 13 GB → 0 during this session, partly from other directories). Could you free or extend space, or say which of these may be deleted: the Exp1 mirrors and spill (`bench-data`, ~1.5 GB), the fuzz build cache, the nightly toolchain (`rustup-nightly`)?
 - **Disk headroom** is still tight: it has dipped below 8 GB twice. Both sessions now clean their build caches regularly.
 - **Exp1 failed**, so grouped repack stays opt-in (`[gc] grouped = false` by default, per the pre-registered rule), and Exp1b is queued. Nothing is needed from you unless you want to override the pre-registered consequences.
