@@ -1,0 +1,184 @@
+//! Shared plumbing for package-index fronts (PyPI, npm, Maven): streaming a body into the
+//! store while hashing it, create-once names, and the upstream HTTP client.
+
+// Handlers short-circuit with a ready `Response` as the error value.
+#![allow(clippy::result_large_err)]
+
+use crate::hf::ChanRead;
+use axum::body::Bytes;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use futures_util::StreamExt;
+use pico2peta_core::{Error, Hash, Name, Observed, ReplaceOutcome, Repository, Result};
+use sha1::Sha1;
+use sha2::{Digest, Sha256, Sha512};
+use std::io::Read;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::mpsc;
+
+pub(crate) fn err(status: StatusCode, msg: impl Into<String>) -> Response {
+    (status, msg.into()).into_response()
+}
+
+pub(crate) fn core_err(e: Error) -> Response {
+    let a = crate::error::ApiError::from(e);
+    err(a.status, a.message)
+}
+
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> std::result::Result<T, Response> {
+    match tokio::task::spawn_blocking(f).await {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(core_err(e)),
+        Err(e) => Err(err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+    }
+}
+
+pub(crate) fn http_client() -> std::result::Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .user_agent(concat!("pico2peta/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// Where package content goes: the front's handle, plus the concrete repo for named puts.
+#[derive(Clone)]
+pub(crate) struct Store {
+    pub repo: Arc<dyn Repository>,
+    pub local: Option<pico2peta_repo::LocalRepo>,
+}
+
+/// Digests of a stored body.
+#[derive(Clone, Debug)]
+pub(crate) struct Stored {
+    pub hash: Hash,
+    pub size: u64,
+    pub sha1: [u8; 20],
+    pub sha256: [u8; 32],
+    pub sha512: [u8; 64],
+}
+
+impl Stored {
+    pub fn sha256_hex(&self) -> String {
+        crate::git::hex(&self.sha256)
+    }
+    pub fn sha1_hex(&self) -> String {
+        crate::git::hex(&self.sha1)
+    }
+    /// Subresource-integrity form, as npm uses.
+    pub fn sri_sha512(&self) -> String {
+        use base64::Engine as _;
+        format!("sha512-{}", base64::engine::general_purpose::STANDARD.encode(self.sha512))
+    }
+}
+
+struct Hashing<R> {
+    inner: R,
+    sha1: Sha1,
+    sha256: Sha256,
+    sha512: Sha512,
+    n: u64,
+}
+
+impl<R: Read> Read for Hashing<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let k = self.inner.read(buf)?;
+        self.sha1.update(&buf[..k]);
+        self.sha256.update(&buf[..k]);
+        self.sha512.update(&buf[..k]);
+        self.n += k as u64;
+        Ok(k)
+    }
+}
+
+impl Store {
+    /// Stores `src` under namespace `ns`'s encoding profile, hashing it.
+    pub fn put_reader(&self, ns: &Name, src: impl Read) -> Result<Stored> {
+        let mut r = Hashing { inner: src, sha1: Sha1::new(), sha256: Sha256::new(), sha512: Sha512::new(), n: 0 };
+        let hash = match &self.local {
+            Some(l) => l.put_stream_for(ns, &mut r)?,
+            None => self.repo.put_stream(&mut r)?,
+        };
+        Ok(Stored {
+            hash,
+            size: r.n,
+            sha1: r.sha1.finalize().into(),
+            sha256: r.sha256.finalize().into(),
+            sha512: r.sha512.finalize().into(),
+        })
+    }
+
+    /// Streams a body into the store (bounded by `limit` bytes and the idle timeout).
+    pub async fn put_stream<S, E>(&self, ns: Name, mut s: S, limit: u64) -> std::result::Result<Stored, Response>
+    where
+        S: futures_util::Stream<Item = std::result::Result<Bytes, E>> + Unpin,
+        E: std::fmt::Display,
+    {
+        let (tx, rx) = mpsc::channel::<std::io::Result<Bytes>>(8);
+        let me = self.clone();
+        let job = tokio::task::spawn_blocking(move || me.put_reader(&ns, ChanRead { rx, cur: Bytes::new() }));
+        let mut n = 0u64;
+        let mut failed = None;
+        loop {
+            let item = match tokio::time::timeout(crate::api::IDLE_TIMEOUT, s.next()).await {
+                Err(_) => {
+                    failed = Some("transfer idle".to_string());
+                    break;
+                }
+                Ok(None) => break,
+                Ok(Some(i)) => i,
+            };
+            match item {
+                Ok(b) => {
+                    n += b.len() as u64;
+                    if n > limit {
+                        failed = Some("file too large".into());
+                        break;
+                    }
+                    if tx.send(Ok(b)).await.is_err() {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    failed = Some(e.to_string());
+                    break;
+                }
+            }
+        }
+        if let Some(m) = &failed {
+            let _ = tx.send(Err(std::io::Error::other(m.clone()))).await;
+        }
+        drop(tx);
+        let res = job.await;
+        if let Some(m) = failed {
+            return Err(err(StatusCode::BAD_REQUEST, m));
+        }
+        match res {
+            Ok(Ok(x)) => Ok(x),
+            Ok(Err(e)) => Err(core_err(e)),
+            Err(e) => Err(err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+        }
+    }
+}
+
+/// Points `name` at `record`, create-once. `Ok(Ok(true))` if created, `Ok(Ok(false))` if an
+/// equivalent record (per `same`) was already there; another record is `Ok(Err(..))`.
+pub(crate) fn create_once(
+    repo: &dyn Repository,
+    name: &Name,
+    record: &[u8],
+    same: &dyn Fn(&[u8]) -> bool,
+) -> Result<std::result::Result<bool, String>> {
+    for _ in 0..4 {
+        if let Some(v) = repo.resolve(name)? {
+            return Ok(if same(&repo.get(&v.hash, None)?) { Ok(false) } else { Err(format!("{name} already exists")) });
+        }
+        let h = repo.put(record)?;
+        if let ReplaceOutcome::Ok { .. } = repo.replace(name, &[(name.clone(), Observed::Absent)], h)? {
+            return Ok(Ok(true));
+        }
+        // Lost a race: compare with the winner.
+    }
+    Err(Error::Corrupt(format!("{name}: create-once did not settle")))
+}
