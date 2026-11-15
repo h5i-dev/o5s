@@ -26,6 +26,29 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+/// Log entry framing: `"P2PLOGE1" | nonce[16] | journal record`. The nonce is
+/// unique per commit *attempt*, so two writers that make the same decision
+/// (same name, same observed version, same target, hence byte-identical
+/// records) still produce different entries, and at most one of them can
+/// recognise a stored entry as its own.
+const ENTRY_MAGIC: &[u8; 8] = b"P2PLOGE1";
+
+fn entry_record(b: &[u8]) -> &[u8] {
+    if b.len() >= 24 && &b[..8] == ENTRY_MAGIC { &b[24..] } else { b }
+}
+
+fn attempt_nonce() -> [u8; 16] {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let mut h = blake3::Hasher::new();
+    h.update(&std::process::id().to_le_bytes());
+    h.update(&SEQ.fetch_add(1, Ordering::Relaxed).to_le_bytes());
+    h.update(&format!("{:?}", SystemTime::now()).into_bytes());
+    h.update(&format!("{:?}", std::thread::current().id()).into_bytes());
+    let mut n = [0u8; 16];
+    n.copy_from_slice(&h.finalize().as_bytes()[..16]);
+    n
+}
+
 /// Log entries are trimmed only behind snapshots at least this old.
 pub const TRIM_GRACE: Duration = Duration::from_secs(3600);
 /// Commits whose catch-up → create gap exceeds this re-check for trimming.
@@ -182,11 +205,12 @@ impl LogEngine {
                 }
                 Err(e) => return Err(e),
             }
-            let (muts, used, err) = parse_records(&b);
+            let rec = entry_record(&b);
+            let (muts, used, err) = parse_records(rec);
             if let Some(e) = err {
                 return Err(e);
             }
-            if muts.len() != 1 || used != b.len() {
+            if muts.len() != 1 || used != rec.len() {
                 return Err(Error::Corrupt(format!("bad ref log entry {}", g.next)));
             }
             for m in muts {
@@ -242,7 +266,11 @@ impl crate::Engine for LogEngine {
             self.catch_up(&mut g)?;
             let caught_up = Instant::now();
             let Some(m) = decide(&g.state)? else { return Ok(()) };
-            let rec = encode_checked(&m)?;
+            // One nonce per attempt: the backend may retry this exact body internally
+            // (and a lost response then shows up as AlreadyExists with our own bytes).
+            let mut rec = ENTRY_MAGIC.to_vec();
+            rec.extend_from_slice(&attempt_nonce());
+            rec.extend_from_slice(&encode_checked(&m)?);
             self.faults.hit("refs.log.put")?;
             match self.backend.put_if_absent(&self.log_key(g.next), PutSource::Bytes(&rec))? {
                 PutOutcome::Created => {
@@ -273,11 +301,12 @@ impl crate::Engine for LogEngine {
                     return Ok(());
                 }
                 PutOutcome::AlreadyExists => {
-                    // Either another writer won this slot, or *our* earlier attempt landed
-                    // and only its response was lost (the backend's retry then sees 412).
-                    // Records are deterministic, so if the stored entry is byte-identical to
-                    // ours, the commit is ours (or an identical one): apply it and report Ok.
-                    // Otherwise catch up and re-decide.
+                    // Either another writer won this slot, or *our* attempt landed and only
+                    // its response was lost (the backend's retry then sees 412). The entry
+                    // carries this attempt's nonce: only a byte-identical entry (same nonce)
+                    // is ours. Another writer making the *same* decision has a different
+                    // nonce, so we conflict and re-decide. Two CAS operations on one
+                    // observed version can never both succeed.
                     let mut stored = Vec::new();
                     match self.backend.open(&self.log_key(g.next)) {
                         Ok(mut r) => {

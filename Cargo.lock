@@ -1190,6 +1190,7 @@ dependencies = [
 name = "pico2peta-refs"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "crc32fast",
  "pico2peta-core",
  "proptest",
