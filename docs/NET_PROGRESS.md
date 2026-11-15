@@ -240,7 +240,8 @@ The contended run checks that no update is lost: the final version equals the nu
   - Proxy-cache, tested with a second server proxying the first: local and upstream packages are merged. After the upstream stops and a zero-grace GC runs, cached versions still install, `latest` falls back to the newest cached version, and a never-fetched version fails.
   - Storage: `npm/<r>/<seg>/<v>` → `P2PNPMV1` record (manifest + digests) → tarball; dist-tags are `npm/<r>/<seg>/_tags/<t>`. The `npm` front claims `npm/`.
   - Shared plumbing with PyPI lives in `pkg.rs`: a streaming put with sha1/sha256/sha512, create-once, and the HTTP client.
-  - Not done: unpublish, deprecate, the dist-tag API, and search.
+  - Dist-tag API (`npm dist-tag ls|add|rm`): DONE, tested with the real npm (install by tag; readers and unknown versions refused).
+  - Not done: unpublish, deprecate, and search.
 - **Maven front: DONE** (`crates/server/src/maven.rs`, `tests/maven.rs`).
   - Tested with the real Maven 3.9.9; its plugins come from Maven Central through a pico2peta proxy:
     - `deploy:deploy-file` of a release; two snapshots (mutable); release overwrite 409; reader 403;

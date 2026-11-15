@@ -255,6 +255,9 @@ pub async fn dispatch(
         Some((a, f)) => (a, Some(f)),
         None => (path, None),
     };
+    if let Some(rest) = path.strip_prefix("-/package/") {
+        return dist_tags(&st, &npm, &p, &c, reg, rest, method, body).await;
+    }
     if pkg_part.starts_with("-/") {
         // Registry meta endpoints (`/-/ping`, `/-/whoami`, audits): minimal answers.
         return match pkg_part {
@@ -544,25 +547,105 @@ async fn publish(
         if !published.iter().any(|x| x == v) {
             continue;
         }
-        let Some(n) = tag_name(reg, pkg, t) else { continue };
-        let (repo, val) = (npm.repo.clone(), [TAG_MAGIC.as_slice(), v.as_bytes()].concat());
-        let res = blocking(move || {
-            let h = repo.put(&val)?;
-            for _ in 0..8 {
-                let cur = repo.resolve(&n)?;
-                let obs = cur.map_or(Observed::Absent, |c| Observed::Version(c.version));
-                if let ReplaceOutcome::Ok { .. } = repo.replace(&n, &[(n.clone(), obs)], h)? {
-                    return Ok(());
-                }
-            }
-            Err(Error::Corrupt("dist-tag update did not settle".into()))
-        })
-        .await;
-        if let Err(r) = res {
+        if let Err(r) = set_tag(npm, reg, pkg, t, Some(v)).await {
             return r;
         }
     }
     (StatusCode::CREATED, axum::Json(json!({ "ok": true, "id": pkg.full() }))).into_response()
+}
+
+/// Points dist-tag `tag` at `version` (or removes it with `None`).
+async fn set_tag(
+    npm: &Arc<NpmState>,
+    reg: &str,
+    pkg: &Pkg,
+    tag: &str,
+    version: Option<&str>,
+) -> std::result::Result<(), Response> {
+    let Some(n) = tag_name(reg, pkg, tag) else { return Err(npm_err(StatusCode::BAD_REQUEST, "invalid tag")) };
+    let (repo, val) = (npm.repo.clone(), version.map(|v| [TAG_MAGIC.as_slice(), v.as_bytes()].concat()));
+    blocking(move || {
+        let h = match &val {
+            Some(v) => Some(repo.put(v)?),
+            None => None,
+        };
+        for _ in 0..8 {
+            let Some(cur) = repo.resolve(&n)? else {
+                let Some(h) = h else { return Ok(()) }; // removing a tag that isn't there
+                if let ReplaceOutcome::Ok { .. } = repo.replace(&n, &[(n.clone(), Observed::Absent)], h)? {
+                    return Ok(());
+                }
+                continue;
+            };
+            let rs = [(n.clone(), Observed::Version(cur.version))];
+            let out = match h {
+                Some(h) => repo.replace(&n, &rs, h)?,
+                None => repo.delete_ref(&n, &rs)?,
+            };
+            if let ReplaceOutcome::Ok { .. } = out {
+                return Ok(());
+            }
+        }
+        Err(Error::Corrupt("dist-tag update did not settle".into()))
+    })
+    .await
+}
+
+/// `/-/package/<pkg>/dist-tags[/<tag>]` (`npm dist-tag ls|add|rm`).
+#[allow(clippy::too_many_arguments)]
+async fn dist_tags(
+    st: &Arc<AppState>,
+    npm: &Arc<NpmState>,
+    p: &Principal,
+    c: &Caller,
+    reg: &str,
+    rest: &str,
+    method: Method,
+    body: Body,
+) -> Response {
+    let Some((pkg_part, tail)) = rest.rsplit_once("/dist-tags").filter(|(_, t)| t.is_empty() || t.starts_with('/'))
+    else {
+        return npm_err(StatusCode::NOT_FOUND, "not supported");
+    };
+    let Some(pkg) = Pkg::parse(pkg_part) else { return npm_err(StatusCode::NOT_FOUND, "invalid package name") };
+    let tag = tail.trim_start_matches('/');
+    let need = if method == Method::GET { Access::Read } else { Access::Write };
+    if let Err(r) = check(st, p, c, reg, need) {
+        return r;
+    }
+    match (method, tag) {
+        (Method::GET, "") => match local_versions(npm, reg, &pkg).await {
+            Ok((_, tags)) => axum::Json(tags).into_response(),
+            Err(r) => r,
+        },
+        (Method::PUT | Method::POST, t) if valid_tag(t) => {
+            let Ok(raw) = axum::body::to_bytes(body, 4096).await else {
+                return npm_err(StatusCode::BAD_REQUEST, "bad body");
+            };
+            let Ok(Value::String(v)) = serde_json::from_slice::<Value>(&raw) else {
+                return npm_err(StatusCode::BAD_REQUEST, "body must be a JSON string (the version)");
+            };
+            match local_versions(npm, reg, &pkg).await {
+                Ok((vs, _)) if vs.contains_key(&v) => {}
+                Ok(_) => return npm_err(StatusCode::NOT_FOUND, format!("{}@{v} is not in this registry", pkg.full())),
+                Err(r) => return r,
+            }
+            match set_tag(npm, reg, &pkg, t, Some(&v)).await {
+                Ok(()) => (StatusCode::CREATED, axum::Json(json!({ "ok": true }))).into_response(),
+                Err(r) => r,
+            }
+        }
+        (Method::DELETE, t) if valid_tag(t) => {
+            if t == "latest" {
+                return npm_err(StatusCode::BAD_REQUEST, "the latest tag cannot be removed");
+            }
+            match set_tag(npm, reg, &pkg, t, None).await {
+                Ok(()) => axum::Json(json!({ "ok": true })).into_response(),
+                Err(r) => r,
+            }
+        }
+        _ => npm_err(StatusCode::NOT_FOUND, "not supported"),
+    }
 }
 
 async fn audit(st: &AppState, p: &Principal, c: &Caller, n: &Name, outcome: &str) {

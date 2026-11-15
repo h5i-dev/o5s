@@ -110,6 +110,18 @@ fn npm_publish_install_and_proxy_cache() {
     assert_eq!(npm.install(&reader, "demo-npm@1.0.0", "demo-npm").as_deref(), Some("1"));
     assert_eq!(npm.install(&reader, "@team/util", "@team/util").as_deref(), Some("7"), "scoped");
 
+    // Dist-tags: add, install by tag, list, remove.
+    let d = npm.package("demo-npm", "1.0.0", "1");
+    assert!(npm.run(&d, &alice, &["dist-tag", "add", "demo-npm@1.0.0", "stable"]).status.success());
+    assert_eq!(npm.install(&reader, "demo-npm@stable", "demo-npm").as_deref(), Some("1"), "install by tag");
+    let ls = String::from_utf8_lossy(&npm.run(&d, &reader, &["dist-tag", "ls", "demo-npm"]).stdout).into_owned();
+    assert!(ls.contains("stable: 1.0.0") && ls.contains("latest: 1.1.0"), "{ls}");
+    assert!(!npm.run(&d, &reader, &["dist-tag", "add", "demo-npm@1.0.0", "x"]).status.success(), "readers can't tag");
+    assert!(!npm.run(&d, &alice, &["dist-tag", "add", "demo-npm@9.9.9", "x"]).status.success(), "unknown version");
+    assert!(npm.run(&d, &alice, &["dist-tag", "rm", "demo-npm", "stable"]).status.success());
+    let ls = String::from_utf8_lossy(&npm.run(&d, &reader, &["dist-tag", "ls", "demo-npm"]).stdout).into_owned();
+    assert!(!ls.contains("stable"), "{ls}");
+
     // Proxy-cache: a second server whose registry "mirror" proxies the first.
     let upstream = format!("{}/npm/reg", up.url());
     let proxy = TestServer::start(move |cfg| {

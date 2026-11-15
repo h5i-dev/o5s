@@ -164,7 +164,8 @@ npm install left-pad
 ```
 - Packuments, tarballs, and publish (the JSON body that npm sends). On publish, the tarball's sha512 and sha1 are checked against `dist.integrity` and `dist.shasum`. Versions are create-once (409 on republish with other bytes). Dist-tags come from the publish. Authorization is on `npm/<registry>`.
 - Proxy-cache: `[npm.upstream.<registry>] url = "https://registry.npmjs.org"`. Upstream versions are merged in, and tarballs are fetched and integrity-checked on first install, then served from the store. When the upstream is unreachable, packuments list only cached versions, and `latest` falls back to the newest cached one.
-- Not yet: unpublish, deprecate, `npm dist-tag`, and search.
+- `npm dist-tag ls|add|rm` work (for versions in that registry; `latest` can't be removed).
+- Not yet: unpublish, deprecate, and search.
 
 ## Maven (`/maven/<repo>`)
 ```xml
