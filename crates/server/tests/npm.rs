@@ -93,6 +93,7 @@ fn npm_publish_install_and_proxy_cache() {
     let w = tempfile::tempdir().unwrap();
     let npm = Npm { bin, work: w.path().to_path_buf() };
     let mut up = TestServer::start(|cfg| {
+        cfg.policy.push(grant("alice", "npm/locked", Access::Write));
         cfg.policy.push(grant("alice", "npm/reg", Access::Write));
         cfg.policy.push(grant("reader", "npm/reg", Access::Read));
     });
@@ -121,6 +122,33 @@ fn npm_publish_install_and_proxy_cache() {
     assert!(npm.run(&d, &alice, &["dist-tag", "rm", "demo-npm", "stable"]).status.success());
     let ls = String::from_utf8_lossy(&npm.run(&d, &reader, &["dist-tag", "ls", "demo-npm"]).stdout).into_owned();
     assert!(!ls.contains("stable"), "{ls}");
+
+    // Deprecate and undeprecate (the packument carries the message).
+    assert!(npm.run(&d, &alice, &["deprecate", "demo-npm@1.0.0", "use 1.1"]).status.success());
+    let view =
+        String::from_utf8_lossy(&npm.run(&d, &reader, &["view", "demo-npm@1.0.0", "deprecated"]).stdout).into_owned();
+    assert!(view.contains("use 1.1"), "{view}");
+    assert!(npm.run(&d, &alice, &["deprecate", "demo-npm@1.0.0", ""]).status.success());
+    let view =
+        String::from_utf8_lossy(&npm.run(&d, &reader, &["view", "demo-npm@1.0.0", "deprecated"]).stdout).into_owned();
+    assert!(!view.contains("use 1.1"), "{view}");
+    // Unpublish one version, then a whole package.
+    for v in ["2.0.0", "2.1.0"] {
+        assert!(npm.run(&npm.package("gone-npm", v, "9"), &alice, &["publish"]).status.success());
+    }
+    assert!(npm.run(&d, &alice, &["unpublish", "gone-npm@2.0.0"]).status.success());
+    let vs =
+        String::from_utf8_lossy(&npm.run(&d, &reader, &["view", "gone-npm", "versions", "--json"]).stdout).into_owned();
+    assert!(!vs.contains("2.0.0") && vs.contains("2.1.0"), "{vs}");
+    assert_eq!(npm.install(&reader, "gone-npm@2.0.0", "gone-npm"), None);
+    assert!(npm.run(&d, &alice, &["unpublish", "gone-npm", "--force"]).status.success());
+    assert!(!npm.run(&d, &reader, &["view", "gone-npm"]).status.success(), "package gone");
+    // A registry whose namespace rule makes versions create-once refuses unpublish.
+    s_rule(&up, "npm/locked");
+    let locked = npm.rc("locked", &up, "locked", ALICE);
+    assert!(npm.run(&npm.package("kept", "1.0.0", "1"), &locked, &["publish"]).status.success());
+    assert!(!npm.run(&d, &locked, &["unpublish", "kept@1.0.0"]).status.success(), "immutable namespace");
+    assert!(npm.run(&d, &locked, &["view", "kept@1.0.0", "version"]).status.success());
 
     // Proxy-cache: a second server whose registry "mirror" proxies the first.
     let upstream = format!("{}/npm/reg", up.url());
@@ -156,4 +184,10 @@ fn npm_publish_install_and_proxy_cache() {
     assert_eq!(npm.install(&m_reader, "demo-npm", "demo-npm").as_deref(), Some("1"));
     assert_eq!(npm.install(&m_reader, "@team/util@0.1.0", "@team/util").as_deref(), Some("7"));
     assert_eq!(npm.install(&m_reader, "demo-npm@1.1.0", "demo-npm"), None, "never cached");
+}
+
+/// Makes every name under `ns` create-once (admin rule).
+fn s_rule(srv: &TestServer, ns: &str) {
+    use pico2peta_core::Repository;
+    srv.client(ADMIN).set_rule(ns, pico2peta_core::Rule::ImmutableAfterPublish).unwrap();
 }

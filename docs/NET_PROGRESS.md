@@ -246,7 +246,11 @@ The contended run checks that no update is lost: the final version equals the nu
   - Storage: `npm/<r>/<seg>/<v>` → `P2PNPMV1` record (manifest + digests) → tarball; dist-tags are `npm/<r>/<seg>/_tags/<t>`. The `npm` front claims `npm/`.
   - Shared plumbing with PyPI lives in `pkg.rs`: a streaming put with sha1/sha256/sha512, create-once, and the HTTP client.
   - Dist-tag API (`npm dist-tag ls|add|rm`): DONE, tested with the real npm (install by tag; readers and unknown versions refused).
-  - Not done: unpublish, deprecate, and search.
+  - Deprecate and unpublish: DONE, tested with the real npm.
+    - `npm deprecate` and undeprecate store per-version notes (`_deprecated/<v>`, mutable).
+    - `npm unpublish pkg@v` (a PUT without the version) and `--force` (DELETE) remove version names through the npm front.
+    - Versions follow the namespace's rules: under `immutable`, unpublish is refused. Packuments carry `_rev`; a stale one gets 409.
+  - Not done: search.
 - **Maven front: DONE** (`crates/server/src/maven.rs`, `tests/maven.rs`).
   - Tested with the real Maven 3.9.9; its plugins come from Maven Central through a pico2peta proxy:
     - `deploy:deploy-file` of a release; two snapshots (mutable); release overwrite 409; reader 403;

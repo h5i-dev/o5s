@@ -39,6 +39,7 @@ use std::time::{Duration, Instant};
 
 const RECORD_MAGIC: &[u8; 8] = b"P2PNPMV1";
 const TAG_MAGIC: &[u8; 8] = b"P2PNPMT1";
+const DEPRECATED_MAGIC: &[u8; 8] = b"P2PNPMD1";
 const MAX_PUBLISH_BODY: usize = 512 << 20;
 
 pub struct NpmState {
@@ -250,6 +251,11 @@ pub async fn dispatch(
         return npm_err(StatusCode::NOT_FOUND, "invalid registry name");
     }
     let path = path.trim_end_matches('/');
+    // CouchDB revisions on writes: `<pkg>/-rev/<rev>`, `<pkg>/-/<file>/-rev/<rev>` (unpublish).
+    let (path, rev) = match path.rsplit_once("/-rev/") {
+        Some((a, r)) => (a, Some(r.to_string())),
+        None => (path, None),
+    };
     // `<pkg>/-/<file>` is a tarball; anything else is a package document.
     let (pkg_part, file) = match path.split_once("/-/") {
         Some((a, f)) => (a, Some(f)),
@@ -284,7 +290,22 @@ pub async fn dispatch(
             if let Err(r) = check(&st, &p, &c, reg, Access::Write) {
                 return r;
             }
-            publish(&st, &npm, &p, &c, reg, &pkg, body).await
+            publish(&st, &npm, &p, &c, reg, &pkg, rev.as_deref(), body).await
+        }
+        // `npm unpublish <pkg> --force`: every version.
+        (Method::DELETE, None) if rev.is_some() => {
+            if let Err(r) = check(&st, &p, &c, reg, Access::Write) {
+                return r;
+            }
+            unpublish_all(&st, &npm, &p, &c, reg, &pkg, rev.as_deref()).await
+        }
+        // The tarball delete that follows a version unpublish: the version record (which
+        // references the tarball) is already gone, and GC reclaims the tarball.
+        (Method::DELETE, Some(_)) if rev.is_some() => {
+            if let Err(r) = check(&st, &p, &c, reg, Access::Write) {
+                return r;
+            }
+            axum::Json(json!({ "ok": true })).into_response()
         }
         _ => npm_err(StatusCode::METHOD_NOT_ALLOWED, "unsupported operation"),
     }
@@ -293,6 +314,44 @@ pub async fn dispatch(
 /// Local versions: version → (record meta), and local dist-tags.
 type Local = (BTreeMap<String, Meta>, BTreeMap<String, String>);
 
+/// Deprecation messages of local versions (`npm/<r>/<seg>/_deprecated/<v>`).
+async fn local_deprecated(
+    npm: &Arc<NpmState>,
+    reg: &str,
+    pkg: &Pkg,
+) -> std::result::Result<BTreeMap<String, String>, Response> {
+    let (n2, prefix) = (npm.clone(), format!("npm/{reg}/{}/_deprecated", pkg.seg()));
+    blocking(move || {
+        let mut out = BTreeMap::new();
+        for (n, v) in n2.repo.list_refs(&prefix)? {
+            let b = n2.repo.get(&v.hash, None)?;
+            if let (Some(ver), Some(msg)) = (n.as_str().rsplit('/').next(), b.strip_prefix(DEPRECATED_MAGIC.as_slice()))
+            {
+                out.insert(ver.to_string(), String::from_utf8_lossy(msg).into_owned());
+            }
+        }
+        Ok(out)
+    })
+    .await
+}
+
+/// CouchDB-style document revision over the package's local state (npm sends it back on
+/// unpublish; a mismatch means the package changed in between).
+fn doc_rev(local: &Local, deps: &BTreeMap<String, String>) -> String {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    for (v, m) in &local.0 {
+        h.update(format!("v {v} {}\n", m.shasum));
+    }
+    for (t, v) in &local.1 {
+        h.update(format!("t {t} {v}\n"));
+    }
+    for (v, d) in deps {
+        h.update(format!("d {v} {d}\n"));
+    }
+    format!("1-{}", &crate::git::hex(&h.finalize())[..32])
+}
+
 async fn local_versions(npm: &Arc<NpmState>, reg: &str, pkg: &Pkg) -> std::result::Result<Local, Response> {
     let (n2, prefix) = (npm.clone(), format!("npm/{reg}/{}", pkg.seg()));
     blocking(move || {
@@ -300,6 +359,9 @@ async fn local_versions(npm: &Arc<NpmState>, reg: &str, pkg: &Pkg) -> std::resul
         for (n, v) in n2.repo.list_refs(&prefix)? {
             let rel = &n.as_str()[prefix.len() + 1..];
             let b = n2.repo.get(&v.hash, None)?;
+            if rel.starts_with("_deprecated/") {
+                continue;
+            }
             if let Some(t) = rel.strip_prefix("_tags/") {
                 if let Some(ver) = b.strip_prefix(TAG_MAGIC.as_slice()) {
                     tags.insert(t.to_string(), String::from_utf8_lossy(ver).into_owned());
@@ -370,14 +432,22 @@ async fn packument(npm: &Arc<NpmState>, reg: &str, pkg: &Pkg, headers: &HeaderMa
         Ok(x) => x,
         Err(r) => return r,
     };
+    let deps = match local_deprecated(npm, reg, pkg).await {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let rev = doc_rev(&(local.clone(), local_tags.clone()), &deps);
     let base = format!("{}/npm/{reg}/{}/-/", base_url(headers), pkg.url_part());
     let mut versions = Map::new();
     let mut time = Map::new();
     for (v, m) in &local {
-        versions.insert(
-            v.clone(),
-            with_tarball(m.manifest.clone(), &format!("{base}{}", pkg.tarball(v)), &m.integrity, &m.shasum),
-        );
+        let mut man = with_tarball(m.manifest.clone(), &format!("{base}{}", pkg.tarball(v)), &m.integrity, &m.shasum);
+        if let Some(d) = deps.get(v)
+            && let Some(o) = man.as_object_mut()
+        {
+            o.insert("deprecated".into(), json!(d));
+        }
+        versions.insert(v.clone(), man);
         time.insert(v.clone(), json!(m.time));
     }
     let mut tags: BTreeMap<String, String> = BTreeMap::new();
@@ -424,7 +494,7 @@ async fn packument(npm: &Arc<NpmState>, reg: &str, pkg: &Pkg, headers: &HeaderMa
         }
     }
     axum::Json(json!({
-        "_id": pkg.full(), "name": pkg.full(), "dist-tags": tags, "versions": versions, "time": time,
+        "_id": pkg.full(), "_rev": rev, "name": pkg.full(), "dist-tags": tags, "versions": versions, "time": time,
     }))
     .into_response()
 }
@@ -468,6 +538,7 @@ async fn publish(
     c: &Caller,
     reg: &str,
     pkg: &Pkg,
+    rev: Option<&str>,
     body: Body,
 ) -> Response {
     if !st.audit.is_healthy() {
@@ -480,9 +551,13 @@ async fn publish(
     if doc["name"].as_str() != Some(&pkg.full()) {
         return npm_err(StatusCode::BAD_REQUEST, "package name in body does not match the URL");
     }
+    // No tarballs attached: a metadata update of the whole document (`npm deprecate`, or
+    // `npm unpublish <pkg>@<v>`, which PUTs the document without that version).
+    if doc["_attachments"].as_object().is_none_or(|a| a.is_empty()) {
+        return update_document(st, npm, p, c, reg, pkg, rev, &doc).await;
+    }
     let Some(versions) = doc["versions"].as_object().filter(|v| !v.is_empty()) else {
-        // Tag-only or deprecate updates (no new version) are not supported yet.
-        return npm_err(StatusCode::BAD_REQUEST, "publish carries no versions (unpublish/deprecate are not supported)");
+        return npm_err(StatusCode::BAD_REQUEST, "publish carries no versions");
     };
     let attachments = doc["_attachments"].as_object().cloned().unwrap_or_default();
     let ns = match Name::new(format!("npm/{reg}/{}", pkg.seg())) {
@@ -646,6 +721,157 @@ async fn dist_tags(
         }
         _ => npm_err(StatusCode::NOT_FOUND, "not supported"),
     }
+}
+
+/// Moves `n` to `val` (or deletes it), whatever it held (deprecation notes).
+async fn set_name(npm: &Arc<NpmState>, n: Name, val: Option<Vec<u8>>) -> std::result::Result<(), Response> {
+    let repo = npm.repo.clone();
+    blocking(move || {
+        let h = match &val {
+            Some(v) => Some(repo.put(v)?),
+            None => None,
+        };
+        for _ in 0..8 {
+            let cur = repo.resolve(&n)?;
+            let obs = cur.map_or(Observed::Absent, |c| Observed::Version(c.version));
+            let out = match (h, cur) {
+                (Some(h), _) => repo.replace(&n, &[(n.clone(), obs)], h)?,
+                (None, Some(_)) => repo.delete_ref(&n, &[(n.clone(), obs)])?,
+                (None, None) => return Ok(()),
+            };
+            if let ReplaceOutcome::Ok { .. } = out {
+                return Ok(());
+            }
+        }
+        Err(Error::Corrupt(format!("{n}: update did not settle")))
+    })
+    .await
+}
+
+/// Applies a whole-document PUT without tarballs: deprecation messages, dist-tags, and (with a
+/// revision, as `npm unpublish <pkg>@<v>` sends) removal of versions missing from the body.
+/// Version names obey the namespace's rules, so an immutable namespace refuses unpublishes.
+#[allow(clippy::too_many_arguments)]
+async fn update_document(
+    st: &Arc<AppState>,
+    npm: &Arc<NpmState>,
+    p: &Principal,
+    c: &Caller,
+    reg: &str,
+    pkg: &Pkg,
+    rev: Option<&str>,
+    doc: &Value,
+) -> Response {
+    let local = match local_versions(npm, reg, pkg).await {
+        Ok(x) => x,
+        Err(r) => return r,
+    };
+    let deps = match local_deprecated(npm, reg, pkg).await {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    if local.0.is_empty() {
+        return npm_err(StatusCode::NOT_FOUND, format!("{} has no versions in this registry", pkg.full()));
+    }
+    let current = doc_rev(&local, &deps);
+    if let Some(r) = rev.or_else(|| doc["_rev"].as_str())
+        && r != current
+    {
+        return npm_err(StatusCode::CONFLICT, "document update conflict: the package changed since it was read");
+    }
+    let body_versions = doc["versions"].as_object().cloned().unwrap_or_default();
+    // Deprecations.
+    for (v, man) in &body_versions {
+        if !local.0.contains_key(v) {
+            continue;
+        }
+        let want = man["deprecated"].as_str().filter(|s| !s.is_empty());
+        if want == deps.get(v).map(String::as_str) {
+            continue;
+        }
+        let Ok(n) = Name::new(format!("npm/{reg}/{}/_deprecated/{v}", pkg.seg())) else { continue };
+        let val = want.map(|m| [DEPRECATED_MAGIC.as_slice(), m.as_bytes()].concat());
+        if let Err(r) = set_name(npm, n, val).await {
+            return r;
+        }
+    }
+    // Unpublish: versions missing from the body (only on revision-carrying writes).
+    let mut removed = Vec::new();
+    if rev.is_some() {
+        for v in local.0.keys().filter(|v| !body_versions.contains_key(*v)) {
+            let Some(n) = version_name(reg, pkg, v) else { continue };
+            if let Err(r) = set_name(npm, n.clone(), None).await {
+                audit(st, p, c, &n, "unpublish_refused").await;
+                return r;
+            }
+            audit(st, p, c, &n, "unpublished").await;
+            if let Ok(dn) = Name::new(format!("npm/{reg}/{}/_deprecated/{v}", pkg.seg())) {
+                let _ = set_name(npm, dn, None).await;
+            }
+            removed.push(v.clone());
+        }
+    }
+    // Dist-tags: drop tags of removed versions; apply the body's tags for remaining versions.
+    for (t, v) in &local.1 {
+        if removed.contains(v)
+            && let Err(r) = set_tag(npm, reg, pkg, t, None).await
+        {
+            return r;
+        }
+    }
+    for (t, v) in doc["dist-tags"].as_object().into_iter().flatten() {
+        if let Some(v) = v.as_str()
+            && valid_tag(t)
+            && local.0.contains_key(v)
+            && !removed.iter().any(|r| r == v)
+            && local.1.get(t).map(String::as_str) != Some(v)
+            && let Err(r) = set_tag(npm, reg, pkg, t, Some(v)).await
+        {
+            return r;
+        }
+    }
+    axum::Json(json!({ "ok": true, "id": pkg.full() })).into_response()
+}
+
+/// `npm unpublish <pkg> --force`: removes every version, tag and deprecation note.
+#[allow(clippy::too_many_arguments)]
+async fn unpublish_all(
+    st: &Arc<AppState>,
+    npm: &Arc<NpmState>,
+    p: &Principal,
+    c: &Caller,
+    reg: &str,
+    pkg: &Pkg,
+    rev: Option<&str>,
+) -> Response {
+    let local = match local_versions(npm, reg, pkg).await {
+        Ok(x) => x,
+        Err(r) => return r,
+    };
+    let deps = match local_deprecated(npm, reg, pkg).await {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    if rev.is_some_and(|r| r != doc_rev(&local, &deps)) {
+        return npm_err(StatusCode::CONFLICT, "document update conflict: the package changed since it was read");
+    }
+    for v in local.0.keys() {
+        let Some(n) = version_name(reg, pkg, v) else { continue };
+        if let Err(r) = set_name(npm, n.clone(), None).await {
+            audit(st, p, c, &n, "unpublish_refused").await;
+            return r;
+        }
+        audit(st, p, c, &n, "unpublished").await;
+    }
+    for t in local.1.keys() {
+        let _ = set_tag(npm, reg, pkg, t, None).await;
+    }
+    for v in deps.keys() {
+        if let Ok(n) = Name::new(format!("npm/{reg}/{}/_deprecated/{v}", pkg.seg())) {
+            let _ = set_name(npm, n, None).await;
+        }
+    }
+    axum::Json(json!({ "ok": true })).into_response()
 }
 
 async fn audit(st: &AppState, p: &Principal, c: &Caller, n: &Name, outcome: &str) {
