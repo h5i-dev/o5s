@@ -495,3 +495,83 @@ fn sha256_repositories() {
     let (pushed, out) = git(&a, &["push", "-q", &url(&s, ALICE, "team/plain"), "main"]);
     assert!(!pushed, "SHA-256 push into a SHA-1 repo must fail:\n{out}");
 }
+
+/// Full clones are served from the clone pack cache once one exists, for both protocols, and
+/// a push (new wants) makes the next clone encode (and cache) a fresh pack. Clones stay
+/// fsck-clean throughout, including after a GC.
+#[test]
+fn clone_pack_cache() {
+    if !have_git() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let s = git_server();
+    let w = tempfile::tempdir().unwrap();
+    let a = w.path().join("a");
+    std::fs::create_dir(&a).unwrap();
+    ok(&a, &["init", "-q", "-b", "main"]);
+    for i in 0..5 {
+        commit(&a, "f", &format!("v{i}\n"), &format!("c{i}"));
+    }
+    ok(&a, &["tag", "-a", "v1", "-m", "release"]);
+    ok(&a, &["push", "-q", &url(&s, ALICE, "team/cp"), "main", "v1"]);
+    let u = url(&s, READER, "team/cp");
+    let admin = s.client(ADMIN);
+    let cache = n("git/_clonepack/team/cp");
+    let wait_cache = |prev: Option<Hash>| -> Hash {
+        for _ in 0..100 {
+            if let Some(v) = admin.resolve(&cache).unwrap()
+                && Some(v.hash) != prev
+            {
+                return v.hash;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        panic!("clone pack never cached");
+    };
+    let clone_ok = |dir: &str, proto: &str| {
+        let (good, out) = git_v(w.path(), &["clone", "-q", "--bare", &u, dir], proto);
+        assert!(good, "{out}");
+        let d = w.path().join(dir);
+        ok(&d, &["fsck", "--full", "--strict", "--no-progress"]);
+        ok(&d, &["for-each-ref", "--format=%(refname) %(objectname)"])
+    };
+    let r1 = clone_ok("c1", "2");
+    let p1 = wait_cache(None);
+    // The push also persisted the repository's commit graph (derived, behind its own ref).
+    let graph = n("git/_commitgraph/team/cp");
+    for _ in 0..100 {
+        if admin.resolve(&graph).unwrap().is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(&admin.get(&admin.resolve(&graph).unwrap().unwrap().hash, None).unwrap()[..8], b"P2PCGR01");
+    // From the cache: same refs, same pack object afterwards (nothing re-stored).
+    assert_eq!(clone_ok("c2", "2"), r1);
+    assert_eq!(clone_ok("c3", "0"), r1);
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(admin.resolve(&cache).unwrap().unwrap().hash, p1);
+    // The cached object is the pack after a header; the clone got exactly those pack bytes.
+    let cached = admin.get(&p1, None).unwrap();
+    assert_eq!(&cached[..8], b"P2PCPK01");
+    assert_eq!(&cached[40..44], b"PACK");
+    // A push changes the wants: the next clone encodes and re-caches.
+    commit(&a, "g", "new\n", "c5");
+    ok(&a, &["push", "-q", &url(&s, ALICE, "team/cp"), "main"]);
+    let r4 = clone_ok("c4", "2");
+    assert_ne!(r4, r1);
+    assert!(r4.contains(&head(&a)));
+    let p2 = wait_cache(Some(p1));
+    assert_ne!(p2, p1);
+    // After a GC the cache still serves a correct clone.
+    let _ = admin.gc(false).unwrap();
+    assert_eq!(clone_ok("c5", "2"), r4);
+    // Incremental fetches never use it (they have haves).
+    let c4 = w.path().join("c4");
+    commit(&a, "h", "newer\n", "c6");
+    ok(&a, &["push", "-q", &url(&s, ALICE, "team/cp"), "main"]);
+    ok(&c4, &["fetch", "-q", &u, "+refs/heads/main:refs/heads/main"]);
+    ok(&c4, &["fsck", "--full", "--no-progress"]);
+    assert_eq!(ok(&c4, &["rev-parse", "main"]).trim(), head(&a));
+}

@@ -257,11 +257,15 @@ pub struct GitSection {
     /// Repository-name prefixes whose repositories use `object-format=sha256` (e.g.
     /// `["team/sha256"]`). Fixed per repository: git learns the format before its first push.
     pub sha256_repos: Vec<String>,
+    /// Keep the pack of the last full clone of each repository (as an object behind
+    /// `git/_clonepack/<repo>`) and stream it to the next clone with the same wants, instead
+    /// of re-encoding. Costs one pack of storage per cloned repository.
+    pub clone_pack_cache: bool,
 }
 
 impl Default for GitSection {
     fn default() -> Self {
-        GitSection { enabled: true, spool_dir: None, sha256_repos: Vec::new() }
+        GitSection { enabled: true, spool_dir: None, sha256_repos: Vec::new(), clone_pack_cache: true }
     }
 }
 

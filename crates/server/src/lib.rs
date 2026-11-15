@@ -12,6 +12,7 @@ pub mod config;
 pub mod error;
 pub mod fronts;
 pub mod git;
+pub(crate) mod gitgraph;
 pub mod hf;
 pub mod limits;
 pub mod maven;
@@ -125,7 +126,8 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         });
         let st = git::GitState::new(fronts.handle("git")?, dir.clone(), cfg.server.max_upload_bytes)
             .map_err(|e| StartError::Audit(dir, e))?
-            .with_sha256_repos(cfg.git.sha256_repos.clone());
+            .with_sha256_repos(cfg.git.sha256_repos.clone())
+            .with_clone_pack_cache(cfg.git.clone_pack_cache);
         Some(Arc::new(st))
     } else {
         None

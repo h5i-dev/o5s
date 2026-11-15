@@ -71,9 +71,8 @@ const CACHE_ENTRIES: u64 = 1 << 20;
 /// turns ~log2(n) chunk decodes per lookup into hits.
 const PAGE: u64 = 64 << 10;
 /// Bytes of large-segment pages kept (shared by all maps).
-const PAGE_CACHE_BYTES: u64 = 64 << 20;
-/// Sequential reads of large segments (`get_many` scans) use aligned windows of this size;
-/// they bypass the page cache.
+const PAGE_CACHE_BYTES: u64 = 128 << 20;
+/// `get_many` scans fetch runs of missing pages with ranged reads of at most this size.
 const SCAN_WINDOW: u64 = 4 << 20;
 
 /// A map key (external ids are hashed or padded to 32 bytes by the front).
@@ -331,9 +330,10 @@ impl SegMap {
     /// A sorted merge-join: the keys are sorted and deduplicated once, then each segment, newest
     /// first, is matched against the keys not found yet. A large segment is split recursively
     /// around probe entries until a sub-range holds about one key per page or fits one window;
-    /// such a range is then read sequentially in aligned windows and merged with its keys. So a
-    /// dense batch scans the segment once, and a sparse one reads only the pages its keys can be
-    /// in (its probes share the page cache).
+    /// such a range's pages are taken from the page cache (runs of missing pages fetched with one
+    /// ranged read each) and merged with its keys. So a dense batch reads each page of the
+    /// segment at most once per cache lifetime, and a sparse one only the pages its keys can be
+    /// in.
     pub fn get_many(&self, root: &Root, keys: &[Key]) -> Result<Vec<Option<Value>>> {
         let mut uniq: Vec<Key> = keys.to_vec();
         uniq.sort_unstable();
@@ -377,8 +377,9 @@ impl SegMap {
         }
         let span = (hi - lo) * ENTRY;
         if span <= SCAN_WINDOW || (keys.len() as u64).saturating_mul(PAGE) >= span {
-            let it = SpanReader::new(&*self.repo, seg, lo, hi);
-            return merge_join(it, keys, found);
+            let (first, pages) = self.span_pages(seg, count, lo, hi)?;
+            let entries = (lo..hi).map(|i| span_entry(&pages, first, i).map(|b| decode_entry(&b)));
+            return merge_join(entries, keys, found);
         }
         let mid = lo + (hi - lo) / 2;
         let (k, v) = decode_entry(&self.entry_bytes(seg, count, mid)?);
@@ -393,6 +394,40 @@ impl SegMap {
         };
         self.range_many(seg, count, lo, mid, left, found)?;
         self.range_many(seg, count, mid + 1, hi, right, found)
+    }
+
+    /// The pages covering entries `lo..hi` of a large segment, through the page cache: runs of
+    /// missing pages are fetched with one ranged read each (at most [`SCAN_WINDOW`] bytes) and
+    /// cached. Returns the first page index and the pages.
+    fn span_pages(&self, seg: &Hash, count: u64, lo: u64, hi: u64) -> Result<(u64, Vec<Arc<Vec<u8>>>)> {
+        let size = SEG_HEADER + count * ENTRY;
+        let (pa, pb) = ((SEG_HEADER + lo * ENTRY) / PAGE, (SEG_HEADER + hi * ENTRY - 1) / PAGE);
+        let mut pages: Vec<Option<Arc<Vec<u8>>>> = (pa..=pb).map(|pi| self.cache.page(&(*seg, pi))).collect();
+        let mut k = 0usize;
+        while k < pages.len() {
+            if pages[k].is_some() {
+                k += 1;
+                continue;
+            }
+            // A run of missing pages, bounded by the window.
+            let mut e = k;
+            while e < pages.len() && pages[e].is_none() && ((e - k + 1) as u64) * PAGE <= SCAN_WINDOW {
+                e += 1;
+            }
+            let start = (pa + k as u64) * PAGE;
+            let end = ((pa + e as u64) * PAGE).min(size);
+            let b = self.repo.get(seg, Some(start..end))?;
+            if b.len() as u64 != end - start {
+                return Err(Error::Corrupt(format!("short segment read in {seg}")));
+            }
+            for (j, chunk) in b.chunks(PAGE as usize).enumerate() {
+                let p = Arc::new(chunk.to_vec());
+                self.cache.put_page((*seg, pa + (k + j) as u64), p.clone());
+                pages[k + j] = Some(p);
+            }
+            k = e;
+        }
+        Ok((pa, pages.into_iter().map(|p| p.unwrap_or_default()).collect()))
     }
 
     /// A small segment, decoded whole through the segment cache.
@@ -536,70 +571,25 @@ fn merge_join(
     Ok(())
 }
 
-/// Entries `lo..hi` of a segment, read with ranged reads in [`SCAN_WINDOW`]-aligned windows.
-struct SpanReader<'a> {
-    store: &'a dyn Repository,
-    seg: Hash,
-    /// Next byte offset to fetch; end offset.
-    at: u64,
-    end: u64,
-    buf: Vec<u8>,
-    pos: usize,
-    failed: bool,
-}
-
-impl<'a> SpanReader<'a> {
-    fn new(store: &'a dyn Repository, seg: &Hash, lo: u64, hi: u64) -> Self {
-        SpanReader {
-            store,
-            seg: *seg,
-            at: SEG_HEADER + lo * ENTRY,
-            end: SEG_HEADER + hi * ENTRY,
-            buf: Vec::new(),
-            pos: 0,
-            failed: false,
+/// Entry `i` from the pages of a span (`pages[0]` is page `first`); entries may straddle pages.
+fn span_entry(pages: &[Arc<Vec<u8>>], first: u64, i: u64) -> Result<[u8; ENTRY as usize]> {
+    let mut out = [0u8; ENTRY as usize];
+    let mut at = SEG_HEADER + i * ENTRY;
+    let mut done = 0usize;
+    while done < ENTRY as usize {
+        let page = pages
+            .get((at / PAGE - first) as usize)
+            .ok_or_else(|| Error::Corrupt("segment entry outside its span".into()))?;
+        let s = (at % PAGE) as usize;
+        let n = (ENTRY as usize - done).min(page.len().saturating_sub(s));
+        if n == 0 {
+            return Err(Error::Corrupt("short segment page".into()));
         }
+        out[done..done + n].copy_from_slice(&page[s..s + n]);
+        done += n;
+        at += n as u64;
     }
-}
-
-impl Iterator for SpanReader<'_> {
-    type Item = Result<(Key, Value)>;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.failed {
-            return None;
-        }
-        while self.buf.len() - self.pos < ENTRY as usize {
-            if self.at >= self.end {
-                if self.buf.len() != self.pos {
-                    self.failed = true;
-                    return Some(Err(Error::Corrupt(format!("short segment read in {}", self.seg))));
-                }
-                return None;
-            }
-            // Up to the next window boundary (absolute offsets, so windows stay aligned).
-            let stop = ((self.at / SCAN_WINDOW + 1) * SCAN_WINDOW).min(self.end);
-            let r = self.at..stop;
-            match self.store.get(&self.seg, Some(r)) {
-                Ok(b) if b.len() as u64 == stop - self.at => {
-                    self.buf.drain(..self.pos);
-                    self.pos = 0;
-                    self.buf.extend_from_slice(&b);
-                    self.at = stop;
-                }
-                Ok(_) => {
-                    self.failed = true;
-                    return Some(Err(Error::Corrupt(format!("short segment read in {}", self.seg))));
-                }
-                Err(e) => {
-                    self.failed = true;
-                    return Some(Err(e));
-                }
-            }
-        }
-        let e = decode_entry(&self.buf[self.pos..self.pos + ENTRY as usize]);
-        self.pos += ENTRY as usize;
-        Some(Ok(e))
-    }
+    Ok(out)
 }
 
 struct SegReader {
