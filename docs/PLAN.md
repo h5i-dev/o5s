@@ -398,7 +398,30 @@ The scattered-edit case is the hard one for chunk dedup. 0.1 % of 1 GiB is about
 every 64 KiB chunk. If the store can't meet it with chunking alone, a generic derived-object encoding
 (`base + patch`) is the expected route. Either way the number is reported.
 
-### 6.5 Net fronts
+### 6.5 Net fronts, pre-registered 2026-11-15, before any front measurement code (net session)
 
-*(Added by the net session: Git protocol (clone/fetch/push time and bytes on the wire; Git storage size is
-§6.3), HF/Xet, OCI, PyPI/npm/Maven. No measurement code for a front before its row is committed here.)*
+**Common rules.** Every check uses the **real, unmodified client**. Timing runs hold the bench lock. Each
+metric is the median of 3 runs. Raw results go to JSONL, and a script computes the verdicts. Specialist
+baselines run locally on this host. A front's verdict tiers are, per metric:
+- **STRONG PASS:** ≤ 1.00× the specialist (parity or better).
+- **PASS:** ≤ 1.25×.
+- **FAIL:** anything else.
+
+Functional compatibility is pass/fail, and any failure fails the front. Disk budget: each benchmark cleans up
+after itself.
+
+| front | specialist baseline (local) | real clients | functional (all must pass) | measured (tiers above) |
+|---|---|---|---|---|
+| **Git protocol** | `git daemon` (Git 2.50.1) serving a bare mirror | git 2.50.1, protocol v2 and v0 | clone, fetch, push (incl. `--atomic`, tags, deletes), `fsck --full` clean on every clone | clone wall time, clone bytes on the wire, incremental fetch (last 10 commits) time, full push time; corpus ripgrep, jq, redis (heads + tags). **Storage size is §6.3** (core). |
+| **HF/Xet** | none can run locally (the Hub is remote). The reference is the same files as plain objects through the generic `/v1` front, plus Xet-style chunk dedup computed with `crates/chunk` | `huggingface_hub` (version pinned at run time) **with its default `hf_xet` install**, and also with `HF_HUB_DISABLE_XET=1` | create_repo, upload_file, upload_folder (incl. LFS), hf_hub_download, snapshot_download, repo info / file listing, revision by branch and commit; downloaded bytes identical (sha256) | upload and download time of a real model (SmolLM2-135M, about 270 MB) vs the generic-front reference; **storage of a model family** (SmolLM2-135M + SmolLM2-135M-Instruct) vs Xet chunk dedup of the same files (Xet's dedup on HF) |
+| **OCI** | CNCF Distribution (`registry`, v3 binary) on local disk | `oras` and/or `crane` (real binaries); the distribution-spec conformance suite | conformance: all 4 workflows, 0 failures (as now) | push and pull time for a set of real images (at least 3 related tags of one image plus 1 unrelated); stored bytes with cross-image dedup |
+| **PyPI** | `devpi-server` (or `pypiserver` if devpi can't run) | `pip` and `uv` | install from the simple API (PEP 503/691), upload (`twine` or `uv publish`), **upstream proxy-cache** of pypi.org with exactly one fetch per file | proxy-cache **hit** latency (p50 per file over 50 files), cold-miss latency, stored bytes |
+| **npm** | `verdaccio` | `npm` | install, publish, upstream proxy-cache of registry.npmjs.org | as PyPI |
+| **Maven** | `reposilite` (or Nexus OSS if it fits the disk budget) | `mvn` | resolve dependencies, deploy, upstream proxy-cache of Maven Central | as PyPI |
+
+**Cross-front checks** (reported, not tiered): one principal, policy and audit log across fronts, and dedup
+of an identical file stored through two fronts (stored once).
+
+**Consequences:**
+- FAIL on a metric: reported honestly, and the next attempt is pre-registered separately, as in §6.1.
+- Functional FAIL: the front is not done.
