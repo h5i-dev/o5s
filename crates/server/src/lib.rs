@@ -17,6 +17,7 @@ pub mod oci;
 pub mod oidc;
 pub mod segmap;
 pub mod tls;
+pub mod xet;
 
 use crate::api::AppState;
 use crate::config::{BackendSection, Config};
@@ -119,7 +120,7 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         None
     };
     let hf = match (&git, cfg.hf.enabled) {
-        (Some(g), true) => Some(Arc::new(hf::HfState::new(g.clone()).map_err(StartError::Hf)?)),
+        (Some(g), true) => Some(Arc::new(hf::HfState::new(g.clone(), Some(local.clone())).map_err(StartError::Hf)?)),
         _ => None,
     };
     let tokens = Arc::new(auth::TokenAuthenticator::new(&cfg.auth.tokens, cfg.auth.allow_anonymous));

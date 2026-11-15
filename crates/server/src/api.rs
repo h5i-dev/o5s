@@ -140,6 +140,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/metrics", get(metrics_main))
         // Capability URLs (HMAC-signed by the HF front): the LFS client sends no credentials.
         .route("/api/_lfs/{op}/{token}", axum::routing::any(crate::hf::lfs_capability))
+        .route("/xet/{*rest}", axum::routing::any(crate::hf::xet_cas))
         .merge(api)
         .layer(middleware::from_fn_with_state(state.clone(), observe))
         .with_state(state)

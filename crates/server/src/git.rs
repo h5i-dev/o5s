@@ -2147,6 +2147,9 @@ impl GitTracer {
     pub fn children_of(&self, h: &Hash, store: &dyn ObjectStore) -> Result<Option<Vec<Hash>>> {
         let size = store.size(h)?;
         let head = store.get(h, Some(0..size.min(32)))?;
+        if let Some(c) = crate::xet::record_child(h, &head, size, store)? {
+            return Ok(Some(vec![c])); // Xet xorb record -> its content
+        }
         let Some((kind, body_len, hl)) = parse_header(&head) else { return Ok(None) };
         if hl as u64 + body_len as u64 != size {
             return Ok(None);

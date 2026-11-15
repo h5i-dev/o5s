@@ -199,7 +199,20 @@ The contended run checks that no update is lost: the final version equals the nu
   - GC: `GitTracer` now follows LFS pointer blobs into the `git/_lfs` index. Tested with zero-grace GC: committed LFS content survives and an uncommitted orphan is collected (the negative control).
   - Signed LFS capability URLs (HMAC-SHA256 with a per-process key, one-hour expiry). A forged token gets 403. Because the key is per-process, URLs handed out before a restart stop working, and the client retries via the batch API.
   - CI installs huggingface_hub 2.4.0 and hf_xet 1.8.0 for the test job.
-  - Next: the Xet CAS protocol (upload is Xet by default when hf_xet is installed). Then PyPI, npm and Maven.
+- **HF Xet upload protocol: DONE** (`crates/server/src/xet.rs`). Tested with the real default client (`huggingface_hub` 2.4.0 with `hf_xet` 1.8.0, no env overrides): round-trip, then zero-grace GC, then re-download.
+  - Upload flow:
+    - `xet-write-token` issues an HMAC capability.
+    - Xorbs: chunks are decompressed (none, LZ4 frame, BG4+LZ4), then the chunk hashes and the Merkle xorb hash are recomputed byte-exact with xet-core. The decompressed bytes are stored as one core object, with a `P2PXORB1` record in `git/_xet`.
+    - Shards: segments are checked against their verification range hashes, then each file is rebuilt into a core object and checked against its Xet file hash and sha256 (which xet stores word-swapped). It is then registered like an LFS upload.
+  - GC follows record → content.
+  - Negative tests: tampered xorb gives 400, forged token 401, read token 403.
+  - Not done:
+    - Xet downloads: no `X-Xet-Hash`, so clients use plain HTTP.
+    - Global dedup: `/v1/chunks` gives 404, so clients only dedup against their local cache.
+    - Storage: each xorb's decompressed bytes are kept in addition to the rebuilt files. With the Xet chunker on `hf/` (a profile), the pack store dedups them chunk for chunk; without it, they cost about 2×.
+    - Xorb records are weak: a client whose local Xet cache references a xorb that GC has collected gets a 400 "upload it first" on the shard.
+- **Security fix: LFS ACL.** `git/_lfs` is global (sha256 → content), so anyone who knew a sha256 could commit, and then read, another repo's private file. Now `git/_lfsacl` (sha256(repo namespace, sha)) gates commits, `resolve`, batch "have" answers and download URLs. Test `lfs_objects_are_scoped_to_their_repo`.
+- Next: port the Git/OCI/HF code onto the Front API (core landed owned `FrontHandle` and `Front::gc_tracer` on request). Then PyPI, npm and Maven.
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
