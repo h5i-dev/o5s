@@ -952,3 +952,51 @@ fn frame3_reference_prefix_roundtrip_recovery_and_gc_child() {
     let with_ref = dir_bytes(&d2.path().join("objects")) - before;
     assert!(with_ref < 20_000, "one near-copy against its reference: {with_ref} bytes");
 }
+
+/// Large frames are decoded only as far as a read needs (prefix decoding),
+/// with members still verified: random, sequential and reverse reads all
+/// return exact bytes (Frame2 and Frame3); a corrupt byte in a frame is
+/// detected (the record CRC covers the whole record, and every member is also
+/// checked against its content hash, so a partial decode never returns
+/// unverified bytes).
+#[test]
+fn frame_prefix_decoding_reads_exact_and_verified() {
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { pack_cap: 1 << 30, chunk_threshold: 1 << 20, ..PackConfig::default() };
+    let members: Vec<Vec<u8>> = (0..48).map(|i| pseudo(64 << 10, 500 + i)).collect();
+    let refs: Vec<&[u8]> = members.iter().map(|m| m.as_slice()).collect();
+    let (h2, h3) = {
+        let s = open(d.path(), cfg.clone());
+        let h2 = s.put_frame(&refs, 3).unwrap();
+        let base = s.put(&members[0]).unwrap();
+        let h3 = s.put_frame_ref(&refs[1..], 3, Some(&base)).unwrap();
+        s.flush().unwrap();
+        (h2, h3)
+    };
+    let s = open(d.path(), cfg.clone());
+    let order: Vec<usize> = (0..48).map(|i| (i * 29) % 48).chain(0..48).chain((0..48).rev()).collect();
+    for &i in &order {
+        assert_eq!(s.get(&h2[i], None).unwrap(), members[i], "frame2 member {i}");
+        if i > 0 {
+            assert_eq!(s.get(&h3[i - 1], None).unwrap(), members[i], "frame3 member {i}");
+        }
+    }
+    // Corrupt one byte near the end of the first frame's compressed body.
+    let dir = d.path().join("objects/packs");
+    let pack = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "pack"))
+        .unwrap();
+    let mut b = std::fs::read(&pack).unwrap();
+    // The first record after the 24-byte pack header is the Frame2: its payload
+    // ends well before 3 MiB; flip a byte at ~95% of it.
+    let at = 24 + (members.len() * (64 << 10)) * 95 / 100;
+    if at < b.len() {
+        b[at] ^= 0x10;
+    }
+    std::fs::write(&pack, b).unwrap();
+    let s = open(d.path(), cfg);
+    assert!(s.get(&h2[47], None).is_err(), "corruption is detected");
+    assert!(s.get(&h2[0], None).is_err(), "the record CRC covers every member");
+}

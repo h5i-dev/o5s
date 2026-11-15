@@ -371,6 +371,8 @@ const MANIFEST_CACHE: usize = 16;
 
 /// Frames kept decompressed per handle (at most ~4 MiB each by default).
 const FRAME_CACHE: usize = 8;
+/// Smallest frame prefix decoded at once (see `frame_bodies`).
+const FRAME_PREFIX_MIN: usize = 256 << 10;
 
 impl Inner {
     fn fault(&self, point: &'static str) -> Result<()> {
@@ -1225,8 +1227,8 @@ impl PackStore {
         }
         let (_, payload) = decode_record(&raw)?;
         if let Some((inner, _)) = loc.frame {
-            let bodies = self.frame_bodies(&h, payload, &loc)?;
             let (a, b) = (inner as usize, inner as usize + loc.raw_len as usize);
+            let bodies = self.frame_bodies(&h, payload, &loc, b)?;
             let d = bodies.get(a..b).ok_or_else(|| Error::Corrupt(format!("frame member {hash} out of range")))?;
             return Ok((h, d.to_vec()));
         }
@@ -1258,20 +1260,33 @@ impl PackStore {
 
     /// Decompressed frame bodies, through a small cache (recently used
     /// frames). Sequential reads of grouped objects then decompress each frame once.
-    fn frame_bodies(&self, h: &RecHeader, payload: &[u8], loc: &Loc) -> Result<Arc<Vec<u8>>> {
+    fn frame_bodies(&self, h: &RecHeader, payload: &[u8], loc: &Loc, need: usize) -> Result<Arc<Vec<u8>>> {
         let key = (h.hash, loc.offset);
-        {
+        let cached = {
             let c = self.inner.frame_cache.lock().map_err(poisoned)?;
-            if let Some((_, v)) = c.iter().find(|(k, _)| *k == key) {
-                return Ok(v.clone());
-            }
+            c.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())
+        };
+        if let Some(v) = &cached
+            && v.len() >= need
+        {
+            return Ok(v.clone());
         }
         let reference = match frame_ref(h, payload)? {
             Some(r) => Some(self.get_reference(&r)?),
             None => None,
         };
-        let v = Arc::new(decode_frame_bodies(h, payload, reference.as_deref())?);
+        // Decode only as far as needed (random reads of large frames), but at
+        // least double what is cached (sequential reads stay linear), and
+        // decode (and verify) the whole frame once past half of it.
+        let raw = h.raw_len as usize;
+        let want = need.max(cached.as_ref().map_or(0, |v| v.len() * 2)).max(FRAME_PREFIX_MIN);
+        let v = if want * 2 >= raw {
+            Arc::new(decode_frame_bodies(h, payload, reference.as_deref())?)
+        } else {
+            Arc::new(decode_frame_prefix(h, payload, reference.as_deref(), want)?)
+        };
         let mut c = self.inner.frame_cache.lock().map_err(poisoned)?;
+        c.retain(|(k, _)| *k != key);
         if c.len() >= FRAME_CACHE {
             c.remove(0);
         }

@@ -536,6 +536,46 @@ pub fn decode_frame_bodies(h: &RecHeader, payload: &[u8], reference: Option<&[u8
     Ok(out)
 }
 
+/// The first `need` bytes of a frame's decompressed bodies (streaming; stops
+/// early). Unlike [`decode_frame_bodies`] this can't check the whole-frame
+/// hash, so callers must verify each member they return (reads do: every
+/// member is checked against its content hash).
+pub fn decode_frame_prefix(h: &RecHeader, payload: &[u8], reference: Option<&[u8]>, need: usize) -> Result<Vec<u8>> {
+    use zstd::zstd_safe::{DCtx, DParameter, InBuffer, OutBuffer};
+    if need as u64 > h.raw_len {
+        return Err(Error::Corrupt("frame prefix past the frame".into()));
+    }
+    let (_, start) = frame_dir(h.kind, payload)?;
+    let body = &payload[start..];
+    match h.codec {
+        Codec::Raw => {
+            return body.get(..need).map(|b| b.to_vec()).ok_or_else(|| Error::Corrupt("short raw frame".into()));
+        }
+        Codec::GroupedZstd => return Err(Error::Corrupt("grouped codec on a frame".into())),
+        Codec::Zstd => {}
+    }
+    let zerr = |e: usize| Error::Corrupt(format!("zstd: {}", zstd::zstd_safe::get_error_name(e)));
+    let mut d = DCtx::create();
+    d.set_parameter(DParameter::WindowLogMax(27)).map_err(zerr)?;
+    if h.kind == Kind::Frame3 {
+        let r = reference.ok_or_else(|| Error::Corrupt("frame3 decoded without its reference".into()))?;
+        d.ref_prefix(r).map_err(zerr)?;
+    }
+    let mut out = vec![0u8; need];
+    let mut inb = InBuffer::around(body);
+    let mut pos = 0;
+    while pos < need {
+        let mut ob = OutBuffer::around_pos(&mut out[..], pos);
+        let hint = d.decompress_stream(&mut ob, &mut inb).map_err(zerr)?;
+        let new = ob.pos();
+        if new == pos && (hint == 0 || inb.pos() == body.len()) {
+            return Err(Error::Corrupt("frame ended before the requested prefix".into()));
+        }
+        pos = new;
+    }
+    Ok(out)
+}
+
 /// Members of a frame record with their content hashes. For v2/v3 frames the
 /// hashes are recomputed from the decompressed bodies (used by recovery);
 /// `resolve` supplies a [`Kind::Frame3`] reference's bytes.

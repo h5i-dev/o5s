@@ -56,6 +56,9 @@ XOR deltas when the writer passes a width hint). `kind`:
   - features, then a similarity order (front hints only break ties), then frames of up to 6 MiB;
   - a frame cut inside a similar run is written as a **Frame3**, compressed against its most similar earlier
     object (reference depth ≤ 2);
+  - a read decodes a frame only as far as the member it needs (the cached prefix at least doubles on each
+    re-decode, and a request past half the frame decodes, and verifies, all of it). The record CRC and each
+    member's content hash are always checked;
   - a Frame3's reference is a GC child of every member, and its members keep kind 5 in the index, so GC,
     `ensure_live` and recovery follow it. Recovery resolves a reference from earlier records of the same staging
     file.
