@@ -287,11 +287,25 @@ impl Backend for LocalDisk {
     fn put_if_absent(&self, key: &str, src: PutSource<'_>) -> Result<PutOutcome> {
         use std::io::Write;
         let path = self.path(key)?;
-        if path.exists() {
+        if path.is_file() {
             return Ok(PutOutcome::AlreadyExists);
         }
+        if path.exists() {
+            return Err(Error::Parse(format!("key {key} names a directory")));
+        }
         let dir = path.parent().ok_or_else(|| Error::Parse(format!("bad key {key}")))?.to_path_buf();
-        std::fs::create_dir_all(&dir)?;
+        if !dir.is_dir() {
+            std::fs::create_dir_all(&dir)?;
+            // New directories must be durable too: fsync every ancestor up to the root.
+            let mut d = dir.as_path();
+            while d.starts_with(&self.root) {
+                fsync_dir(d)?;
+                match d.parent() {
+                    Some(p) if p != d => d = p,
+                    _ => break,
+                }
+            }
+        }
         if let PutSource::File(src_path) = src {
             // Same filesystem: publish by hard link. That's atomic and
             // create-only, with no copy. The caller guarantees the file is
@@ -306,7 +320,9 @@ impl Backend for LocalDisk {
             }
         }
         let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let tmp = dir.join(format!(".tmp-{}-{seq}", std::process::id()));
+        // Unique even across PID namespaces sharing a volume (containers).
+        let nonce = blake3::hash(format!("{}-{seq}-{:?}", std::process::id(), std::time::SystemTime::now()).as_bytes());
+        let tmp = dir.join(format!(".tmp-{}-{seq}-{}", std::process::id(), &nonce.to_hex()[..12]));
         let res = (|| -> Result<PutOutcome> {
             {
                 let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
@@ -323,7 +339,13 @@ impl Backend for LocalDisk {
                     fsync_dir(&dir)?;
                     Ok(PutOutcome::Created)
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(PutOutcome::AlreadyExists),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if path.is_file() {
+                        Ok(PutOutcome::AlreadyExists)
+                    } else {
+                        Err(Error::Parse(format!("key {key} names a directory")))
+                    }
+                }
                 Err(e) => Err(e.into()),
             }
         })();
@@ -336,6 +358,10 @@ impl Backend for LocalDisk {
         let f = std::fs::File::open(self.path(key)?).map_err(not_found_as(key))?;
         if range.start > range.end {
             return Err(Error::Parse(format!("bad range {range:?}")));
+        }
+        // Check against the real length before allocating (a corrupt range must not abort).
+        if range.end > f.metadata()?.len() {
+            return Err(Error::Corrupt(format!("read of {key} at {range:?} is past its end")));
         }
         let mut buf = vec![0u8; (range.end - range.start) as usize];
         f.read_exact_at(&mut buf, range.start).map_err(|e| {

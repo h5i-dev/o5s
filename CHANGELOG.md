@@ -44,6 +44,13 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 - Ref journal records: `Txn`, `Delete`, `Rotated`. Snapshot `P2PREFS1`.
 - Local caches: `idx-cache/*.idx3` and `midx-*.midx` (`P2PMIDX1`), derived and safe to delete.
 
+### Fixed (second review and net session, 2026-11-15)
+- Ref log engine: identical decisions by two writers could both report Ok (introduced by the lost-response fix, caught by the net session's multi-host test). Each log entry now carries a per-attempt nonce.
+- Provenance: `record()` now enforces the decoder's limits (an oversized record could make the log unreadable) and uses `ensure_live` for inputs.
+- Weights: short or malformed inputs fall back to a plain delta, and base segments are clamped to the base.
+- LocalDisk: newly created parent directories are fsynced; `get_range` checks bounds before allocating; a directory is never treated as an existing blob; temp names are unique across PID namespaces.
+- Exp1b harness: pledged-size patch-from frames, a single target read, path-less tags, and a build timer that includes the final fsync (all disclosed in EXP1.md).
+
 ### Fixed (independent code review, 2026-11-15)
 - Ref journal: batches over 4 MiB were acknowledged, then truncated by other handles as "torn tails". Records are now limited to 16 MiB and checked at write time.
 - Ref journal: a CRC error in the middle of the journal was silently truncated along with all later records. It's now reported as corruption; only a torn *last* record or a zero-filled tail is truncated.

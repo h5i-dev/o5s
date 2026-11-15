@@ -163,3 +163,22 @@ fn checkpointed_log_scales_and_matches() {
     let p = Provenance::load(&fresh, &log()).unwrap();
     assert_eq!(p.lineage(&chain[100]).unwrap().len(), 101);
 }
+
+/// Review finding: a record that the decoder would reject must be refused at
+/// record() time, never written (it would make the whole log unreadable).
+#[test]
+fn oversized_records_are_refused_and_log_stays_readable() {
+    let d = tempfile::tempdir().unwrap();
+    let r = LocalRepo::init(d.path(), &PackConfig::tiny()).unwrap();
+    let x = r.put(b"x").unwrap();
+    record(&r, &log(), &[rec("ok", &[("in", x)], &[("out", x)])]).unwrap();
+    let mut big = rec("big", &[("in", x)], &[]);
+    big.meta.insert("blob".into(), "v".repeat((1 << 20) + 1));
+    assert!(record(&r, &log(), &[big]).is_err());
+    let many_inputs =
+        Record { op: "many".into(), inputs: (0..70_000).map(|i| (format!("i{i}"), x)).collect(), ..Default::default() };
+    assert!(record(&r, &log(), &[many_inputs]).is_err());
+    let p = Provenance::load(&r, &log()).unwrap();
+    assert_eq!(p.len(), 1);
+    record(&r, &log(), &[rec("after", &[("in", x)], &[("out", x)])]).unwrap();
+}

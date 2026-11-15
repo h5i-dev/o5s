@@ -106,6 +106,24 @@ impl<'a> Rd<'a> {
 }
 
 impl Record {
+    /// Checks the limits the decoder enforces, so a record that can be written
+    /// can always be read back (an unreadable record would break the whole log).
+    pub fn validate(&self) -> Result<()> {
+        let too = |what: &str| Err(Error::Parse(format!("provenance record: {what} exceeds limits")));
+        if self.op.len() > MAX_FIELD {
+            return too("op");
+        }
+        for m in [&self.inputs, &self.outputs] {
+            if m.len() > MAX_ITEMS || m.keys().any(|k| k.len() > MAX_FIELD) {
+                return too("roles");
+            }
+        }
+        if self.meta.len() > MAX_ITEMS || self.meta.iter().any(|(k, v)| k.len() > MAX_FIELD || v.len() > MAX_FIELD) {
+            return too("meta");
+        }
+        Ok(())
+    }
+
     /// Canonical encoding (deterministic: maps are sorted).
     pub fn encode(&self) -> Vec<u8> {
         let mut v = REC_MAGIC.to_vec();
@@ -307,10 +325,16 @@ fn index_header(b: &[u8]) -> Result<(u64, u64)> {
 /// Every input, output and params object must already exist (a dangling
 /// provenance record is refused). Returns the record hashes.
 pub fn record(repo: &dyn Repository, log_ref: &Name, recs: &[Record]) -> Result<Vec<Hash>> {
+    if recs.len() > MAX_ITEMS {
+        return Err(Error::Parse(format!("at most {MAX_ITEMS} provenance records per call")));
+    }
     let mut hashes = Vec::with_capacity(recs.len());
     for r in recs {
+        r.validate()?;
+        // `ensure_live`, not `contains`: this links objects without putting them again,
+        // so GC must not be allowed to collect a condemned-only copy under us.
         for h in r.inputs.values().chain(r.outputs.values()).chain(r.params.iter()) {
-            if !repo.contains(h)? {
+            if !repo.ensure_live(h)? {
                 return Err(Error::MissingObject(*h));
             }
         }
