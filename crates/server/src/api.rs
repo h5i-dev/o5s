@@ -43,6 +43,8 @@ pub struct AppState {
     pub repo: Arc<dyn Repository>,
     pub authn: Arc<dyn Authenticator>,
     pub authz: Authorizer,
+    /// The token authenticator, if that is what `authn` is (for SIGHUP reload).
+    pub tokens: Option<Arc<crate::auth::TokenAuthenticator>>,
     pub audit: AuditLog,
     pub log_reads: bool,
     pub metrics: Arc<Metrics>,
@@ -76,7 +78,23 @@ fn client_addr(req: &Request, trust_forwarded_for: bool) -> Option<String> {
     {
         return Some(first.to_string());
     }
-    req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|ci| ci.0.to_string())
+    req.extensions().get::<axum::extract::ConnectInfo<PeerAddr>>().map(|ci| ci.0.0.to_string())
+}
+
+/// The TCP peer of a connection, for any listener (plain or TLS).
+#[derive(Clone, Copy, Debug)]
+pub struct PeerAddr(pub std::net::SocketAddr);
+
+impl<'a> axum::extract::connect_info::Connected<axum::serve::IncomingStream<'a, tokio::net::TcpListener>> for PeerAddr {
+    fn connect_info(s: axum::serve::IncomingStream<'a, tokio::net::TcpListener>) -> Self {
+        PeerAddr(*s.remote_addr())
+    }
+}
+
+impl<'a> axum::extract::connect_info::Connected<axum::serve::IncomingStream<'a, crate::tls::TlsListener>> for PeerAddr {
+    fn connect_info(s: axum::serve::IncomingStream<'a, crate::tls::TlsListener>) -> Self {
+        PeerAddr(*s.remote_addr())
+    }
 }
 
 /// The request id assigned by the request-id layer.
@@ -90,7 +108,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/objects/{hash}", get(get_object).head(head_object))
         .route("/v1/flush", post(flush))
         .route("/v1/refs", get(list_refs))
-        .route("/v1/refs/{*name}", get(resolve))
+        .route("/v1/refs/{*name}", get(resolve).delete(delete_ref))
         .route("/v1/replace", post(replace))
         .route("/v1/replace_many", post(replace_many))
         .route("/v1/namespaces", get(list_rules))
@@ -654,6 +672,50 @@ async fn replace(
     Ok((status, Json(wire::ReplaceResponse::from_core(&out))).into_response())
 }
 
+async fn delete_ref(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let name = parse_name(&name)?;
+    let req: wire::DeleteRefRequest =
+        serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("bad delete request: {e}")))?;
+    let read_set =
+        req.read_set.iter().map(wire::ReadSetEntry::to_core).collect::<Result<Vec<_>, _>>().map_err(ApiError::from)?;
+    st.require(st.authz.allows(&p, name.as_str(), Access::Write), &p, &c, "delete_ref", name.as_str())?;
+    if is_reserved(name.as_str()) {
+        st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "delete_reserved", name.as_str())?;
+    }
+    for (n, _) in &read_set {
+        st.require(st.authz.allows(&p, n.as_str(), Access::Read), &p, &c, "delete_ref", n.as_str())?;
+    }
+    st.require_audit_healthy()?;
+    let repo = st.repo.clone();
+    let (n, rs) = (name.clone(), read_set.clone());
+    let res = blocking(move || repo.delete_ref(&n, &rs)).await;
+    let outcome = match &res {
+        Ok(pico2peta_core::ReplaceOutcome::Ok { .. }) => "ok",
+        Ok(pico2peta_core::ReplaceOutcome::Conflict { .. }) => "conflict",
+        Err(_) => "rejected",
+    };
+    st.audit_mutation(Event {
+        request_id: c.request_id.clone(),
+        principal: p.name.clone(),
+        action: "delete_ref",
+        target: name.to_string(),
+        outcome: outcome.into(),
+        detail: None,
+        remote: c.remote.clone(),
+    })
+    .await?;
+    let out = res?;
+    let status =
+        if matches!(out, pico2peta_core::ReplaceOutcome::Ok { .. }) { StatusCode::OK } else { StatusCode::CONFLICT };
+    Ok((status, Json(wire::ReplaceResponse::from_core(&out))).into_response())
+}
+
 async fn replace_many(
     State(st): St,
     Extension(p): Extension<Principal>,
@@ -771,17 +833,21 @@ impl pico2peta_repo::Tracer for AdapterTracer {
 struct GcQuery {
     #[serde(default)]
     dry_run: bool,
+    /// Regroup fully-live packs too (aggressive repack).
+    #[serde(default)]
+    repack_all: bool,
 }
 
 /// Runs one GC invocation, unless one is already running.
-pub async fn run_gc(st: &AppState, dry_run: bool) -> ApiResult<wire::GcReportJson> {
+pub async fn run_gc(st: &AppState, dry_run: bool, repack_all: bool) -> ApiResult<wire::GcReportJson> {
     let Some(local) = st.local.clone() else {
         return Err(ApiError::new(StatusCode::NOT_IMPLEMENTED, "unsupported", "GC needs a local repository"));
     };
     if st.gc_running.swap(true, Ordering::AcqRel) {
         return Err(ApiError::new(StatusCode::CONFLICT, codes::GC_RUNNING, "a GC run is already in progress"));
     }
-    let opts = st.gc.options(dry_run);
+    let opts = st.gc.options_with(dry_run, repack_all);
+    let grouped = st.gc.grouped;
     let running = st.gc_running.clone();
     let res = blocking(move || {
         // Provenance records, then git objects, OCI manifests and segment maps;
@@ -793,7 +859,8 @@ pub async fn run_gc(st: &AppState, dry_run: bool) -> ApiResult<wire::GcReportJso
                 oci: crate::oci::OciTracer::new(shared),
             },
         };
-        let r = local.gc(&opts, &tracer);
+        let grouper = crate::git::GitGrouper;
+        let r = local.gc_with(&opts, &tracer, if grouped { Some(&grouper) } else { None });
         running.store(false, Ordering::Release);
         r
     })
@@ -829,7 +896,7 @@ async fn gc(
 ) -> ApiResult<Json<wire::GcReportJson>> {
     st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "gc", "repository")?;
     st.require_audit_healthy()?;
-    let res = run_gc(&st, q.dry_run).await;
+    let res = run_gc(&st, q.dry_run, q.repack_all).await;
     st.audit_mutation(Event {
         request_id: c.request_id.clone(),
         principal: p.name.clone(),

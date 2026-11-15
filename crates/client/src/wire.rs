@@ -9,11 +9,12 @@
 //! | `GET` | `/v1/refs/{name}` | [`RefJson`] or 404 |
 //! | `GET` | `/v1/refs?prefix=p` | [`RefList`] (only names the caller may read) |
 //! | `POST` | `/v1/replace` | [`ReplaceRequest`] → 200/409 [`ReplaceResponse`] |
+//! | `DELETE` | `/v1/refs/{name}` | [`DeleteRefRequest`] → 200/409 [`ReplaceResponse`] (OCC, rules apply) |
 //! | `POST` | `/v1/replace_many` | [`ReplaceManyRequest`] → 200/409 [`ReplaceManyResponse`] (atomic) |
 //! | `GET` | `/v1/namespaces` | [`RuleList`] |
 //! | `PUT` | `/v1/namespaces/{prefix}` | [`SetRuleRequest`] (admin) |
 //! | `GET` | `/v1/whoami` | [`WhoAmI`] |
-//! | `POST` | `/v1/admin/gc?dry_run=bool` | [`GcReportJson`] (admin on `""`); 409 if a GC is running |
+//! | `POST` | `/v1/admin/gc?dry_run=bool&repack_all=bool` | [`GcReportJson`] (admin on `""`); 409 if a GC is running |
 //!
 //! **Operation lease:** GC reclaims objects that no ref reaches once the GC grace
 //! period (default 1 h) has passed. A client must `replace` a ref to point at a
@@ -83,6 +84,12 @@ pub struct ReplaceRequest {
 pub enum ReplaceResponse {
     Ok { version: u64 },
     Conflict { stale: Vec<ReadSetEntry> },
+}
+
+/// OCC delete: the target must be in `read_set`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeleteRefRequest {
+    pub read_set: Vec<ReadSetEntry>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

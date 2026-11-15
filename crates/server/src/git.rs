@@ -19,7 +19,7 @@
 //!   only from refs.
 //!
 //! Limits of this version (also in the production gaps): SHA-1 repositories
-//! only, no shallow clones, no protocol v2, no ref deletion, full objects
+//! only, no shallow clones, no protocol v2, full objects
 //! (no deltas) in served packs, and delta bases resolved in a bounded
 //! in-memory cache.
 
@@ -365,7 +365,16 @@ fn advertisement(st: &GitState, repo: &str, service: &str) -> Result<Vec<u8>> {
     out.extend_from_slice(FLUSH);
     let mut caps = match service {
         "git-upload-pack" => vec!["side-band-64k", "no-progress", "ofs-delta", "object-format=sha1", AGENT],
-        _ => vec!["report-status", "side-band-64k", "atomic", "ofs-delta", "quiet", "object-format=sha1", AGENT],
+        _ => vec![
+            "report-status",
+            "delete-refs",
+            "side-band-64k",
+            "atomic",
+            "ofs-delta",
+            "quiet",
+            "object-format=sha1",
+            AGENT,
+        ],
     }
     .into_iter()
     .map(str::to_string)
@@ -1336,12 +1345,21 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
     }
     // Validate commands.
     let mut statuses: Vec<(String, std::result::Result<(), String>)> = Vec::new();
-    let mut updates: Vec<(Name, Hash, Observed, usize)> = Vec::new();
+    // `None` hash = delete.
+    let mut updates: Vec<(Name, Option<Hash>, Observed, usize)> = Vec::new();
     for (i, c) in cmds.iter().enumerate() {
-        let check = (|| -> std::result::Result<(Name, Hash, Observed), String> {
+        let check = (|| -> std::result::Result<(Name, Option<Hash>, Observed), String> {
             let name = ref_name(repo, &c.gitref).ok_or("unsupported ref name")?;
             if c.new == ZERO_OID {
-                return Err("deleting refs is not supported".into());
+                let cur = git.repo.resolve(&name).map_err(|e| e.to_string())?;
+                let cur_oid = match &cur {
+                    Some(v) => Some(oid_of(&git.repo.get(&v.hash, None).map_err(|e| e.to_string())?)),
+                    None => None,
+                };
+                if cur_oid != Some(c.old) && c.old != ZERO_OID {
+                    return Err("fetch first (stale old value)".into());
+                }
+                return Ok((name, None, RefValue::observed(cur)));
             }
             let (kind, h) = view.lookup(&c.new).map_err(|e| e.to_string())?.ok_or("missing new object")?;
             // Not in this push: the client assumes we have it, so make sure it stays.
@@ -1360,7 +1378,7 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
             if cur_oid != expected {
                 return Err("fetch first (stale old value)".into());
             }
-            Ok((name, h, RefValue::observed(cur)))
+            Ok((name, Some(h), RefValue::observed(cur)))
         })();
         match check {
             Ok((n, h, o)) => {
@@ -1379,8 +1397,15 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
             }
             return Ok(PushResult { unpack, statuses, sideband });
         }
+        if updates.iter().any(|u| u.1.is_none()) {
+            // replace_many cannot delete; refuse rather than lose atomicity.
+            for s in statuses.iter_mut() {
+                s.1 = Err("atomic pushes cannot delete refs".into());
+            }
+            return Ok(PushResult { unpack, statuses, sideband });
+        }
         if !updates.is_empty() {
-            let u: Vec<(Name, Hash)> = updates.iter().map(|x| (x.0.clone(), x.1)).collect();
+            let u: Vec<(Name, Hash)> = updates.iter().filter_map(|x| Some((x.0.clone(), x.1?))).collect();
             let rs: Vec<(Name, Observed)> = updates.iter().map(|x| (x.0.clone(), x.2)).collect();
             let why = match git.repo.replace_many(&u, &rs) {
                 Ok(ReplaceManyOutcome::Ok { .. }) => None,
@@ -1396,7 +1421,11 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
         }
     } else {
         for (n, h, o, i) in updates {
-            let r = match git.repo.replace(&n, &[(n.clone(), o)], h) {
+            let res = match h {
+                Some(h) => git.repo.replace(&n, &[(n.clone(), o)], h),
+                None => git.repo.delete_ref(&n, &[(n.clone(), o)]),
+            };
+            let r = match res {
                 Ok(ReplaceOutcome::Ok { .. }) => Ok(()),
                 Ok(ReplaceOutcome::Conflict { .. }) => Err("fetch first (concurrent update)".to_string()),
                 Err(Error::Forbidden { .. }) => Err("ref is immutable".to_string()),
@@ -1406,6 +1435,184 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
         }
     }
     Ok(PushResult { unpack, statuses, sideband })
+}
+
+// ---------------------------------------------------------------------------
+// Grouped repack hints
+// ---------------------------------------------------------------------------
+
+/// `pico2peta_repo::Grouper` for git content (the Experiment 1 V2 layout):
+/// * blobs: group `blob:<ext>` (or `blob:<basename>` without an extension),
+///   ordered by path, then the time of the oldest commit that contains them;
+/// * trees: group `tree`, ordered by directory path, then time;
+/// * commits and tags: groups `commit` / `tag`, ordered by time.
+///
+/// Every git repository's refs are walked (oldest commits first), so all
+/// versions of a file end up adjacent and in history order.
+pub struct GitGrouper;
+
+/// Commit or tagger time from a commit/tag body (`committer … <ts> <tz>`).
+fn object_time(kind: Kind, body: &[u8]) -> u64 {
+    let field: &[u8] = if kind == Kind::Tag { b"tagger " } else { b"committer " };
+    for line in body.split(|&c| c == b'\n') {
+        if line.is_empty() {
+            break;
+        }
+        if let Some(rest) = line.strip_prefix(field) {
+            let mut it = rest.rsplit(|&c| c == b' ');
+            let _tz = it.next();
+            if let Some(ts) = it.next().and_then(|t| std::str::from_utf8(t).ok()).and_then(|t| t.parse().ok()) {
+                return ts;
+            }
+        }
+    }
+    0
+}
+
+fn blob_group(path: &str) -> String {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    match base.rfind('.') {
+        Some(i) if i > 0 && i + 1 < base.len() => format!("blob:{}", &base[i + 1..]),
+        _ => format!("blob:{base}"),
+    }
+}
+
+impl pico2peta_repo::Grouper for GitGrouper {
+    fn assign(&self, repo: &dyn Repository, live: &HashSet<Hash>) -> Result<HashMap<Hash, pico2peta_repo::GroupKey>> {
+        use pico2peta_repo::GroupKey;
+        let mut out: HashMap<Hash, GroupKey> = HashMap::new();
+        let n = Name::new("git/_oidmap").unwrap_or_else(|_| unreachable!("static name is valid"));
+        let Some(rv) = repo.resolve(&n)? else { return Ok(out) };
+        let root = crate::segmap::Root::decode(&repo.get(&rv.hash, None)?)?;
+        // A SegMap needs an Arc<dyn Repository>; read segments directly instead.
+        let lookup = OidLookup { repo, root, cache: HashMap::new() };
+        let mut lookup = lookup;
+        let load = |l: &mut OidLookup<'_>, oid: &Oid| -> Result<Option<(Hash, Kind, Vec<u8>)>> {
+            let Some(h) = l.get(oid)? else { return Ok(None) };
+            let bytes = match l.repo.get(&h, None) {
+                Ok(b) => b,
+                Err(Error::NotFound(_)) => return Ok(None),
+                Err(e) => return Err(e),
+            };
+            let Some((kind, size, hl)) = parse_header(&bytes) else { return Ok(None) };
+            if hl + size != bytes.len() {
+                return Ok(None);
+            }
+            Ok(Some((h, kind, bytes[hl..].to_vec())))
+        };
+        // 1. All commits (and tags) reachable from any git ref.
+        let mut tips: Vec<Oid> = Vec::new();
+        for (name, v) in repo.list_refs("git")? {
+            if name.as_str().starts_with("git/_") || !name.as_str().contains("/refs/") {
+                continue;
+            }
+            let bytes = repo.get(&v.hash, None)?;
+            tips.push(oid_of(&bytes));
+        }
+        let mut commits: Vec<(u64, Oid, Hash, Vec<u8>)> = Vec::new();
+        let mut seen: HashSet<Oid> = HashSet::new();
+        let mut stack = tips;
+        while let Some(o) = stack.pop() {
+            if !seen.insert(o) {
+                continue;
+            }
+            let Some((h, kind, body)) = load(&mut lookup, &o)? else { continue };
+            match kind {
+                Kind::Tag => {
+                    let t = object_time(kind, &body);
+                    if live.contains(&h) {
+                        out.insert(h, GroupKey { group: "tag".into(), order: format!("{t:020}") });
+                    }
+                    stack.extend(refs_of(kind, &body)?);
+                }
+                Kind::Commit => {
+                    let t = object_time(kind, &body);
+                    let refs = refs_of(kind, &body)?;
+                    stack.extend(refs.iter().skip(1).copied());
+                    commits.push((t, o, h, body));
+                }
+                _ => {}
+            }
+        }
+        commits.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        // 2. Trees and blobs, first seen from the oldest commit.
+        let mut seen_tree: HashSet<Oid> = HashSet::new();
+        for (t, _, h, body) in commits {
+            if live.contains(&h) {
+                out.insert(h, GroupKey { group: "commit".into(), order: format!("{t:020}") });
+            }
+            let Some(tree) = refs_of(Kind::Commit, &body)?.first().copied() else { continue };
+            let mut stack: Vec<(Oid, String)> = vec![(tree, String::new())];
+            while let Some((toid, dir)) = stack.pop() {
+                if !seen_tree.insert(toid) {
+                    continue;
+                }
+                let Some((th, kind, tbody)) = load(&mut lookup, &toid)? else { continue };
+                if kind != Kind::Tree {
+                    continue;
+                }
+                if live.contains(&th) {
+                    out.insert(th, GroupKey { group: "tree".into(), order: format!("{dir}\0{t:020}") });
+                }
+                let mut i = 0;
+                while i < tbody.len() {
+                    let Some(sp) = tbody[i..].iter().position(|&c| c == b' ').map(|x| x + i) else { break };
+                    let Some(nul) = tbody[sp..].iter().position(|&c| c == 0).map(|x| x + sp) else { break };
+                    if nul + 21 > tbody.len() {
+                        break;
+                    }
+                    let mode = &tbody[i..sp];
+                    let name = String::from_utf8_lossy(&tbody[sp + 1..nul]).to_string();
+                    let mut oid = [0u8; 20];
+                    oid.copy_from_slice(&tbody[nul + 1..nul + 21]);
+                    i = nul + 21;
+                    let path = if dir.is_empty() { name } else { format!("{dir}/{name}") };
+                    match mode {
+                        b"40000" => stack.push((oid, path)),
+                        b"160000" => {}
+                        _ => {
+                            if let Some(bh) = lookup.get(&oid)?
+                                && live.contains(&bh)
+                            {
+                                out.entry(bh).or_insert_with(|| GroupKey {
+                                    group: blob_group(&path),
+                                    order: format!("{path}\0{t:020}"),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// Oid → BLAKE3 lookups against an oid-map root, reading segments directly.
+struct OidLookup<'a> {
+    repo: &'a dyn Repository,
+    root: crate::segmap::Root,
+    cache: HashMap<Hash, Arc<Vec<(Key, Value)>>>,
+}
+
+impl OidLookup<'_> {
+    fn get(&mut self, oid: &Oid) -> Result<Option<Hash>> {
+        let k = key_of(oid);
+        for (seg, _) in self.root.segments.iter().rev() {
+            let entries = match self.cache.get(seg) {
+                Some(e) => e.clone(),
+                None => {
+                    let e = Arc::new(crate::segmap::decode_segment(&self.repo.get(seg, None)?)?);
+                    self.cache.insert(*seg, e.clone());
+                    e
+                }
+            };
+            if let Ok(i) = entries.binary_search_by(|(x, _)| x.cmp(&k)) {
+                return Ok(Some(entries[i].1.hash));
+            }
+        }
+        Ok(None)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1424,8 +1631,10 @@ pub(crate) fn fuzz_push(repo: Arc<pico2peta_repo::LocalRepo>, spool: &std::path:
             for (r, s) in &res.statuses {
                 if s.is_ok() {
                     let n = ref_name("fuzz/repo", r).unwrap_or_else(|| panic!("accepted bad ref {r}"));
-                    let v = st.repo.resolve(&n).ok().flatten().unwrap_or_else(|| panic!("ok ref {r} not set"));
-                    assert!(st.repo.contains(&v.hash).unwrap_or(false));
+                    // An accepted update (not a delete) must point at a stored object.
+                    if let Some(v) = st.repo.resolve(&n).ok().flatten() {
+                        assert!(st.repo.contains(&v.hash).unwrap_or(false), "ok ref {r} points at a missing object");
+                    }
                 }
             }
         }

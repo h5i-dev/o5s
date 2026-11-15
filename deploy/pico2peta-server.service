@@ -10,6 +10,8 @@ User=pico2peta
 Group=pico2peta
 ExecStartPre=/usr/local/bin/pico2peta-server check-config --config /etc/pico2peta/server.toml
 ExecStart=/usr/local/bin/pico2peta-server serve --config /etc/pico2peta/server.toml
+# SIGHUP reloads tokens, policies and the TLS certificate.
+ExecReload=/bin/kill -HUP $MAINPID
 # Optional: AWS_ACCESS_KEY_ID=..., AWS_SECRET_ACCESS_KEY=..., RUST_LOG=...
 EnvironmentFile=-/etc/pico2peta/env
 # Graceful drain: must exceed server.shutdown_grace_secs.

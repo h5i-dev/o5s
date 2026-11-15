@@ -93,6 +93,7 @@ fn main() -> ExitCode {
 }
 
 fn serve(config: PathBuf) -> ExitCode {
+    let config = std::fs::canonicalize(&config).unwrap_or(config);
     let cfg = match pico2peta_server::config::Config::load(&config) {
         Ok(c) => c,
         Err(e) => {
@@ -120,18 +121,38 @@ fn serve(config: PathBuf) -> ExitCode {
             .await
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string())?;
-        let listener = tokio::net::TcpListener::bind(cfg.server.listen)
-            .await
-            .map_err(|e| format!("bind {}: {e}", cfg.server.listen))?;
-        tracing::info!(listen = %cfg.server.listen, repo = %cfg.repo.path.display(), "pico2peta-server listening");
-        pico2peta_server::serve(
-            listener,
-            state,
-            Duration::from_secs(cfg.server.request_timeout_secs),
-            Duration::from_secs(cfg.server.shutdown_grace_secs),
-            pico2peta_server::shutdown_signal(),
-        )
-        .await
+        let listener = tokio::net::TcpListener::bind(cfg.server.listen).await.map_err(|e| format!("bind {}: {e}", cfg.server.listen))?;
+        let cert = match &cfg.server.tls {
+            Some(t) => Some(pico2peta_server::tls::ReloadableCert::load(t.cert.clone(), t.key.clone())?),
+            None => None,
+        };
+        // SIGHUP: reload tokens, policies and the certificate.
+        #[cfg(unix)]
+        {
+            let st = state.clone();
+            let cert = cert.clone();
+            let path = config.clone();
+            tokio::spawn(async move {
+                let Ok(mut hup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) else { return };
+                while hup.recv().await.is_some() {
+                    if let Err(e) = pico2peta_server::reload(&st, &path, cert.as_deref()).await {
+                        tracing::error!(error = %e, "configuration reload failed; keeping the old configuration");
+                    }
+                }
+            });
+        }
+        let timeout = Duration::from_secs(cfg.server.request_timeout_secs);
+        let grace = Duration::from_secs(cfg.server.shutdown_grace_secs);
+        let scheme = if cert.is_some() { "https" } else { "http" };
+        tracing::info!(listen = %cfg.server.listen, scheme, repo = %cfg.repo.path.display(), "pico2peta-server listening");
+        match cert {
+            Some(c) => {
+                let acceptor = pico2peta_server::tls::acceptor(c)?;
+                let l = pico2peta_server::tls::TlsListener::new(listener, acceptor).map_err(|e| e.to_string())?;
+                pico2peta_server::serve_on(l, state, timeout, grace, pico2peta_server::shutdown_signal()).await
+            }
+            None => pico2peta_server::serve(listener, state, timeout, grace, pico2peta_server::shutdown_signal()).await,
+        }
         .map_err(|e| e.to_string())
     });
     match res {

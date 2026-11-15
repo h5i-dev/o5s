@@ -145,9 +145,10 @@ fn atomic_push_and_immutable_tags() {
     // Without the bad ref, an atomic push of two branches succeeds.
     ok(&a, &["push", "-q", "--atomic", &u, "main", "side"]);
     assert!(s.client(ALICE).resolve(&n("git/team/t/refs/heads/side")).unwrap().is_some());
-    // Deleting refs is not supported.
-    let (pushed, _) = git(&a, &["push", &u, ":side"]);
-    assert!(!pushed);
+    // Deleting a mutable branch works; an immutable tag cannot be deleted.
+    ok(&a, &["push", "-q", &u, ":side"]);
+    let (pushed, out) = git(&a, &["push", &u, ":refs/tags/v1"]);
+    assert!(!pushed, "{out}");
 }
 
 #[test]
@@ -180,4 +181,123 @@ fn gc_tracer_follows_git_objects() {
     assert_eq!(canon("HEAD"), tip, "internal id = BLAKE3 of canonical git bytes");
     // A blob is a leaf.
     assert_eq!(tracer.children_of(&canon("HEAD:f"), &repo).unwrap(), Some(vec![]));
+}
+
+fn dir_bytes(p: &Path) -> u64 {
+    let mut total = 0;
+    if let Ok(rd) = std::fs::read_dir(p) {
+        for e in rd.flatten() {
+            let m = e.metadata().unwrap();
+            total += if m.is_dir() { dir_bytes(&e.path()) } else { m.len() };
+        }
+    }
+    total
+}
+
+/// Measurement (opt-in): import a real mirror, run a grouped aggressive repack,
+/// compare with git's pack size, and verify the repo still clones identically.
+///   P2P_GIT_MIRROR=/mnt/scratch/pico2peta/bench-data/mirrors/ripgrep.git \
+///   cargo test --release -p pico2peta-server --test git grouped_repack -- --ignored --nocapture
+#[test]
+#[ignore]
+fn grouped_repack_vs_git() {
+    let Ok(mirror) = std::env::var("P2P_GIT_MIRROR") else { return };
+    let mirror = std::path::PathBuf::from(mirror);
+    let s = git_server();
+    let u = url(&s, ALICE, "team/m");
+    ok(&mirror, &["push", "-q", &u, "refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"]);
+    let objects = s.dir.path().join("repo/objects");
+    let before = dir_bytes(&objects);
+    let repo = pico2peta_repo::LocalRepo::open(s.dir.path().join("repo")).unwrap();
+    repo.flush().unwrap();
+    let shared: std::sync::Arc<dyn pico2peta_core::Repository> = std::sync::Arc::new(repo.clone());
+    let tracer = pico2peta_prov::ProvTracer {
+        inner: pico2peta_server::api::AdapterTracer {
+            git: pico2peta_server::git::GitTracer::new(shared.clone()).unwrap(),
+            oci: pico2peta_server::oci::OciTracer::new(shared),
+        },
+    };
+    let opts = pico2peta_repo::GcOptions {
+        grace: Duration::ZERO,
+        allow_short_grace: true,
+        repack_all: true,
+        ..Default::default()
+    };
+    let t = std::time::Instant::now();
+    for _ in 0..3 {
+        std::thread::sleep(Duration::from_millis(1100));
+        let r = repo.gc_with(&opts, &tracer, Some(&pico2peta_server::git::GitGrouper)).unwrap();
+        assert!(r.dangling_refs.is_empty(), "{r:?}");
+        eprintln!("gc phase: {r:?}");
+    }
+    let after = dir_bytes(&objects);
+    let mut files: Vec<(String, u64)> = Vec::new();
+    let mut stack = vec![objects.clone()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            if e.path().is_dir() {
+                stack.push(e.path());
+            } else {
+                files.push((
+                    e.path().strip_prefix(&objects).unwrap().display().to_string(),
+                    e.metadata().unwrap().len(),
+                ));
+            }
+        }
+    }
+    files.sort();
+    for (f, n) in &files {
+        eprintln!("  {f} {n}");
+    }
+    // Fair baseline: the same refs (heads + tags) packed by `git gc --aggressive`.
+    let b = tempfile::tempdir().unwrap();
+    ok(b.path(), &["init", "-q", "--bare", "base"]);
+    let base = b.path().join("base");
+    ok(&base, &["fetch", "-q", mirror.to_str().unwrap(), "refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"]);
+    ok(&base, &["-c", "pack.threads=4", "gc", "-q", "--aggressive", "--prune=now"]);
+    let sum = |ext: &str| -> u64 {
+        std::fs::read_dir(base.join("objects/pack"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == ext))
+            .map(|e| e.metadata().unwrap().len())
+            .sum()
+    };
+    let (gp, gi) = (sum("pack"), sum("idx"));
+    let ours_pack: u64 = files.iter().filter(|f| f.0.ends_with(".pack")).map(|f| f.1).sum();
+    eprintln!(
+        "RESULT import={before} grouped={after} (packs {ours_pack}) git-aggressive pack={gp} idx={gi} total={} ratio={:.3} payload-ratio={:.3} repack={:.1}s",
+        gp + gi,
+        after as f64 / (gp + gi) as f64,
+        ours_pack as f64 / gp as f64,
+        t.elapsed().as_secs_f64()
+    );
+    // Everything still clones identically.
+    let w = tempfile::tempdir().unwrap();
+    ok(w.path(), &["clone", "-q", "--mirror", &u, "c"]);
+    let list = |d: &Path| ok(d, &["for-each-ref", "--format=%(objectname) %(refname)", "refs/heads", "refs/tags"]);
+    assert_eq!(list(&mirror), list(&w.path().join("c")));
+    ok(&w.path().join("c"), &["fsck", "--full"]);
+}
+
+#[test]
+fn branch_deletion() {
+    if !have_git() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let s = git_server();
+    let w = tempfile::tempdir().unwrap();
+    let a = w.path().join("a");
+    std::fs::create_dir(&a).unwrap();
+    ok(&a, &["init", "-q"]);
+    commit(&a, "f", "1", "one");
+    let u = url(&s, ALICE, "team/del");
+    ok(&a, &["branch", "tmp"]);
+    ok(&a, &["push", "-q", &u, "main", "tmp"]);
+    ok(&a, &["push", "-q", &u, ":tmp"]);
+    assert!(s.client(ALICE).resolve(&n("git/team/del/refs/heads/tmp")).unwrap().is_none());
+    // Re-create after delete.
+    ok(&a, &["push", "-q", &u, "tmp"]);
+    assert!(s.client(ALICE).resolve(&n("git/team/del/refs/heads/tmp")).unwrap().is_some());
 }

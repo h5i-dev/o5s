@@ -8,6 +8,8 @@ max_concurrent_requests = 256      # beyond this: 503 + Retry-After (load sheddi
 request_timeout_secs = 3600        # until response headers (covers whole uploads)
 shutdown_grace_secs = 30           # drain time after SIGTERM
 trust_forwarded_for = false        # true behind a reverse proxy that sets X-Forwarded-For
+# Native HTTPS instead of a TLS proxy (cert/key reloaded on SIGHUP):
+#tls = { cert = "/etc/pico2peta/tls.crt", key = "/etc/pico2peta/tls.key" }
 
 [repo]
 path = "/var/lib/pico2peta/repo"

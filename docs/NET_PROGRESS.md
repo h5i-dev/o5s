@@ -78,18 +78,43 @@
 - A distroless nonroot Dockerfile, sample configs (`server.toml`, `server.docker.toml`, `tokens.example.toml`), a hardened systemd unit (`systemd-analyze verify` clean), and `deploy/README.md` (install, TLS, S3 lifecycle and IAM, observability, audit, capacity).
 - Smoke-tested the real binary with the sample config: gen-token, check-config, put, replace, resolve, ranged get, SIGTERM drain and flush, verify-audit.
 
+### Hardening after goal 6
+- Native TLS (rustls, concurrent handshakes, ALPN h2) with SIGHUP hot reload of the cert, tokens and policies (`tests/tls.rs`).
+- Fuzz targets plus never-panic proptests for every net decoder, and allocation caps on untrusted size headers (zlib-bomb-safe pack scanning).
+- `ensure_live` (API v1.3) is used wherever existing objects get referenced without being re-put.
+
+### Grouped repack of git content (core `Grouper`, net `GitGrouper`)
+- `GitGrouper` follows the EXP1 V2 layout:
+  - Groups are `blob:<ext>` (or `blob:<basename>`), `tree`, `commit` and `tag`.
+  - Order is path, then the time of the oldest commit that contains the object. Every git repo's refs are walked, oldest commits first.
+- Enabled through `[gc] grouped = true` (the default) and `repack_all`, or per call with `POST /v1/admin/gc?repack_all=true`.
+- **Measured on ripgrep** (heads + tags, 14,190 objects), with `cargo test --release -p pico2peta-server --test git grouped_repack -- --ignored`:
+
+  | | bytes | vs git `--aggressive` |
+  |---|---|---|
+  | after git push import (one zstd record per object) | 37.06 MB | 9.7× |
+  | after grouped `repack_all`: .pack | 3.93 MB | 1.154× git .pack (3.41 MB) |
+  | after grouped `repack_all`: .pack + .idx | 4.82 MB | **1.264×** git .pack + .idx (3.81 MB) |
+
+  - The repack takes 52 s on a release build; `git gc --aggressive` takes 7 s.
+  - After the repack the repo clones back with identical refs and passes `git fsck --full`.
+- This does **not** reproduce EXP1's predicted ~0.85× on ripgrep. Both parts contribute:
+  - Payload: 1.15× vs git pack.
+  - Index: 62 B/object real vs the 48 B modeled in PLAN §4.4, and git's .idx is about 28 B/object.
+- I've reported this to the core lead to reconcile with the Exp1 harness (`bench/exp1`). Possible causes: frame boundaries, grouping keys that differ from the harness, and the cost of the index format.
+
 ### Next
 - Goal 6: Git smart-HTTP and OCI distribution adapters. The hash-mapping design proposal is below, waiting for the lead's agreement.
 
 ### Goal 6a: OCI distribution adapter (`crates/server/src/oci.rs`, `/v2`). Done.
-- Covers pull, push (monolithic and chunked with `Content-Range` checks), cross-repo mount, tags/list with pagination, and the OCI 1.1 referrers API (`OCI-Subject`, `artifactType` filter). Deletion returns 405.
+- Covers pull, push (monolithic and chunked with `Content-Range` checks), cross-repo mount, tags/list with pagination, and the OCI 1.1 referrers API (`OCI-Subject`, `artifactType` filter). Manifest and tag deletes go through OCC `delete_ref`; blob deletes return 405.
 - Auth: Basic (any user, the token as password) or Bearer. Unauthenticated requests get a `WWW-Authenticate: Basic` challenge.
 - Mapping follows the agreed design, with the lead's amendment:
   - The sha256 → BLAKE3 digest index (`oci/_digest`) and per-repo blob membership (`oci/<repo>/_blobs`) are **segment maps** (`segmap.rs`): content-addressed sorted segments behind one ref, OCC updates, tiered compaction, ranged binary search for large segments, and a cache.
   - Tags, manifest links, media types and referrer links stay refs.
   - Map values are weak. `OciTracer` keeps blobs alive through manifests, and is chained inside the core `ProvTracer` for server GC.
   - Uploads spool to `<repo>.oci-uploads/` and hash incrementally (bounded memory). Sessions are per principal, with a TTL and a session cap.
-- **Passes the OCI distribution-spec v1.1.1 conformance suite: 64/64** across pull, push and content discovery (content-management is skipped because deletes are unsupported). It ran three times on fresh repositories. CI job: `scripts/oci-conformance.sh`.
+- **Passes the OCI distribution-spec v1.1.1 conformance suite in all four workflows (pull, push, content discovery, content management): 73 passed, 0 failed.** The 6 skips follow blob deletion, which returns 405 as the spec allows; GC reclaims those blobs. Manifest and tag deletion use `delete_ref` (API v1.5). CI job: `scripts/oci-conformance.sh`.
 - `/v1` writes under `oci/`, `git/` and `_prov/` need global admin, which protects the digest↔content invariants.
 - `POST /v1/replace_many` (atomic, API v1.2), with `RemoteRepo` overriding `replace_many`.
 
@@ -100,7 +125,7 @@
   - Resolves OFS and REF deltas, including thin packs against existing objects, with a 256 MiB bounded base cache.
   - Stores canonical `<type> <size>\0<body>` objects and checks connectivity (every referenced oid is in the pack or the repo).
   - Appends one oid-map segment per push.
-- Ref updates are CAS: `old` must match the current ref, otherwise `ng … fetch first`. Namespace rules apply, so for example `git/<repo>/refs/tags` can be `ImmutableAfterPublish` (`ng … ref is immutable`). Deletes return `ng`.
+- Ref updates are CAS: `old` must match the current ref, otherwise `ng … fetch first`. Namespace rules apply, so for example `git/<repo>/refs/tags` can be `ImmutableAfterPublish` (`ng … ref is immutable`). Branch and tag deletion uses `delete_ref` (advertises `delete-refs`), and immutable refs refuse it. `--atomic` pushes that include deletes are refused.
 - Wants must be tips of this repo's refs, and common haves are restricted to commits reachable from this repo. Because the oid map is global, this keeps repos from reading each other's objects.
 - `GitTracer` (header range-read, then commit, tree and tag parsing through an oid-map snapshot) is chained in server GC as `ProvTracer { AdapterTracer { git, oci } }`.
 - Verified with the real git 2.50 CLI. Full head and tag sets of the ripgrep and jq mirrors push, clone back with **identical refs**, and pass `git fsck --full` (debug build: ripgrep 8 s push / 17 s clone, jq 9 s / 21 s; server RSS ≤ 170 MB).
@@ -153,26 +178,26 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **GET checksums:** a GET is not checksummed end to end beyond TCP and TLS. Integrity of pack records relies on the core pack CRCs.
 - **Virtual-hosted style and real AWS:** neither has been tested, because no AWS credentials are available here. Only path style against MinIO has run.
 - **Extra copy:** `PutSource::Bytes` is copied once into the runtime, because `Backend` is sync and borrows the bytes.
-- **Server TLS:** none built in; terminate TLS at a reverse proxy (documented). Native rustls listener is a possible addition.
 - **OIDC/JWT authenticator:** not implemented; the `Authenticator` trait is async and ready for it.
-- **Token management:** only via config/token file plus restart. There is no admin API to issue or revoke tokens, and no hot reload (SIGHUP).
+- **Token management:** tokens and policies live in config and reload on SIGHUP (revocation applies to the next request). There is no admin API to issue or revoke tokens.
 - **Audit log rotation and shipping:** manual (stop, move, start). There is no remote sink (syslog, S3).
 - **Unauthenticated `/metrics`:** restrict it at the network level. There is no separate metrics listener yet.
 - **Rate limiting:** only a global concurrency cap. There is no per-principal rate limit or quota.
 - **Durability of server puts:** an unreferenced `put` becomes durable at the next replace or flush (core semantics, since the open pack is not fsynced per put). If the server crashes before that, the client's later `replace` gets `MissingObject` and must re-put. Clients needing durability without a replace call `POST /v1/flush`.
 - **Git adapter limits:**
-  - SHA-1 repos only (no `object-format=sha256`). No protocol v2 server side (clients fall back to v0), no shallow or partial clones, and no ref deletion.
+  - SHA-1 repos only (no `object-format=sha256`). No protocol v2 server side (clients fall back to v0), and no shallow or partial clones. `--atomic` pushes cannot include deletes, because `replace_many` has no delete form.
   - Served packs carry full objects, with no delta compression on the wire, so clones transfer more bytes than from git.
   - Upload-pack walks the full reachable set per request (no bitmaps or commit-graph), which is O(history) per fetch.
   - Each push object is held in memory (cap 1 GiB per object).
   - Ref names outside the core grammar (`[A-Za-z0-9._+-]` segments) are rejected with `ng`.
-- **OCI adapter limits:** no deletes (so registry GC can only reclaim blobs that were never referenced by a manifest), sha256 digests only, and upload sessions do not survive restarts.
+- **OCI adapter limits:** blob DELETE returns 405 (blobs are reclaimed by GC once no manifest references them), sha256 digests only, and upload sessions do not survive restarts.
 - **Large listings:** `list()` buffers all keys in memory. The trait returns a `Vec`, so a paginated or streaming list would need a trait change if a prefix grows to millions of keys.
 
 ## Requests for core
 - 2026-11-15: a streaming put, a backend error variant, and committing early. All three were delivered in API v1.
-- `Error::Unauthorized` (v1.1) and `replace_many` (v1.2) were delivered, and both are adopted.
-- Open question: does `ObjectStore::contains` (or `size`) report `false` for an object served **only** from a condemned pack? The OCI adapter accepts a manifest when `contains(blob)` is true, without re-putting the blob. If a condemned-only copy counts as present, a manifest pushed between GC's delete-phase mark and the pack deletion could reference a blob that then disappears. If the answer is yes, I need a `touch`/`ensure_live(hash)` primitive (rewrite if condemned-only), or `contains` must ignore condemned copies.
+- `Error::Unauthorized` (v1.1), `replace_many` (v1.2), `ensure_live` (v1.3), the `Grouper` trait and `delete_ref` (v1.5) were delivered, and all are adopted. `DELETE /v1/refs/<name>` exists and `RemoteRepo::delete_ref` overrides the default.
+- Possible request: a `replace_many` form that can also delete (for `git push --atomic` with deletions).
+- Resolved by `ensure_live` (v1.3). The original question was whether `ObjectStore::contains` (or `size`) reports `false` for an object served **only** from a condemned pack? The OCI adapter accepts a manifest when `contains(blob)` is true, without re-putting the blob. If a condemned-only copy counts as present, a manifest pushed between GC's delete-phase mark and the pack deletion could reference a blob that then disappears. If the answer is yes, I need a `touch`/`ensure_live(hash)` primitive (rewrite if condemned-only), or `contains` must ignore condemned copies.
 - (none open)
 
 ## Small fixes made to core crates

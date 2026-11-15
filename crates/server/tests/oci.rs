@@ -174,8 +174,20 @@ fn integrity_and_isolation() {
     assert_eq!(o.push_manifest("team/b", "x", &m).status(), 201);
     // Outside the granted namespace.
     assert_eq!(o.push_blob("other/repo", b"x"), 403);
-    // Deletion is unsupported.
-    assert_eq!(o.req(reqwest::Method::DELETE, "/v2/team/a/manifests/x").send().unwrap().status(), 405);
+    // Tag deletion works; blob deletion is left to GC.
+    assert_eq!(o.req(reqwest::Method::DELETE, "/v2/team/a/manifests/x").send().unwrap().status(), 202);
+    assert_eq!(o.req(reqwest::Method::GET, "/v2/team/a/manifests/x").send().unwrap().status(), 404);
+    assert_eq!(o.req(reqwest::Method::DELETE, "/v2/team/a/manifests/x").send().unwrap().status(), 404);
+    assert_eq!(
+        o.req(reqwest::Method::DELETE, &format!("/v2/team/a/blobs/{}", sha(config))).send().unwrap().status(),
+        405
+    );
+    // Deleting by digest removes the manifest and every tag on it.
+    assert_eq!(o.push_manifest("team/b", "y", &m).status(), 201);
+    let r = o.req(reqwest::Method::DELETE, &format!("/v2/team/b/manifests/{}", sha(m.as_bytes()))).send().unwrap();
+    assert_eq!(r.status(), 202);
+    assert_eq!(o.req(reqwest::Method::GET, "/v2/team/b/manifests/x").send().unwrap().status(), 404);
+    assert_eq!(o.req(reqwest::Method::GET, "/v2/team/b/manifests/y").send().unwrap().status(), 404);
     // Adapter namespaces cannot be rewritten through /v1 by non-admins.
     let c = s.client(ALICE);
     let h = c.put(b"evil").unwrap();

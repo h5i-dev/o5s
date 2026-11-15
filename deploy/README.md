@@ -38,7 +38,9 @@ docker run -d --name p2p -p 8080:8080 \
 `docker stop` sends SIGTERM. Give it `--stop-timeout 45` or more if you raise the grace period.
 
 ## TLS
-The server speaks plain HTTP/1.1 and h2c. Terminate TLS in a reverse proxy (nginx, envoy, an ALB) and keep the server on loopback or a private network. Bearer tokens must never cross an untrusted network in clear text. Behind a proxy, set `server.trust_forwarded_for = true` so audit records show the real client address. Never enable it when clients can reach the server directly, because they could then forge their address.
+Two options:
+- **Native:** set `server.tls = { cert = "...", key = "..." }` (PEM; ECDSA or RSA; TLS 1.2+, ALPN h2 and http/1.1). Handshakes run concurrently with a 10 s timeout, so slow clients cannot block accepts. After renewing the certificate in place, `systemctl reload pico2peta-server` (SIGHUP) swaps it for new connections without dropping existing ones.
+- **Proxy:** terminate TLS in a reverse proxy (nginx, envoy, an ALB) and keep the server on loopback or a private network. Bearer tokens must never cross an untrusted network in clear text. Behind a proxy, set `server.trust_forwarded_for = true` so audit records show the real client address. Never enable it when clients can reach the server directly, because they could then forge their address.
 
 For large uploads, disable request buffering in the proxy (`proxy_request_buffering off; client_max_body_size 0;` in nginx). Otherwise the proxy spools whole uploads to disk.
 
@@ -52,6 +54,9 @@ For large uploads, disable request buffering in the proxy (`proxy_request_buffer
 - Don't enable bucket versioning just to protect packs. They are create-only (`If-None-Match: *`) and never overwritten.
 - Minimal IAM permissions on `arn:aws:s3:::bucket/prefix/*`: `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` (used only by GC), `s3:AbortMultipartUpload`. Add `s3:ListBucket` on the bucket with a prefix condition.
 - Staging (the open pack) and refs stay on the local disk at `repo.path`. Put that path on durable storage (EBS, not instance store) and back it up. Without it, refs are lost.
+
+## Reloading configuration
+SIGHUP (`systemctl reload`) re-reads the config file and applies **tokens, policies and the TLS certificate** atomically. Revoked tokens stop working on the next request. If the new file fails validation, nothing changes and an error is logged. Every reload is audited (`action = "config_reload"`). All other settings need a restart.
 
 ## Observability
 - `GET /healthz` is liveness (the process is up). `GET /readyz` is readiness: it is 503 while draining, after an audit-log failure, or when the repository is unreachable. Neither needs credentials.

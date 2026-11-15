@@ -20,7 +20,8 @@
 //! reads as a miss, and the client simply pushes the blob again.
 //!
 //! Authorization: pull = `read` and push = `write` on namespace `oci/<repo>`.
-//! Deletion is not supported (405), since core refs are never deleted.
+//! Manifests and tags can be deleted (OCC `delete_ref`, namespace rules apply);
+//! blob deletion returns 405 and unreferenced blobs are reclaimed by GC.
 
 use crate::api::{AppState, Caller, IDLE_TIMEOUT, Unsatisfiable, parse_range, stream_reader};
 use crate::audit::Event;
@@ -517,9 +518,12 @@ async fn dispatch_inner(
         (Method::GET | Method::HEAD, Route::Blob(n, d)) => {
             get_blob(st, &oci, &n, &d, headers, method == Method::HEAD).await
         }
-        (Method::DELETE, Route::Blob(..) | Route::Manifest(..)) => {
-            Err(oe(StatusCode::METHOD_NOT_ALLOWED, "UNSUPPORTED", "deletion is not supported"))
-        }
+        (Method::DELETE, Route::Blob(..)) => Err(oe(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "UNSUPPORTED",
+            "blob deletion is not supported; GC reclaims unreferenced blobs",
+        )),
+        (Method::DELETE, Route::Manifest(n, reference)) => delete_manifest(st, p, c, &n, &reference).await,
         (Method::POST, Route::Upload(n, None)) => start_upload(st, &oci, p, c, &n, q, headers, body).await,
         (Method::GET, Route::Upload(n, Some(id))) => upload_status(&oci, p, &n, &id).await,
         (Method::PATCH, Route::Upload(n, Some(id))) => patch_upload(st, &oci, p, &n, &id, headers, body).await,
@@ -1013,6 +1017,80 @@ async fn referrers(st: &Arc<AppState>, repo: &str, digest: &str, q: &HashMap<Str
         resp.headers_mut().insert("oci-filters-applied", HeaderValue::from_static("artifactType"));
     }
     Ok(resp)
+}
+
+/// OCC-deletes `n` if it currently points at `expect` (any value if `None`).
+/// Returns whether something was deleted.
+async fn delete_name(repo: &Arc<dyn Repository>, n: Name, expect: Option<Hash>) -> OciResult<bool> {
+    for _ in 0..5 {
+        let r = repo.clone();
+        let n2 = n.clone();
+        let Some(cur) = blocking(move || r.resolve(&n2)).await? else { return Ok(false) };
+        if expect.is_some_and(|h| h != cur.hash) {
+            return Ok(false);
+        }
+        let r = repo.clone();
+        let n2 = n.clone();
+        match blocking(move || r.delete_ref(&n2, &[(n2.clone(), Observed::Version(cur.version))])).await {
+            Ok(ReplaceOutcome::Ok { .. }) => return Ok(true),
+            Ok(ReplaceOutcome::Conflict { .. }) => continue,
+            Err(e) if e.status == StatusCode::FORBIDDEN => {
+                return Err(oe(
+                    StatusCode::METHOD_NOT_ALLOWED,
+                    "UNSUPPORTED",
+                    format!("deletion disallowed by namespace rule: {}", e.message),
+                ));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(oe(StatusCode::SERVICE_UNAVAILABLE, "TOOMANYREQUESTS", format!("contention on {n}")))
+}
+
+/// `DELETE /v2/<name>/manifests/<tag|digest>`. A tag deletes just the tag; a
+/// digest deletes the manifest from the repo along with every tag and
+/// referrer link pointing at it. Blobs are reclaimed later by GC.
+async fn delete_manifest(
+    st: &Arc<AppState>,
+    p: &Principal,
+    c: &Caller,
+    repo: &str,
+    reference: &str,
+) -> OciResult<Response> {
+    let unknown = || oe(StatusCode::NOT_FOUND, "MANIFEST_UNKNOWN", format!("manifest {reference} not found in {repo}"));
+    if !reference.starts_with("sha256:") {
+        if !valid_tag(reference) || !delete_name(&st.repo, tag_name(repo, reference)?, None).await? {
+            return Err(unknown());
+        }
+        audit_push(st, p, c, repo, "delete_tag", reference).await?;
+        return Ok(StatusCode::ACCEPTED.into_response());
+    }
+    let hex =
+        parse_digest(reference).ok_or_else(|| oe(StatusCode::BAD_REQUEST, "DIGEST_INVALID", "bad digest"))?.to_string();
+    let link = manifest_link(repo, &hex)?;
+    let h = resolve(&st.repo, link.clone()).await?.ok_or_else(unknown)?;
+    // Tags pointing at it.
+    let prefix = format!("oci/{repo}/tags");
+    let r = st.repo.clone();
+    let tags = blocking(move || r.list_refs(&prefix)).await?;
+    for (n, v) in tags {
+        if v.hash == h {
+            delete_name(&st.repo, n, Some(h)).await?;
+        }
+    }
+    // Its referrer link, if it has a subject.
+    let r = st.repo.clone();
+    if let Ok(bytes) = blocking(move || r.get(&h, None)).await
+        && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes)
+        && let Some(sub) =
+            v.get("subject").and_then(|s| s.get("digest")).and_then(|d| d.as_str()).and_then(parse_digest)
+    {
+        delete_name(&st.repo, referrer_link(repo, sub, &hex)?, Some(h)).await?;
+    }
+    delete_name(&st.repo, mediatype_link(repo, &hex)?, None).await?;
+    delete_name(&st.repo, link, Some(h)).await?;
+    audit_push(st, p, c, repo, "delete_manifest", &format!("sha256:{hex}")).await?;
+    Ok(StatusCode::ACCEPTED.into_response())
 }
 
 async fn get_manifest(st: &Arc<AppState>, repo: &str, reference: &str, head: bool) -> OciResult<Response> {

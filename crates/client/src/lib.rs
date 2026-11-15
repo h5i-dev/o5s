@@ -651,6 +651,43 @@ impl Repository for RemoteRepo {
         })
     }
 
+    fn delete_ref(&self, name: &Name, read_set: &[(Name, Observed)]) -> Result<ReplaceOutcome> {
+        let body = serde_json::to_vec(&wire::DeleteRefRequest {
+            read_set: read_set.iter().map(|(n, o)| wire::ReadSetEntry::from_core(n, *o)).collect(),
+        })
+        .map_err(|e| Error::Parse(e.to_string()))?;
+        let this = self.clone();
+        let name = name.clone();
+        self.block(async move {
+            // OCC with an explicit read set: retrying after a lost response
+            // yields Conflict (or Ok version 0), never a wrong delete. Still, only
+            // retry when the connection was never established.
+            let mut attempt = 0;
+            let resp = loop {
+                let rb = this
+                    .request(Method::DELETE, &format!("/v1/refs/{name}"))
+                    .header("content-type", "application/json")
+                    .body(body.clone())
+                    .timeout(this.inner.cfg.request_timeout);
+                match rb.send().await {
+                    Ok(r) => break r,
+                    Err(e) if e.is_connect() && attempt + 1 < this.inner.cfg.max_attempts => {
+                        tokio::time::sleep(this.backoff(attempt)).await;
+                        attempt += 1;
+                    }
+                    Err(e) => return Err(transport(e)),
+                }
+            };
+            match resp.status() {
+                StatusCode::OK | StatusCode::CONFLICT => {
+                    let r: wire::ReplaceResponse = resp.json().await.map_err(transport)?;
+                    r.to_core()
+                }
+                _ => Err(error_from(resp, &Ctx { name: Some(&name), ..Default::default() }).await),
+            }
+        })
+    }
+
     fn list_refs(&self, prefix: &str) -> Result<Vec<(Name, RefValue)>> {
         self.refs_wire(prefix)?.iter().map(wire::RefJson::to_core).collect()
     }

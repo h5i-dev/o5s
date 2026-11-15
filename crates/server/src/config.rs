@@ -8,6 +8,7 @@
 //! request_timeout_secs = 3600        # whole request, including body transfer
 //! shutdown_grace_secs = 30
 //! trust_forwarded_for = false      # true only behind a proxy that sets X-Forwarded-For
+//! # tls = { cert = "/etc/pico2peta/tls.crt", key = "/etc/pico2peta/tls.key" }  # native HTTPS
 //!
 //! [repo]
 //! path = "/var/lib/pico2peta/repo"
@@ -40,6 +41,8 @@
 //! [gc]
 //! interval_secs = 0                  # background GC period; 0 = off
 //! grace_secs = 3600                  # >= 600; also the put->replace lease
+//! grouped = true                     # similarity-grouped repack of git content
+//! repack_all = false                 # regroup fully-live packs too (aggressive)
 //!
 //! [log]
 //! format = "json"                    # json | text
@@ -116,6 +119,10 @@ pub struct GcSection {
     pub grace_secs: u64,
     pub min_garbage_ratio: f64,
     pub small_pack_bytes: u64,
+    /// Similarity-grouped repack of git content (Experiment 1 V2 layout).
+    pub grouped: bool,
+    /// Regroup even fully-live packs (like `git gc --aggressive`). Expensive.
+    pub repack_all: bool,
 }
 
 impl Default for GcSection {
@@ -126,11 +133,17 @@ impl Default for GcSection {
             grace_secs: d.grace.as_secs(),
             min_garbage_ratio: d.min_garbage_ratio,
             small_pack_bytes: d.small_pack_bytes,
+            grouped: true,
+            repack_all: false,
         }
     }
 }
 
 impl GcSection {
+    pub fn options_with(&self, dry_run: bool, repack_all: bool) -> pico2peta_repo::GcOptions {
+        pico2peta_repo::GcOptions { repack_all: repack_all || self.repack_all, ..self.options(dry_run) }
+    }
+
     pub fn options(&self, dry_run: bool) -> pico2peta_repo::GcOptions {
         pico2peta_repo::GcOptions {
             grace: std::time::Duration::from_secs(self.grace_secs),
@@ -154,6 +167,17 @@ pub struct ServerSection {
     /// Take the client address for audit records from `X-Forwarded-For`.
     /// Enable only behind a reverse proxy that sets it.
     pub trust_forwarded_for: bool,
+    /// Serve HTTPS directly (otherwise plain HTTP behind a TLS proxy).
+    pub tls: Option<TlsSection>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TlsSection {
+    /// PEM certificate chain (leaf first). Reloaded on SIGHUP.
+    pub cert: PathBuf,
+    /// PEM private key (PKCS#8, PKCS#1 or SEC1). Reloaded on SIGHUP.
+    pub key: PathBuf,
 }
 
 impl Default for ServerSection {
@@ -165,6 +189,7 @@ impl Default for ServerSection {
             request_timeout_secs: 3600,
             shutdown_grace_secs: 30,
             trust_forwarded_for: false,
+            tls: None,
         }
     }
 }

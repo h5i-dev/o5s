@@ -19,6 +19,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 /// The reserved principal for unauthenticated callers.
 pub const ANONYMOUS: &str = "anonymous";
@@ -58,6 +59,10 @@ pub trait Authenticator: Send + Sync + 'static {
 
 /// Static bearer tokens. Only SHA-256 hashes are kept in memory or config.
 pub struct TokenAuthenticator {
+    inner: std::sync::RwLock<Arc<TokenTable>>,
+}
+
+struct TokenTable {
     by_hash: HashMap<[u8; 32], String>,
     allow_anonymous: bool,
 }
@@ -79,13 +84,27 @@ fn parse_hex32(s: &str) -> Option<[u8; 32]> {
 
 impl TokenAuthenticator {
     pub fn new(tokens: &[TokenEntry], allow_anonymous: bool) -> Self {
+        TokenAuthenticator { inner: std::sync::RwLock::new(Arc::new(Self::table(tokens, allow_anonymous))) }
+    }
+
+    fn table(tokens: &[TokenEntry], allow_anonymous: bool) -> TokenTable {
         let by_hash = tokens.iter().filter_map(|t| Some((parse_hex32(&t.sha256)?, t.principal.clone()))).collect();
-        TokenAuthenticator { by_hash, allow_anonymous }
+        TokenTable { by_hash, allow_anonymous }
+    }
+
+    /// Atomically replaces the token set (SIGHUP reload). Revoked tokens stop
+    /// working for the next request.
+    pub fn reload(&self, tokens: &[TokenEntry], allow_anonymous: bool) {
+        let t = Arc::new(Self::table(tokens, allow_anonymous));
+        if let Ok(mut g) = self.inner.write() {
+            *g = t;
+        }
     }
 
     fn check(&self, headers: &HeaderMap) -> Result<Principal, AuthError> {
+        let table = self.inner.read().map_err(|_| AuthError::Unavailable("token table poisoned".into()))?.clone();
         let Some(v) = headers.get(axum::http::header::AUTHORIZATION) else {
-            return if self.allow_anonymous { Ok(Principal::anonymous()) } else { Err(AuthError::Missing) };
+            return if table.allow_anonymous { Ok(Principal::anonymous()) } else { Err(AuthError::Missing) };
         };
         let v = v.to_str().map_err(|_| AuthError::Malformed)?;
         let (scheme, rest) = v.split_once(' ').ok_or(AuthError::Malformed)?;
@@ -106,7 +125,7 @@ impl TokenAuthenticator {
             return Err(AuthError::Malformed);
         }
         // The lookup key is a hash of the secret, so timing reveals nothing usable.
-        match self.by_hash.get(&sha256(tok.as_bytes())) {
+        match table.by_hash.get(&sha256(tok.as_bytes())) {
             Some(p) => Ok(Principal { name: p.clone(), authenticated: true }),
             None => Err(AuthError::Invalid),
         }
@@ -120,15 +139,27 @@ impl Authenticator for TokenAuthenticator {
     }
 }
 
-/// Evaluates [`PolicyEntry`] grants.
-#[derive(Clone, Debug, Default)]
+/// Evaluates [`PolicyEntry`] grants. The policy set can be swapped at runtime.
+#[derive(Debug, Default)]
 pub struct Authorizer {
-    entries: Vec<PolicyEntry>,
+    entries: std::sync::RwLock<Arc<Vec<PolicyEntry>>>,
 }
 
 impl Authorizer {
     pub fn new(entries: Vec<PolicyEntry>) -> Self {
-        Authorizer { entries }
+        Authorizer { entries: std::sync::RwLock::new(Arc::new(entries)) }
+    }
+
+    /// Atomically replaces the policy set (SIGHUP reload).
+    pub fn reload(&self, entries: Vec<PolicyEntry>) {
+        if let Ok(mut g) = self.entries.write() {
+            *g = Arc::new(entries);
+        }
+    }
+
+    fn snapshot(&self) -> Arc<Vec<PolicyEntry>> {
+        // A poisoned lock means a panic mid-swap; deny everything rather than guess.
+        self.entries.read().map(|g| g.clone()).unwrap_or_default()
     }
 
     fn applies(e: &PolicyEntry, p: &Principal) -> bool {
@@ -137,14 +168,14 @@ impl Authorizer {
 
     /// May `p` perform `access` on name (or namespace prefix) `path`?
     pub fn allows(&self, p: &Principal, path: &str, access: Access) -> bool {
-        self.entries
+        self.snapshot()
             .iter()
             .any(|e| Self::applies(e, p) && e.access >= access && pico2peta_core::is_under(path, &e.namespace))
     }
 
     /// Does `p` hold `access` on at least one namespace?
     pub fn allows_somewhere(&self, p: &Principal, access: Access) -> bool {
-        self.entries.iter().any(|e| Self::applies(e, p) && e.access >= access)
+        self.snapshot().iter().any(|e| Self::applies(e, p) && e.access >= access)
     }
 }
 
@@ -182,6 +213,10 @@ mod tests {
         assert_eq!(anon.check(&HeaderMap::new()).unwrap(), Principal::anonymous());
         // A bad token is never downgraded to anonymous.
         assert_eq!(anon.check(&hdr("Bearer x")), Err(AuthError::Invalid));
+        // Reload revokes old tokens immediately.
+        a.reload(&[tok("ci2", "new")], false);
+        assert_eq!(a.check(&hdr("Bearer s3cret")), Err(AuthError::Invalid));
+        assert_eq!(a.check(&hdr("Bearer new")).unwrap().name, "ci2");
     }
 
     #[test]
@@ -212,5 +247,7 @@ mod tests {
         // and an unauthenticated principal never matches a named grant.
         let fake = Principal { name: "root".into(), authenticated: false };
         assert!(!z.allows(&fake, "x", Access::Read));
+        z.reload(vec![]);
+        assert!(!z.allows(&root, "anything", Access::Read), "reload revokes grants");
     }
 }
