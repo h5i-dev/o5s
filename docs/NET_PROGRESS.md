@@ -83,6 +83,26 @@
 - Fuzz targets plus never-panic proptests for every net decoder, and allocation caps on untrusted size headers (zlib-bomb-safe pack scanning).
 - `ensure_live` (API v1.3) is used wherever existing objects get referenced without being re-put.
 
+### Grouped repack of git content (core `Grouper`, net `GitGrouper`)
+- `GitGrouper` follows the EXP1 V2 layout:
+  - Groups are `blob:<ext>` (or `blob:<basename>`), `tree`, `commit` and `tag`.
+  - Order is path, then the time of the oldest commit that contains the object. Every git repo's refs are walked, oldest commits first.
+- Enabled through `[gc] grouped = true` (the default) and `repack_all`, or per call with `POST /v1/admin/gc?repack_all=true`.
+- **Measured on ripgrep** (heads + tags, 14,190 objects), with `cargo test --release -p pico2peta-server --test git grouped_repack -- --ignored`:
+
+  | | bytes | vs git `--aggressive` |
+  |---|---|---|
+  | after git push import (one zstd record per object) | 37.06 MB | 9.7× |
+  | after grouped `repack_all`: .pack | 3.93 MB | 1.154× git .pack (3.41 MB) |
+  | after grouped `repack_all`: .pack + .idx | 4.82 MB | **1.264×** git .pack + .idx (3.81 MB) |
+
+  - The repack takes 52 s on a release build; `git gc --aggressive` takes 7 s.
+  - After the repack the repo clones back with identical refs and passes `git fsck --full`.
+- This does **not** reproduce EXP1's predicted ~0.85× on ripgrep. Both parts contribute:
+  - Payload: 1.15× vs git pack.
+  - Index: 62 B/object real vs the 48 B modeled in PLAN §4.4, and git's .idx is about 28 B/object.
+- I've reported this to the core lead to reconcile with the Exp1 harness (`bench/exp1`). Possible causes: frame boundaries, grouping keys that differ from the harness, and the cost of the index format.
+
 ### Next
 - Goal 6: Git smart-HTTP and OCI distribution adapters. The hash-mapping design proposal is below, waiting for the lead's agreement.
 

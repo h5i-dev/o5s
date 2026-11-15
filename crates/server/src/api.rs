@@ -789,17 +789,21 @@ impl pico2peta_repo::Tracer for AdapterTracer {
 struct GcQuery {
     #[serde(default)]
     dry_run: bool,
+    /// Regroup fully-live packs too (aggressive repack).
+    #[serde(default)]
+    repack_all: bool,
 }
 
 /// Runs one GC invocation, unless one is already running.
-pub async fn run_gc(st: &AppState, dry_run: bool) -> ApiResult<wire::GcReportJson> {
+pub async fn run_gc(st: &AppState, dry_run: bool, repack_all: bool) -> ApiResult<wire::GcReportJson> {
     let Some(local) = st.local.clone() else {
         return Err(ApiError::new(StatusCode::NOT_IMPLEMENTED, "unsupported", "GC needs a local repository"));
     };
     if st.gc_running.swap(true, Ordering::AcqRel) {
         return Err(ApiError::new(StatusCode::CONFLICT, codes::GC_RUNNING, "a GC run is already in progress"));
     }
-    let opts = st.gc.options(dry_run);
+    let opts = st.gc.options_with(dry_run, repack_all);
+    let grouped = st.gc.grouped;
     let running = st.gc_running.clone();
     let res = blocking(move || {
         // Provenance records, then git objects, OCI manifests and segment maps;
@@ -811,7 +815,8 @@ pub async fn run_gc(st: &AppState, dry_run: bool) -> ApiResult<wire::GcReportJso
                 oci: crate::oci::OciTracer::new(shared),
             },
         };
-        let r = local.gc(&opts, &tracer);
+        let grouper = crate::git::GitGrouper;
+        let r = local.gc_with(&opts, &tracer, if grouped { Some(&grouper) } else { None });
         running.store(false, Ordering::Release);
         r
     })
@@ -847,7 +852,7 @@ async fn gc(
 ) -> ApiResult<Json<wire::GcReportJson>> {
     st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "gc", "repository")?;
     st.require_audit_healthy()?;
-    let res = run_gc(&st, q.dry_run).await;
+    let res = run_gc(&st, q.dry_run, q.repack_all).await;
     st.audit_mutation(Event {
         request_id: c.request_id.clone(),
         principal: p.name.clone(),

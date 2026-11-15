@@ -272,7 +272,7 @@ async fn gc_loop(state: Arc<AppState>) {
         if state.shutting_down.load(Ordering::Acquire) {
             return;
         }
-        match api::run_gc(&state, false).await {
+        match api::run_gc(&state, false, false).await {
             Ok(r) => info!(
                 planned = ?r.planned,
                 swept = r.swept.len(),

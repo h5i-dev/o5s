@@ -41,6 +41,8 @@
 //! [gc]
 //! interval_secs = 0                  # background GC period; 0 = off
 //! grace_secs = 3600                  # >= 600; also the put->replace lease
+//! grouped = true                     # similarity-grouped repack of git content
+//! repack_all = false                 # regroup fully-live packs too (aggressive)
 //!
 //! [log]
 //! format = "json"                    # json | text
@@ -117,6 +119,10 @@ pub struct GcSection {
     pub grace_secs: u64,
     pub min_garbage_ratio: f64,
     pub small_pack_bytes: u64,
+    /// Similarity-grouped repack of git content (Experiment 1 V2 layout).
+    pub grouped: bool,
+    /// Regroup even fully-live packs (like `git gc --aggressive`). Expensive.
+    pub repack_all: bool,
 }
 
 impl Default for GcSection {
@@ -127,11 +133,17 @@ impl Default for GcSection {
             grace_secs: d.grace.as_secs(),
             min_garbage_ratio: d.min_garbage_ratio,
             small_pack_bytes: d.small_pack_bytes,
+            grouped: true,
+            repack_all: false,
         }
     }
 }
 
 impl GcSection {
+    pub fn options_with(&self, dry_run: bool, repack_all: bool) -> pico2peta_repo::GcOptions {
+        pico2peta_repo::GcOptions { repack_all: repack_all || self.repack_all, ..self.options(dry_run) }
+    }
+
     pub fn options(&self, dry_run: bool) -> pico2peta_repo::GcOptions {
         pico2peta_repo::GcOptions {
             grace: std::time::Duration::from_secs(self.grace_secs),

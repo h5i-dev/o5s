@@ -13,7 +13,7 @@
 //! | `GET` | `/v1/namespaces` | [`RuleList`] |
 //! | `PUT` | `/v1/namespaces/{prefix}` | [`SetRuleRequest`] (admin) |
 //! | `GET` | `/v1/whoami` | [`WhoAmI`] |
-//! | `POST` | `/v1/admin/gc?dry_run=bool` | [`GcReportJson`] (admin on `""`); 409 if a GC is running |
+//! | `POST` | `/v1/admin/gc?dry_run=bool&repack_all=bool` | [`GcReportJson`] (admin on `""`); 409 if a GC is running |
 //!
 //! **Operation lease:** GC reclaims objects that no ref reaches once the GC grace
 //! period (default 1 h) has passed. A client must `replace` a ref to point at a
