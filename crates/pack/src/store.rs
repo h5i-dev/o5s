@@ -95,7 +95,16 @@ pub struct PackConfig {
     /// 4 KiB. If that saves less than 3%, store the record raw and skip the full
     /// compression. Deterministic; affects only the codec, never identity.
     pub compress_probe: bool,
+    /// zstd level for byte-grouped records (codec 2; model weights and their
+    /// deltas). Grouped data keeps shrinking at higher levels where plain zstd
+    /// doesn't (measured on bf16: L3 −1.6%, L6 −4.5%, L15 −9.4% vs plain L3;
+    /// one core does ~290 / 90 / 12 MB/s). 0 = store grouped chunks raw.
+    pub grouped_zstd_level: i32,
 }
+
+/// Default [`PackConfig::grouped_zstd_level`]: as fast as the disk on a
+/// 4-core host, with about three times level 3's gain.
+pub const DEFAULT_GROUPED_ZSTD_LEVEL: i32 = 6;
 
 impl Default for PackConfig {
     fn default() -> Self {
@@ -108,6 +117,7 @@ impl Default for PackConfig {
             zstd_level: 3,
             manifest_fanout: DEFAULT_MANIFEST_FANOUT,
             compress_probe: true,
+            grouped_zstd_level: DEFAULT_GROUPED_ZSTD_LEVEL,
         }
     }
 }
@@ -124,6 +134,7 @@ impl PackConfig {
             zstd_level: 1,
             manifest_fanout: 4,
             compress_probe: true,
+            grouped_zstd_level: 1,
         }
     }
 
@@ -141,6 +152,7 @@ impl PackConfig {
             && self.chunk_threshold <= (u32::MAX / 2) as usize
             && self.pack_cap >= 1024
             && (-7..=22).contains(&self.zstd_level)
+            && (-7..=22).contains(&self.grouped_zstd_level)
             && (2..=(1 << 20)).contains(&self.manifest_fanout);
         if ok { Ok(()) } else { Err(Error::Parse(format!("invalid pack config {self:?}"))) }
     }
@@ -1233,6 +1245,7 @@ impl PackStore {
         let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).saturating_sub(1).clamp(1, 8);
         let credits = PIPELINE_CREDITS_PER_WORKER * workers;
         let level = self.inner.cfg.zstd_level;
+        let glevel = self.inner.cfg.grouped_zstd_level;
         let probe = self.inner.cfg.compress_probe;
         let fanout = self.inner.cfg.manifest_fanout;
         type Chunk = Arc<Vec<u8>>;
@@ -1261,7 +1274,7 @@ impl PackStore {
                         // committer re-checks before appending.
                         let r = self.lookup_local(&hash).map(|known| {
                             let rec = known.is_none().then(|| match group {
-                                Some(w) => encode_grouped_or_raw(level, w, &hash, &c),
+                                Some(w) => encode_grouped_or_raw(glevel, w, &hash, &c),
                                 None => match compress_with_probe(level, probe, &c) {
                                     Some(z) => {
                                         (Codec::Zstd, encode_record(Kind::Blob, Codec::Zstd, &hash, c.len() as u64, &z))

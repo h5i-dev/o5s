@@ -356,7 +356,48 @@ fn bytegroup_gran(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// `p2p-bench group-levels <safetensors> [MiB]`: per-64 KiB-block grouped zstd
+/// size and single-thread compress speed by level, over the first MiB of tensor
+/// data (what codec 2 stores at each `pack.zstd_level`).
+fn group_levels(path: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
+    use pico2peta_weights::bytegroup::group;
+    let f = std::fs::read(path)?;
+    let w = pico2peta_weights::group_width(&f).ok_or("not a groupable safetensors file")? as usize;
+    let layout = pico2peta_weights::parse_layout(&f).ok_or("bad header")?;
+    let start = layout.data_start as usize;
+    let data = &f[start..(start + (mib << 20)).min(f.len())];
+    let blocks: Vec<Vec<u8>> = data.chunks(64 << 10).map(|b| group(b, w)).collect::<Result<_, _>>()?;
+    let plain_blocks: Vec<&[u8]> = data.chunks(64 << 10).collect();
+    println!("{:.0} MB of tensor data, width {w}, 64 KiB blocks, 1 thread", data.len() as f64 / 1e6);
+    println!("| zstd level | plain | grouped | grouped vs plain-L3 | grouped MB/s (1 core) |");
+    println!("|---|---|---|---|---|");
+    let size = |bs: &[&[u8]], level: i32| -> usize {
+        bs.iter().map(|b| zstd::bulk::compress(b, level).map_or(b.len(), |c| c.len().min(b.len()))).sum()
+    };
+    let gref: Vec<&[u8]> = blocks.iter().map(|b| b.as_slice()).collect();
+    let p3 = size(&plain_blocks, 3);
+    for level in [1, 3, 6, 9, 12, 15, 19] {
+        let p = size(&plain_blocks, level);
+        let t = Instant::now();
+        let g = size(&gref, level);
+        let secs = t.elapsed().as_secs_f64();
+        println!(
+            "| {level} | {:.3} | {:.3} | {:+.1}% | {:.0} |",
+            p as f64 / data.len() as f64,
+            g as f64 / data.len() as f64,
+            (g as f64 / p3 as f64 - 1.0) * 100.0,
+            data.len() as f64 / secs / 1e6
+        );
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("group-levels") {
+        let f = std::env::args().nth(2).ok_or("usage: p2p-bench group-levels <safetensors> [MiB]")?;
+        let mib = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(64);
+        return group_levels(&f, mib);
+    }
     if std::env::args().nth(1).as_deref() == Some("bytegroup-gran") {
         let f = std::env::args().nth(2).ok_or("usage: p2p-bench bytegroup-gran <safetensors>")?;
         return bytegroup_gran(&f);
