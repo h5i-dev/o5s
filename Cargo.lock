@@ -1177,6 +1177,7 @@ dependencies = [
  "pico2peta-core",
  "pico2peta-repo",
  "pico2peta-weights",
+ "zstd",
 ]
 
 [[package]]
@@ -1189,6 +1190,7 @@ dependencies = [
  "memmap2",
  "pico2peta-chunk",
  "pico2peta-core",
+ "pico2peta-weights",
  "proptest",
  "tempfile",
  "zstd",

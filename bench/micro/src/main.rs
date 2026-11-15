@@ -321,7 +321,46 @@ fn chunkers(a: &str, b: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// `p2p-bench bytegroup-gran <safetensors>`: zstd-3 size of the tensor data
+/// in 64 KiB blocks, (a) plain, (b) byte-grouped per block (what the
+/// GroupedZstd record codec does per chunk), (c) grouped per whole tensor and
+/// then cut into blocks (planes span the tensor; not record-local).
+fn bytegroup_gran(path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use pico2peta_weights::bytegroup::group;
+    let f = std::fs::read(path)?;
+    let w = pico2peta_weights::group_width(&f).ok_or("not a groupable safetensors file")? as usize;
+    let layout = pico2peta_weights::parse_layout(&f).ok_or("bad header")?;
+    const B: usize = 64 << 10;
+    let z = |b: &[u8]| zstd::bulk::compress(b, 3).map_or(b.len(), |c| c.len().min(b.len()));
+    let (mut raw, mut a, mut b, mut c) = (0usize, 0usize, 0usize, 0usize);
+    let mut ranges: Vec<_> = layout.tensors.values().copied().collect();
+    ranges.sort();
+    for (s, e) in ranges {
+        let t = &f[s as usize..e as usize];
+        raw += t.len();
+        for blk in t.chunks(B) {
+            a += z(blk);
+            b += z(&group(blk, w)?);
+        }
+        for blk in group(t, w)?.chunks(B) {
+            c += z(blk);
+        }
+    }
+    let pct = |x: usize| (1.0 - x as f64 / a as f64) * 100.0;
+    println!("tensor data {:.1} MB, width {w}", raw as f64 / 1e6);
+    println!("| layout (zstd-3, 64 KiB blocks) | bytes | vs plain |");
+    println!("|---|---|---|");
+    println!("| plain | {a} | |");
+    println!("| grouped per block (record-local; the codec) | {b} | {:+.1}% |", -pct(b));
+    println!("| grouped per tensor, then blocks (not record-local) | {c} | {:+.1}% |", -pct(c));
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("bytegroup-gran") {
+        let f = std::env::args().nth(2).ok_or("usage: p2p-bench bytegroup-gran <safetensors>")?;
+        return bytegroup_gran(&f);
+    }
     if std::env::args().nth(1).as_deref() == Some("chunkers") {
         let a = std::env::args().nth(2).ok_or("usage: p2p-bench chunkers <A> <B>")?;
         let b = std::env::args().nth(3).ok_or("usage: p2p-bench chunkers <A> <B>")?;

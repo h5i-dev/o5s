@@ -16,3 +16,4 @@ pico2peta-repo.workspace = true
 pico2peta-weights.workspace = true
 pico2peta-chunk.workspace = true
 blake3.workspace = true
+zstd.workspace = true

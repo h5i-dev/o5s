@@ -33,7 +33,9 @@ content-derived name never aliases another pack (GC relies on this). `P2PPACK1` 
 ```text
 magic u32 "P2PR" | kind u8 | codec u8 | 0u16 | hash[32] | raw_len u64 | stored_len u32 | payload | crc32 u32
 ```
-`codec`: 0 raw, 1 zstd. `kind`:
+`codec`: 0 raw, 1 zstd, 2 grouped zstd (blobs only: `width u8 | zstd(group(raw, width))`, where `group` lays out
+byte `k` of every `width`-byte element as plane `k`, then the `len % width` tail; used for bf16/fp32 weights and their
+XOR deltas when the writer passes a width hint). `kind`:
 
 | kind | payload | hash / raw_len |
 |---|---|---|

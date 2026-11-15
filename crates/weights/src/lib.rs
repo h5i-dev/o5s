@@ -79,6 +79,29 @@ pub fn plan(base: &Layout, new: &Layout) -> Vec<(u64, u64, u64)> {
     out
 }
 
+/// The byte-grouping width for a safetensors file: the element width of the
+/// dtype holding the most tensor bytes, if that dtype benefits from grouping
+/// (`bytegroup::width_for_dtype`). `None` for non-safetensors input or 1-byte
+/// dtypes. `head` must hold the full header (as [`parse_layout`]).
+pub fn group_width(head: &[u8]) -> Option<u8> {
+    let n = u64::from_le_bytes(head.get(..8)?.try_into().ok()?);
+    if n == 0 || n > MAX_HEADER {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_slice(head.get(8..8 + n as usize)?).ok()?;
+    let mut bytes: HashMap<&str, u64> = HashMap::new();
+    for (name, t) in v.as_object()? {
+        if name == "__metadata__" {
+            continue;
+        }
+        let offs = t.get("data_offsets")?.as_array()?;
+        let len = offs.get(1)?.as_u64()?.checked_sub(offs.first()?.as_u64()?)?;
+        *bytes.entry(t.get("dtype")?.as_str()?).or_default() += len;
+    }
+    let (dtype, _) = bytes.into_iter().max_by_key(|&(d, b)| (b, std::cmp::Reverse(d)))?;
+    bytegroup::width_for_dtype(dtype).and_then(|w| u8::try_from(w).ok())
+}
+
 /// Reads up to the safetensors header from `src` (fewer bytes if the input is
 /// shorter or isn't safetensors; `put_checkpoint` then falls back).
 fn read_head(src: &mut dyn Read) -> Result<Vec<u8>> {
@@ -97,7 +120,14 @@ fn read_head(src: &mut dyn Read) -> Result<Vec<u8>> {
 /// `base` (falls back to an offset-aligned delta when either side isn't
 /// safetensors). Returns the content hash of the new checkpoint.
 pub fn put_checkpoint(store: &dyn ObjectStore, base: &Hash, src: &mut dyn Read) -> Result<Hash> {
+    put_checkpoint_opts(store, base, src, true)
+}
+
+/// [`put_checkpoint`], choosing whether to pass the byte-grouping hint
+/// ([`group_width`]) to the store. `false` is for ablation.
+pub fn put_checkpoint_opts(store: &dyn ObjectStore, base: &Hash, src: &mut dyn Read, byte_group: bool) -> Result<Hash> {
     let head = read_head(src)?;
+    let width = if byte_group { group_width(&head) } else { None };
     let base_len = store.size(base)?;
     let bhead_len = store.get(base, Some(0..8.min(base_len)))?;
     let bn = bhead_len.get(..8).and_then(|b| b.try_into().ok()).map(u64::from_le_bytes).unwrap_or(0);
@@ -114,10 +144,35 @@ pub fn put_checkpoint(store: &dyn ObjectStore, base: &Hash, src: &mut dyn Read) 
                 .into_iter()
                 .filter(|&(_, src, len)| src.checked_add(len).is_some_and(|e| e <= base_len))
                 .collect();
-            store.put_delta_mapped(base, &segs, &mut rest)
+            match width {
+                Some(w) => store.put_delta_mapped_grouped(base, &segs, &mut rest, w),
+                None => store.put_delta_mapped(base, &segs, &mut rest),
+            }
         }
         _ => store.put_delta(base, &mut rest),
     }
+}
+
+/// Stores a (non-delta) weights file from `src`, passing the byte-grouping
+/// hint when it is safetensors with a multi-byte dominant dtype; any other
+/// input is stored with a plain `put_stream`. Returns the content hash.
+pub fn put_weights(store: &dyn ObjectStore, src: &mut dyn Read) -> Result<Hash> {
+    let head = read_head(src)?;
+    let width = group_width(&head);
+    let mut rest = std::io::Cursor::new(head).chain(src);
+    match width {
+        Some(w) => store.put_stream_grouped(&mut rest, w),
+        None => store.put_stream(&mut rest),
+    }
+}
+
+/// Reads the safetensors header prefix of `src` and returns it with the
+/// grouping width ([`group_width`]). Feed the returned bytes back in front of
+/// `src` (e.g. `Cursor::new(head).chain(src)`) to store the whole input.
+pub fn sniff(src: &mut dyn Read) -> Result<(Vec<u8>, Option<u8>)> {
+    let head = read_head(src)?;
+    let w = group_width(&head);
+    Ok((head, w))
 }
 
 /// Convenience: an error for non-safetensors input when a caller insists on it.
@@ -243,5 +298,78 @@ mod tests {
         let mut v = 5u64.to_le_bytes().to_vec();
         v.extend_from_slice(b"{bad}");
         assert!(parse_layout(&v).is_none());
+    }
+
+    fn header_with(dtypes: &[(&str, &str, u64)]) -> Vec<u8> {
+        let mut hdr = serde_json::Map::new();
+        let mut off = 0u64;
+        for (n, dt, len) in dtypes {
+            hdr.insert(n.to_string(), serde_json::json!({"dtype": dt, "shape": [1], "data_offsets": [off, off + len]}));
+            off += len;
+        }
+        let j = serde_json::to_vec(&serde_json::Value::Object(hdr)).unwrap();
+        let mut v = (j.len() as u64).to_le_bytes().to_vec();
+        v.extend_from_slice(&j);
+        v
+    }
+
+    #[test]
+    fn group_width_follows_the_dominant_dtype() {
+        assert_eq!(group_width(&header_with(&[("a", "BF16", 1000), ("n", "F32", 10)])), Some(2));
+        assert_eq!(group_width(&header_with(&[("a", "BF16", 10), ("n", "F32", 1000)])), Some(4));
+        assert_eq!(group_width(&header_with(&[("q", "U8", 1000), ("s", "F16", 10)])), None);
+        assert_eq!(group_width(&header_with(&[])), None);
+        assert_eq!(group_width(b"not safetensors at all"), None);
+        assert_eq!(group_width(&[]), None);
+        // Truncated header, absurd lengths, non-object JSON: None, no panic.
+        let h = header_with(&[("a", "BF16", 1000)]);
+        assert_eq!(group_width(&h[..h.len() - 3]), None);
+        assert_eq!(group_width(&u64::MAX.to_le_bytes()), None);
+        let mut arr = 2u64.to_le_bytes().to_vec();
+        arr.extend_from_slice(b"[]");
+        assert_eq!(group_width(&arr), None);
+        let neg = header_with(&[("a", "BF16", 0)]);
+        assert_eq!(group_width(&neg), Some(2));
+    }
+
+    /// put_checkpoint passes the grouping hint: the delta round-trips with the
+    /// same identity, and is stored smaller than without the hint.
+    #[test]
+    fn grouped_checkpoint_delta_is_smaller_and_exact() {
+        let bf16 = |seed: u64, n: usize| -> Vec<u8> {
+            noise(seed, n).chunks(2).flat_map(|c| [c[0], 0x3c + c.get(1).map_or(0, |b| b % 3)]).collect()
+        };
+        let a = bf16(1, 3_000_000);
+        let mut b = a.clone();
+        for i in (0..b.len()).step_by(2) {
+            b[i] ^= (i as u8) & 0x07;
+        }
+        let base = safetensors(&[("w", a)], "v1");
+        let next = safetensors(&[("w", b)], "v2");
+        let mut sizes = Vec::new();
+        for group in [false, true] {
+            let d = tempfile::tempdir().unwrap();
+            let r = LocalRepo::init(d.path(), &PackConfig::default()).unwrap();
+            let hb = put_weights(&r, &mut &base[..]).unwrap();
+            assert_eq!(hb, Hash::of(&base));
+            let before = dir_size(&d.path().join("objects"), &r);
+            let hn = put_checkpoint_opts(&r, &hb, &mut &next[..], group).unwrap();
+            assert_eq!(hn, Hash::of(&next));
+            assert_eq!(r.get(&hn, None).unwrap(), next);
+            sizes.push(dir_size(&d.path().join("objects"), &r) - before);
+        }
+        assert!(sizes[1] < sizes[0], "grouped delta {} should be < plain {}", sizes[1], sizes[0]);
+    }
+
+    fn dir_size(p: &std::path::Path, r: &LocalRepo) -> u64 {
+        r.flush().unwrap();
+        fn walk(p: &std::path::Path) -> u64 {
+            std::fs::read_dir(p).map_or(0, |rd| {
+                rd.flatten()
+                    .map(|e| if e.path().is_dir() { walk(&e.path()) } else { e.metadata().map_or(0, |m| m.len()) })
+                    .sum()
+            })
+        }
+        walk(p)
     }
 }

@@ -71,6 +71,11 @@ enum Cmd {
         /// --chunk`). Doesn't create NAME. Local repositories only.
         #[arg(long, value_name = "NAME", conflicts_with_all = ["delta_base", "delta_from_ref"])]
         for_name: Option<Name>,
+        /// Don't byte-group safetensors weights before compressing (by default
+        /// bf16/fp16/fp32 checkpoints are stored with the grouped codec; this
+        /// changes only the stored size, never the hash).
+        #[arg(long)]
+        no_byte_group: bool,
     },
     /// Write an object (or a byte range of it) to stdout or a file.
     Get {
@@ -259,7 +264,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
     let mut out = std::io::stdout().lock();
     match cli.cmd {
         Cmd::Init { .. } => unreachable!("handled above"),
-        Cmd::Put { file, delta_base, delta_from_ref, for_name } => {
+        Cmd::Put { file, delta_base, delta_from_ref, for_name, no_byte_group } => {
             let delta_base = match (delta_base, delta_from_ref) {
                 (Some(b), _) => Some(b),
                 (None, Some(n)) => r.resolve(&n)?.map(|v| v.hash),
@@ -272,14 +277,20 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             };
             let h = match delta_base {
                 // Tensor-aligned for safetensors checkpoints; offset-aligned otherwise.
-                Some(b) => pico2peta_weights::put_checkpoint(r, &b, &mut src)?,
-                None => match (&for_name, &local) {
-                    (Some(n), Some(l)) => l.put_stream_for(n, &mut src)?,
-                    (Some(_), None) => {
-                        return Err(Error::Unsupported("put --for-name is only available for local repositories"));
+                Some(b) => pico2peta_weights::put_checkpoint_opts(r, &b, &mut src, !no_byte_group)?,
+                None => {
+                    let (head, width) = pico2peta_weights::sniff(&mut src)?;
+                    let width = if no_byte_group { None } else { width };
+                    let mut src = std::io::Cursor::new(head).chain(src);
+                    match (&for_name, &local, width) {
+                        (Some(n), Some(l), w) => l.put_stream_for_grouped(n, &mut src, w)?,
+                        (Some(_), None, _) => {
+                            return Err(Error::Unsupported("put --for-name is only available for local repositories"));
+                        }
+                        (None, _, Some(w)) => r.put_stream_grouped(&mut src, w)?,
+                        (None, _, None) => r.put_stream(&mut src)?,
                     }
-                    (None, _) => r.put_stream(&mut src)?,
-                },
+                }
             };
             r.flush()?;
             writeln!(out, "{h}")?;

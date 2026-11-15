@@ -124,6 +124,12 @@ pub enum Codec {
     Raw = 0,
     /// zstd-compressed.
     Zstd = 1,
+    /// Byte-grouped, then zstd-compressed (blobs only): payload is
+    /// `width u8 | zstd(group(raw, width))`, where `group` lays out byte `k`
+    /// of every `width`-byte element as plane `k`, followed by the
+    /// `len % width` tail unchanged (`pico2peta_weights::bytegroup`). For
+    /// fixed-width numeric data such as bf16/fp32 model weights.
+    GroupedZstd = 2,
 }
 
 impl Kind {
@@ -143,6 +149,7 @@ impl Codec {
         match b {
             0 => Ok(Codec::Raw),
             1 => Ok(Codec::Zstd),
+            2 => Ok(Codec::GroupedZstd),
             _ => Err(Error::Corrupt(format!("bad codec {b}"))),
         }
     }
@@ -231,6 +238,12 @@ pub fn unpack_payload(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
         (Codec::Zstd, Kind::Frame | Kind::Frame2) => {
             return Err(Error::Corrupt("use decode_frame_bodies for frame records".into()));
         }
+        (Codec::GroupedZstd, Kind::Blob) => {
+            let (&w, z) = payload.split_first().ok_or_else(|| Error::Corrupt("empty grouped payload".into()))?;
+            let g = zstd::bulk::decompress(z, h.raw_len as usize).map_err(zerr)?;
+            pico2peta_weights::bytegroup::ungroup(&g, w as usize).map_err(|e| Error::Corrupt(format!("{e}")))?
+        }
+        (Codec::GroupedZstd, _) => return Err(Error::Corrupt("grouped codec on a non-blob record".into())),
     };
     if h.kind == Kind::Blob && out.len() as u64 != h.raw_len {
         return Err(Error::Corrupt(format!("length mismatch for {}", h.hash)));
@@ -423,6 +436,7 @@ pub fn decode_frame_bodies(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
         Codec::Zstd => {
             zstd::bulk::decompress(body, h.raw_len as usize).map_err(|e| Error::Corrupt(format!("zstd: {e}")))?
         }
+        Codec::GroupedZstd => return Err(Error::Corrupt("grouped codec on a frame".into())),
     };
     if out.len() as u64 != h.raw_len || Hash::of(&out) != h.hash {
         return Err(Error::Corrupt("frame body mismatch".into()));

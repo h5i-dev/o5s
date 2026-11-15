@@ -221,6 +221,27 @@ pub trait ObjectStore: Send + Sync {
         let _ = segments;
         self.put_delta(base, src)
     }
+    /// `put_stream` with a storage hint (API v1.12): the content is
+    /// fixed-width numeric data with `width`-byte elements (2 = bf16/fp16,
+    /// 4 = fp32), so the store may byte-group it before compressing. The hint
+    /// only affects encoding: identity and reads are unchanged, and a wrong
+    /// hint costs only compression ratio. Default: ignores the hint.
+    fn put_stream_grouped(&self, src: &mut dyn Read, width: u8) -> Result<Hash> {
+        let _ = width;
+        self.put_stream(src)
+    }
+    /// `put_delta_mapped` with the same hint for the delta (API v1.12).
+    /// Default: ignores the hint.
+    fn put_delta_mapped_grouped(
+        &self,
+        base: &Hash,
+        segments: &[(u64, u64, u64)],
+        src: &mut dyn Read,
+        width: u8,
+    ) -> Result<Hash> {
+        let _ = width;
+        self.put_delta_mapped(base, segments, src)
+    }
     /// Returns the bytes of `hash` in `range` (whole object if `None`).
     /// Buffers the result, so use [`ObjectStore::open`] for large objects.
     fn get(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Vec<u8>>;

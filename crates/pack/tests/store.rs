@@ -758,3 +758,61 @@ fn put_stream_with_xet_chunker() {
     let s3 = open(d3.path(), PackConfig::tiny());
     assert!(matches!(s3.put_stream_with(ChunkerKind::Xet, &mut &data[..]), Err(Error::Parse(_))));
 }
+
+/// bf16-like values (small floats: similar sign/exponent bytes, noisy
+/// mantissas), as in real checkpoints.
+fn bf16_like(n_elems: usize, seed: u64) -> Vec<u8> {
+    let noise = pseudo(n_elems, seed);
+    let mut out = Vec::with_capacity(2 * n_elems);
+    for (i, &m) in noise.iter().enumerate() {
+        let hi = 0x3c + (m % 3) + if i % 5 == 0 { 0x80 } else { 0 };
+        out.push(m.rotate_left(3));
+        out.push(hi);
+    }
+    out
+}
+
+/// The grouped codec: put_stream_grouped and grouped deltas round-trip
+/// (whole and ranged reads, across reopen), keep identity, and store bf16-like
+/// data smaller than plain zstd does.
+#[test]
+fn byte_grouped_records_roundtrip_and_shrink() {
+    let cfg = || PackConfig { chunk_threshold: 1 << 20, ..PackConfig::default() };
+    let data = bf16_like(3_000_000, 5);
+    let mut next = data.clone();
+    for i in (0..next.len()).step_by(2) {
+        next[i] ^= (i as u8) & 0x07; // fine-tune-like: low mantissa bits move
+    }
+    let mut sizes = Vec::new();
+    for grouped in [false, true] {
+        let d = tempfile::tempdir().unwrap();
+        let (h, hn) = {
+            let s = open(d.path(), cfg());
+            let h =
+                if grouped { s.put_stream_grouped(&mut &data[..], 2) } else { s.put_stream(&mut &data[..]) }.unwrap();
+            assert_eq!(h, Hash::of(&data));
+            let segs = [(0, 0, data.len() as u64)];
+            let hn = if grouped {
+                s.put_delta_mapped_grouped(&h, &segs, &mut &next[..], 2)
+            } else {
+                s.put_delta_mapped(&h, &segs, &mut &next[..])
+            }
+            .unwrap();
+            assert_eq!(hn, Hash::of(&next));
+            s.flush().unwrap();
+            (h, hn)
+        };
+        let s = open(d.path(), cfg());
+        assert_eq!(s.get(&h, None).unwrap(), data);
+        assert_eq!(s.get(&hn, None).unwrap(), next);
+        assert_eq!(s.get(&h, Some(123_457..2_000_001)).unwrap(), data[123_457..2_000_001]);
+        assert_eq!(s.get(&hn, Some(5..4_999_999)).unwrap(), next[5..4_999_999]);
+        sizes.push(dir_bytes(&d.path().join("objects")));
+    }
+    assert!(sizes[1] < sizes[0], "grouped {} should be < plain {}", sizes[1], sizes[0]);
+    // Width out of range is refused; 0/1 mean "off".
+    let d = tempfile::tempdir().unwrap();
+    let s = open(d.path(), cfg());
+    assert!(matches!(s.put_stream_grouped(&mut &data[..], 17), Err(Error::Parse(_))));
+    assert_eq!(s.put_stream_grouped(&mut &data[..], 1).unwrap(), Hash::of(&data));
+}
