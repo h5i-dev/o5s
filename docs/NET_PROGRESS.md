@@ -2,7 +2,7 @@
 
 ## Status (2026-11-15)
 
-**Summary:** all six goals in AGENT_TASK_NET.md are done, and production hardening continued beyond them (see "Hardening after goal 6"). Remaining limits are listed under "Production gaps". The parts:
+**Summary (verified 2026-11-15):** all six goals in AGENT_TASK_NET.md are done and verified. The checks: clippy `-D warnings`; all 18 net test binaries, including MinIO; OCI conformance 73/0; real-git round-trips; and the cargo-fuzz targets. CI also has Lean and fuzz-smoke jobs. Production hardening continued beyond the goals and production hardening continued beyond them (see "Hardening after goal 6"). Remaining limits are listed under "Production gaps". The parts:
 - S3 backend: MinIO conformance plus fault injection.
 - Server: authn (tokens and OIDC), authz, audit, metrics, TLS, reload, rate limits, GC.
 - Client.
