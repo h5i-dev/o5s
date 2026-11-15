@@ -250,7 +250,18 @@ The contended run checks that no update is lost: the final version equals the nu
   - The test needs network access to Maven Central and skips without it. The Maven distribution is at `/mnt/scratch/pico2peta/tools/maven` (sha512-verified 3.9.9).
 - The 401 for unauthenticated `/pypi/` and `/maven/` requests now carries a Basic challenge, as `/git/` already did: pip and Maven send credentials only after one.
 - **All Phase 3 (3) fronts are DONE:** HF (LFS + Xet upload), PyPI, npm, Maven, and OCI (conformance 73/0), each tested with its real client.
-- Next: Phase 3 (4), the comparison benchmarks against the specialist systems, in one batch per PLAN §6.5 (disk budget: clean up after each run). Then switch segmap to a re-export of `pico2peta_repo::idmap`.
+- **Phase 3 (4) harness: DONE** (`bench/fronts/`, `scripts/fronts-bench.sh`). It follows PLAN §6.5 with the real clients and local specialists:
+  - `git-daemon` 2.50.1 (extracted from the signed AL2023 rpm into tools/bin, since the system git has no daemon);
+  - CNCF Distribution 3.0.0 with crane 0.20.6 and oras 1.2.3;
+  - devpi-server 6.14.0, verdaccio 6.1.6, reposilite 3.5.19 and Maven 3.9.9.
+
+  Every binary was checksum- or signature-verified, and all of them live under `/mnt/scratch/pico2peta/tools`.
+  - The batch is running (results go to `/mnt/scratch/pico2peta/bench-fronts-results.jsonl`, the report to `bench-fronts-report.md`); see "Phase 3 results" once it finishes.
+  - Smoke runs (one run each, not the measurement): the package proxies are at about parity, while throughput-bound transfers (Git push and clone, OCI, HF) are 1.7–2.6× the specialist. That matches the store's put/get pipeline throughput and is relayed to the core.
+  - Deviations from the §6.5 wording:
+    - PyPI timing uses pip (uv is covered functionally in `tests/pypi.rs`).
+    - Maven's "per file" is per artifact (`dependency:get -Dtransitive=false` fetches the jar, its pom and parent poms), and its one-fetch check is "hot requests cause no upstream fetch".
+- Next: switch segmap to a re-export of `pico2peta_repo::idmap`, after the batch (it needs builds, which would disturb the timings).
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
