@@ -631,3 +631,51 @@ fn update_many_mixes_sets_and_deletes_atomically() {
         ReplaceOutcome::Ok { version: 2 }
     );
 }
+
+/// Review finding 1: a multi-megabyte (valid) batch must be readable by every
+/// other handle, and never be mistaken for a torn tail and truncated.
+#[test]
+fn large_batch_is_durable_and_visible_to_other_handles() {
+    let d = tempfile::tempdir().unwrap();
+    let a = RefStore::open(d.path()).unwrap();
+    let b = RefStore::open(d.path()).unwrap();
+    let long = "x".repeat(900);
+    let names: Vec<Name> = (0..6000).map(|i| n(&format!("big/{i}/{long}"))).collect();
+    let ups: Vec<(Name, Hash)> = names.iter().map(|nm| (nm.clone(), h(1))).collect();
+    let rs: Vec<(Name, Observed)> = names.iter().map(|nm| (nm.clone(), Observed::Absent)).collect();
+    assert!(matches!(a.replace_many(&ups, &rs, &yes).unwrap(), pico2peta_core::ReplaceManyOutcome::Ok { .. }));
+    // Another handle sees it, and its next commit must not truncate it.
+    assert_eq!(b.list("big").unwrap().len(), 6000);
+    let z = n("z");
+    b.replace(&z, &[(z.clone(), Observed::Absent)], h(2), &yes).unwrap();
+    let c = RefStore::open(d.path()).unwrap();
+    assert_eq!(c.list("big").unwrap().len(), 6000);
+    assert!(a.resolve(&z).unwrap().is_some(), "the original writer keeps working");
+}
+
+/// Review finding 4: a corrupted record in the middle of the journal is an
+/// error, never silently truncated together with all later records.
+#[test]
+fn mid_journal_corruption_is_an_error_not_a_truncation() {
+    let d = tempfile::tempdir().unwrap();
+    {
+        let r = RefStore::open(d.path()).unwrap();
+        for i in 0..5u64 {
+            let nm = n(&format!("k{i}"));
+            r.replace(&nm, &[(nm.clone(), Observed::Absent)], h(i), &yes).unwrap();
+        }
+    }
+    let p = d.path().join("journal");
+    let mut j = std::fs::read(&p).unwrap();
+    j[8 + 12] ^= 0xff; // inside the first record's payload
+    std::fs::write(&p, &j).unwrap();
+    assert!(matches!(RefStore::open(d.path()), Err(Error::Corrupt(_))));
+    assert_eq!(std::fs::read(&p).unwrap().len(), j.len(), "nothing was truncated");
+    // A zero-filled tail (crash after size update) is still a torn tail.
+    let mut j2 = j.clone();
+    j2[8 + 12] ^= 0xff; // restore
+    j2.extend_from_slice(&[0u8; 37]);
+    std::fs::write(&p, &j2).unwrap();
+    let r = RefStore::open(d.path()).unwrap();
+    assert_eq!(r.list("").unwrap().len(), 5);
+}

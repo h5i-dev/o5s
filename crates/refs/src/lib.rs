@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 const MAGIC: &[u8; 8] = b"P2PREFJ1";
-const MAX_RECORD: u32 = 4 << 20;
+const MAX_RECORD: u32 = 16 << 20;
 /// Maximum number of names in one atomic `replace_many`.
 pub const MAX_BATCH: usize = 10_000;
 
@@ -415,24 +415,51 @@ pub fn decode_payload(p: &[u8]) -> Result<Mutation> {
 pub fn parse_records(buf: &[u8]) -> (Vec<Mutation>, usize, Option<Error>) {
     let mut out = Vec::new();
     let mut off = 0;
-    while buf.len() - off >= 8 {
-        let len = u32::from_le_bytes([buf[off], buf[off + 1], buf[off + 2], buf[off + 3]]);
-        let crc = u32::from_le_bytes([buf[off + 4], buf[off + 5], buf[off + 6], buf[off + 7]]);
-        if len > MAX_RECORD || buf.len() - off - 8 < len as usize {
+    let corrupt = |off: usize, why: &str| Some(Error::Corrupt(format!("ref journal: {why} at offset {off}")));
+    while off < buf.len() {
+        let rest = &buf[off..];
+        // A crash can leave a partially written *last* record, or a zero-filled
+        // tail (size persisted, data not). Both are torn tails, not corruption.
+        if rest.len() < 8 || rest.iter().all(|b| *b == 0) {
             break;
         }
-        let p = &buf[off + 8..off + 8 + len as usize];
+        let len = u32::from_le_bytes([rest[0], rest[1], rest[2], rest[3]]);
+        let crc = u32::from_le_bytes([rest[4], rest[5], rest[6], rest[7]]);
+        if len > MAX_RECORD {
+            return (out, off, corrupt(off, "record length out of range"));
+        }
+        let end = 8 + len as usize;
+        if end > rest.len() {
+            break; // the last record is incomplete: torn
+        }
+        let p = &rest[8..end];
         if crc32fast::hash(p) != crc {
-            break;
+            if end == rest.len() {
+                break; // a bad *last* record is a torn write
+            }
+            // A bad record followed by more data is corruption: never truncate valid history.
+            return (out, off, corrupt(off, "checksum mismatch"));
         }
         match decode_payload(p) {
             Ok(m) => out.push(m),
             // A CRC-valid but undecodable record is real corruption (or a newer format).
             Err(e) => return (out, off, Some(e)),
         }
-        off += 8 + len as usize;
+        off += end;
     }
     (out, off, None)
+}
+
+/// Encodes a mutation, refusing records the decoder would reject.
+fn encode_checked(m: &Mutation) -> Result<Vec<u8>> {
+    let rec = encode(m);
+    if rec.len() - 8 > MAX_RECORD as usize {
+        return Err(Error::Parse(format!(
+            "ref transaction too large ({} bytes encoded, limit {MAX_RECORD}); split it",
+            rec.len()
+        )));
+    }
+    Ok(rec)
 }
 
 struct Inner {
@@ -606,6 +633,13 @@ impl Journal {
                     return Err(Error::Corrupt(format!("{} is not a pico2peta ref journal (v1)", path.display())));
                 }
             }
+            // Generation 0 is opened with `create`. If a compaction moved past it and
+            // deleted it after we read CURRENT, we may just have recreated an empty
+            // orphan. CURRENT is written before old generations are deleted, so
+            // re-checking it under the lock detects that. Retry with the new generation.
+            if g == 0 && read_current(dir)? > 0 {
+                return Err(Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "generation 0 superseded")));
+            }
         }
         Ok(Inner { file, generation: g, state, applied: MAGIC.len() as u64 })
     }
@@ -681,7 +715,7 @@ impl Journal {
         };
         let (m, out) = decide(&g.state)?;
         if let Some(m) = m {
-            let rec = encode(&m);
+            let rec = encode_checked(&m)?;
             if let Err(e) = self.faults.hit("refs.append") {
                 // Simulated torn write.
                 let _ = g.file.write_all_at(&rec[..rec.len() / 2], g.applied);

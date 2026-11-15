@@ -18,7 +18,7 @@
 //! detects this with a post-commit check, and fails the commit instead of
 //! acknowledging a write that nobody would read.
 
-use crate::{Error, Mutation, RefState, Result, decode_snapshot, encode, encode_snapshot, parse_records};
+use crate::{Error, Mutation, RefState, Result, decode_snapshot, encode_checked, encode_snapshot, parse_records};
 use pico2peta_core::backend::{Backend, PutOutcome, PutSource};
 use pico2peta_core::fault::FaultHandle;
 use std::io::Read;
@@ -200,7 +200,7 @@ impl crate::Engine for LogEngine {
             self.catch_up(&mut g)?;
             let caught_up = Instant::now();
             let Some(m) = decide(&g.state)? else { return Ok(()) };
-            let rec = encode(&m);
+            let rec = encode_checked(&m)?;
             self.faults.hit("refs.log.put")?;
             match self.backend.put_if_absent(&self.log_key(g.next), PutSource::Bytes(&rec))? {
                 PutOutcome::Created => {
