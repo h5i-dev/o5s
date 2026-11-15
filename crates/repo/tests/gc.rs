@@ -279,3 +279,74 @@ fn slow_writer_after_delete_fails_cleanly() {
     assert!(matches!(res, Err(pico2peta_core::Error::MissingObject(_))), "{res:?}");
     assert_eq!(w.resolve(&n).unwrap(), None);
 }
+
+/// Crash GC at every fault point (writes, seals, record writes, deletes) across
+/// whole cycles. After each crash, clean GC runs must converge: live data stays
+/// intact, garbage is eventually collected, and no index points at a missing pack.
+#[test]
+fn gc_crash_at_every_fault_point() {
+    use pico2peta_core::backend::{Backend, LocalDisk};
+    use pico2peta_core::fault::Faults;
+    use std::sync::Arc;
+    let setup = |dir: &std::path::Path| -> (Vec<(Hash, Vec<u8>)>, Vec<Hash>) {
+        let r = LocalRepo::init(dir, &PackConfig { pack_cap: 4096, ..PackConfig::tiny() }).unwrap();
+        let mut live = Vec::new();
+        let mut garbage = Vec::new();
+        for i in 0..12u32 {
+            let data = blob(i, 400 + (i as usize % 3) * 900);
+            let h = r.put(&data).unwrap();
+            if i % 3 == 0 {
+                garbage.push(h);
+            } else {
+                set(&r, &format!("k/{i}"), h);
+                live.push((h, data));
+            }
+        }
+        let big = blob(99, 9000);
+        let hb = r.put(&big).unwrap();
+        set(&r, "k/big", hb);
+        live.push((hb, big));
+        r.flush().unwrap();
+        (live, garbage)
+    };
+    let backend =
+        |dir: &std::path::Path| -> Arc<dyn Backend> { Arc::new(LocalDisk::new(dir.join("objects")).unwrap()) };
+    // Size the sweep with a disarmed run.
+    let total = {
+        let d = tempfile::tempdir().unwrap();
+        setup(d.path());
+        let f = Faults::disarmed();
+        let r = LocalRepo::open_with_faults(d.path(), backend(d.path()), f.clone()).unwrap();
+        for _ in 0..3 {
+            r.gc(&opts(), &OpaqueObjects).unwrap();
+        }
+        f.hits()
+    };
+    assert!(total > 20, "GC should pass many fault points ({total})");
+    for budget in 0..=total {
+        let d = tempfile::tempdir().unwrap();
+        let (live, garbage) = setup(d.path());
+        {
+            let f = Faults::crash_after(budget);
+            if let Ok(r) = LocalRepo::open_with_faults(d.path(), backend(d.path()), f) {
+                for _ in 0..3 {
+                    if r.gc(&opts(), &OpaqueObjects).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+        // Recovery: fresh handles, clean GC runs until a full cycle completes.
+        let r = LocalRepo::open(d.path()).unwrap();
+        for _ in 0..6 {
+            r.gc(&opts(), &OpaqueObjects).unwrap_or_else(|e| panic!("budget {budget}: gc after crash: {e}"));
+        }
+        let fresh = LocalRepo::open(d.path()).unwrap();
+        for (h, data) in &live {
+            assert_eq!(&fresh.get(h, None).unwrap_or_else(|e| panic!("budget {budget}: lost {h}: {e}")), data);
+        }
+        for g in &garbage {
+            assert!(!fresh.contains(g).unwrap(), "budget {budget}: garbage {g} never collected");
+        }
+    }
+}
