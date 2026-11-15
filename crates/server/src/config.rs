@@ -91,6 +91,27 @@ pub struct Config {
     pub npm: NpmSection,
     #[serde(default)]
     pub maven: MavenSection,
+    /// `[[promotion]]`: which destination namespaces accept promotions, and what they require.
+    #[serde(default)]
+    pub promotion: Vec<PromotionRule>,
+}
+
+/// A promotion gate (`POST /v1/promote`): promotions into names under `dst` must satisfy it.
+/// Names under no rule's `dst` can't be promoted into.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PromotionRule {
+    /// Destination name prefix (e.g. `prod` or `oci/prod`). The longest match applies.
+    pub dst: String,
+    /// Hex Ed25519 public keys that must each have signed an attestation about the object.
+    #[serde(default)]
+    pub required_keys: Vec<String>,
+    /// The required attestations must have this in-toto predicate type.
+    #[serde(default)]
+    pub predicate_type: Option<String>,
+    /// The object must have a provenance record that produced it (e.g. a front's publish).
+    #[serde(default)]
+    pub require_provenance: bool,
 }
 
 /// Maven-compatible repositories (`/maven/<repo>/`). Every repository accepts deploys; one

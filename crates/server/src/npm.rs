@@ -605,6 +605,18 @@ async fn publish(
             crate::pkg::create_once(&*repo, &n2, &rec, &|b| decode_record(b).is_some_and(|(_, m)| m.shasum == sha))
         })
         .await;
+        if let Ok(Ok(true)) = &res {
+            let m = [
+                ("registry", reg.to_string()),
+                ("package", pkg.full()),
+                ("version", v.clone()),
+                ("integrity", x.sri_sha512()),
+            ]
+            .into_iter()
+            .map(|(k, v): (&str, String)| (k.to_string(), v))
+            .collect();
+            crate::prov_api::record_publish(st, "npm", x.hash, &p.name, m);
+        }
         match res {
             Ok(Ok(_)) => published.push(v.clone()),
             Ok(Err(_)) => {

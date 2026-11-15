@@ -320,6 +320,12 @@ The contended run checks that no update is lost: the final version equals the nu
   - Partial: `filter blob:none` and `blob:limit=<n>[kmg]`.
   - Non-tip wants (lazy fetches) are allowed only if reachable from this repo's refs, since object ids are global across repos.
   - Real-git test `shallow_and_partial_clone`, including refusing another repo's object.
+- **ROADMAP Net 3 (P5, front side): DONE** (`crates/server/src/prov_api.rs`, `tests/p5.rs`).
+  - Every front records its publishes as provenance through the core API, with the front's ids in `meta`, which makes them searchable.
+  - External-id resolver: `git:`, `pypi:`, `npm:`, `maven:`, `oci:`, `name:` and `blake3:`, with authz per front namespace.
+  - `GET`/`POST /v1/provenance` (lineage and impact across fronts), `GET /v1/search`, `POST`/`GET /v1/attestations` (DSSE), `POST /v1/promote` gated by `[[promotion]]` rules (Ed25519 keys, predicate type, require_provenance), and `GET /v1/admin/audit` (one query across fronts).
+  - The test drives a real git push → `git.publish` record → a declared build of a wheel → lineage and impact → search → promotion refused without a signature → signed attestation → promotion allowed → audit query.
+  - Not done: OCI cosign/notation signatures as core attestations. Their payloads are a different format (simple signing / JWS), so they stay OCI artifacts.
 - ROADMAP Net 2, Git, "bitmaps or equivalent" and "served-pack size": measured, no change needed.
   - Development check on redis heads+tags (not a benchmark result): a clone sends 130.8 MB, against 226.9 MB from git daemon (the earlier batch rows), so ~0.58× git's bytes. The "1.8×" premise doesn't hold for the current code. `fsck` is clean.
   - Profile of that clone (23.7 s vs git daemon ~13 s):

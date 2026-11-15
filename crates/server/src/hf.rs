@@ -1903,6 +1903,19 @@ async fn commit(
         Err(r) => return r,
     };
     audit(st, p, c, repo, "hf_commit", "ok", Some(format!("{} ops={n_ops} rev={rev}", hex(&oid)))).await;
+    let hf2 = hf.clone();
+    if let Ok(Ok(Some((_, ch)))) = tokio::task::spawn_blocking(move || View::new(&hf2.git)?.lookup(&oid)).await {
+        let m = [
+            ("repo", repo.id()),
+            ("type", repo.kind.to_string()),
+            ("revision", rev.to_string()),
+            ("commit", hex(&oid)),
+        ]
+        .into_iter()
+        .map(|(k, v): (&str, String)| (k.to_string(), v))
+        .collect();
+        crate::prov_api::record_publish(st, "hf", ch, &p.name, m);
+    }
     let url = format!("{}/{}{}/commit/{}", base_url(headers), repo.url_prefix(), repo.id(), hex(&oid));
     axum::Json(serde_json::json!({ "commitUrl": url, "commitOid": hex(&oid), "pullRequestUrl": null, "success": true }))
         .into_response()

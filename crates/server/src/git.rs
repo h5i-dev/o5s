@@ -2089,6 +2089,8 @@ struct PushResult {
     unpack: std::result::Result<usize, String>,
     statuses: Vec<(String, std::result::Result<(), String>)>,
     sideband: bool,
+    /// Refs created or moved: (ref, new oid, core hash of the new object).
+    applied: Vec<(String, Oid, Hash)>,
 }
 
 async fn receive_pack(
@@ -2169,6 +2171,13 @@ async fn receive_pack(
     {
         st.metrics.audit_failures.inc();
         return git_error(StatusCode::INTERNAL_SERVER_ERROR, format!("push applied but audit write failed: {e}"));
+    }
+    for (gitref, oid, h) in &res.applied {
+        let meta = [("repo", repo.clone()), ("ref", gitref.clone()), ("oid", hex(oid))]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect();
+        crate::prov_api::record_publish(st, "git", *h, &p.name, meta);
     }
     let mut report = Vec::new();
     match &res.unpack {
@@ -2272,7 +2281,7 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
     if let Err(e) = &unpack {
         let statuses = cmds.iter().map(|c| (c.gitref.clone(), Err("unpacker error".to_string()))).collect();
         warn!(repo, error = %e, "push rejected");
-        return Ok(PushResult { unpack, statuses, sideband });
+        return Ok(PushResult { unpack, statuses, sideband, applied: Vec::new() });
     }
     // Validate commands.
     let mut statuses: Vec<(String, std::result::Result<(), String>)> = Vec::new();
@@ -2319,6 +2328,7 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
             Err(e) => statuses.push((c.gitref.clone(), Err(e))),
         }
     }
+    let planned: Vec<(usize, Option<Hash>)> = updates.iter().map(|x| (x.3, x.1)).collect();
     if atomic {
         if statuses.iter().any(|s| s.1.is_err()) {
             for s in statuses.iter_mut() {
@@ -2326,7 +2336,7 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
                     s.1 = Err("atomic push failed".into());
                 }
             }
-            return Ok(PushResult { unpack, statuses, sideband });
+            return Ok(PushResult { unpack, statuses, sideband, applied: Vec::new() });
         }
         if !updates.is_empty() {
             let u: Vec<(Name, Option<Hash>)> = updates.iter().map(|x| (x.0.clone(), x.1)).collect();
@@ -2358,7 +2368,12 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
             statuses[i].1 = r;
         }
     }
-    Ok(PushResult { unpack, statuses, sideband })
+    let applied = planned
+        .into_iter()
+        .filter(|(i, _)| statuses.get(*i).is_some_and(|s| s.1.is_ok()))
+        .filter_map(|(i, h)| Some((statuses.get(i)?.0.clone(), cmds.get(i)?.new, h?)))
+        .collect();
+    Ok(PushResult { unpack, statuses, sideband, applied })
 }
 
 // ---------------------------------------------------------------------------

@@ -425,6 +425,13 @@ async fn put(
             remote: c.remote.clone(),
         })
         .await;
+    if let Ok(Ok(true)) = &res {
+        let m = [("repo", repo.to_string()), ("path", path.to_string()), ("sha1", meta.sha1.clone())]
+            .into_iter()
+            .map(|(k, v): (&str, String)| (k.to_string(), v))
+            .collect();
+        crate::prov_api::record_publish(st, "maven", x.hash, &p.name, m);
+    }
     match res {
         Ok(Ok(_)) => StatusCode::CREATED.into_response(),
         Ok(Err(_)) => {

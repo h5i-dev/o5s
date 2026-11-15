@@ -187,5 +187,31 @@ mvn deploy -DaltDeploymentRepository=p2p::https://p2p.example.com/maven/releases
 - Release files are create-once: re-deploying with other bytes gets 409. `maven-metadata.xml` and `-SNAPSHOT` versions are mutable. Authorization is on `maven/<repo>`.
 - Proxy-cache: `[maven.upstream.central] url = "https://repo.maven.apache.org/maven2"`. A miss is fetched, checked against the upstream's `.sha1`, and stored. Mutable upstream files are refreshed after `ttl_secs`, and the cached copy is served if the upstream is down.
 
+## Provenance, search, attestations and promotion (all fronts)
+- **Automatic provenance:** every publish records `op = "<front>.publish"` (git push per ref, OCI manifest, HF commit, PyPI upload, npm version, Maven file). The stored object is the output, and the front's ids go in `meta` (repo/ref/oid, digest/tag, index/project/version/file, ...).
+- **External ids** name objects in every call below:
+  - `blake3:<hex>` and `name:<core name>`;
+  - `git:<repo>@<oid>` (SHA-1 or SHA-256);
+  - `pypi:<index>/<project>/<file>`, `npm:<registry>/<pkg>@<version>`, `maven:<repo>/<path>`;
+  - `oci:<repo>@sha256:<hex>`.
+
+  Each requires read access on its front's namespace.
+- **`GET /v1/provenance?ref=<id>`** returns producers, consumers, transitive `lineage` and `impact`.
+- **`POST /v1/provenance`** `{op, inputs: {role: id}, outputs: {role: id}, meta}` records a client-declared derivation, e.g. a wheel built from a git commit. It needs write access on every output.
+- **`GET /v1/search?q=<text>`** (or `prefix=` / `exact=`) searches names, front metadata and provenance. Results are limited to names the caller can read.
+- **`POST /v1/attestations`** takes a DSSE envelope (in-toto Statement) and links it to its subjects. **`GET /v1/attestations?ref=<id>`** lists them, with the trusted keys that verify each one.
+- **`POST /v1/promote {src, dst}`** points `dst` at what `src` names, in one OCC transaction, if the `[[promotion]]` rule covering `dst` holds:
+
+  ```toml
+  [[promotion]]
+  dst = "prod"                       # longest matching prefix applies; uncovered names can't be promoted into
+  required_keys = ["<hex ed25519 public key>"]
+  predicate_type = "https://slsa.dev/provenance/v1"
+  require_provenance = true
+  ```
+
+  It needs read on `src` and write on `dst`. It answers 403 with the reasons when the policy refuses, and 409 if either name moved concurrently. Every promotion is recorded in provenance and the audit log.
+- **`GET /v1/admin/audit?principal=&action=&target=&outcome=&since=&limit=`** (admin) is one query over the hash-chained audit log of every front, including rotated files.
+
 ## Operations
 See `deploy/README.md` for install, TLS, reload (SIGHUP), S3 credentials and lifecycle rules, metrics, audit verification (`pico2peta-server verify-audit`) and capacity notes.

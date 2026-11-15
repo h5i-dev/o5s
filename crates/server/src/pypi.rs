@@ -641,6 +641,20 @@ async fn upload(
             remote: c.remote.clone(),
         })
         .await;
+    if let Ok(Ok(true)) = &res {
+        let version = fields.get("version").cloned().unwrap_or_default();
+        let m = [
+            ("index", index.to_string()),
+            ("project", project.clone()),
+            ("version", version),
+            ("file", file.clone()),
+            ("sha256", sha.clone()),
+        ]
+        .into_iter()
+        .map(|(k, v): (&str, String)| (k.to_string(), v))
+        .collect();
+        crate::prov_api::record_publish(st, "pypi", h, &p.name, m);
+    }
     match res {
         Ok(Ok(_)) => (status, "OK").into_response(),
         Ok(Err(m)) => err(status, m),

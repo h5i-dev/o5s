@@ -118,6 +118,15 @@ impl OciState {
         Ok(self.blob_map(repo)?.get_live(hex_key(hex)?).await.map_err(OciError::from)?.map(|v| v.hash))
     }
 
+    /// A manifest (by its link) or blob of `repo` with this sha256 digest (provenance ids).
+    pub(crate) async fn resolve_digest(&self, repo: &str, hex: &str) -> std::result::Result<Option<Hash>, String> {
+        let n = manifest_link(repo, hex).map_err(|_| "invalid repository or digest".to_string())?;
+        if let Some(v) = self.repo.resolve(&n).map_err(|e| e.to_string())? {
+            return Ok(Some(v.hash));
+        }
+        self.blob(repo, hex).await.map_err(|_| "invalid repository or digest".to_string())
+    }
+
     async fn digest(&self, hex: &str) -> OciResult<Option<Hash>> {
         Ok(self.digest_map()?.get_live(hex_key(hex)?).await.map_err(OciError::from)?.map(|v| v.hash))
     }
@@ -959,6 +968,16 @@ async fn put_manifest(
         ensure_mapping(&st.oci_repo(), referrer_link(repo, sub, &hex)?, h).await?;
     }
     audit_push(st, p, c, repo, "manifest", &format!("sha256:{hex} tag={}", tag.as_deref().unwrap_or("-"))).await?;
+    let m = [
+        ("repo", repo.to_string()),
+        ("digest", format!("sha256:{hex}")),
+        ("tag", tag.clone().unwrap_or_default()),
+        ("media_type", media_type.clone()),
+    ]
+    .into_iter()
+    .map(|(k, v): (&str, String)| (k.to_string(), v))
+    .collect();
+    crate::prov_api::record_publish(st, "oci", h, &p.name, m);
     let mut resp = StatusCode::CREATED.into_response();
     location(resp.headers_mut(), format!("/v2/{repo}/manifests/sha256:{hex}"));
     digest_header(resp.headers_mut(), &hex);

@@ -19,6 +19,7 @@ pub mod npm;
 pub mod oci;
 pub mod oidc;
 pub(crate) mod pkg;
+pub(crate) mod prov_api;
 pub mod pypi;
 pub mod segmap;
 pub mod tls;
@@ -206,6 +207,8 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         pypi,
         npm,
         maven,
+        search: Default::default(),
+        promotion: cfg.promotion.clone(),
         fronts: Some(fronts),
     }))
 }

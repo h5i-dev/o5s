@@ -69,6 +69,11 @@ pub struct AppState {
     pub pypi: Option<Arc<crate::pypi::PypiState>>,
     pub npm: Option<Arc<crate::npm::NpmState>>,
     pub maven: Option<Arc<crate::maven::MavenState>>,
+    /// Search index over names, front metadata and provenance (built on first use, then
+    /// refreshed incrementally from the logs).
+    pub search: Arc<std::sync::Mutex<Option<pico2peta_prov::search::SearchIndex>>>,
+    /// `[[promotion]]` rules.
+    pub promotion: Vec<crate::config::PromotionRule>,
     /// The domain fronts and their write handles (`None` only in tests that build state by hand).
     pub fronts: Option<Arc<crate::fronts::Fronts>>,
 }
@@ -81,7 +86,7 @@ impl AppState {
 
     /// Repository to move `names` with. Fronts own `git/` and `oci/`; a global admin who
     /// passed the reserved-name check acts through the owning front's handle.
-    fn repo_for<'a>(&self, names: impl IntoIterator<Item = &'a str>) -> Arc<dyn Repository> {
+    pub(crate) fn repo_for<'a>(&self, names: impl IntoIterator<Item = &'a str>) -> Arc<dyn Repository> {
         let names: Vec<&str> = names.into_iter().collect();
         match &self.fronts {
             Some(f) if names.iter().any(|n| is_reserved(n)) => f.handle_for(names),
@@ -145,6 +150,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/namespaces", get(list_rules))
         .route("/v1/namespaces/{*prefix}", put(set_rule))
         .route("/v1/whoami", get(whoami))
+        .route("/v1/provenance", get(crate::prov_api::get_provenance).post(crate::prov_api::post_provenance))
+        .route("/v1/search", get(crate::prov_api::search))
+        .route("/v1/attestations", get(crate::prov_api::get_attestations).post(crate::prov_api::post_attestation))
+        .route("/v1/promote", post(crate::prov_api::promote))
+        .route("/v1/admin/audit", get(crate::prov_api::audit_query))
         .route("/v1/admin/gc", post(gc))
         .route("/v1/admin/tokens", get(list_tokens).post(create_token))
         .route("/v1/admin/tokens/{sha256}", axum::routing::delete(revoke_token))
@@ -334,7 +344,14 @@ async fn authenticate(State(st): St, mut req: Request, next: Next) -> Response {
 
 impl AppState {
     /// Fails with 403 (and audits the denial) unless `cond`.
-    fn require(&self, cond: bool, p: &Principal, c: &Caller, action: &'static str, target: &str) -> ApiResult<()> {
+    pub(crate) fn require(
+        &self,
+        cond: bool,
+        p: &Principal,
+        c: &Caller,
+        action: &'static str,
+        target: &str,
+    ) -> ApiResult<()> {
         if cond {
             return Ok(());
         }
@@ -352,7 +369,7 @@ impl AppState {
     }
 
     /// Mutations are refused once the audit log has failed.
-    fn require_audit_healthy(&self) -> ApiResult<()> {
+    pub(crate) fn require_audit_healthy(&self) -> ApiResult<()> {
         if self.audit.is_healthy() {
             Ok(())
         } else {
@@ -361,7 +378,7 @@ impl AppState {
     }
 
     /// Writes a durable audit record for a completed mutation.
-    async fn audit_mutation(&self, ev: Event) -> ApiResult<()> {
+    pub(crate) async fn audit_mutation(&self, ev: Event) -> ApiResult<()> {
         self.audit.record(ev).await.map_err(|e| {
             self.metrics.audit_failures.inc();
             ApiError::internal(format!("operation applied but audit write failed: {e}"))
