@@ -171,7 +171,7 @@ What follows from each result (also decided in advance):
   this is fair, but it would differ if pico2peta stored its own tree format.
 - Read latency is measured on the experimental reader, not the M2 pack reader.
 
-## 5. Lean 4 properties (M8, deferred)
+## 5. Lean 4 properties (M8, done; see lean/README.md)
 
 Pure model, structurally mirroring `pico2peta-model`:
 - **P1 Content immutability:** for any operation sequence, if `get h = some d` at time t, then
