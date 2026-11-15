@@ -174,9 +174,9 @@
 Plan: OCI first (smaller and well specified). It will be validated with the official OCI distribution-spec conformance suite (Go), built locally. Git smart HTTP comes second.
 
 ## Production gaps
-- **S3 credentials:** only static and environment credentials exist. There is no IMDSv2 instance profile, STS web identity or `~/.aws` profile support yet. These can plug into the `CredentialsProvider` trait.
+- **S3 credentials:** the default chain covers env keys, then web identity (EKS IRSA / OIDC via STS `AssumeRoleWithWebIdentity`), then the EC2 instance profile (IMDSv2). Temporary credentials refresh in the background 5 min before expiry. These are tested against mock IMDS and STS; this host has no instance role, so a live AWS run is still missing. Not supported: `~/.aws/config` profiles, SSO, and `credential_process`.
 - **Lost-response detection** relies on the ETag being the MD5 of the body, so it does not work with SSE-KMS or SSE-C. In that case a lost response is reported as `AlreadyExists`. That is still correct for content-addressed keys, but the count is wrong.
-- **Abandoned multipart uploads** (process killed mid-upload) are not cleaned up by the client. Deployments should set a bucket lifecycle rule `AbortIncompleteMultipartUpload` (for example, 1 day). This is documented in deploy/ (TODO).
+- **Abandoned multipart uploads** (process killed mid-upload) are not cleaned up by the client. Deployments should set a bucket lifecycle rule `AbortIncompleteMultipartUpload` (for example, 1 day); deploy/README.md documents it.
 - **GET checksums:** a GET is not checksummed end to end beyond TCP and TLS. Integrity of pack records relies on the core pack CRCs.
 - **Virtual-hosted style and real AWS:** neither has been tested, because no AWS credentials are available here. Only path style against MinIO has run.
 - **Extra copy:** `PutSource::Bytes` is copied once into the runtime, because `Backend` is sync and borrows the bytes.

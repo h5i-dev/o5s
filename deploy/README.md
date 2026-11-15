@@ -46,6 +46,7 @@ For large uploads, disable request buffering in the proxy (`proxy_request_buffer
 
 ## S3 backend
 - Create the bucket first. The server never creates buckets.
+- Credentials are resolved in this order: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (in `/etc/pico2peta/env`), then web identity (`AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN`, e.g. EKS IRSA), then the EC2 instance profile (IMDSv2). Temporary credentials refresh automatically. Prefer the instance profile or IRSA over static keys.
 - **Add a lifecycle rule that aborts incomplete multipart uploads** (for example after 1 day). If the process is killed in the middle of an upload, the parts stay billable until that rule removes them:
   ```json
   {"Rules":[{"ID":"abort-mpu","Status":"Enabled","Filter":{"Prefix":""},

@@ -21,7 +21,8 @@
 //! bucket = "my-bucket"
 //! prefix = "pico2peta"
 //! path_style = false
-//! # credentials: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN
+//! # credentials: AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY[/AWS_SESSION_TOKEN], else
+//! # AWS_WEB_IDENTITY_TOKEN_FILE + AWS_ROLE_ARN (EKS IRSA), else the EC2 instance profile (IMDSv2)
 //!
 //! [auth]
 //! allow_anonymous = false

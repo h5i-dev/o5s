@@ -57,8 +57,8 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
                 c.pool_max_idle = n;
                 c.multipart_concurrency = c.multipart_concurrency.min(n);
             }
-            let creds = pico2peta_backend_s3::Credentials::from_env().map_err(|e| StartError::S3(e.to_string()))?;
-            let b = Arc::new(pico2peta_backend_s3::S3Backend::new(c, Arc::new(creds), 2)?);
+            // Env keys, then web identity (EKS/OIDC), then the EC2 instance profile.
+            let b = Arc::new(pico2peta_backend_s3::S3Backend::with_default_chain(c, 2)?);
             let client = b.client().clone();
             metrics = metrics.with_s3(Arc::new(move || client.stats().snapshot()));
             Some(b)

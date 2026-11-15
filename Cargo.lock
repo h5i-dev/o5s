@@ -1033,6 +1033,7 @@ dependencies = [
  "proptest",
  "quick-xml",
  "reqwest",
+ "serde_json",
  "sha2",
  "tempfile",
  "thiserror",
