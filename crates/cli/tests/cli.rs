@@ -58,6 +58,9 @@ fn put_get_replace_roundtrip() {
     let out2 = d.path().join("v2.out");
     ok(&repo, &["get", &hd, "-o", out2.to_str().unwrap()]);
     assert_eq!(std::fs::read(&out2).unwrap(), v2);
+    // --delta-from-ref uses the ref's current object as the base.
+    let hd2 = ok(&repo, &["put", "--delta-from-ref", "main", f2.to_str().unwrap()]).trim().to_string();
+    assert_eq!(hd2, hd, "same content, same identity regardless of storage");
     // Provenance.
     let h2 = ok(&repo, &["put", f.to_str().unwrap()]).trim().to_string();
     let small = d.path().join("small.txt");

@@ -48,8 +48,13 @@ enum Cmd {
         file: PathBuf,
         /// Store as an XOR delta against this object (for new versions of
         /// model weights with the same layout).
-        #[arg(long)]
+        #[arg(long, conflicts_with = "delta_from_ref")]
         delta_base: Option<Hash>,
+        /// Store as an XOR delta against the object NAME currently points at
+        /// (e.g. the previous checkpoint of `models/heads/main`). Falls back to a
+        /// plain put if NAME doesn't exist.
+        #[arg(long)]
+        delta_from_ref: Option<Name>,
     },
     /// Write an object (or a byte range of it) to stdout or a file.
     Get {
@@ -211,7 +216,12 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
     let mut out = std::io::stdout().lock();
     match cli.cmd {
         Cmd::Init { .. } => unreachable!("handled above"),
-        Cmd::Put { file, delta_base } => {
+        Cmd::Put { file, delta_base, delta_from_ref } => {
+            let delta_base = match (delta_base, delta_from_ref) {
+                (Some(b), _) => Some(b),
+                (None, Some(n)) => r.resolve(&n)?.map(|v| v.hash),
+                (None, None) => None,
+            };
             let mut src: Box<dyn Read> = if file.as_os_str() == "-" {
                 Box::new(std::io::stdin().lock())
             } else {
