@@ -200,10 +200,11 @@ struct Inner {
     /// Recently decompressed frames: `((frame hash, record offset), bodies)`.
     frame_cache: Mutex<Vec<FrameCacheEntry>>,
     /// Recently used manifest nodes (immutable, so they can be cached freely).
-    manifest_cache: Mutex<Vec<(Hash, Arc<Vec<(Hash, u64)>>)>>,
+    manifest_cache: Mutex<Vec<ManifestCacheEntry>>,
 }
 
 type FrameCacheEntry = ((Hash, u64), Arc<Vec<u8>>);
+type ManifestCacheEntry = (Hash, Arc<Vec<(Hash, u64)>>);
 
 /// Manifest nodes cached per handle (each up to `manifest_fanout` × 40 B).
 const MANIFEST_CACHE: usize = 16;
