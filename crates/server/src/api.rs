@@ -54,6 +54,7 @@ pub struct AppState {
     pub local: Option<pico2peta_repo::LocalRepo>,
     pub gc: crate::config::GcSection,
     pub gc_running: Arc<AtomicBool>,
+    pub oci: Option<Arc<crate::oci::OciState>>,
 }
 
 type St = State<Arc<AppState>>;
@@ -94,6 +95,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/namespaces/{*prefix}", put(set_rule))
         .route("/v1/whoami", get(whoami))
         .route("/v1/admin/gc", post(gc))
+        .route("/v2/", get(crate::oci::base))
+        .route("/v2", get(crate::oci::base))
+        .route("/v2/{*rest}", axum::routing::any(crate::oci::dispatch))
         .layer(middleware::from_fn_with_state(state.clone(), authenticate))
         .layer(middleware::from_fn_with_state(state.clone(), shed_load));
     Router::new()
@@ -172,6 +176,13 @@ async fn authenticate(State(st): St, mut req: Request, next: Next) -> Response {
             if let crate::auth::AuthError::Unavailable(m) = e {
                 return ApiError::unavailable(codes::INTERNAL, m).into_response();
             }
+            if req.uri().path().starts_with("/v2") {
+                let body = serde_json::json!({"errors": [{"code": "UNAUTHORIZED", "message": e.to_string()}]});
+                let mut r = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+                r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"pico2peta\""));
+                r.headers_mut().insert("docker-distribution-api-version", HeaderValue::from_static("registry/2.0"));
+                return r;
+            }
             ApiError::unauthenticated(e.to_string()).into_response()
         }
     }
@@ -216,6 +227,11 @@ impl AppState {
             ApiError::internal(format!("operation applied but audit write failed: {e}"))
         })
     }
+}
+
+/// Namespaces owned by protocol adapters (OCI, Git).
+pub fn is_reserved(name: &str) -> bool {
+    pico2peta_core::is_under(name, "oci") || pico2peta_core::is_under(name, "git")
 }
 
 /// Runs a repository call on the blocking pool.
@@ -471,7 +487,7 @@ async fn get_object(
 }
 
 /// Streams `reader` (exactly `len` bytes) as a response body with bounded buffering.
-fn stream_reader(reader: Box<dyn Read + Send>, len: u64, metrics: Arc<Metrics>) -> Body {
+pub(crate) fn stream_reader(reader: Box<dyn Read + Send>, len: u64, metrics: Arc<Metrics>) -> Body {
     let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(4);
     tokio::spawn(async move {
         let mut reader = Some(reader);
@@ -593,6 +609,11 @@ async fn replace(
         serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("bad replace request: {e}")))?;
     let (name, read_set, new) = req.to_core().map_err(ApiError::from)?;
     st.require(st.authz.allows(&p, name.as_str(), Access::Write), &p, &c, "replace", name.as_str())?;
+    // Adapter-managed namespaces keep invariants (digest ↔ content) that raw
+    // replaces could break; only global admins may touch them through /v1.
+    if is_reserved(name.as_str()) {
+        st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "replace_reserved", name.as_str())?;
+    }
     // Conflict responses reveal versions of read-set names, so require read on them.
     for (n, _) in &read_set {
         st.require(st.authz.allows(&p, n.as_str(), Access::Read), &p, &c, "replace", n.as_str())?;
@@ -689,7 +710,8 @@ pub async fn run_gc(st: &AppState, dry_run: bool) -> ApiResult<wire::GcReportJso
     let opts = st.gc.options(dry_run);
     let running = st.gc_running.clone();
     let res = blocking(move || {
-        let r = local.gc(&opts, &pico2peta_repo::OpaqueObjects);
+        let tracer = crate::oci::OciTracer::new(Arc::new(local.clone()));
+        let r = local.gc(&opts, &tracer);
         running.store(false, Ordering::Release);
         r
     })

@@ -67,6 +67,25 @@ pub struct Config {
     pub log: LogSection,
     #[serde(default)]
     pub gc: GcSection,
+    #[serde(default)]
+    pub oci: OciSection,
+}
+
+/// OCI distribution endpoint (`/v2/`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct OciSection {
+    pub enabled: bool,
+    /// Spool directory for chunked uploads (default `<repo.path>/../oci-uploads`).
+    /// Emptied at startup, since upload sessions do not survive restarts.
+    pub upload_dir: Option<PathBuf>,
+    pub max_upload_sessions: usize,
+}
+
+impl Default for OciSection {
+    fn default() -> Self {
+        OciSection { enabled: true, upload_dir: None, max_upload_sessions: 1024 }
+    }
 }
 
 /// Garbage collection (see `pico2peta_repo::gc` for the protocol).

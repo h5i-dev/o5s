@@ -11,6 +11,8 @@ pub mod auth;
 pub mod config;
 pub mod error;
 pub mod metrics;
+pub mod oci;
+pub mod segmap;
 
 use crate::api::AppState;
 use crate::config::{BackendSection, Config};
@@ -76,6 +78,17 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         Some(b) => LocalRepo::open_with_backend(path, b)?,
     };
     let repo: Arc<dyn Repository> = Arc::new(local.clone());
+    let oci = if cfg.oci.enabled {
+        let dir = cfg.oci.upload_dir.clone().unwrap_or_else(|| {
+            let parent = path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| path.clone());
+            parent.join(format!("{}.oci-uploads", path.file_name().and_then(|n| n.to_str()).unwrap_or("repo")))
+        });
+        let st = oci::OciState::new(repo.clone(), dir.clone(), cfg.oci.max_upload_sessions)
+            .map_err(|e| StartError::Audit(dir, e))?;
+        Some(Arc::new(st))
+    } else {
+        None
+    };
     let audit = audit::AuditLog::open(&cfg.audit.path).map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
     Ok(Arc::new(AppState {
         repo,
@@ -91,6 +104,7 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         local: Some(local),
         gc: cfg.gc.clone(),
         gc_running: Arc::new(AtomicBool::new(false)),
+        oci,
     }))
 }
 
@@ -143,6 +157,14 @@ pub async fn serve(
 ) -> std::io::Result<()> {
     let app = app(state.clone(), request_timeout);
     let gc_task = (state.gc.interval_secs > 0).then(|| tokio::spawn(gc_loop(state.clone())));
+    let reaper = state.oci.clone().map(|o| {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+                o.reap().await;
+            }
+        })
+    });
     let (stopping_tx, stopping_rx) = tokio::sync::oneshot::channel::<()>();
     let st = state.clone();
     let graceful = async move {
@@ -162,6 +184,9 @@ pub async fn serve(
         }
     }
     if let Some(t) = gc_task {
+        t.abort();
+    }
+    if let Some(t) = reaper {
         t.abort();
     }
     let repo = state.repo.clone();

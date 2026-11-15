@@ -96,3 +96,24 @@ jobs:
       - name: Stop MinIO
         if: always()
         run: scripts/minio-test.sh stop
+
+  oci-conformance:
+    name: OCI distribution-spec conformance
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - run: cargo build --locked -p pico2peta-server
+      - run: scripts/oci-conformance.sh target/debug/pico2peta-server "$RUNNER_TEMP/oci-conformance"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oci-conformance-report
+          path: ${{ runner.temp }}/oci-conformance/server/report.html
+          if-no-files-found: ignore

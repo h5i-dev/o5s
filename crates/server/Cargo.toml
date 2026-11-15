@@ -34,6 +34,7 @@ sha2 = "0.10"
 fastrand = "2"
 clap.workspace = true
 getrandom = "0.3"
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile.workspace = true
