@@ -58,6 +58,32 @@ pub(crate) fn http_client(upstreams: &[&crate::config::Upstream]) -> std::result
         .map_err(|e| e.to_string())
 }
 
+/// Upstream listings (PyPI project pages, npm packuments) are read into memory: at most this.
+pub(crate) const MAX_LISTING: usize = 64 << 20;
+
+/// Reads an upstream JSON response with a size cap (a hostile upstream can't exhaust memory).
+pub(crate) async fn json_limited(resp: reqwest::Response) -> std::result::Result<serde_json::Value, String> {
+    serde_json::from_slice(&bytes_limited(resp, MAX_LISTING).await?).map_err(|e| e.to_string())
+}
+
+/// Reads a response body, refusing more than `limit` bytes.
+pub(crate) async fn bytes_limited(resp: reqwest::Response, limit: usize) -> std::result::Result<Vec<u8>, String> {
+    use futures_util::StreamExt as _;
+    if resp.content_length().is_some_and(|n| n > limit as u64) {
+        return Err("upstream response too large".into());
+    }
+    let mut buf = Vec::new();
+    let mut s = resp.bytes_stream();
+    while let Some(c) = s.next().await {
+        let c = c.map_err(|e| e.to_string())?;
+        if buf.len() + c.len() > limit {
+            return Err("upstream response too large".into());
+        }
+        buf.extend_from_slice(&c);
+    }
+    Ok(buf)
+}
+
 /// Where package content goes: the front's handle, plus the concrete repo for named puts.
 #[derive(Clone)]
 pub(crate) struct Store {

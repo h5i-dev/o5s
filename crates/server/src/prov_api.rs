@@ -47,21 +47,43 @@ pub(crate) fn record_publish(
     front: &str,
     output: Hash,
     principal: &str,
-    mut meta: BTreeMap<String, String>,
+    meta: BTreeMap<String, String>,
 ) {
-    meta.insert("front".into(), front.into());
-    meta.insert("principal".into(), principal.into());
-    let rec = Record {
-        op: format!("{front}.publish"),
-        outputs: [("artifact".to_string(), output)].into_iter().collect(),
-        meta,
-        ..Default::default()
-    };
+    record_publishes(st, front, principal, vec![(output, meta)]);
+}
+
+/// Records several publishes of one request (e.g. every ref of a git push) in one log update:
+/// one record per object, but a single OCC append to the provenance log instead of one per ref.
+pub(crate) fn record_publishes(
+    st: &AppState,
+    front: &str,
+    principal: &str,
+    items: Vec<(Hash, BTreeMap<String, String>)>,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let recs: Vec<Record> = items
+        .into_iter()
+        .map(|(output, mut meta)| {
+            meta.insert("front".into(), front.into());
+            meta.insert("principal".into(), principal.into());
+            Record {
+                op: format!("{front}.publish"),
+                outputs: [("artifact".to_string(), output)].into_iter().collect(),
+                meta,
+                ..Default::default()
+            }
+        })
+        .collect();
     let repo = st.repo.clone();
     let front = front.to_string();
     tokio::task::spawn_blocking(move || {
-        if let Err(e) = pico2peta_prov::record(&*repo, &log_ref(), &[rec]) {
-            tracing::warn!(front, error = %e, "provenance record of a publish failed");
+        // At most 2^16 records per call (the provenance crate's limit).
+        for batch in recs.chunks(1 << 16) {
+            if let Err(e) = pico2peta_prov::record(&*repo, &log_ref(), batch) {
+                tracing::warn!(front, error = %e, "provenance record of a publish failed");
+            }
         }
     });
 }

@@ -800,3 +800,27 @@ fn read_verify_parameter_follows_repo_policy() {
     s.client(ADMIN).open_verified(&h, None, pico2peta_core::ReadVerify::Eof).unwrap().read_to_end(&mut out).unwrap();
     assert_eq!(out, data);
 }
+
+/// Slowloris: a client that never finishes its request headers is disconnected after
+/// `HEADER_READ_TIMEOUT` (30 s); so is an idle keep-alive connection.
+#[test]
+fn slow_headers_and_idle_connections_are_closed() {
+    use std::io::{Read, Write};
+    let s = TestServer::start(|_| {});
+    let started = std::time::Instant::now();
+    let mut a = std::net::TcpStream::connect(s.addr).unwrap();
+    a.write_all(b"GET /healthz HTTP/1.1\r\nHost: x\r\n").unwrap();
+    let mut b = std::net::TcpStream::connect(s.addr).unwrap();
+    b.write_all(b"GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
+    let mut buf = [0u8; 512];
+    assert!(b.read(&mut buf).unwrap() > 0, "first request answered");
+    for c in [&mut a, &mut b] {
+        c.set_read_timeout(Some(std::time::Duration::from_secs(45))).unwrap();
+        let mut rest = Vec::new();
+        // Reads until the server closes (EOF) or the 45 s safety timeout (an error).
+        let r = c.read_to_end(&mut rest);
+        assert!(r.is_ok(), "connection still open: {r:?}");
+    }
+    let e = started.elapsed();
+    assert!(e >= std::time::Duration::from_secs(25) && e < std::time::Duration::from_secs(40), "{e:?}");
+}

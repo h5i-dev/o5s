@@ -484,7 +484,7 @@ async fn upstream_files(
     } else if !resp.status().is_success() {
         return Err(format!("upstream {page}: {}", resp.status()));
     } else {
-        let v: serde_json::Value = resp.json().await.map_err(|e| format!("upstream {page}: not PEP 691 JSON: {e}"))?;
+        let v = crate::pkg::json_limited(resp).await.map_err(|e| format!("upstream {page}: not PEP 691 JSON: {e}"))?;
         let mut out = Vec::new();
         for f in v["files"].as_array().into_iter().flatten() {
             let (Some(name), Some(u)) = (f["filename"].as_str(), f["url"].as_str()) else { continue };
@@ -806,9 +806,9 @@ async fn metadata(
                 rq = rq.bearer_auth(t);
             }
             let body = match rq.send().await {
-                Ok(r) if r.status().is_success() => match r.bytes().await {
-                    Ok(b) if b.len() <= 16 << 20 => b,
-                    _ => return err(StatusCode::BAD_GATEWAY, "upstream metadata unreadable"),
+                Ok(r) if r.status().is_success() => match crate::pkg::bytes_limited(r, 16 << 20).await {
+                    Ok(b) => axum::body::Bytes::from(b),
+                    Err(_) => return err(StatusCode::BAD_GATEWAY, "upstream metadata unreadable or too large"),
                 },
                 Ok(r) => return err(StatusCode::BAD_GATEWAY, format!("upstream metadata: {}", r.status())),
                 Err(e) => return err(StatusCode::BAD_GATEWAY, format!("upstream metadata: {e}")),

@@ -257,7 +257,56 @@ pub async fn serve_ops(
     state: Arc<AppState>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
-    axum::serve(listener, api::ops_router(state)).with_graceful_shutdown(shutdown).await
+    serve_http(listener, api::ops_router(state), shutdown).await
+}
+
+/// How long a client may take to send a request's headers (also bounds idle keep-alive
+/// connections waiting for their next request). Without it, a client trickling headers
+/// (slowloris) holds a connection forever.
+pub const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Accepts connections on `listener` and serves `app` on each (HTTP/1.1 and HTTP/2), with a
+/// header read timeout and HTTP/2 keep-alive pings. Stops accepting when `shutdown`
+/// resolves, then waits for open connections to finish (callers bound that wait).
+pub async fn serve_http<L>(
+    mut listener: L,
+    app: axum::Router,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()>
+where
+    L: axum::serve::Listener<Addr = std::net::SocketAddr>,
+{
+    use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
+    use tower::ServiceExt;
+    let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+    builder.http1().timer(TokioTimer::new()).header_read_timeout(HEADER_READ_TIMEOUT);
+    builder
+        .http2()
+        .timer(TokioTimer::new())
+        .keep_alive_interval(Some(Duration::from_secs(30)))
+        .keep_alive_timeout(Duration::from_secs(20));
+    let graceful = hyper_util::server::graceful::GracefulShutdown::new();
+    tokio::pin!(shutdown);
+    loop {
+        tokio::select! {
+            (io, addr) = listener.accept() => {
+                let app = app.clone();
+                let svc = hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
+                    req.extensions_mut().insert(axum::extract::ConnectInfo(api::PeerAddr(addr)));
+                    app.clone().oneshot(req.map(axum::body::Body::new))
+                });
+                let conn = builder.serve_connection_with_upgrades(TokioIo::new(io), svc).into_owned();
+                let conn = graceful.watch(conn);
+                tokio::spawn(async move {
+                    let _ = conn.await;
+                });
+            }
+            _ = &mut shutdown => break,
+        }
+    }
+    drop(listener);
+    graceful.shutdown().await;
+    Ok(())
 }
 
 /// Serves plain HTTP on `listener` until `shutdown` resolves. See [`serve_on`].
@@ -283,7 +332,6 @@ pub async fn serve_on<L>(
 ) -> std::io::Result<()>
 where
     L: axum::serve::Listener<Addr = std::net::SocketAddr>,
-    api::PeerAddr: for<'a> axum::extract::connect_info::Connected<axum::serve::IncomingStream<'a, L>>,
 {
     let app = app(state.clone(), request_timeout);
     let gc_task = (state.gc.interval_secs > 0).then(|| tokio::spawn(gc_loop(state.clone())));
@@ -303,9 +351,7 @@ where
         info!("shutdown requested; draining");
         let _ = stopping_tx.send(());
     };
-    let server = axum::serve(listener, app.into_make_service_with_connect_info::<api::PeerAddr>())
-        .with_graceful_shutdown(graceful);
-    let server = server.into_future();
+    let server = serve_http(listener, app, graceful);
     tokio::pin!(server);
     tokio::select! {
         r = &mut server => r?,

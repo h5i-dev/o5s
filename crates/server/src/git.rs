@@ -2172,13 +2172,18 @@ async fn receive_pack(
         st.metrics.audit_failures.inc();
         return git_error(StatusCode::INTERNAL_SERVER_ERROR, format!("push applied but audit write failed: {e}"));
     }
-    for (gitref, oid, h) in &res.applied {
-        let meta = [("repo", repo.clone()), ("ref", gitref.clone()), ("oid", hex(oid))]
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect();
-        crate::prov_api::record_publish(st, "git", *h, &p.name, meta);
-    }
+    let items = res
+        .applied
+        .iter()
+        .map(|(gitref, oid, h)| {
+            let meta = [("repo", repo.clone()), ("ref", gitref.clone()), ("oid", hex(oid))]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect();
+            (*h, meta)
+        })
+        .collect();
+    crate::prov_api::record_publishes(st, "git", &p.name, items);
     let mut report = Vec::new();
     match &res.unpack {
         Ok(_) => report.extend_from_slice(&pkt(b"unpack ok\n")),

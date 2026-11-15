@@ -401,7 +401,7 @@ async fn upstream_doc(
     if !resp.status().is_success() {
         return Err(format!("upstream {url}: {}", resp.status()));
     }
-    let doc = Arc::new(resp.json::<Value>().await.map_err(|e| format!("upstream {url}: {e}"))?);
+    let doc = Arc::new(crate::pkg::json_limited(resp).await.map_err(|e| format!("upstream {url}: {e}"))?);
     if let Ok(mut m) = npm.pages.lock() {
         if m.len() > 10_000 {
             m.clear();

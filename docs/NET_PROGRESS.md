@@ -320,6 +320,20 @@ The contended run checks that no update is lost: the final version equals the nu
   - Partial: `filter blob:none` and `blob:limit=<n>[kmg]`.
   - Non-tip wants (lazy fetches) are allowed only if reachable from this repo's refs, since object ids are global across repos.
   - Real-git test `shallow_and_partial_clone`, including refusing another repo's object.
+- **ROADMAP Net 6 (server security review), findings and fixes so far (2026-11-15):**
+  - **Fixed: slowloris.** `axum::serve` sets no hyper timer, so its 30 s header-read timeout never applied. A client trickling headers, or an idle keep-alive connection, was held forever (measured: still open after 75 s). The server now accepts through hyper-util's auto builder with a Tokio timer: `HEADER_READ_TIMEOUT` = 30 s for HTTP/1 headers and idle keep-alive, plus HTTP/2 keep-alive pings, and graceful shutdown via hyper-util. Measured: both kinds of connection are closed at 30.0 s. Test `slow_headers_and_idle_connections_are_closed`.
+  - **Fixed: SSRF in the proxy-caches** (see above).
+  - **Fixed: Xet decompression bomb.** Chunks were capped at 128 KiB each and xorbs at 64k chunks, but an 80 MB body could LZ4-expand to ~8 GB. The total is now capped at 64 MiB (xet-core's `MAX_XORB_BYTES`). Test `xorb_expansion_is_bounded`.
+  - **Fixed: unbounded upstream listings.** PyPI pages, npm packuments and PEP 658 metadata are read with size caps (64 MiB listings, 16 MiB metadata).
+  - Reviewed, no change needed:
+    - capability URLs: HMAC-SHA256, per-process key, expiry, op+repo scope, constant-time compare; repo segments can't contain the `|` separator;
+    - path handling: every front maps paths to validated core names; OCI follows the distribution-spec grammar, so no collision with internal `_` names;
+    - authz on every write path (dist-tags, yank, unpublish, promote, provenance outputs, attest), and search filtered by readable names;
+    - request smuggling: hyper parses, nothing is proxied;
+    - token storage: sha256 only, looked up by hash;
+    - `/metrics`: unauthenticated on the main listener by design (`metrics_listen` separates it), with route labels as templates, so no repo names leak;
+    - `GET /v1/objects/<hash>` lets any reader fetch by BLAKE3 (content address as capability). Hashes of non-readable names aren't exposed by search or provenance.
+  - Open: in-memory request bodies are bounded but large for authenticated writers (HF commit NDJSON 256 MiB, npm publish JSON 512 MiB). They could be streamed later.
 - ROADMAP Net 7 (ops), part 1: DONE.
   - `deploy/grafana-dashboard.json`: 12 panels over every exported metric.
   - `deploy/prometheus-alerts.yml`: 9 rules, validated YAML.
