@@ -49,18 +49,21 @@ fn put_get_replace_roundtrip() {
     assert_eq!(run(&repo, &["delete", "pkg/a", "--expect", "1"]).status.code(), Some(4));
     assert!(ok(&repo, &["refs"]).contains("pkg/a"));
     assert!(ok(&repo, &["stat"]).contains("sealed_packs"));
-    // XOR delta against an existing object round-trips through the CLI.
+    // A derived object (`--encoding derive-from=HASH`, both patch formats) round-trips.
     let mut v2 = data.clone();
     v2[500] ^= 1;
     let f2 = d.path().join("v2.bin");
     std::fs::write(&f2, &v2).unwrap();
-    let hd = ok(&repo, &["put", "--delta-base", &h, f2.to_str().unwrap()]).trim().to_string();
+    let hd = ok(&repo, &["put", "--encoding", &format!("derive-from={h}"), f2.to_str().unwrap()]).trim().to_string();
     let out2 = d.path().join("v2.out");
     ok(&repo, &["get", &hd, "-o", out2.to_str().unwrap()]);
     assert_eq!(std::fs::read(&out2).unwrap(), v2);
-    // --delta-from-ref uses the ref's current object as the base.
-    let hd2 = ok(&repo, &["put", "--delta-from-ref", "main", f2.to_str().unwrap()]).trim().to_string();
+    let hd2 =
+        ok(&repo, &["put", "--encoding", &format!("derive-from={h}"), "--encoding", "patch=xor", f2.to_str().unwrap()])
+            .trim()
+            .to_string();
     assert_eq!(hd2, hd, "same content, same identity regardless of storage");
+    assert!(!run(&repo, &["put", "--encoding", "colour=blue", f2.to_str().unwrap()]).status.success());
     // Provenance.
     let h2 = ok(&repo, &["put", f.to_str().unwrap()]).trim().to_string();
     let small = d.path().join("small.txt");
@@ -281,11 +284,71 @@ fn search_and_retention_via_cli() {
     assert_eq!(out.lines().count(), 2, "{out}");
     let out = ok(&repo, &["search", "torchlite"]);
     assert_eq!(out.lines().count(), 2, "{out}");
-    assert!(ok(&repo, &["lineage", "pypi/torchlite/1.1"]).trim().is_empty(), "no provenance yet");
+    assert!(ok(&repo, &["prov", "lineage", "pypi/torchlite/1.1"]).trim().is_empty(), "no provenance yet");
     let dry = ok(&repo, &["retention", "--dry-run"]);
     assert_eq!(dry.trim(), "would-delete pypi/torchlite/1.0");
     assert!(run(&repo, &["resolve", "pypi/torchlite/1.0"]).status.success());
     assert_eq!(ok(&repo, &["retention"]).trim(), "deleted pypi/torchlite/1.0");
     assert_eq!(run(&repo, &["resolve", "pypi/torchlite/1.0"]).status.code(), Some(2));
     assert!(!run(&d.path().join("x"), &["init", "--profile", "p=keep_versions:many"]).status.success());
+}
+
+/// The cleaned-up CLI: `prov` takes a HASH or a NAME; attestations (keygen,
+/// create, list, verify); policy-gated promotion; multi-name `update`.
+#[test]
+fn prov_attest_promote_and_update_via_cli() {
+    let d = tempfile::tempdir().unwrap();
+    let repo = d.path().join("r");
+    ok(&repo, &["init"]);
+    let f = d.path().join("w.whl");
+    std::fs::write(&f, b"wheel v1").unwrap();
+    let src = d.path().join("src");
+    std::fs::write(&src, b"source tree").unwrap();
+    let hw = ok(&repo, &["put", f.to_str().unwrap()]).trim().to_string();
+    let hs = ok(&repo, &["put", src.to_str().unwrap()]).trim().to_string();
+    // update: two names in one transaction; a stale read set conflicts (exit 3).
+    assert_eq!(
+        ok(
+            &repo,
+            &[
+                "update",
+                &format!("dev/app={hw}"),
+                &format!("git/main={hs}"),
+                "--expect",
+                "dev/app=absent",
+                "--expect",
+                "git/main=absent"
+            ]
+        )
+        .trim(),
+        "ok 1,1"
+    );
+    assert_eq!(run(&repo, &["update", "dev/app=-", "--expect", "dev/app=absent"]).status.code(), Some(3));
+    // prov: record, then query by NAME and by HASH.
+    ok(&repo, &["prov", "record", "build", "--in", &format!("source={hs}"), "--out", &format!("wheel={hw}")]);
+    assert!(ok(&repo, &["prov", "lineage", "dev/app"]).contains("git/main"));
+    assert!(ok(&repo, &["prov", "impact", "git/main"]).contains("dev/app"));
+    assert!(ok(&repo, &["prov", "why", &hw]).contains(&hs));
+    // attest: keygen, create, list, verify (a wrong key verifies nothing).
+    let key = d.path().join("ci.key");
+    let kg = ok(&repo, &["attest", "keygen", key.to_str().unwrap()]);
+    let pubhex = kg.split_whitespace().nth(1).unwrap().to_string();
+    let other = d.path().join("other.key");
+    let other_pub =
+        ok(&repo, &["attest", "keygen", other.to_str().unwrap()]).split_whitespace().nth(1).unwrap().to_string();
+    assert!(!run(&repo, &["attest", "keygen", key.to_str().unwrap()]).status.success(), "never overwrites a key");
+    ok(&repo, &["attest", "create", "dev/app", "--key", key.to_str().unwrap()]);
+    assert!(ok(&repo, &["attest", "list", "dev/app"]).contains("ed25519:"));
+    assert!(ok(&repo, &["attest", "verify", "dev/app", "--trust", &pubhex]).contains("ed25519:"));
+    assert!(!run(&repo, &["attest", "verify", "dev/app", "--trust", &other_pub]).status.success());
+    // promote: refused without the required signer, promoted with it.
+    let refused = run(&repo, &["promote", "dev/app", "prod/app", "--require-key", &other_pub]);
+    assert_eq!(refused.status.code(), Some(4), "{}", String::from_utf8_lossy(&refused.stdout));
+    assert!(String::from_utf8_lossy(&refused.stdout).contains("refused"));
+    let p = ok(
+        &repo,
+        &["promote", "dev/app", "prod/app", "--require-key", &pubhex, "--require-provenance", "--actor", "alice"],
+    );
+    assert!(p.starts_with(&format!("promoted {hw}")), "{p}");
+    assert!(ok(&repo, &["resolve", "prod/app"]).starts_with(&hw));
 }

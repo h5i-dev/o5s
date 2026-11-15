@@ -1261,11 +1261,13 @@ name = "pico2peta-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "pico2peta-attest",
  "pico2peta-client",
  "pico2peta-core",
  "pico2peta-prov",
  "pico2peta-repo",
  "pico2peta-weights",
+ "serde_json",
  "tempfile",
 ]
 

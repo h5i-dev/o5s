@@ -41,8 +41,8 @@ enum Cmd {
         /// zstd level for pack records (0 = off).
         #[arg(long)]
         zstd_level: Option<i32>,
-        /// zstd level for byte-grouped model-weight records (default 6; 15 gets
-        /// about the full per-tensor gain on bf16 at ~12 MB/s per core).
+        /// zstd level for byte-grouped records (record codec 2, used when a put
+        /// carries a grouping width; default 6).
         #[arg(long)]
         grouped_zstd_level: Option<i32>,
         /// Store refs as a create-only log on the object backend instead of a
@@ -74,28 +74,21 @@ enum Cmd {
         #[arg(long)]
         allow_eof_reads: bool,
     },
-    /// Store a file (or stdin with `-`), print its hash.
+    /// Store a file (or stdin with `-`), print its hash. How it is stored comes from
+    /// the namespace profile of `--for-name` (chunker, derive from the name's current
+    /// object, the profile's front); without it, the store's defaults. Works with
+    /// `--remote` too. Doesn't move any name.
     Put {
         #[arg(default_value = "-")]
         file: PathBuf,
-        /// Store as an XOR delta against this object (new versions of model
-        /// weights). safetensors files are aligned per tensor.
-        #[arg(long, conflicts_with = "delta_from_ref")]
-        delta_base: Option<Hash>,
-        /// Store as an XOR delta against the object NAME currently points at
-        /// (e.g. the previous checkpoint of `models/heads/main`). Falls back to a
-        /// plain put if NAME doesn't exist.
-        #[arg(long)]
-        delta_from_ref: Option<Name>,
-        /// Chunk with the chunker configured for NAME's namespace (`init
-        /// --chunk`). Doesn't create NAME. Local repositories only.
-        #[arg(long, value_name = "NAME", conflicts_with_all = ["delta_base", "delta_from_ref"])]
+        /// Apply NAME's namespace profile (see `init --profile/--namespace`).
+        #[arg(long, value_name = "NAME", conflicts_with = "encoding")]
         for_name: Option<Name>,
-        /// Don't byte-group safetensors weights before compressing (by default
-        /// bf16/fp16/fp32 checkpoints are stored with the grouped codec; this
-        /// changes only the stored size, never the hash).
-        #[arg(long)]
-        no_byte_group: bool,
+        /// Low-level override of the encoding, as KEY=VALUE (repeatable): `chunker=ID`
+        /// (fastcdc|xet), `group-width=N`, `derive-from=HASH`, `patch=xor|xor-anchored`
+        /// (with derive-from; default xor-anchored). Storage only, never the hash.
+        #[arg(long = "encoding", value_name = "KEY=VALUE")]
+        encoding: Vec<String>,
     },
     /// Write an object (or a byte range of it) to stdout or a file.
     Get {
@@ -119,10 +112,6 @@ enum Cmd {
         prefix: Option<String>,
         words: Vec<String>,
     },
-    /// Everything NAME's object was derived from (provenance, across fronts).
-    Lineage { name: Name },
-    /// Everything derived from NAME's object (what to re-verify if it's bad).
-    Impact { name: Name },
     /// Apply the profiles' retention (keep_versions, only_if_regenerable):
     /// delete old versions' names so GC can collect them. Local only.
     Retention {
@@ -143,6 +132,15 @@ enum Cmd {
         /// Further read-set entries `OTHER=absent|VERSION` (repeatable).
         #[arg(long = "read")]
         reads: Vec<String>,
+    },
+    /// Atomically update several names (one OCC transaction): `NAME=HASH` sets,
+    /// `NAME=-` deletes. Every target must be in the read set (`--expect`).
+    Update {
+        #[arg(required = true, value_name = "NAME=HASH|NAME=-")]
+        updates: Vec<String>,
+        /// Read set: `NAME=absent|VERSION` (repeatable).
+        #[arg(long = "expect", value_name = "NAME=STATE")]
+        expect: Vec<String>,
     },
     /// Delete a name (OCC). Immutable/released names can't be deleted.
     Delete {
@@ -167,10 +165,36 @@ enum Cmd {
     Stat,
     /// Verify every stored object (CRC + content hash) and every ref. Exit 1 on problems.
     Fsck,
-    /// Provenance: record derivations, query lineage and impact.
+    /// Provenance: record derivations; lineage, impact and why of a HASH or NAME.
     Prov {
         #[command(subcommand)]
         cmd: ProvCmd,
+    },
+    /// Signed attestations (in-toto Statement v1 in DSSE envelopes) about a HASH or NAME.
+    Attest {
+        #[command(subcommand)]
+        cmd: AttestCmd,
+    },
+    /// Promote: move DST to the object SRC names, if the policy given by the flags
+    /// holds (one OCC transaction, recorded as a `promote` provenance record).
+    /// Local repositories; with --remote it is refused for now, so the client can
+    /// never bypass the server's `[[promotion]]` policy (use `POST /v1/promote`).
+    Promote {
+        src: Name,
+        dst: Name,
+        /// A key that must have signed an attestation about the object: hex Ed25519
+        /// public key (repeatable). Local only.
+        #[arg(long = "require-key", value_name = "PUBHEX")]
+        require_key: Vec<String>,
+        /// Required attestations must have this predicate type. Local only.
+        #[arg(long)]
+        predicate_type: Option<String>,
+        /// The object must have a provenance record that produced it. Local only.
+        #[arg(long)]
+        require_provenance: bool,
+        /// Who is promoting (recorded in the audit record).
+        #[arg(long, default_value = "cli")]
+        actor: String,
     },
     /// Run whichever garbage-collection phases are due (plan → sweep → delete).
     /// Safe with concurrent writers. Run it periodically (e.g. from cron).
@@ -209,10 +233,44 @@ enum ProvCmd {
         #[arg(long = "meta")]
         meta: Vec<String>,
     },
-    /// Show how HASH was made (direct producers), then its full lineage.
-    Why { hash: Hash },
-    /// List everything derived (transitively) from HASH.
-    Impact { hash: Hash },
+    /// Everything TARGET (a HASH or a NAME) was derived from. Prints `<hash> <names...>`.
+    Lineage { target: String },
+    /// Everything derived from TARGET (what to re-verify if it's bad).
+    Impact { target: String },
+    /// How TARGET was made: the direct producing records, then the full lineage.
+    Why { target: String },
+}
+
+#[derive(Subcommand)]
+enum AttestCmd {
+    /// Generate an Ed25519 signing key: writes a 32-byte seed (hex) to FILE and
+    /// prints `<keyid> <public key hex>`.
+    Keygen { file: PathBuf },
+    /// Sign and store an attestation about TARGET (a HASH or a NAME) with the key
+    /// in KEYFILE. Prints the envelope's hash.
+    Create {
+        target: String,
+        #[arg(long = "key", value_name = "KEYFILE")]
+        key: PathBuf,
+        /// in-toto predicate type URI.
+        #[arg(long, default_value = "https://pico2peta.dev/attestation/v1")]
+        predicate_type: String,
+        /// Predicate JSON file (default `{}`).
+        #[arg(long)]
+        predicate: Option<PathBuf>,
+        /// Subject name in the statement (default: TARGET).
+        #[arg(long)]
+        subject_name: Option<String>,
+    },
+    /// List the attestations about TARGET: `<predicate type> <key ids...>`.
+    List { target: String },
+    /// Verify TARGET's attestations against trusted public keys (hex, repeatable).
+    /// Prints `<predicate type> <verified key ids...>`; exit 1 if none verifies.
+    Verify {
+        target: String,
+        #[arg(long = "trust", value_name = "PUBHEX", required = true)]
+        trust: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -388,33 +446,18 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
     let mut out = std::io::stdout().lock();
     match cli.cmd {
         Cmd::Init { .. } => unreachable!("handled above"),
-        Cmd::Put { file, delta_base, delta_from_ref, for_name, no_byte_group } => {
-            let delta_base = match (delta_base, delta_from_ref) {
-                (Some(b), _) => Some(b),
-                (None, Some(n)) => r.resolve(&n)?.map(|v| v.hash),
-                (None, None) => None,
-            };
+        Cmd::Put { file, for_name, encoding } => {
             let mut src: Box<dyn Read> = if file.as_os_str() == "-" {
                 Box::new(std::io::stdin().lock())
             } else {
                 Box::new(std::io::BufReader::new(std::fs::File::open(&file)?))
             };
-            let h = match delta_base {
-                // Tensor-aligned for safetensors checkpoints; offset-aligned otherwise.
-                Some(b) => pico2peta_weights::put_checkpoint_opts(r, &b, &mut src, !no_byte_group)?,
-                None => {
-                    let (head, width) = pico2peta_weights::sniff(&mut src)?;
-                    let width = if no_byte_group { None } else { width };
-                    let mut src = std::io::Cursor::new(head).chain(src);
-                    match (&for_name, &local, width) {
-                        (Some(n), Some(l), w) => l.put_named_hinted(n, &mut src, w)?,
-                        (Some(_), None, _) => {
-                            return Err(Error::Unsupported("put --for-name is only available for local repositories"));
-                        }
-                        (None, _, Some(w)) => r.put_stream_grouped(&mut src, w)?,
-                        (None, _, None) => r.put_stream(&mut src)?,
-                    }
-                }
+            let h = match (&for_name, &local, &remote) {
+                (Some(n), Some(l), _) => l.put_named(n, &mut src)?,
+                (Some(n), None, Some(rr)) => rr.put_named(n, &mut src)?,
+                (Some(_), None, None) => return Err(Error::Unsupported("no repository")),
+                (None, _, _) if !encoding.is_empty() => r.put_encoded(&mut src, &parse_encoding(&encoding)?)?,
+                (None, _, _) => r.put_stream(&mut src)?,
             };
             r.flush()?;
             writeln!(out, "{h}")?;
@@ -471,18 +514,6 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 }
             }
         }
-        Cmd::Lineage { name } => {
-            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
-            for hit in pico2peta_prov::search::lineage_named(r, &log, &name)? {
-                writeln!(out, "{} {}", hit.hash, hit.names.join(" "))?;
-            }
-        }
-        Cmd::Impact { name } => {
-            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
-            for hit in pico2peta_prov::search::impact_named(r, &log, &name)? {
-                writeln!(out, "{} {}", hit.hash, hit.names.join(" "))?;
-            }
-        }
         Cmd::Retention { dry_run } => {
             let Some(l) = &local else {
                 return Err(Error::Unsupported("retention is only available for local repositories"));
@@ -527,6 +558,36 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 }
             }
         }
+        Cmd::Update { updates, expect } => {
+            let mut ups = Vec::new();
+            for u in &updates {
+                let (n, v) = u
+                    .split_once('=')
+                    .ok_or_else(|| Error::Parse(format!("expected NAME=HASH or NAME=-, got {u:?}")))?;
+                ups.push((Name::new(n)?, if v == "-" { None } else { Some(v.parse::<Hash>()?) }));
+            }
+            let mut rs = Vec::new();
+            for e in &expect {
+                let (n, o) =
+                    e.split_once('=').ok_or_else(|| Error::Parse(format!("--expect wants NAME=STATE, got {e:?}")))?;
+                rs.push((Name::new(n)?, parse_observed(o)?));
+            }
+            match r.update_many(&ups, &rs)? {
+                pico2peta_core::ReplaceManyOutcome::Ok { versions } => {
+                    writeln!(out, "ok {}", versions.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","))?
+                }
+                pico2peta_core::ReplaceManyOutcome::Conflict { stale } => {
+                    for (n, o) in stale {
+                        let cur = match o {
+                            Observed::Absent => "absent".to_string(),
+                            Observed::Version(v) => v.to_string(),
+                        };
+                        writeln!(out, "conflict {n} {cur}")?;
+                    }
+                    return Ok(Outcome::Conflict);
+                }
+            }
+        }
         Cmd::Delete { name, expect } => match r.delete_ref(&name, &[(name.clone(), parse_observed(&expect)?)])? {
             ReplaceOutcome::Ok { version } => writeln!(out, "deleted {version}")?,
             ReplaceOutcome::Conflict { stale } => {
@@ -552,6 +613,10 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
         Cmd::Flush => r.flush()?,
         Cmd::Prov { cmd } => {
             let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
+            let cmd_kind = match &cmd {
+                ProvCmd::Lineage { .. } => "lineage",
+                _ => "other",
+            };
             match cmd {
                 ProvCmd::Record { op, inputs, outputs, params, meta } => {
                     let roles = |v: Vec<String>| -> Result<std::collections::BTreeMap<String, Hash>, Error> {
@@ -578,7 +643,19 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                         writeln!(out, "{h}")?;
                     }
                 }
-                ProvCmd::Why { hash } => {
+                ProvCmd::Lineage { target } | ProvCmd::Impact { target } => {
+                    let lineage = matches!(cmd_kind, "lineage");
+                    let h = resolve_target(r, &target)?;
+                    let p = pico2peta_prov::Provenance::load(r, &log)?;
+                    let set = if lineage { p.lineage(&h)? } else { p.impact(&h)? };
+                    let names = names_by_hash(r)?;
+                    for x in set {
+                        let ns = names.get(&x).map(|v| v.join(" ")).unwrap_or_default();
+                        writeln!(out, "{x} {ns}")?;
+                    }
+                }
+                ProvCmd::Why { target } => {
+                    let hash = resolve_target(r, &target)?;
                     let p = pico2peta_prov::Provenance::load(r, &log)?;
                     let producers = p.producers(&hash)?;
                     for (rh, rec) in &producers {
@@ -594,11 +671,100 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                         return Ok(Outcome::Absent);
                     }
                 }
-                ProvCmd::Impact { hash } => {
-                    let p = pico2peta_prov::Provenance::load(r, &log)?;
-                    for h in p.impact(&hash)? {
-                        writeln!(out, "{h}")?;
+            }
+        }
+        Cmd::Attest { cmd } => {
+            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
+            match cmd {
+                AttestCmd::Keygen { file } => {
+                    let mut seed = [0u8; 32];
+                    std::fs::File::open("/dev/urandom")?.read_exact(&mut seed)?;
+                    write_secret(&file, &hex(&seed))?;
+                    let signer = pico2peta_attest::Ed25519Signer::from_seed(&seed);
+                    use pico2peta_attest::Signer as _;
+                    writeln!(out, "{} {}", signer.keyid(), hex(&signer.verifier().public()))?;
+                }
+                AttestCmd::Create { target, key, predicate_type, predicate, subject_name } => {
+                    let h = resolve_target(r, &target)?;
+                    let seed = read_seed(&key)?;
+                    let predicate = match predicate {
+                        Some(p) => serde_json::from_slice(&std::fs::read(p)?)
+                            .map_err(|e| Error::Parse(format!("--predicate: {e}")))?,
+                        None => serde_json::json!({}),
+                    };
+                    let st = pico2peta_attest::Statement {
+                        subjects: vec![pico2peta_attest::Subject { name: subject_name.unwrap_or(target), hash: h }],
+                        predicate_type,
+                        predicate,
+                    };
+                    let signer = pico2peta_attest::Ed25519Signer::from_seed(&seed);
+                    let env = pico2peta_attest::Envelope::sign(&st, &[&signer]);
+                    writeln!(out, "{}", pico2peta_attest::attest(r, &log, &env)?)?;
+                }
+                AttestCmd::List { target } => {
+                    let h = resolve_target(r, &target)?;
+                    for env in pico2peta_attest::attestations(r, &log, &h)? {
+                        let pt = env.statement().map(|s| s.predicate_type).unwrap_or_else(|_| "?".into());
+                        let ids: Vec<&str> = env.signatures.iter().map(|(k, _)| k.as_str()).collect();
+                        writeln!(out, "{pt} {}", ids.join(" "))?;
                     }
+                }
+                AttestCmd::Verify { target, trust } => {
+                    let h = resolve_target(r, &target)?;
+                    let verifiers = trust.iter().map(|t| parse_pubkey(t)).collect::<Result<Vec<_>, _>>()?;
+                    let vs: Vec<&dyn pico2peta_attest::Verifier> =
+                        verifiers.iter().map(|v| v as &dyn pico2peta_attest::Verifier).collect();
+                    let mut any = false;
+                    for env in pico2peta_attest::attestations(r, &log, &h)? {
+                        let ok = env.verified_by(&vs);
+                        if !ok.is_empty() {
+                            any = true;
+                            let pt = env.statement().map(|s| s.predicate_type).unwrap_or_else(|_| "?".into());
+                            writeln!(out, "{pt} {}", ok.join(" "))?;
+                        }
+                    }
+                    if !any {
+                        out.flush()?;
+                        return Err(Error::Corrupt("no attestation verifies with the trusted keys".into()));
+                    }
+                }
+            }
+        }
+        Cmd::Promote { src, dst, require_key, predicate_type, require_provenance, actor } => {
+            if remote.is_some() {
+                // The server applies its own [[promotion]] policy; the client must not bypass it.
+                return Err(Error::Unsupported(
+                    "promote with --remote needs the server's promote endpoint (not yet in this client)",
+                ));
+            }
+            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
+            let verifiers = require_key.iter().map(|t| parse_pubkey(t)).collect::<Result<Vec<_>, _>>()?;
+            use pico2peta_attest::Verifier as _;
+            let policy = pico2peta_attest::Policy {
+                required_keys: verifiers.iter().map(|v| v.keyid()).collect(),
+                predicate_type,
+                require_provenance,
+            };
+            let vs: Vec<&dyn pico2peta_attest::Verifier> =
+                verifiers.iter().map(|v| v as &dyn pico2peta_attest::Verifier).collect();
+            match pico2peta_attest::promote(r, &log, &src, &dst, &policy, &vs, &actor)? {
+                pico2peta_attest::PromoteOutcome::Promoted { object, record } => {
+                    writeln!(out, "promoted {object} record {record}")?
+                }
+                pico2peta_attest::PromoteOutcome::Refused(why) => {
+                    for w in &why {
+                        writeln!(out, "refused {w}")?;
+                    }
+                    out.flush()?;
+                    return Err(Error::Forbidden {
+                        name: dst.clone(),
+                        rule: Rule::Mutable,
+                        why: "promotion policy not satisfied",
+                    });
+                }
+                pico2peta_attest::PromoteOutcome::Conflict => {
+                    writeln!(out, "conflict")?;
+                    return Ok(Outcome::Conflict);
                 }
             }
         }
@@ -692,4 +858,90 @@ fn main() -> ExitCode {
 /// The fronts the CLI opens repositories with.
 fn builtin_fronts() -> pico2peta_core::Result<pico2peta_repo::FrontRegistry> {
     pico2peta_repo::FrontRegistry::new().with(std::sync::Arc::new(pico2peta_weights::SafetensorsFront))
+}
+
+/// A HASH (64 hex digits) or a NAME (resolved to the object it points at).
+fn resolve_target(r: &dyn Repository, t: &str) -> Result<Hash, Error> {
+    if let Ok(h) = t.parse::<Hash>() {
+        return Ok(h);
+    }
+    let n = Name::new(t)?;
+    r.resolve(&n)?.map(|v| v.hash).ok_or(Error::NotFound(Hash([0; 32])))
+}
+
+/// Names currently pointing at each object.
+fn names_by_hash(r: &dyn Repository) -> Result<std::collections::HashMap<Hash, Vec<String>>, Error> {
+    let mut m: std::collections::HashMap<Hash, Vec<String>> = std::collections::HashMap::new();
+    for (n, v) in r.list_refs("")? {
+        m.entry(v.hash).or_default().push(n.to_string());
+    }
+    Ok(m)
+}
+
+/// `--encoding KEY=VALUE...` → the Front API's [`pico2peta_core::Encoding`].
+fn parse_encoding(items: &[String]) -> Result<pico2peta_core::Encoding, Error> {
+    let mut enc = pico2peta_core::Encoding::default();
+    let mut derive_from: Option<Hash> = None;
+    let mut patch = pico2peta_core::PatchFormat::XorAnchored;
+    for it in items {
+        let (k, v) =
+            it.split_once('=').ok_or_else(|| Error::Parse(format!("--encoding wants KEY=VALUE, got {it:?}")))?;
+        match k {
+            "chunker" => enc.chunker = Some(v.to_string()),
+            "group-width" => {
+                enc.group_width = Some(v.parse().map_err(|_| Error::Parse(format!("group-width: {v:?} is not 1..16")))?)
+            }
+            "derive-from" => derive_from = Some(v.parse()?),
+            "patch" => {
+                patch = match v {
+                    "xor" => pico2peta_core::PatchFormat::Xor,
+                    "xor-anchored" => pico2peta_core::PatchFormat::XorAnchored,
+                    _ => return Err(Error::Parse(format!("patch: {v:?} (xor or xor-anchored)"))),
+                }
+            }
+            _ => {
+                return Err(Error::Parse(format!(
+                    "--encoding: unknown key {k:?} (chunker, group-width, derive-from, patch)"
+                )));
+            }
+        }
+    }
+    enc.derive = derive_from.map(|base| pico2peta_core::Derive { base, patch, segments: Vec::new() });
+    Ok(enc)
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+fn unhex32(s: &str) -> Option<[u8; 32]> {
+    let s = s.trim();
+    if s.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (i, o) in out.iter_mut().enumerate() {
+        *o = u8::from_str_radix(s.get(2 * i..2 * i + 2)?, 16).ok()?;
+    }
+    Some(out)
+}
+
+fn read_seed(p: &std::path::Path) -> Result<[u8; 32], Error> {
+    unhex32(&std::fs::read_to_string(p)?)
+        .ok_or_else(|| Error::Parse(format!("{}: expected 64 hex digits", p.display())))
+}
+
+fn parse_pubkey(s: &str) -> Result<pico2peta_attest::Ed25519Verifier, Error> {
+    let b = unhex32(s).ok_or_else(|| Error::Parse(format!("public key {s:?}: expected 64 hex digits")))?;
+    pico2peta_attest::Ed25519Verifier::from_public(&b)
+}
+
+/// Writes a secret file readable only by its owner (created new; never overwritten).
+fn write_secret(p: &std::path::Path, contents: &str) -> Result<(), Error> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(p)?;
+    f.write_all(contents.as_bytes())?;
+    f.write_all(b"\n")?;
+    f.sync_all()?;
+    Ok(())
 }
