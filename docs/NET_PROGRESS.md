@@ -326,6 +326,25 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **Large listings:** `list()` buffers all keys in memory. The trait returns a `Vec`, so a paginated or streaming list would need a trait change if a prefix grows to millions of keys.
 
 ## Requests for core
+- **Bug (perf): repeat pushes into a large store get 6× slower** (2026-11-15, found by the §6.5 Git benchmark; cause not yet confirmed by a profile).
+  - Evidence, from `git push` of heads+tags into a fresh, empty repo name on the same server each run (`bench/fronts/git_bench.py`; results in `/mnt/scratch/pico2peta/bench-fronts-results.jsonl`; host load average ~1.1, so not contention):
+
+    | corpus | run 0 (store empty) | run 1 (all objects already stored) | run 2 | git daemon (each run) |
+    |---|---|---|---|---|
+    | ripgrep | 2.02 s | 1.26 s | 0.89 s | 0.6–0.8 s |
+    | jq | 2.28 s | 1.04 s | 0.91 s | 0.55–0.7 s |
+    | redis (~300k objects) | 31.6 s | **196.4 s** | **182.7 s** | 11.9–14.3 s |
+
+    Small repos get *faster* on repeat pushes, as dedup should make them. Redis, where every put is a dedup hit against a large index, gets 6× slower.
+  - **Correction to my first hypothesis** (relayed to the human as "`dedup_hit` → `refresh()` relists packs on every put once the index is 60 s old"): the code does not do that. `refresh()` sets `last_refresh` unconditionally at its end (`crates/pack/src/store.rs:666` @ b5872b5; its only early returns are errors). So `dedup_hit` (line 818) refreshes at most once per `DEDUP_REFRESH_INTERVAL` (60 s), roughly 3 times in a 190 s push. That is not the cause unless a single refresh is very expensive. It can be: a refresh that sees a changed condemned set or a removed pack rebuilds from all indexes (lines 559–564).
+  - The remaining suspect on the per-put path is `Index::get` (line 269). A hash that is not in the in-memory `map` at rank 0 falls through to the multi-index, and then to a **linear scan over every big (mmap) pack index not covered by it** (line 292). After a redis-sized first push, most objects may live in big indexes. A store-wide dedup hit would then cost O(number of big packs) binary searches per object, and a push does ~300k of them.
+  - Ask:
+    1. Profile a second push. Repro: start a server, push `bench-data/mirrors/redis.git` heads+tags to `git/a/r1`, then the same to `git/a/r2`; the second push is the slow one.
+    2. If `Index::get` dominates, keep the multi-index covering all big indexes (or build one on refresh).
+    3. Check whether `refresh()` took the rebuild branch during the push.
+
+    I can send a `perf` profile; I skipped it so as not to hold the bench lock longer.
+  - On the net side I'm also removing the redundant work: the Git front re-`put`s every pushed object even when its oid is already mapped. It will now skip the put (and the oid-map insert) for objects already in the map, after `ensure_live`.
 - **Byte-grouping pack codec (Phase 2 C): delivered by the core as record codec 2 (`GroupedZstd`, API v1.12).** Measured with `crates/weights/examples/bytegroup_measure.rs` under the bench lock, on real checkpoints. Two granularities are reported. *Per-block* means each 64 KiB block is grouped on its own, which is what the record codec does. *Tensor-grouped* means each whole tensor is grouped first, which is the possible object-level follow-up. My first report gave only the tensor-grouped numbers under a "64 KiB blocks" label; the core lead caught that.
 
   | data (zstd output, 64 KiB blocks) | per-block, L3 | per-block, L19 | tensor-grouped, L3 | tensor-grouped, L19 |
