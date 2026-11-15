@@ -1326,6 +1326,7 @@ dependencies = [
  "blake3",
  "pico2peta-chunk",
  "pico2peta-core",
+ "pico2peta-prov",
  "pico2peta-repo",
  "pico2peta-weights",
  "zstd",
