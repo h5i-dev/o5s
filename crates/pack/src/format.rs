@@ -235,19 +235,42 @@ pub fn decode_record(b: &[u8]) -> Result<(RecHeader, &[u8])> {
     Ok((h, &body[REC_HEADER..]))
 }
 
+thread_local! {
+    /// A reused decompression context per thread (creating one per read showed
+    /// up as ~3 % of a small-object read profile).
+    static ZSTD_DCTX: std::cell::RefCell<Option<zstd::bulk::Decompressor<'static>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// `zstd::bulk::decompress` with a reused per-thread context (same output).
+fn zstd_decompress(c: &[u8], capacity: usize) -> std::io::Result<Vec<u8>> {
+    ZSTD_DCTX.with(|cell| {
+        let Ok(mut slot) = cell.try_borrow_mut() else {
+            return zstd::bulk::decompress(c, capacity);
+        };
+        if slot.is_none() {
+            *slot = Some(zstd::bulk::Decompressor::new()?);
+        }
+        match slot.as_mut() {
+            Some(d) => d.decompress(c, capacity),
+            None => zstd::bulk::decompress(c, capacity),
+        }
+    })
+}
+
 /// Decompresses a payload according to its codec.
 pub fn unpack_payload(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
     let zerr = |e: std::io::Error| Error::Corrupt(format!("zstd: {e}"));
     let out = match (h.codec, h.kind) {
         (Codec::Raw, _) => payload.to_vec(),
-        (Codec::Zstd, Kind::Blob) => zstd::bulk::decompress(payload, h.raw_len as usize).map_err(zerr)?,
+        (Codec::Zstd, Kind::Blob) => zstd_decompress(payload, h.raw_len as usize).map_err(zerr)?,
         (Codec::Zstd, Kind::Manifest | Kind::Delta) => zstd::stream::decode_all(payload).map_err(zerr)?,
         (Codec::Zstd, Kind::Frame | Kind::Frame2 | Kind::Frame3) => {
             return Err(Error::Corrupt("use decode_frame_bodies for frame records".into()));
         }
         (Codec::GroupedZstd, Kind::Blob) => {
             let (&w, z) = payload.split_first().ok_or_else(|| Error::Corrupt("empty grouped payload".into()))?;
-            let g = zstd::bulk::decompress(z, h.raw_len as usize).map_err(zerr)?;
+            let g = zstd_decompress(z, h.raw_len as usize).map_err(zerr)?;
             crate::bytegroup::ungroup(&g, w as usize).map_err(|e| Error::Corrupt(format!("{e}")))?
         }
         (Codec::GroupedZstd, _) => return Err(Error::Corrupt("grouped codec on a non-blob record".into())),
@@ -526,7 +549,7 @@ pub fn decode_frame_bodies(h: &RecHeader, payload: &[u8], reference: Option<&[u8
             zstd_decompress_ref(r, body, h.raw_len as usize)?
         }
         (Codec::Zstd, _) => {
-            zstd::bulk::decompress(body, h.raw_len as usize).map_err(|e| Error::Corrupt(format!("zstd: {e}")))?
+            zstd_decompress(body, h.raw_len as usize).map_err(|e| Error::Corrupt(format!("zstd: {e}")))?
         }
         (Codec::GroupedZstd, _) => return Err(Error::Corrupt("grouped codec on a frame".into())),
     };
