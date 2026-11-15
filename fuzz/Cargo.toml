@@ -1,0 +1,60 @@
+[package]
+name = "pico2peta-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Separate workspace: built only with `cargo +nightly fuzz` (see fuzz/README.md).
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+pico2peta-core = { path = "../crates/core" }
+pico2peta-pack = { path = "../crates/pack" }
+pico2peta-refs = { path = "../crates/refs" }
+tempfile = "3"
+
+[[bin]]
+name = "pack_record"
+path = "fuzz_targets/pack_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pack_index"
+path = "fuzz_targets/pack_index.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "manifest"
+path = "fuzz_targets/manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ref_journal"
+path = "fuzz_targets/ref_journal.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "staging_recovery"
+path = "fuzz_targets/staging_recovery.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "names"
+path = "fuzz_targets/names.rs"
+test = false
+doc = false
+bench = false
