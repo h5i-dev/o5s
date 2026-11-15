@@ -1882,6 +1882,12 @@ pub(crate) fn fuzz_parsers(data: &[u8]) {
     }
     let mut r = data;
     while let Ok(Some(_)) = read_pkt(&mut r) {}
+    if data.len() > 2 {
+        let split = data[1] as usize % data.len();
+        let (b, t) = data.split_at(split);
+        let back = apply_delta(b, &encode_delta(b, t)).unwrap_or_else(|e| panic!("encoded delta does not apply: {e}"));
+        assert!(back == t, "delta roundtrip mismatch");
+    }
 }
 
 // ---------------------------------------------------------------------------

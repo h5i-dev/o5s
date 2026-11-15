@@ -365,6 +365,13 @@ pub mod fuzzing {
         crate::git::fuzz_make_push(objects, tip)
     }
 
+    /// `apply(base, encode(base, target)) == target` (panics otherwise).
+    pub fn git_delta_roundtrip(base: &[u8], target: &[u8]) {
+        let d = crate::git::encode_delta(base, target);
+        let back = crate::git::apply_delta(base, &d).unwrap_or_else(|e| panic!("encoded delta does not apply: {e}"));
+        assert!(back == target, "delta roundtrip mismatch");
+    }
+
     pub fn git_parsers(data: &[u8]) {
         crate::git::fuzz_parsers(data);
     }
