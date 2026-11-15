@@ -954,14 +954,140 @@ fn ofs_encode(mut off: u64) -> Vec<u8> {
 /// every commit reachable from `common` (commit objects only), plus the full
 /// trees of up to [`MAX_BOUNDARY`] common commits. Objects outside this set
 /// that the client has anyway may be re-sent, which is harmless.
-fn boundary_exclude(view: &View<'_>, common: &[Oid]) -> Result<HashSet<Oid>> {
+/// Fetch options beyond wants/haves (protocol v2 `fetch` arguments).
+#[derive(Default, Clone)]
+pub(crate) struct FetchOpts {
+    /// `deepen N`: commits at most N deep from the wants.
+    depth: Option<u32>,
+    /// `deepen-since <t>`: commits at least this new (the wants themselves always).
+    since: Option<u64>,
+    /// `shallow <oid>`: the client's current shallow boundary.
+    client_shallow: HashSet<Oid>,
+    /// `filter blob:none` / `blob:limit=<n>`: omit blobs larger than this.
+    blob_limit: Option<u64>,
+}
+
+impl FetchOpts {
+    fn deepens(&self) -> bool {
+        self.depth.is_some() || self.since.is_some()
+    }
+}
+
+/// Parses `blob:none` / `blob:limit=<n>[kmg]`.
+fn parse_filter(spec: &[u8]) -> Result<u64> {
+    let s = std::str::from_utf8(spec).map_err(|_| Error::Parse("bad filter".into()))?.trim();
+    if s == "blob:none" {
+        return Ok(0);
+    }
+    if let Some(n) = s.strip_prefix("blob:limit=") {
+        let (num, mul) = match n.as_bytes().last() {
+            Some(b'k' | b'K') => (&n[..n.len() - 1], 1u64 << 10),
+            Some(b'm' | b'M') => (&n[..n.len() - 1], 1 << 20),
+            Some(b'g' | b'G') => (&n[..n.len() - 1], 1 << 30),
+            _ => (n, 1),
+        };
+        return num.parse::<u64>().map(|v| v.saturating_mul(mul)).map_err(|_| Error::Parse(format!("bad filter {s}")));
+    }
+    Err(Error::Unsupported("only blob:none and blob:limit=<n> filters are supported"))
+}
+
+/// The commits a shallow fetch sends, and its new shallow boundary (included commits whose
+/// parents are not all included).
+fn shallow_cut(view: &View<'_>, wants: &[Oid], opts: &FetchOpts) -> Result<(HashSet<Oid>, Vec<Oid>)> {
+    let mut included: HashSet<Oid> = HashSet::new();
+    let mut boundary = Vec::new();
+    let mut queue: std::collections::VecDeque<(Oid, u32)> = std::collections::VecDeque::new();
+    for w in wants {
+        // Peel tags to commits; non-commit wants (blobs, trees) need no cut.
+        let mut o = *w;
+        for _ in 0..8 {
+            match view.load(&o)? {
+                Some((Kind::Tag, body)) => match refs_of(Kind::Tag, &body)?.first() {
+                    Some(t) => o = *t,
+                    None => break,
+                },
+                _ => break,
+            }
+        }
+        queue.push_back((o, 1));
+    }
+    while let Some((c, d)) = queue.pop_front() {
+        let Some((Kind::Commit, body)) = view.load(&c)? else { continue };
+        if !included.insert(c) {
+            continue;
+        }
+        let parents: Vec<Oid> = refs_of(Kind::Commit, &body)?.into_iter().skip(1).collect();
+        let mut cut = opts.depth.is_some_and(|n| d >= n);
+        let mut kept = Vec::new();
+        for p in &parents {
+            if cut {
+                break;
+            }
+            if let Some(t) = opts.since
+                && let Some((Kind::Commit, pb)) = view.load(p)?
+                && commit_time(&pb) < t
+            {
+                cut = true;
+                break;
+            }
+            kept.push(*p);
+        }
+        if cut && !parents.is_empty() {
+            boundary.push(c);
+        } else {
+            for p in kept {
+                queue.push_back((p, d + 1));
+            }
+        }
+    }
+    boundary.sort();
+    boundary.dedup();
+    Ok((included, boundary))
+}
+
+/// Depth (from the wants, wants = 1) of the deepest of the client's shallow commits.
+fn shallow_depth(view: &View<'_>, wants: &[Oid], shallow: &HashSet<Oid>) -> Result<u32> {
+    let mut seen: HashSet<Oid> = HashSet::new();
+    let mut queue: std::collections::VecDeque<(Oid, u32)> = wants.iter().map(|w| (*w, 1)).collect();
+    let mut deepest = 0;
+    while let Some((c, d)) = queue.pop_front() {
+        if !seen.insert(c) {
+            continue;
+        }
+        if shallow.contains(&c) {
+            deepest = deepest.max(d);
+            continue; // the client has nothing behind it
+        }
+        if let Some((Kind::Commit, body)) = view.load(&c)? {
+            for p in refs_of(Kind::Commit, &body)?.into_iter().skip(1) {
+                queue.push_back((p, d + 1));
+            }
+        }
+    }
+    Ok(deepest)
+}
+
+/// Committer time of a commit body (seconds; 0 if unparsable).
+fn commit_time(body: &[u8]) -> u64 {
+    String::from_utf8_lossy(body)
+        .lines()
+        .take_while(|l| !l.is_empty())
+        .find_map(|l| l.strip_prefix("committer ").map(str::to_string))
+        .and_then(|l| l.rsplit(' ').nth(1).and_then(|t| t.parse().ok()))
+        .unwrap_or(0)
+}
+
+fn boundary_exclude(view: &View<'_>, common: &[Oid], stop: &HashSet<Oid>) -> Result<HashSet<Oid>> {
     let mut ex: HashSet<Oid> = HashSet::new();
     let mut stack: Vec<Oid> = common.to_vec();
     while let Some(o) = stack.pop() {
         if !ex.insert(o) {
             continue;
         }
-        if let Some((Kind::Commit, body)) = view.load(&o)? {
+        // The client has no history behind its shallow commits.
+        if !stop.contains(&o)
+            && let Some((Kind::Commit, body)) = view.load(&o)?
+        {
             stack.extend(refs_of(Kind::Commit, &body)?.into_iter().skip(1));
         }
     }
@@ -983,6 +1109,19 @@ const MAX_BOUNDARY: usize = 16;
 /// Objects to send with the path they were reached by (for delta pairing):
 /// reachable from `tips`, minus `exclude`. Newest history first.
 fn walk_paths(view: &View<'_>, tips: &[Oid], exclude: &HashSet<Oid>) -> Result<Vec<(Oid, Kind, String)>> {
+    walk_paths_with(view, tips, exclude, None, None)
+}
+
+/// [`walk_paths`] limited to the `commits` set (shallow) and omitting blobs over `blob_limit`
+/// bytes (partial clone). Blobs named directly as tips are always sent.
+fn walk_paths_with(
+    view: &View<'_>,
+    tips: &[Oid],
+    exclude: &HashSet<Oid>,
+    commits: Option<&HashSet<Oid>>,
+    blob_limit: Option<u64>,
+) -> Result<Vec<(Oid, Kind, String)>> {
+    let tip_set: HashSet<Oid> = tips.iter().copied().collect();
     let mut seen: HashSet<Oid> = HashSet::new();
     let mut out = Vec::new();
     let mut stack: Vec<(Oid, String)> =
@@ -992,6 +1131,13 @@ fn walk_paths(view: &View<'_>, tips: &[Oid], exclude: &HashSet<Oid>) -> Result<V
         if exclude.contains(&oid) || !seen.insert(oid) {
             continue;
         }
+        if let Some(limit) = blob_limit
+            && !tip_set.contains(&oid)
+            && let Some((Kind::Blob, _)) = view.lookup(&oid)?
+            && view.body_len(&oid)?.is_some_and(|n| n > limit)
+        {
+            continue; // filtered out (partial clone)
+        }
         let (kind, body) =
             view.load(&oid)?.ok_or_else(|| Error::Corrupt(format!("missing git object {}", hex(&oid))))?;
         match kind {
@@ -999,7 +1145,9 @@ fn walk_paths(view: &View<'_>, tips: &[Oid], exclude: &HashSet<Oid>) -> Result<V
                 let refs = refs_of(kind, &body)?;
                 // Parents go below the tree on the stack: content first, then history.
                 for p in refs.iter().skip(1).rev() {
-                    stack.push((*p, String::new()));
+                    if commits.is_none_or(|c| c.contains(p)) {
+                        stack.push((*p, String::new()));
+                    }
                 }
                 if let Some(t) = refs.first() {
                     stack.push((*t, String::new()));
@@ -1340,8 +1488,13 @@ fn send(tx: &mpsc::Sender<std::result::Result<Bytes, std::io::Error>>, data: Vec
 fn negotiate(view: &View<'_>, git: &GitState, repo: &str, wants: &[Oid], haves: &[Oid]) -> Result<Vec<Oid>> {
     let refs = list_refs(git, repo)?;
     let tips: HashSet<Oid> = refs.iter().map(|r| r.1).collect();
-    for w in wants {
-        if !tips.contains(w) {
+    // Non-tip wants (a partial clone fetching missing blobs, or a shallow client deepening) are
+    // allowed when reachable from this repo's refs: object ids are global across repos.
+    let others: Vec<&Oid> = wants.iter().filter(|w| !tips.contains(*w)).collect();
+    if !others.is_empty() {
+        let tip_list: Vec<Oid> = tips.iter().copied().collect();
+        let reachable: HashSet<Oid> = walk_paths(view, &tip_list, &HashSet::new())?.into_iter().map(|o| o.0).collect();
+        if let Some(w) = others.into_iter().find(|w| !reachable.contains(*w)) {
             return Err(Error::Parse(format!("not our ref {}", hex(w))));
         }
     }
@@ -1386,7 +1539,9 @@ fn negotiate(view: &View<'_>, git: &GitState, repo: &str, wants: &[Oid], haves: 
 /// The v2 capability advertisement (no `# service` line in v2).
 fn v2_capabilities() -> Vec<u8> {
     let mut out = Vec::new();
-    for l in ["version 2\n", &format!("{AGENT}\n"), "ls-refs=unborn\n", "fetch\n", "object-format=sha1\n"] {
+    for l in
+        ["version 2\n", &format!("{AGENT}\n"), "ls-refs=unborn\n", "fetch=shallow filter\n", "object-format=sha1\n"]
+    {
         out.extend_from_slice(&pkt(l.as_bytes()));
     }
     out.extend_from_slice(FLUSH);
@@ -1477,19 +1632,42 @@ fn v2_fetch(
     let mut wants = Vec::new();
     let mut haves = Vec::new();
     let mut done = false;
+    let mut opts = FetchOpts::default();
+    let mut relative = false;
+    let oid_arg = |o: &[u8], what: &str| {
+        parse_oid(o.get(..40).unwrap_or_default()).ok_or_else(|| Error::Parse(format!("bad {what}")))
+    };
     for a in args {
         if let Some(o) = a.strip_prefix(b"want ") {
-            wants.push(parse_oid(o.get(..40).unwrap_or_default()).ok_or_else(|| Error::Parse("bad want".into()))?);
+            wants.push(oid_arg(o, "want")?);
         } else if let Some(o) = a.strip_prefix(b"have ") {
-            haves.push(parse_oid(o.get(..40).unwrap_or_default()).ok_or_else(|| Error::Parse("bad have".into()))?);
+            haves.push(oid_arg(o, "have")?);
         } else if a == b"done" {
             done = true;
-        } else if a.starts_with(b"shallow ")
-            || a.starts_with(b"deepen")
-            || a.starts_with(b"filter ")
-            || a.starts_with(b"want-ref ")
-        {
-            return Err(Error::Unsupported("shallow, partial and want-ref fetches are not supported"));
+        } else if let Some(o) = a.strip_prefix(b"shallow ") {
+            opts.client_shallow.insert(oid_arg(o, "shallow")?);
+        } else if let Some(n) = a.strip_prefix(b"deepen ") {
+            let n: u32 = std::str::from_utf8(n)
+                .ok()
+                .and_then(|s| s.trim().parse().ok())
+                .ok_or_else(|| Error::Parse("bad deepen".into()))?;
+            if n == 0 {
+                return Err(Error::Parse("deepen 0".into()));
+            }
+            opts.depth = Some(n.min(1 << 20));
+        } else if let Some(t) = a.strip_prefix(b"deepen-since ") {
+            opts.since = Some(
+                std::str::from_utf8(t)
+                    .ok()
+                    .and_then(|s| s.trim().parse().ok())
+                    .ok_or_else(|| Error::Parse("bad deepen-since".into()))?,
+            );
+        } else if let Some(f) = a.strip_prefix(b"filter ") {
+            opts.blob_limit = Some(parse_filter(f)?);
+        } else if a == b"deepen-relative" {
+            relative = true;
+        } else if a.starts_with(b"deepen-not ") || a.starts_with(b"want-ref ") {
+            return Err(Error::Unsupported("deepen-not and want-ref are not supported"));
         }
     }
     if wants.is_empty() {
@@ -1497,6 +1675,10 @@ fn v2_fetch(
     }
     let view = View::new(git)?;
     let common = negotiate(&view, git, repo, &wants, &haves)?;
+    if relative && let Some(n) = opts.depth {
+        // `--deepen N`: N more commits behind the client's current boundary.
+        opts.depth = Some(shallow_depth(&view, &wants, &opts.client_shallow)?.saturating_add(n));
+    }
     if !done {
         let mut out = pkt(b"acknowledgments\n");
         if common.is_empty() {
@@ -1514,8 +1696,28 @@ fn v2_fetch(
         out.extend_from_slice(b"0001");
         send(tx, out)?;
     }
+    // Shallow: which commits to send, and the client's new boundary.
+    let mut commits = None;
+    if opts.deepens() || !opts.client_shallow.is_empty() {
+        let mut info = pkt(b"shallow-info\n");
+        if opts.deepens() {
+            let (inc, boundary) = shallow_cut(&view, &wants, &opts)?;
+            for b in &boundary {
+                info.extend_from_slice(&pkt(format!("shallow {}\n", hex(b)).as_bytes()));
+            }
+            // Previously shallow commits whose parents are now sent.
+            for c in &opts.client_shallow {
+                if inc.contains(c) && !boundary.contains(c) {
+                    info.extend_from_slice(&pkt(format!("unshallow {}\n", hex(c)).as_bytes()));
+                }
+            }
+            commits = Some(inc);
+        }
+        info.extend_from_slice(b"0001");
+        send(tx, info)?;
+    }
     send(tx, pkt(b"packfile\n"))?;
-    write_pack(&view, repo, &wants, &common, true, tx, metrics)?;
+    write_pack(&view, repo, &wants, &common, &opts, commits.as_ref(), true, tx, metrics)?;
     send(tx, FLUSH.to_vec())
 }
 
@@ -1542,7 +1744,7 @@ fn serve_upload(
         out.extend_from_slice(&pkt(b"NAK\n"));
     }
     send(tx, out)?;
-    write_pack(&view, repo, &req.wants, &common, req.sideband, tx, metrics)?;
+    write_pack(&view, repo, &req.wants, &common, &FetchOpts::default(), None, req.sideband, tx, metrics)?;
     if req.sideband {
         send(tx, FLUSH.to_vec())?;
     }
@@ -1583,18 +1785,32 @@ fn par_map<T: Send>(n: usize, workers: usize, f: impl Fn(usize) -> Result<T> + S
 }
 
 /// Streams a pack of everything reachable from `wants` but not from `common`.
+#[allow(clippy::too_many_arguments)]
 fn write_pack(
     view: &View<'_>,
     repo: &str,
     wants: &[Oid],
     common: &[Oid],
+    opts: &FetchOpts,
+    commits: Option<&HashSet<Oid>>,
     sideband_on: bool,
     tx: &mpsc::Sender<std::result::Result<Bytes, std::io::Error>>,
     metrics: &crate::metrics::Metrics,
 ) -> Result<()> {
     // Objects to send: reachable from wants minus reachable from common.
-    let exclude = if common.is_empty() { HashSet::new() } else { boundary_exclude(view, common)? };
-    let objs = walk_paths(view, wants, &exclude)?;
+    let exclude =
+        if common.is_empty() { HashSet::new() } else { boundary_exclude(view, common, &opts.client_shallow)? };
+    // Deepening: the client's shallow commits are excluded (it has them), so start the walk
+    // at their parents that are now included as well.
+    let mut tips: Vec<Oid> = wants.to_vec();
+    if let Some(inc) = commits {
+        for c in &opts.client_shallow {
+            if let Some((Kind::Commit, body)) = view.load(c)? {
+                tips.extend(refs_of(Kind::Commit, &body)?.into_iter().skip(1).filter(|p| inc.contains(p)));
+            }
+        }
+    }
+    let objs = walk_paths_with(view, &tips, &exclude, commits, opts.blob_limit)?;
     // Stream the pack. Blobs and trees are deltified against the previously
     // sent version at the same path (newest first, so older versions are deltas).
     let mut h = Sha1::new();

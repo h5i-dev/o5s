@@ -127,7 +127,8 @@ git push --atomic origin main v1.0 :old-branch
 - Refs map to names `git/<repo>/refs/...`, so namespace rules apply. For example, make `git/<repo>/refs/tags` immutable to forbid moving or deleting tags.
 - A stale push gets `ng … fetch first`.
 - Served packs are deltified against the previous version of each path.
-- Limits are listed in `docs/NET_PROGRESS.md` under "Production gaps": SHA-1 repos only, no shallow or partial clones.
+- Shallow clones (`--depth`, `--deepen`, `--shallow-since`, `--unshallow`) and partial clones (`--filter=blob:none`, `blob:limit=<n>`, with lazy fetches of missing objects) work over protocol v2 (git's default). A want that isn't a ref tip is served only if it's reachable from this repo's refs.
+- Limits are listed in `docs/NET_PROGRESS.md` under "Production gaps": SHA-1 repos only; `deepen-not` is unsupported.
 
 ## Hugging Face Hub (`/api`, `/<repo>/resolve`)
 ```sh

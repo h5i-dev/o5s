@@ -306,6 +306,12 @@ The contended run checks that no update is lost: the final version equals the nu
   - Files uploaded over LFS still download over plain HTTP; they have no Xet chunk list.
 - Root disk rule (the human, 2026-11-15): nothing under /home or /tmp beyond sources. perf's build-id cache is set to `/mnt/scratch/pico2peta/perf-buildid`.
 - **HF refs API: DONE.** Branches (create/delete, `startingPoint`), tags (create/delete), `list_repo_refs`, `list_repo_commits` and tag revisions everywhere. All of it is git refs of the repo. Tested with the real client, in LFS and Xet modes.
+- ROADMAP Net 2, Git: shallow and partial clone DONE, over protocol v2.
+  - Shallow: `deepen N`, `deepen-relative` (`--deepen`), `deepen-since`, and `--unshallow`, with a `shallow-info` section.
+  - Partial: `filter blob:none` and `blob:limit=<n>[kmg]`.
+  - Non-tip wants (lazy fetches) are allowed only if reachable from this repo's refs, since object ids are global across repos.
+  - Real-git test `shallow_and_partial_clone`, including refusing another repo's object.
+- ROADMAP Net 2, OCI: cosign (tag scheme and OCI 1.1 referrers) and notation sign/list/verify work against the OCI front (`tests/oci_sign.rs`, real binaries). Wiring them to core attestations waits for core P5.
 - idmap large-segment page cache: DONE (see "Requests for core").
 - Pending on the core: the `read_verify = strict | eof` option. The server will keep `strict` as its default and expose `eof` only when the server config enables it; the request parameter is to be agreed with the core.
 
