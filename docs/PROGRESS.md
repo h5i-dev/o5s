@@ -20,6 +20,7 @@
   - Pending: running the fuzzers (nightly toolchain installing on scratch), and recording micro-benchmark numbers (`bench/micro`), which waits for Exp1 to finish so its timings stay clean.
 
 - **M8 Verification: done.** There's a **Lean↔Rust differential test** (`crates/refs/tests/lean_diff.rs` against the `p2p-model` Lean executable), and it's sanity-checked to fail against a wrong model. Fuzzers ran 60 s per target (~24M executions total) with no crashes. `lean/` has a pure model plus machine-checked proofs, with no `sorry` and only standard axioms. Covered: P1 content immutability, P2 no undetected overwrite, P3 frozen names, P4 authorization, P5 GC safety. Rust already has model-based proptests for refs and packs.
+- **M9 Later layers: provenance done (core side).** `crates/prov`: canonical content-addressed `Record`s (`P2PPROV1`), an OCC-appended log under `_prov/log`, and the queries `producers`/`consumers`/`lineage`/`impact`/`regenerable`. `ProvTracer` keeps inputs and params alive but not outputs, which gives regeneration-aware GC. The CLI has `prov record|why|impact`, and its `gc` uses `ProvTracer`. Git/OCI adapters are net's goal 6; the hash-mapping design is agreed (see NET_PROGRESS.md).
 
 ## API changes
 - **v1 (2026-11-15):** first stable shapes. `Backend` lives in `pico2peta_core::backend`. It is create-only (`put_if_absent` with `PutSource::{Bytes, File}`) and adds `get_range(key, Range)`, `open` (streaming), `head`, `list -> Vec<BlobMeta>`, `delete` and `describe`. New error variants are `KeyNotFound(String)` and `Backend { transient, msg }`. `ObjectStore`/`Repository` take `&self` everywhere, and `open()` returns a `'static` streaming reader. Every backend must pass `backend::conformance::run_all`.
@@ -33,6 +34,7 @@
 - **Flat manifests.** A 100 GB object at a 64 KiB average chunk size has a ~64 MB manifest. This needs hierarchical manifests.
 - **GC assumes an operation lease.** A `put` → `replace` must finish within the grace period (default 1 h). There's no enforcement yet; an epoch/lease token on `replace` would make it checkable.
 - **GC tracer.** GC treats objects as opaque, so only ref targets and their chunks are roots. Structured objects (directories, snapshots) need a `Tracer` once those formats exist.
+- **Provenance index scale.** `Provenance::load` walks the whole log, O(records). Large deployments need persisted forward and backward index segments.
 - **Ref store scale.** All refs live in memory (~150 B each), and compaction rewrites a full snapshot. That's fine to ~10^6 names, strained at 10^7. Scaling needs a sharded journal per prefix, or an LSM. Net was advised to keep per-blob OCI links in segment maps, not refs.
 - **No ref deletion.** `Repository` has no `delete(name)` yet, so the only way to drop a root is to move a ref.
 - **Small packs.** `replace` and `flush` seal the writer's open pack, so chatty writers make many small packs. Repack (M6) is the planned fix.

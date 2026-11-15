@@ -1019,6 +1019,7 @@ dependencies = [
  "clap",
  "pico2peta-client",
  "pico2peta-core",
+ "pico2peta-prov",
  "pico2peta-repo",
  "tempfile",
 ]
@@ -1075,6 +1076,16 @@ dependencies = [
  "proptest",
  "tempfile",
  "zstd",
+]
+
+[[package]]
+name = "pico2peta-prov"
+version = "0.1.0"
+dependencies = [
+ "pico2peta-core",
+ "pico2peta-repo",
+ "proptest",
+ "tempfile",
 ]
 
 [[package]]

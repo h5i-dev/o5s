@@ -44,6 +44,17 @@ fn put_get_replace_roundtrip() {
     assert_eq!(run(&repo, &["replace", "pkg/a", &h, "--expect", "1"]).status.code(), Some(4));
     assert!(ok(&repo, &["refs"]).contains("pkg/a"));
     assert!(ok(&repo, &["stat"]).contains("sealed_packs"));
+    // Provenance.
+    let h2 = ok(&repo, &["put", f.to_str().unwrap()]).trim().to_string();
+    let small = d.path().join("small.txt");
+    std::fs::write(&small, b"derived").unwrap();
+    let h3 = ok(&repo, &["put", small.to_str().unwrap()]).trim().to_string();
+    ok(
+        &repo,
+        &["prov", "record", "derive", "--in", &format!("src={h2}"), "--out", &format!("dst={h3}"), "--meta", "by=test"],
+    );
+    assert!(ok(&repo, &["prov", "why", &h3]).contains(&h2));
+    assert!(ok(&repo, &["prov", "impact", &h2]).contains(&h3));
     // GC: three invocations with zero grace run a full cycle; live data survives.
     assert!(!run(&repo, &["gc", "--grace", "0s"]).status.success(), "short grace needs the unsafe flag");
     for _ in 0..3 {
