@@ -12,5 +12,6 @@ path = "src/main.rs"
 
 [dependencies]
 pico2peta-order.workspace = true
+pico2peta-weights.workspace = true
 zstd.workspace = true
 sha1_smol = "1"

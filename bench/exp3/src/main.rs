@@ -2,8 +2,13 @@
 //! framing vs Exp1 V2, on Exp1's extracted object set.
 //!
 //! ```text
-//! exp3 run <exp1-work-dir> <a0|a1|a2|a3|a4> [threads] [samples]   # one JSON line on stdout
+//! exp3 run <exp1-work-dir> <a0|a1|a2|a3|a4|r0> [threads] [samples]   # one JSON line on stdout
+//! exp3 spill-files <work-dir> tensors <file.safetensors>...         # generalization corpora:
+//! exp3 spill-files <work-dir> dirs <dir>...                         #   same work-dir format
 //! ```
+//! `spill-files` writes Exp1's work-dir format with one partition per input
+//! (in the order given), objects = the safetensors' tensors (by offset) or the
+//! directory's files (by path), sha = SHA-1 of the bytes.
 //! Input is `exp1 extract`'s output (meta.tsv + spill.bin: canonical Git
 //! payloads in V2 partition order). Pass 1 streams the spill, computes
 //! features and writes a random-access re-spill (one zstd-1 frame per object).
@@ -38,8 +43,11 @@ fn main() {
             let samples = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(10_000);
             run(Path::new(&args[2]), &args[3], threads, samples)
         }
+        Some("spill-files") if args.len() >= 5 => spill_files(Path::new(&args[2]), &args[3], &args[4..]),
         _ => {
-            eprintln!("usage: exp3 run <exp1-work-dir> <a0|a1|a2|a3|a4> [threads] [samples]");
+            eprintln!(
+                "usage: exp3 run <exp1-work-dir> <a0|a1|a2|a3|a4> [threads] [samples] | exp3 spill-files <work-dir> <tensors|dirs> <inputs>..."
+            );
             std::process::exit(2);
         }
     };
@@ -47,6 +55,70 @@ fn main() {
         eprintln!("exp3: {e}");
         std::process::exit(1);
     }
+}
+
+fn spill_files(out: &Path, mode: &str, inputs: &[String]) -> R<()> {
+    std::fs::create_dir_all(out)?;
+    let mut spill = File::create(out.join("spill.bin"))?;
+    let mut meta = File::create(out.join("meta.tsv"))?;
+    let mut off = 0u64;
+    let (mut n_obj, mut raw_all) = (0usize, 0u64);
+    for (pid, input) in inputs.iter().enumerate() {
+        // (name, bytes) of every object of this input, in order.
+        let mut objs: Vec<(String, Vec<u8>)> = Vec::new();
+        match mode {
+            "tensors" => {
+                let f = std::fs::read(input)?;
+                let layout = pico2peta_weights::parse_layout(&f).ok_or_else(|| format!("{input}: not safetensors"))?;
+                let mut ts: Vec<(String, (u64, u64))> = layout.tensors.into_iter().collect();
+                ts.sort_by_key(|t| t.1);
+                for (name, (a, b)) in ts {
+                    let d = f.get(a as usize..b as usize).ok_or("tensor out of range")?.to_vec();
+                    objs.push((name, d));
+                }
+            }
+            "dirs" => {
+                let root = Path::new(input);
+                let mut stack = vec![root.to_path_buf()];
+                let mut files = Vec::new();
+                while let Some(d) = stack.pop() {
+                    for e in std::fs::read_dir(&d)? {
+                        let p = e?.path();
+                        if p.is_dir() {
+                            stack.push(p);
+                        } else if p.is_file() {
+                            files.push(p);
+                        }
+                    }
+                }
+                files.sort();
+                for p in files {
+                    let rel = p.strip_prefix(root)?.to_string_lossy().replace(['\t', '\n'], " ");
+                    objs.push((rel, std::fs::read(&p)?));
+                }
+            }
+            _ => return Err(format!("unknown mode {mode} (tensors or dirs)").into()),
+        }
+        let mut enc = zstd::stream::Encoder::new(Vec::new(), 3)?;
+        enc.window_log(SPILL_WINDOW_LOG)?;
+        let mut lines = String::new();
+        let mut raw = 0u64;
+        for (name, d) in &objs {
+            enc.write_all(d)?;
+            raw += d.len() as u64;
+            lines.push_str(&format!("O\t{pid}\t{}\t{}\t{name}\n", sha1_smol::Sha1::from(d).digest(), d.len()));
+        }
+        let buf = enc.finish()?;
+        spill.write_all(&buf)?;
+        writeln!(meta, "P\t{pid}\tblob\t{}\t{off}\t{}\t{}\t{raw}", pid, buf.len(), objs.len())?;
+        meta.write_all(lines.as_bytes())?;
+        off += buf.len() as u64;
+        n_obj += objs.len();
+        raw_all += raw;
+    }
+    spill.sync_all()?;
+    eprintln!("spilled {n_obj} objects ({raw_all} bytes) from {} inputs", inputs.len());
+    Ok(())
 }
 
 struct Part {
@@ -224,7 +296,7 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
         }
     }
     let n = objs.len();
-    let want_feats = variant != "a0";
+    let want_feats = variant != "a0" && variant != "r0";
     // Pass 1: features + random-access re-spill, partitions in parallel.
     let respill_path = dir.join(format!("exp3-respill-{}.bin", std::process::id()));
     let respill_file =
@@ -282,7 +354,9 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
     let t_feat = t0.elapsed().as_secs_f64();
     // Order.
     let ord: Vec<usize> = match variant {
-        "a0" | "a2" => (0..n).collect(),
+        // r0: the generalization corpora's reference (PLAN §6.6): input order,
+        // fixed 4 MiB frames, no partition cuts.
+        "a0" | "a2" | "r0" => (0..n).collect(),
         "a1" | "a3" => order(&items, true),
         "a4" => order(&items, false),
         _ => return Err(format!("unknown variant {variant}").into()),
@@ -304,7 +378,7 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
     let part_boundary = |a: usize, b: usize| objs[a].part != objs[b].part;
     let fr: Vec<Frame> = match variant {
         "a0" => frames(&items, &ord, &fixed, &part_boundary),
-        "a1" => frames(&items, &ord, &fixed, &|_, _| false),
+        "a1" | "r0" => frames(&items, &ord, &fixed, &|_, _| false),
         _ => frames(&items, &ord, &sim, &|_, _| false),
     };
     // Per object: frame and inner offset.

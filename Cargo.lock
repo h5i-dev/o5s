@@ -1182,6 +1182,7 @@ name = "pico2peta-exp3"
 version = "0.1.0"
 dependencies = [
  "pico2peta-order",
+ "pico2peta-weights",
  "sha1_smol",
  "zstd",
 ]
