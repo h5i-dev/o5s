@@ -126,14 +126,14 @@ User docs are in `docs/API.md` and `deploy/README.md`.
 - Git wire deltas: upload-pack deltifies blobs and trees against the previously sent version of the same path. A ripgrep clone (release) transfers 33.8 MB → **6.1 MB**, takes 3.65 s → 2.91 s, refs are identical and fsck is clean.
 
 ### Server load benchmark (`crates/server/tests/load.rs`)
-Run with `cargo test --release -p pico2peta-server --test load -- --ignored --nocapture`. Client and server share one 4-core host over loopback, with load average 3–5 from a concurrent Exp1 run, so these are lower bounds.
+Run with `cargo test --release -p pico2peta-server --test load -- --ignored --nocapture`. Client and server share one 4-core host over loopback. Quiet host (load average 0.9 at start, 2026-11-15); the earlier run under Exp1 load is in parentheses.
 
 | workload | throughput | p50 | p99 |
 |---|---|---|---|
-| put 4 KiB objects, 16 threads | 4,849 ops/s | 2.6 ms | 8.0 ms |
-| replace, each thread its own name, 16 threads | 3,793 ops/s | 3.9 ms | 10.6 ms |
-| contended replace on 1 name, 16 threads, OCC retry loop | 646 commits/s (4,555 conflicts) | 15 ms | 109 ms |
-| streaming 4 × 256 MiB up / down (BLAKE3-verified on download) | 154 MiB/s / 775 MiB/s | | |
+| put 4 KiB objects, 16 threads | 9,544 ops/s (4,849) | 1.1 ms | 2.5 ms |
+| replace, each thread its own name, 16 threads | 4,792 ops/s (3,793) | 3.2 ms | 8.0 ms |
+| contended replace on 1 name, 16 threads, OCC retry loop | 1,202 commits/s (646), 4,872 conflicts | 8.8 ms | 54 ms |
+| streaming 4 × 256 MiB up / down (BLAKE3-verified on download) | 181 MiB/s / 1,269 MiB/s (154 / 775) | | |
 
 The contended run checks that no update is lost: the final version equals the number of commits.
 
