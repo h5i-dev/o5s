@@ -28,6 +28,7 @@ fn small_mp(mut c: S3Config) -> S3Config {
 fn conformance_suite() {
     let env = require_s3!();
     let b = backend(&env, config(&env, &env.endpoint, "conformance"));
+    assert!(b.atomic_create());
     conformance::run_all(&b);
 }
 
@@ -46,7 +47,8 @@ fn conformance_without_conditional_writes() {
     let mut c = config(&env, &env.endpoint, "conformance-nocond");
     c.conditional_writes = false;
     let b = backend(&env, c);
-    // HEAD-then-PUT is not race-free, so skip `concurrent_creators`.
+    // HEAD-then-PUT is not race-free: it says so, and `concurrent_creators` is skipped.
+    assert!(!b.atomic_create());
     conformance::create_only(&b);
     conformance::ranged_reads(&b);
     conformance::list_and_head(&b);

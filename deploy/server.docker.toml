@@ -23,7 +23,8 @@ create = true                      # initialize on first start
 #bucket = "my-pico2peta-bucket"
 #prefix = "prod"
 #path_style = false                # true for MinIO / most S3-compatible stores
-#conditional_writes = true         # If-None-Match: *; disable only if the store rejects it
+#conditional_writes = true         # If-None-Match: *; disable only if the store rejects it.
+#                                  # false is safe for packs only; refs = "backend" requires true
 #max_in_flight = 32
 
 [auth]

@@ -665,3 +665,12 @@ fn refs_engine_mismatch_is_refused() {
     let e = pico2peta_server::build_state(&cfg).err().expect("must refuse");
     assert!(e.to_string().contains("created with refs"), "{e}");
 }
+
+#[test]
+fn backend_refs_require_conditional_writes() {
+    let cfg: Result<pico2peta_server::config::Config, _> = toml::from_str(
+        "[repo]\npath = \"/tmp/x\"\nrefs = \"backend\"\n[backend]\ntype = \"s3\"\nendpoint = \"http://127.0.0.1:9\"\nregion = \"r\"\nbucket = \"b\"\nconditional_writes = false\n[audit]\npath = \"/tmp/a\"\n",
+    );
+    let e = cfg.unwrap().validate().unwrap_err();
+    assert!(e.to_string().contains("conditional_writes"), "{e}");
+}

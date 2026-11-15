@@ -210,6 +210,7 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 
 ## Production gaps
 - **S3 credentials:** the default chain covers env keys, then web identity (EKS IRSA / OIDC via STS `AssumeRoleWithWebIdentity`), then the EC2 instance profile (IMDSv2). Temporary credentials refresh in the background 5 min before expiry. These are tested against mock IMDS and STS; this host has no instance role, so a live AWS run is still missing. Not supported: `~/.aws/config` profiles, SSO, and `credential_process`.
+- **Non-conditional S3 stores:** with `conditional_writes = false`, create-only writes are HEAD-then-PUT and not atomic. `S3Backend::atomic_create()` then returns false (API v1.9), the core's backend ref engine refuses it, and the server rejects `repo.refs = "backend"` with that setting. Packs, which are content-named, stay safe.
 - **Lost-response detection** relies on the ETag being the MD5 of the body, so it does not work with SSE-KMS or SSE-C. In that case a lost response is reported as `AlreadyExists`. That is still correct for content-addressed keys, but the count is wrong.
 - **Abandoned multipart uploads** (process killed mid-upload) are not cleaned up by the client. Deployments should set a bucket lifecycle rule `AbortIncompleteMultipartUpload` (for example, 1 day); deploy/README.md documents it.
 - **GET checksums:** a GET is not checksummed end to end beyond TCP and TLS. Integrity of pack records relies on the core pack CRCs.
