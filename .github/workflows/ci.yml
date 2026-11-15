@@ -117,3 +117,54 @@ jobs:
           name: oci-conformance-report
           path: ${{ runner.temp }}/oci-conformance/server/report.html
           if-no-files-found: ignore
+
+  lean:
+    name: Lean proofs + Rust/Lean difftest
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install elan (toolchain from lean/lean-toolchain)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: No sorry in proofs
+        run: "! grep -rn --include='*.lean' -w sorry lean/Pico2peta"
+      - name: Build proofs and the executable model
+        working-directory: lean
+        run: lake build && lake build p2p-model
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Differential test (Lean model is required)
+        run: P2P_REQUIRE_LEAN=1 cargo test --locked -p pico2peta-refs --test lean_diff
+
+  fuzz-smoke:
+    name: Fuzz smoke (30 s per target)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+      - name: Build all targets
+        working-directory: fuzz
+        run: cargo +nightly fuzz build
+      - name: Run every target for 30 s
+        working-directory: fuzz
+        run: |
+          set -euo pipefail
+          for t in $(cargo +nightly fuzz list); do
+            echo "::group::$t"
+            cargo +nightly fuzz run "$t" -- -max_total_time=30 -rss_limit_mb=2048
+            echo "::endgroup::"
+          done
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts
+          if-no-files-found: ignore
