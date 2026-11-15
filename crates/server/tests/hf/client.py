@@ -64,6 +64,25 @@ assert open(os.path.join(snap, "sub", "a.txt"), "rb").read() == b"hello\n"
 assert open(os.path.join(snap, "tok.bin"), "rb").read() == binary_small
 assert open(os.path.join(snap, "model.safetensors"), "rb").read() == big
 
+# Branches, tags, refs and history through the HF API (the repo's git refs).
+api.create_branch(repo, branch="dev")
+api.upload_file(path_or_fileobj=b"dev only\n", path_in_repo="DEV.md", repo_id=repo, revision="dev")
+assert "DEV.md" in api.list_repo_files(repo, revision="dev")
+assert "DEV.md" not in api.list_repo_files(repo)
+api.create_tag(repo, tag="v1", revision="main")
+refs = api.list_repo_refs(repo)
+assert sorted(b.name for b in refs.branches) == ["dev", "main"], refs
+assert [t.name for t in refs.tags] == ["v1"] and refs.tags[0].target_commit == info.sha, refs
+commits = api.list_repo_commits(repo)
+assert commits[0].commit_id == info.sha and len(commits) >= 4, commits
+assert any(c.title == "folder" for c in commits), [c.title for c in commits]
+p = hf_hub_download(repo, "config.json", revision="v1", cache_dir=os.path.join(work, "cache-tag"))
+assert open(p, "rb").read() == small
+api.delete_tag(repo, tag="v1")
+api.delete_branch(repo, branch="dev")
+refs = api.list_repo_refs(repo)
+assert [b.name for b in refs.branches] == ["main"] and refs.tags == [], refs
+
 # Old revision still resolvable by commit id.
 first = info.sha
 api.delete_file("config.json", repo_id=repo)

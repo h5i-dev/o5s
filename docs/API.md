@@ -141,7 +141,8 @@ git clone https://any:$TOKEN@p2p.example.com/git/hf/models/team/tiny.git   # the
 - Xet uploads (the default with `hf_xet` installed) are served at `/xet` (`casUrl` from `xet-write-token`). Xorbs are checked against their Merkle hash, and shard segments against their verification hashes. Each file is rebuilt and checked against its Xet file hash and sha256, then stored like an LFS upload.
 - LFS objects are scoped to a repo: a commit, `resolve` or download can only reference an object uploaded to that repo, so knowing another repo's sha256 is not enough.
 - Files uploaded through Xet also download through Xet: `resolve` advertises `X-Xet-Hash`, and reconstructions use signed xorb URLs. Files uploaded over LFS download over plain HTTP.
-- Not yet: global Xet dedup queries, pull requests, tags/branches via the HF API (use `git push`), and the repo settings and delete APIs.
+- Branches, tags and history: `create_branch`/`delete_branch` (`startingPoint`), `create_tag`/`delete_tag` (lightweight; annotated tags pushed with git are peeled), `list_repo_refs` and `list_repo_commits` (newest first, up to 1000). Any revision may be a branch, a tag or a commit id.
+- Not yet: global Xet dedup queries, pull requests, and the repo settings and delete APIs.
 - Disable it with `[hf] enabled = false`. It requires `[git]`.
 
 ## PyPI (`/pypi/<index>`)

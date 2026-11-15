@@ -373,17 +373,71 @@ struct Resolved {
 }
 
 fn resolve_rev(st: &GitState, view: &View<'_>, repo: &RepoId, rev: &str) -> Result<Option<Resolved>> {
-    let rev = rev.strip_prefix("refs/heads/").unwrap_or(rev);
-    let (commit, branch) = if let Some(o) = parse_oid(rev.as_bytes()) {
+    let (mut commit, branch) = if let Some(o) = parse_oid(rev.as_bytes()) {
+        (o, None)
+    } else if let Some(t) = rev.strip_prefix("refs/tags/") {
+        let Some(o) = tag_target(st, repo, t)? else { return Ok(None) };
         (o, None)
     } else {
-        let Some(n) = repo.branch_ref(rev) else { return Ok(None) };
-        let Some(v) = st.repo.resolve(&n)? else { return Ok(None) };
-        (oid_of(&st.repo.get(&v.hash, None)?), Some((n, v)))
+        let b = rev.strip_prefix("refs/heads/").unwrap_or(rev);
+        match repo.branch_ref(b) {
+            Some(n) if let Some(v) = st.repo.resolve(&n)? => (oid_of(&st.repo.get(&v.hash, None)?), Some((n, v))),
+            // Not a branch: a tag of that name.
+            _ => match tag_target(st, repo, b)? {
+                Some(o) => (o, None),
+                None => return Ok(None),
+            },
+        }
     };
+    // Peel annotated tags (pushed with git).
+    for _ in 0..8 {
+        match view.load(&commit)? {
+            Some((Kind::Tag, body)) => match refs_of(Kind::Tag, &body)?.first() {
+                Some(o) => commit = *o,
+                None => return Ok(None),
+            },
+            _ => break,
+        }
+    }
     let Some((Kind::Commit, body)) = view.load(&commit)? else { return Ok(None) };
     let tree = *refs_of(Kind::Commit, &body)?.first().ok_or_else(|| Error::Corrupt("commit without tree".into()))?;
     Ok(Some(Resolved { commit, tree, branch }))
+}
+
+/// The object a tag points at (unpeeled).
+fn tag_target(st: &GitState, repo: &RepoId, tag: &str) -> Result<Option<Oid>> {
+    let Some(n) = crate::git::ref_name(&repo.git_repo(), &format!("refs/tags/{tag}")) else { return Ok(None) };
+    Ok(match st.repo.resolve(&n)? {
+        Some(v) => Some(oid_of(&st.repo.get(&v.hash, None)?)),
+        None => None,
+    })
+}
+
+/// Moves (creates, or deletes with `None`) a git ref of the HF repo. `create_only`: fail if it exists.
+fn set_ref(
+    st: &GitState,
+    view: &View<'_>,
+    name: &Name,
+    to: Option<Oid>,
+    create_only: bool,
+) -> Result<std::result::Result<(), &'static str>> {
+    let cur = st.repo.resolve(name)?;
+    if create_only && cur.is_some() {
+        return Ok(Err("exists"));
+    }
+    let obs = cur.as_ref().map_or(Observed::Absent, |c| Observed::Version(c.version));
+    let out = match to {
+        Some(oid) => {
+            let (_, h) = view.lookup(&oid)?.ok_or_else(|| Error::Corrupt(format!("{} not indexed", hex(&oid))))?;
+            st.repo.replace(name, &[(name.clone(), obs)], h)?
+        }
+        None if cur.is_none() => return Ok(Err("missing")),
+        None => st.repo.delete_ref(name, &[(name.clone(), obs)])?,
+    };
+    Ok(match out {
+        ReplaceOutcome::Ok { .. } => Ok(()),
+        ReplaceOutcome::Conflict { .. } => Err("conflict"),
+    })
 }
 
 fn repo_exists(st: &GitState, repo: &RepoId) -> Result<bool> {
@@ -709,6 +763,16 @@ pub async fn api(
                 }
                 (Method::POST, ["preupload", rev]) => preupload(&st, &hf, &p, &c, &repo, &dec(rev), body).await,
                 (Method::POST, ["commit", rev]) => commit(&st, &hf, &p, &c, &repo, &dec(rev), &headers, body).await,
+                (Method::GET, ["refs"]) => refs_api(&st, &hf, &p, &c, &repo).await,
+                (Method::GET, ["commits", rev @ ..]) => {
+                    commits_api(&st, &hf, &p, &c, &repo, &dec(&rev.join("/"))).await
+                }
+                (m @ (Method::POST | Method::DELETE), ["branch", name @ ..]) => {
+                    ref_api(&st, &hf, &p, &c, &repo, m, "heads", &dec(&name.join("/")), body).await
+                }
+                (m @ (Method::POST | Method::DELETE), ["tag", name @ ..]) => {
+                    ref_api(&st, &hf, &p, &c, &repo, m, "tags", &dec(&name.join("/")), body).await
+                }
                 (Method::GET, ["xet-write-token", ..]) => xet_token(&st, &hf, &p, &c, &repo, true, &headers),
                 (Method::GET, ["xet-read-token", ..]) => xet_token(&st, &hf, &p, &c, &repo, false, &headers),
                 _ => hf_err(StatusCode::NOT_FOUND, None, "unknown API"),
@@ -716,6 +780,188 @@ pub async fn api(
         }
         _ => hf_err(StatusCode::NOT_FOUND, None, "unknown API"),
     }
+}
+
+/// `GET /api/<type>s/<repo>/refs`: branches and tags (the git refs).
+async fn refs_api(st: &Arc<AppState>, hf: &Arc<HfState>, p: &Principal, c: &Caller, repo: &RepoId) -> Response {
+    if let Err(r) = check(st, p, c, repo, Access::Read) {
+        return r;
+    }
+    let (hf2, r2) = (hf.clone(), repo.clone());
+    let res = blocking(move || {
+        let st = &*hf2.git;
+        if !repo_exists(st, &r2)? {
+            return Ok(None);
+        }
+        let view = View::new(st)?;
+        let (mut branches, mut tags) = (Vec::new(), Vec::new());
+        for (gitref, oid, _) in crate::git::list_refs(st, &r2.git_repo())? {
+            // Tags point at commits for HF clients: peel annotated ones.
+            let mut target = oid;
+            if let Some((Kind::Tag, body)) = view.load(&oid)?
+                && let Some(t) = refs_of(Kind::Tag, &body)?.first()
+            {
+                target = *t;
+            }
+            let e = |name: &str| serde_json::json!({ "name": name, "ref": gitref, "targetCommit": hex(&target) });
+            if let Some(b) = gitref.strip_prefix("refs/heads/") {
+                branches.push(e(b));
+            } else if let Some(t) = gitref.strip_prefix("refs/tags/") {
+                tags.push(e(t));
+            }
+        }
+        Ok(Some(serde_json::json!({ "branches": branches, "tags": tags, "converts": [], "pullRequests": [] })))
+    })
+    .await;
+    match res {
+        Ok(Some(v)) => axum::Json(v).into_response(),
+        Ok(None) => hf_err(StatusCode::NOT_FOUND, Some("RepoNotFound"), format!("repository {} not found", repo.id())),
+        Err(r) => r,
+    }
+}
+
+/// `POST|DELETE /api/<type>s/<repo>/branch/<name>` and `.../tag/<rev>` (create: body `{tag}`) /
+/// `.../tag/<tag>` (delete). Lightweight tags; branches start at `startingPoint` or `main`.
+#[allow(clippy::too_many_arguments)]
+async fn ref_api(
+    st: &Arc<AppState>,
+    hf: &Arc<HfState>,
+    p: &Principal,
+    c: &Caller,
+    repo: &RepoId,
+    method: Method,
+    kind: &'static str,
+    name: &str,
+    body: Body,
+) -> Response {
+    if let Err(r) = check(st, p, c, repo, Access::Write) {
+        return r;
+    }
+    let raw = axum::body::to_bytes(body, 1 << 16).await.unwrap_or_default();
+    let v: serde_json::Value = serde_json::from_slice(&raw).unwrap_or(serde_json::Value::Null);
+    // For tag creation the path names the revision and the body names the tag.
+    let (refname, start) = match (kind, &method) {
+        ("tags", &Method::POST) => (v["tag"].as_str().unwrap_or_default().to_string(), name.to_string()),
+        ("heads", &Method::POST) => (name.to_string(), v["startingPoint"].as_str().unwrap_or("main").to_string()),
+        _ => (name.to_string(), String::new()),
+    };
+    if kind == "heads" && refname == "main" && method == Method::DELETE {
+        return hf_err(StatusCode::BAD_REQUEST, None, "the main branch cannot be deleted");
+    }
+    let Some(n) = crate::git::ref_name(&repo.git_repo(), &format!("refs/{kind}/{refname}")) else {
+        return hf_err(
+            StatusCode::BAD_REQUEST,
+            None,
+            format!("invalid {} name {refname:?}", if kind == "heads" { "branch" } else { "tag" }),
+        );
+    };
+    let (hf2, r2, create, start2) = (hf.clone(), repo.clone(), method == Method::POST, start.clone());
+    let res = blocking(move || {
+        let st = &*hf2.git;
+        let view = View::new(st)?;
+        let to = if create {
+            match resolve_rev(st, &view, &r2, &start2)? {
+                Some(res) => Some(res.commit),
+                None => return Ok(Err("revision")),
+            }
+        } else {
+            None
+        };
+        set_ref(st, &view, &n, to, create)
+    })
+    .await;
+    let what = if kind == "heads" { "branch" } else { "tag" };
+    match res {
+        Ok(Ok(())) => {
+            audit(st, p, c, repo, "hf_ref", "ok", Some(format!("{method} refs/{kind}/{refname}"))).await;
+            axum::Json(serde_json::json!({ "ok": true })).into_response()
+        }
+        Ok(Err("exists")) => hf_err(StatusCode::CONFLICT, None, format!("{what} {refname} already exists")),
+        Ok(Err("missing")) => {
+            hf_err(StatusCode::NOT_FOUND, Some("RevisionNotFound"), format!("{what} {refname} not found"))
+        }
+        Ok(Err("revision")) => {
+            hf_err(StatusCode::NOT_FOUND, Some("RevisionNotFound"), format!("revision {start} not found"))
+        }
+        Ok(Err(_)) => hf_err(StatusCode::CONFLICT, None, format!("{what} {refname} moved concurrently")),
+        Err(r) => r,
+    }
+}
+
+/// `GET /api/<type>s/<repo>/commits/<rev>`: history (newest first, up to 1000 commits).
+async fn commits_api(
+    st: &Arc<AppState>,
+    hf: &Arc<HfState>,
+    p: &Principal,
+    c: &Caller,
+    repo: &RepoId,
+    rev: &str,
+) -> Response {
+    if let Err(r) = check(st, p, c, repo, Access::Read) {
+        return r;
+    }
+    let (hf2, r2, rev2) = (hf.clone(), repo.clone(), rev.to_string());
+    let res = blocking(move || {
+        let st = &*hf2.git;
+        let view = View::new(st)?;
+        let Some(res) = resolve_rev(st, &view, &r2, &rev2)? else { return Ok(None) };
+        // Walk by commit time, newest first.
+        let mut heap = std::collections::BinaryHeap::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        let load = |o: &Oid| -> Result<Option<(u64, Vec<u8>)>> {
+            Ok(match view.load(o)? {
+                Some((Kind::Commit, body)) => Some((commit_time(&body), body)),
+                _ => None,
+            })
+        };
+        if let Some((t, b)) = load(&res.commit)? {
+            heap.push((t, res.commit, b));
+            seen.insert(res.commit);
+        }
+        while let Some((t, oid, body)) = heap.pop() {
+            if out.len() >= 1000 {
+                break;
+            }
+            let text = String::from_utf8_lossy(&body);
+            let (head, msg) = text.split_once("\n\n").unwrap_or((&text, ""));
+            let author = head
+                .lines()
+                .find_map(|l| l.strip_prefix("author "))
+                .and_then(|a| a.split(" <").next())
+                .unwrap_or("")
+                .to_string();
+            let (title, rest) = msg.split_once('\n').unwrap_or((msg, ""));
+            out.push(serde_json::json!({
+                "id": hex(&oid), "title": title.trim(), "message": rest.trim(),
+                "authors": [{ "user": author }], "date": crate::audit::rfc3339(std::time::UNIX_EPOCH + std::time::Duration::from_secs(t)),
+            }));
+            for parent in refs_of(Kind::Commit, &body)?.into_iter().skip(1) {
+                if seen.insert(parent)
+                    && let Some((pt, pb)) = load(&parent)?
+                {
+                    heap.push((pt, parent, pb));
+                }
+            }
+        }
+        Ok(Some(out))
+    })
+    .await;
+    match res {
+        Ok(Some(v)) => axum::Json(v).into_response(),
+        Ok(None) => hf_err(StatusCode::NOT_FOUND, Some("RevisionNotFound"), format!("revision {rev} not found")),
+        Err(r) => r,
+    }
+}
+
+/// Committer time of a commit body (seconds).
+fn commit_time(body: &[u8]) -> u64 {
+    String::from_utf8_lossy(body)
+        .lines()
+        .take_while(|l| !l.is_empty())
+        .find_map(|l| l.strip_prefix("committer ").map(str::to_string))
+        .and_then(|l| l.rsplit(' ').nth(1).and_then(|t| t.parse().ok()))
+        .unwrap_or(0)
 }
 
 /// `{casUrl, accessToken, exp}` for `hf_xet`: an HMAC capability scoped to this repo.

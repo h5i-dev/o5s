@@ -305,7 +305,8 @@ The contended run checks that no update is lost: the final version equals the nu
     - v2 gives 404 and a forged xorb URL gives 403.
   - Files uploaded over LFS still download over plain HTTP; they have no Xet chunk list.
 - Root disk rule (the human, 2026-11-15): nothing under /home or /tmp beyond sources. perf's build-id cache is set to `/mnt/scratch/pico2peta/perf-buildid`.
-- Next: the PyPI/npm/Maven follow-ups listed under each front (PEP 658 metadata, npm dist-tag/unpublish).
+- **HF refs API: DONE.** Branches (create/delete, `startingPoint`), tags (create/delete), `list_repo_refs`, `list_repo_commits` and tag revisions everywhere. All of it is git refs of the repo. Tested with the real client, in LFS and Xet modes.
+- Waiting on the core lead: who fixes idmap's large-segment lookups (the redis push/clone root cause).
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
