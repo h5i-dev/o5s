@@ -25,6 +25,15 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
   - **Why a separate level:** grouped data keeps shrinking with zstd level where plain zstd doesn't (net's finding, confirmed). Level 6 runs about 90 MB/s per core, so three workers keep up with this host's ~200 MB/s disk. Level 15 is about 8× slower for 2.7 more points on deltas and nothing on the base, so it's an opt-in (`init --grouped-zstd-level 15`) for write-once archives.
   - **Per-chunk vs per-tensor grouping (measured, `p2p-bench bytegroup-gran`):** net's first numbers grouped each whole tensor and then cut 64 KiB blocks, so a block holds a single byte plane. The record codec groups each chunk on its own, so every record stays independently decodable (ranged reads, CDC dedup). At zstd-3 on the same tensors: per-block −1.9% (bf16) / −0.6% (fp32 GPT-2), per-tensor −9.4% / −8.0%. Net has corrected NET_PROGRESS with both granularities.
   - *Correction:* a level sweep on only the first 64 MB of tensor data suggested that level 15 alone would reach the per-tensor gain on raw weights. The full-file measurement above doesn't bear that out (base −6.0% at both L6 and L15), so the sweep wasn't representative.
+  - **Where net's −10% on raw weights comes from (measured, `p2p-bench group-align`, SmolLM2 base, whole file):**
+
+    | grouped vs plain whole-file FastCDC | zstd-6 | zstd-19 |
+    |---|---|---|
+    | whole-file FastCDC (the store today) | −6.0% | −5.8% |
+    | FastCDC restarted inside each tensor | −5.9% | −6.0% |
+    | tensor-aligned fixed 64 KiB blocks | −4.9% | −9.9% |
+
+    The gain needs *both* fixed tensor-aligned blocks *and* level 19. Tensor-aligned CDC alone gains nothing, and so does a higher level alone. Level 19 runs about 6 MB/s per core, so this could only be an opt-in archival mode for weights. It is not implemented. I haven't established why fixed blocks benefit only at high levels.
   - **Possible follow-up (not done):** on raw checkpoints, an object-level transform (a record kind like `Delta`: object = ungroup(child) per tensor region, child chunked as usual; ranged reads gather from `width` planes) would get the per-tensor gain on raw checkpoints. It's a format addition, so it's left as a decision rather than added now.
 - **§3 Experiment 1c:** net's (PLAN §4.9, pre-registered before any 1c code). ripgrep and jq already FAIL; redis and git.git are running.
 - **§4 chunker:** net built `crates/chunk` (byte-exact Xet, conformance-tested on 796 reference boundaries). **The core wired it in as a per-namespace option** (`[chunking]`, API v1.11). FastCDC stays the default and every object stays readable whatever chunker wrote it. Trade-off below.

@@ -392,7 +392,77 @@ fn group_levels(path: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
+/// `p2p-bench group-align <safetensors> <level>`: grouped zstd size of the
+/// whole file under three cuttings: FastCDC over the whole file (what the
+/// store does today), FastCDC restarted inside each tensor (tensor-aligned
+/// CDC), and tensor-aligned fixed 64 KiB blocks. Header and gaps are counted
+/// plain in the tensor-aligned cases.
+fn group_align(path: &str, level: i32) -> Result<(), Box<dyn std::error::Error>> {
+    use pico2peta_chunk::{FastCdcChunker, chunk_lengths};
+    use pico2peta_weights::bytegroup::group;
+    let f = std::fs::read(path)?;
+    let w = pico2peta_weights::group_width(&f).ok_or("not a groupable safetensors file")? as usize;
+    let layout = pico2peta_weights::parse_layout(&f).ok_or("bad header")?;
+    let z = |b: &[u8], g: bool| -> usize {
+        let src = if g { group(b, w).unwrap_or_else(|_| b.to_vec()) } else { b.to_vec() };
+        zstd::bulk::compress(&src, level).map_or(b.len(), |c| c.len().min(b.len()))
+    };
+    let cut = |data: &[u8], lens: Vec<usize>, g: bool| -> (usize, usize) {
+        let mut off = 0;
+        let mut tot = 0;
+        for l in &lens {
+            tot += z(&data[off..off + l], g);
+            off += l;
+        }
+        (tot, lens.len())
+    };
+    // Regions in file order: header, tensors, gaps.
+    let mut ranges: Vec<(usize, usize)> = layout.tensors.values().map(|&(a, b)| (a as usize, b as usize)).collect();
+    ranges.sort();
+    let mut regions: Vec<(usize, usize, bool)> = vec![(0, layout.data_start as usize, false)];
+    let mut pos = layout.data_start as usize;
+    for (a, b) in ranges {
+        if a > pos {
+            regions.push((pos, a, false));
+        }
+        if b > a.max(pos) {
+            regions.push((a.max(pos), b, true));
+            pos = b;
+        }
+    }
+    if pos < f.len() {
+        regions.push((pos, f.len(), false));
+    }
+    let (plain_whole, n_plain) = cut(&f, chunk_lengths(&mut FastCdcChunker::pack_default(), &f), false);
+    let (whole, n_whole) = cut(&f, chunk_lengths(&mut FastCdcChunker::pack_default(), &f), true);
+    let (mut cdc_t, mut n_cdc_t, mut blk_t, mut n_blk_t) = (0, 0, 0, 0);
+    for &(a, b, tensor) in &regions {
+        let r = &f[a..b];
+        let (t, n) = cut(r, chunk_lengths(&mut FastCdcChunker::pack_default(), r), tensor);
+        cdc_t += t;
+        n_cdc_t += n;
+        let lens: Vec<usize> = r.chunks(64 << 10).map(|c| c.len()).collect();
+        let (t, n) = cut(r, lens, tensor);
+        blk_t += t;
+        n_blk_t += n;
+    }
+    let pct = |x: usize| (x as f64 / plain_whole as f64 - 1.0) * 100.0;
+    println!("{} ({:.1} MB), width {w}, zstd level {level}", path, f.len() as f64 / 1e6);
+    println!("| cutting | chunks | bytes | vs plain whole-file CDC |");
+    println!("|---|---|---|---|");
+    println!("| plain, whole-file FastCDC | {n_plain} | {plain_whole} | |");
+    println!("| grouped, whole-file FastCDC (store today) | {n_whole} | {whole} | {:+.1}% |", pct(whole));
+    println!("| grouped, FastCDC inside each tensor | {n_cdc_t} | {cdc_t} | {:+.1}% |", pct(cdc_t));
+    println!("| grouped, tensor-aligned 64 KiB blocks | {n_blk_t} | {blk_t} | {:+.1}% |", pct(blk_t));
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("group-align") {
+        let f = std::env::args().nth(2).ok_or("usage: p2p-bench group-align <safetensors> <level>")?;
+        let level = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(6);
+        return group_align(&f, level);
+    }
     if std::env::args().nth(1).as_deref() == Some("group-levels") {
         let f = std::env::args().nth(2).ok_or("usage: p2p-bench group-levels <safetensors> [MiB]")?;
         let mib = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(64);
