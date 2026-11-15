@@ -212,7 +212,18 @@ The contended run checks that no update is lost: the final version equals the nu
     - Storage: each xorb's decompressed bytes are kept in addition to the rebuilt files. With the Xet chunker on `hf/` (a profile), the pack store dedups them chunk for chunk; without it, they cost about 2×.
     - Xorb records are weak: a client whose local Xet cache references a xorb that GC has collected gets a 400 "upload it first" on the shard.
 - **Security fix: LFS ACL.** `git/_lfs` is global (sha256 → content), so anyone who knew a sha256 could commit, and then read, another repo's private file. Now `git/_lfsacl` (sha256(repo namespace, sha)) gates commits, `resolve`, batch "have" answers and download URLs. Test `lfs_objects_are_scoped_to_their_repo`.
-- Next: port the Git/OCI/HF code onto the Front API (core landed owned `FrontHandle` and `Front::gc_tracer` on request). Then PyPI, npm and Maven.
+- **Port onto the core Front API: DONE** (`crates/server/src/fronts.rs`).
+  - Fronts:
+    - `git` claims `git/`: Git repos, the HF repos, and the `git/_oidmap`, `git/_lfs*` and `git/_xet` maps.
+    - `oci` claims `oci/`.
+    - `safetensors` is registered too, so repos configured by the CLI open in the server.
+  - Each front's `gc_tracer` takes a snapshot per GC run (`GitTracer`, `OciTracer`). `GitFront::group` is `GitGrouper`; it stays until the core's similarity-orderer hint API lands (docs/ORDERING.md).
+  - GitState, OciState and HfState write through owned front handles. The fronts hold `Weak` references to them (no Arc cycle through the registry).
+  - Server GC is `gc_with_fronts`, with provenance as the extra tracer.
+  - Claims are now enforced by the core and not just by the `/v1` check: the plain repository refuses `git/` and `oci/` names. Global admins (`/v1` replace, delete, multi-update) and namespace admins (`set_rule`, e.g. immutable git tags) act through the owning front's handle. A multi-update spanning two fronts is refused.
+  - Tests: `tests/fronts.rs`. The HF GC tests now use the real server GC path.
+  - Not done: `segmap` is not yet a re-export of `pico2peta_repo::idmap` (same format; the async wrappers stay here). That is a mechanical swap, left for later.
+- Next: PyPI (simple API + upload + upstream proxy-cache), npm, Maven.
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 

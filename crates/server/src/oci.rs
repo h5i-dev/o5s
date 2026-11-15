@@ -558,7 +558,7 @@ async fn get_blob(
         .blob(repo, hex)
         .await?
         .ok_or_else(|| oe(StatusCode::NOT_FOUND, "BLOB_UNKNOWN", format!("blob {digest} not found in {repo}")))?;
-    let r = st.repo.clone();
+    let r = st.oci_repo();
     let size = blocking(move || r.size(&h)).await?;
     let range = match parse_range(headers.get(header::RANGE), size) {
         Ok(r) => r,
@@ -574,7 +574,7 @@ async fn get_blob(
     let mut resp = if head {
         Response::new(Body::empty())
     } else {
-        let r = st.repo.clone();
+        let r = st.oci_repo();
         let rr = range.clone();
         let reader = blocking(move || r.open(&h, rr)).await?;
         Response::new(stream_reader(reader, len, st.metrics.clone()))
@@ -633,7 +633,7 @@ async fn start_upload(
         && st.authz.allows(p, &ns(from), Access::Read)
         && let Some(h) = oci.blob(from, hex).await?
     {
-        let r = st.repo.clone();
+        let r = st.oci_repo();
         let size = blocking(move || r.size(&h)).await?;
         oci.link(repo, hex, h, size).await?;
         audit_push(st, p, c, repo, "mount", &format!("sha256:{hex} from={from}")).await?;
@@ -802,7 +802,7 @@ async fn finish_upload(
     let h = match oci.digest(&hex).await? {
         Some(h) => h,
         None => {
-            let r = st.repo.clone();
+            let r = st.oci_repo();
             let path = u.path.clone();
             // Chunk with the namespace's chunker (e.g. Xet for `oci/models/...`, API v1.11).
             let local = st.local.clone();
@@ -935,7 +935,7 @@ async fn put_manifest(
         }
     }
     for m in manifests {
-        if resolve(&st.repo, manifest_link(repo, &m)?).await?.is_none() {
+        if resolve(&st.oci_repo(), manifest_link(repo, &m)?).await?.is_none() {
             return Err(oe(
                 StatusCode::BAD_REQUEST,
                 "MANIFEST_BLOB_UNKNOWN",
@@ -943,20 +943,20 @@ async fn put_manifest(
             ));
         }
     }
-    let r = st.repo.clone();
+    let r = st.oci_repo();
     let b2 = bytes.clone();
     let h = blocking(move || r.put(&b2)).await?;
-    let r = st.repo.clone();
+    let r = st.oci_repo();
     let mt = media_type.clone();
     let mh = blocking(move || r.put(mt.as_bytes())).await?;
     oci.index(&hex, h, bytes.len() as u64).await?;
-    ensure_mapping(&st.repo, mediatype_link(repo, &hex)?, mh).await?;
-    ensure_mapping(&st.repo, manifest_link(repo, &hex)?, h).await?;
+    ensure_mapping(&st.oci_repo(), mediatype_link(repo, &hex)?, mh).await?;
+    ensure_mapping(&st.oci_repo(), manifest_link(repo, &hex)?, h).await?;
     if let Some(t) = &tag {
-        set_tag(&st.repo, tag_name(repo, t)?, h).await?;
+        set_tag(&st.oci_repo(), tag_name(repo, t)?, h).await?;
     }
     if let Some(sub) = &subject {
-        ensure_mapping(&st.repo, referrer_link(repo, sub, &hex)?, h).await?;
+        ensure_mapping(&st.oci_repo(), referrer_link(repo, sub, &hex)?, h).await?;
     }
     audit_push(st, p, c, repo, "manifest", &format!("sha256:{hex} tag={}", tag.as_deref().unwrap_or("-"))).await?;
     let mut resp = StatusCode::CREATED.into_response();
@@ -976,13 +976,13 @@ async fn put_manifest(
 async fn referrers(st: &Arc<AppState>, repo: &str, digest: &str, q: &HashMap<String, String>) -> OciResult<Response> {
     let hex = parse_digest(digest).ok_or_else(|| oe(StatusCode::BAD_REQUEST, "DIGEST_INVALID", "bad digest"))?;
     let prefix = referrers_prefix(repo, hex);
-    let r = st.repo.clone();
+    let r = st.oci_repo();
     let links = blocking(move || r.list_refs(&prefix)).await?;
     let filter = q.get("artifactType").filter(|s| !s.is_empty());
     let mut descs = Vec::new();
     for (n, v) in links {
         let Some(child_hex) = n.as_str().rsplit('/').next().map(str::to_string) else { continue };
-        let r = st.repo.clone();
+        let r = st.oci_repo();
         let h = v.hash;
         let bytes = match blocking(move || r.get(&h, None)).await {
             Ok(b) => b,
@@ -1065,7 +1065,7 @@ async fn delete_manifest(
 ) -> OciResult<Response> {
     let unknown = || oe(StatusCode::NOT_FOUND, "MANIFEST_UNKNOWN", format!("manifest {reference} not found in {repo}"));
     if !reference.starts_with("sha256:") {
-        if !valid_tag(reference) || !delete_name(&st.repo, tag_name(repo, reference)?, None).await? {
+        if !valid_tag(reference) || !delete_name(&st.oci_repo(), tag_name(repo, reference)?, None).await? {
             return Err(unknown());
         }
         audit_push(st, p, c, repo, "delete_tag", reference).await?;
@@ -1074,27 +1074,27 @@ async fn delete_manifest(
     let hex =
         parse_digest(reference).ok_or_else(|| oe(StatusCode::BAD_REQUEST, "DIGEST_INVALID", "bad digest"))?.to_string();
     let link = manifest_link(repo, &hex)?;
-    let h = resolve(&st.repo, link.clone()).await?.ok_or_else(unknown)?;
+    let h = resolve(&st.oci_repo(), link.clone()).await?.ok_or_else(unknown)?;
     // Tags pointing at it.
     let prefix = format!("oci/{repo}/tags");
-    let r = st.repo.clone();
+    let r = st.oci_repo();
     let tags = blocking(move || r.list_refs(&prefix)).await?;
     for (n, v) in tags {
         if v.hash == h {
-            delete_name(&st.repo, n, Some(h)).await?;
+            delete_name(&st.oci_repo(), n, Some(h)).await?;
         }
     }
     // Its referrer link, if it has a subject.
-    let r = st.repo.clone();
+    let r = st.oci_repo();
     if let Ok(bytes) = blocking(move || r.get(&h, None)).await
         && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes)
         && let Some(sub) =
             v.get("subject").and_then(|s| s.get("digest")).and_then(|d| d.as_str()).and_then(parse_digest)
     {
-        delete_name(&st.repo, referrer_link(repo, sub, &hex)?, Some(h)).await?;
+        delete_name(&st.oci_repo(), referrer_link(repo, sub, &hex)?, Some(h)).await?;
     }
-    delete_name(&st.repo, mediatype_link(repo, &hex)?, None).await?;
-    delete_name(&st.repo, link, Some(h)).await?;
+    delete_name(&st.oci_repo(), mediatype_link(repo, &hex)?, None).await?;
+    delete_name(&st.oci_repo(), link, Some(h)).await?;
     audit_push(st, p, c, repo, "delete_manifest", &format!("sha256:{hex}")).await?;
     Ok(StatusCode::ACCEPTED.into_response())
 }
@@ -1103,19 +1103,19 @@ async fn get_manifest(st: &Arc<AppState>, repo: &str, reference: &str, head: boo
     let unknown = || oe(StatusCode::NOT_FOUND, "MANIFEST_UNKNOWN", format!("manifest {reference} not found in {repo}"));
     let h = if reference.starts_with("sha256:") {
         let hex = parse_digest(reference).ok_or_else(|| oe(StatusCode::BAD_REQUEST, "DIGEST_INVALID", "bad digest"))?;
-        resolve(&st.repo, manifest_link(repo, hex)?).await?
+        resolve(&st.oci_repo(), manifest_link(repo, hex)?).await?
     } else if valid_tag(reference) {
-        resolve(&st.repo, tag_name(repo, reference)?).await?
+        resolve(&st.oci_repo(), tag_name(repo, reference)?).await?
     } else {
         None // an invalid tag cannot exist
     }
     .ok_or_else(unknown)?;
-    let r = st.repo.clone();
+    let r = st.oci_repo();
     let bytes = blocking(move || r.get(&h, None)).await?;
     let hex = sha256_hex(&bytes);
-    let media_type = match resolve(&st.repo, mediatype_link(repo, &hex)?).await? {
+    let media_type = match resolve(&st.oci_repo(), mediatype_link(repo, &hex)?).await? {
         Some(mh) => {
-            let r = st.repo.clone();
+            let r = st.oci_repo();
             String::from_utf8(blocking(move || r.get(&mh, None)).await?).unwrap_or_else(|_| MT_OCI_MANIFEST.into())
         }
         None => {
@@ -1139,7 +1139,7 @@ async fn get_manifest(st: &Arc<AppState>, repo: &str, reference: &str, head: boo
 
 async fn list_tags(st: &Arc<AppState>, repo: &str, q: &HashMap<String, String>) -> OciResult<Response> {
     let prefix = format!("oci/{repo}/tags");
-    let r = st.repo.clone();
+    let r = st.oci_repo();
     let p2 = prefix.clone();
     let refs = blocking(move || r.list_refs(&p2)).await?;
     let mut tags: Vec<String> = refs

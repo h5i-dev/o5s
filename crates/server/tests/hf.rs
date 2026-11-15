@@ -82,6 +82,7 @@ fn huggingface_hub_round_trip_over_lfs() {
 
     // GC (zero grace, condemn + delete phases) must keep LFS content reachable through pointers.
     let repo = pico2peta_repo::LocalRepo::open(srv.dir.path().join("repo")).unwrap();
+    let fronts = pico2peta_server::fronts::Fronts::open(repo.clone()).unwrap();
     let opts = pico2peta_repo::GcOptions {
         grace: std::time::Duration::ZERO,
         allow_short_grace: true,
@@ -90,14 +91,9 @@ fn huggingface_hub_round_trip_over_lfs() {
     };
     for _ in 0..3 {
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        let shared: std::sync::Arc<dyn pico2peta_core::Repository> = std::sync::Arc::new(repo.clone());
-        let tracer = pico2peta_prov::ProvTracer {
-            inner: pico2peta_server::api::AdapterTracer {
-                git: pico2peta_server::git::GitTracer::new(shared.clone()).unwrap(),
-                oci: pico2peta_server::oci::OciTracer::new(shared),
-            },
-        };
-        let r = repo.gc_with(&opts, &tracer, None).unwrap();
+        // The server's GC path: every front's per-run snapshot tracer, plus provenance.
+        let prov = pico2peta_prov::ProvTracer { inner: pico2peta_server::fronts::Leaves };
+        let r = fronts.repo.gc_with_fronts(&opts, Some(&prov), false).unwrap();
         assert!(r.dangling_refs.is_empty(), "{r:?}");
     }
     assert!(batch(&orphan_sha, orphan.len())["objects"][0].get("actions").is_some(), "orphan collected");
@@ -192,6 +188,7 @@ fn huggingface_hub_round_trip_over_xet() {
     assert!(out.status.success() && so.contains("OK"), "client failed\nstdout:\n{so}\nstderr:\n{se}");
     // The upload really went through Xet: xorbs were indexed.
     let repo = pico2peta_repo::LocalRepo::open(srv.dir.path().join("repo")).unwrap();
+    let fronts = pico2peta_server::fronts::Fronts::open(repo.clone()).unwrap();
     assert!(
         pico2peta_core::Repository::resolve(&repo, &pico2peta_core::Name::new("git/_xet").unwrap()).unwrap().is_some(),
         "no xorbs were uploaded"
@@ -204,14 +201,9 @@ fn huggingface_hub_round_trip_over_xet() {
     };
     for _ in 0..3 {
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        let shared: std::sync::Arc<dyn pico2peta_core::Repository> = std::sync::Arc::new(repo.clone());
-        let tracer = pico2peta_prov::ProvTracer {
-            inner: pico2peta_server::api::AdapterTracer {
-                git: pico2peta_server::git::GitTracer::new(shared.clone()).unwrap(),
-                oci: pico2peta_server::oci::OciTracer::new(shared),
-            },
-        };
-        repo.gc_with(&opts, &tracer, None).unwrap();
+        // The server's GC path: every front's per-run snapshot tracer, plus provenance.
+        let prov = pico2peta_prov::ProvTracer { inner: pico2peta_server::fronts::Leaves };
+        fronts.repo.gc_with_fronts(&opts, Some(&prov), false).unwrap();
     }
     let out = run_phase(&py, &srv, ALICE, "alice/xet-model", true, "verify");
     let (so, se) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));

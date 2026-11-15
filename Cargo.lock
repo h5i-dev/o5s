@@ -1261,6 +1261,7 @@ dependencies = [
  "pico2peta-pack",
  "pico2peta-prov",
  "pico2peta-repo",
+ "pico2peta-weights",
  "prometheus-client",
  "proptest",
  "reqwest",

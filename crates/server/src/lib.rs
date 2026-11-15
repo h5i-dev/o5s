@@ -10,6 +10,7 @@ pub mod audit;
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod fronts;
 pub mod git;
 pub mod hf;
 pub mod metrics;
@@ -96,13 +97,16 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         None => LocalRepo::open(path)?,
         Some(b) => LocalRepo::open_with_backend(path, b)?,
     };
+    // Register the domain fronts: names under git/ and oci/ can only be moved through them.
+    let fronts = Arc::new(fronts::Fronts::open(local)?);
+    let local = fronts.repo.clone();
     let repo: Arc<dyn Repository> = Arc::new(local.clone());
     let oci = if cfg.oci.enabled {
         let dir = cfg.oci.upload_dir.clone().unwrap_or_else(|| {
             let parent = path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| path.clone());
             parent.join(format!("{}.oci-uploads", path.file_name().and_then(|n| n.to_str()).unwrap_or("repo")))
         });
-        let st = oci::OciState::new(repo.clone(), dir.clone(), cfg.oci.max_upload_sessions)
+        let st = oci::OciState::new(fronts.handle("oci")?, dir.clone(), cfg.oci.max_upload_sessions)
             .map_err(|e| StartError::Audit(dir, e))?;
         Some(Arc::new(st))
     } else {
@@ -113,7 +117,7 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
             let parent = path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| path.clone());
             parent.join(format!("{}.git-spool", path.file_name().and_then(|n| n.to_str()).unwrap_or("repo")))
         });
-        let st = git::GitState::new(repo.clone(), dir.clone(), cfg.server.max_upload_bytes)
+        let st = git::GitState::new(fronts.handle("git")?, dir.clone(), cfg.server.max_upload_bytes)
             .map_err(|e| StartError::Audit(dir, e))?;
         Some(Arc::new(st))
     } else {
@@ -173,6 +177,7 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         oci,
         git,
         hf,
+        fronts: Some(fronts),
     }))
 }
 
