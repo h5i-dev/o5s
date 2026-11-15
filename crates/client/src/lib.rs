@@ -427,79 +427,17 @@ impl ObjectStore for RemoteRepo {
     }
 
     fn open(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Box<dyn Read + Send>> {
-        let hash = *hash;
-        if let Some(r) = &range {
-            if r.start > r.end {
-                return Err(Error::InvalidRange { start: r.start, end: r.end, len: self.size(&hash)? });
-            }
-            if r.start == r.end {
-                // HTTP cannot express an empty range; validate against the size.
-                let len = self.size(&hash)?;
-                pico2peta_core::check_range(Some(r.clone()), len)?;
-                return Ok(Box::new(std::io::empty()));
-            }
-        }
-        let this = self.clone();
-        let rr = range.clone();
-        let resp = self.block(async move {
-            let path = format!("/v1/objects/{}", hash.to_hex());
-            let resp = this
-                .send_retry(Method::GET, &path, |rb| match &rr {
-                    Some(r) => rb.header("range", format!("bytes={}-{}", r.start, r.end - 1)),
-                    None => rb,
-                })
-                .await?;
-            let ok = match &rr {
-                Some(_) => resp.status() == StatusCode::PARTIAL_CONTENT,
-                None => resp.status() == StatusCode::OK,
-            };
-            if !ok {
-                if resp.status().is_success() {
-                    return Err(Error::Corrupt(format!("unexpected status {} for object read", resp.status())));
-                }
-                return Err(error_from(resp, &Ctx { hash: Some(hash), name: None, range: rr.clone() }).await);
-            }
-            Ok(resp)
-        })?;
-        let expect_len = range.as_ref().map(|r| r.end - r.start);
-        if let (Some(want), Some(got)) = (expect_len, resp.content_length())
-            && want != got
-        {
-            return Err(Error::InvalidRange {
-                start: range.as_ref().map_or(0, |r| r.start),
-                end: range.as_ref().map_or(0, |r| r.end),
-                len: got,
-            });
-        }
-        let total = resp.content_length();
-        let (tx, rx) = tokio::sync::mpsc::channel::<std::io::Result<Bytes>>(4);
-        let rt = self.inner.rt.as_ref().ok_or(Error::Unsupported("client runtime is shut down"))?;
-        rt.spawn(async move {
-            let mut resp = resp;
-            loop {
-                match resp.chunk().await {
-                    Ok(Some(c)) => {
-                        if tx.send(Ok(c)).await.is_err() {
-                            return;
-                        }
-                    }
-                    Ok(None) => return,
-                    Err(e) => {
-                        let _ = tx.send(Err(std::io::Error::other(transport(e)))).await;
-                        return;
-                    }
-                }
-            }
-        });
-        Ok(Box::new(VerifyingReader {
-            rx,
-            cur: Bytes::new(),
-            hasher: range.is_none().then(blake3::Hasher::new),
-            expect: hash,
-            total,
-            seen: 0,
-            done: false,
-        }))
+        self.open_with(hash, range, None)
+    }
+
+    /// Sends `?verify=` (API v1.17); the server's repository decides whether `eof` is allowed.
+    fn open_verified(
+        &self,
+        hash: &Hash,
+        range: Option<Range<u64>>,
+        verify: pico2peta_core::ReadVerify,
+    ) -> Result<Box<dyn Read + Send>> {
+        self.open_with(hash, range, Some(verify))
     }
 
     fn size(&self, hash: &Hash) -> Result<u64> {
@@ -754,5 +692,92 @@ impl Repository for RemoteRepo {
             let l: wire::RuleList = resp.json().await.map_err(transport)?;
             l.rules.into_iter().map(|r| Ok((r.prefix, r.rule.parse()?))).collect()
         })
+    }
+}
+
+impl RemoteRepo {
+    /// `GET /v1/objects/<hash>`, optionally with `?verify=`.
+    fn open_with(
+        &self,
+        hash: &Hash,
+        range: Option<Range<u64>>,
+        verify: Option<pico2peta_core::ReadVerify>,
+    ) -> Result<Box<dyn Read + Send>> {
+        let hash = *hash;
+        if let Some(r) = &range {
+            if r.start > r.end {
+                return Err(Error::InvalidRange { start: r.start, end: r.end, len: self.size(&hash)? });
+            }
+            if r.start == r.end {
+                // HTTP cannot express an empty range; validate against the size.
+                let len = self.size(&hash)?;
+                pico2peta_core::check_range(Some(r.clone()), len)?;
+                return Ok(Box::new(std::io::empty()));
+            }
+        }
+        let this = self.clone();
+        let rr = range.clone();
+        let resp = self.block(async move {
+            let path = match verify {
+                Some(v) => format!("/v1/objects/{}?verify={}", hash.to_hex(), v.as_str()),
+                None => format!("/v1/objects/{}", hash.to_hex()),
+            };
+            let resp = this
+                .send_retry(Method::GET, &path, |rb| match &rr {
+                    Some(r) => rb.header("range", format!("bytes={}-{}", r.start, r.end - 1)),
+                    None => rb,
+                })
+                .await?;
+            let ok = match &rr {
+                Some(_) => resp.status() == StatusCode::PARTIAL_CONTENT,
+                None => resp.status() == StatusCode::OK,
+            };
+            if !ok {
+                if resp.status().is_success() {
+                    return Err(Error::Corrupt(format!("unexpected status {} for object read", resp.status())));
+                }
+                return Err(error_from(resp, &Ctx { hash: Some(hash), name: None, range: rr.clone() }).await);
+            }
+            Ok(resp)
+        })?;
+        let expect_len = range.as_ref().map(|r| r.end - r.start);
+        if let (Some(want), Some(got)) = (expect_len, resp.content_length())
+            && want != got
+        {
+            return Err(Error::InvalidRange {
+                start: range.as_ref().map_or(0, |r| r.start),
+                end: range.as_ref().map_or(0, |r| r.end),
+                len: got,
+            });
+        }
+        let total = resp.content_length();
+        let (tx, rx) = tokio::sync::mpsc::channel::<std::io::Result<Bytes>>(4);
+        let rt = self.inner.rt.as_ref().ok_or(Error::Unsupported("client runtime is shut down"))?;
+        rt.spawn(async move {
+            let mut resp = resp;
+            loop {
+                match resp.chunk().await {
+                    Ok(Some(c)) => {
+                        if tx.send(Ok(c)).await.is_err() {
+                            return;
+                        }
+                    }
+                    Ok(None) => return,
+                    Err(e) => {
+                        let _ = tx.send(Err(std::io::Error::other(transport(e)))).await;
+                        return;
+                    }
+                }
+            }
+        });
+        Ok(Box::new(VerifyingReader {
+            rx,
+            cur: Bytes::new(),
+            hasher: range.is_none().then(blake3::Hasher::new),
+            expect: hash,
+            total,
+            seen: 0,
+            done: false,
+        }))
     }
 }

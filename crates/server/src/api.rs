@@ -659,15 +659,30 @@ async fn head_object(
     Ok(r)
 }
 
+#[derive(serde::Deserialize)]
+struct GetQuery {
+    /// `strict` | `eof` (API v1.17): read verification for this request. Absent: the
+    /// repository's `[read] verify` default. `eof` needs `[read] allow_eof` in the repo config.
+    verify: Option<String>,
+}
+
 async fn get_object(
     State(st): St,
     Extension(p): Extension<Principal>,
     Extension(c): Extension<Caller>,
     Path(hash): Path<String>,
+    Query(q): Query<GetQuery>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &c, "get", "objects")?;
     let hash = parse_hash(&hash)?;
+    let verify = match q.verify.as_deref() {
+        None => None,
+        Some(v) => Some(
+            pico2peta_core::ReadVerify::parse(v)
+                .ok_or_else(|| ApiError::bad_request(format!("verify must be strict or eof, not {v:?}")))?,
+        ),
+    };
     let repo = st.repo.clone();
     let size = blocking(move || repo.size(&hash)).await?;
     let range = match parse_range(headers.get(header::RANGE), size) {
@@ -683,7 +698,24 @@ async fn get_object(
     };
     let repo = st.repo.clone();
     let rr = range.clone();
-    let reader = blocking(move || repo.open(&hash, rr)).await?;
+    let reader = match tokio::task::spawn_blocking(move || match verify {
+        Some(v) => repo.open_verified(&hash, rr, v),
+        None => repo.open(&hash, rr),
+    })
+    .await
+    {
+        Ok(Ok(r)) => r,
+        // The repository's `[read]` policy refuses eof reads.
+        Ok(Err(pico2peta_core::Error::Unsupported(m))) if verify == Some(pico2peta_core::ReadVerify::Eof) => {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "forbidden",
+                format!("verify=eof is not allowed here: {m}"),
+            ));
+        }
+        Ok(Err(e)) => return Err(ApiError::from(e)),
+        Err(e) => return Err(ApiError::internal(format!("worker panicked: {e}"))),
+    };
     if st.log_reads {
         st.audit.record_nowait(Event {
             request_id: c.request_id.clone(),

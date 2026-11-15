@@ -762,3 +762,41 @@ fn early_rejection_closes_the_connection() {
     assert!(r.status().is_success());
     assert!(r.headers().get("connection").is_none());
 }
+
+/// `?verify=strict|eof` on object reads (API v1.17): strict always works, eof only when the
+/// repository's `[read]` config allows it, and anything else is a 400.
+#[test]
+fn read_verify_parameter_follows_repo_policy() {
+    let data: Vec<u8> = (0..3_000_000u32).map(|i| (i * 7 % 251) as u8).collect();
+    let get = |s: &TestServer, h: &pico2peta_core::Hash, q: &str| {
+        reqwest::blocking::Client::new()
+            .get(format!("{}/v1/objects/{}{q}", s.url(), h.to_hex()))
+            .bearer_auth(ADMIN)
+            .send()
+            .unwrap()
+    };
+    // Default repository: eof refused.
+    let s = TestServer::start(|_| {});
+    let h = s.client(ADMIN).put(&data).unwrap();
+    assert_eq!(get(&s, &h, "?verify=strict").bytes().unwrap().as_ref(), data.as_slice());
+    assert_eq!(get(&s, &h, "?verify=eof").status(), 403);
+    assert_eq!(get(&s, &h, "?verify=fast").status(), 400);
+    let mut out = Vec::new();
+    let r = s.client(ADMIN).open_verified(&h, None, pico2peta_core::ReadVerify::Eof);
+    assert!(r.is_err(), "RemoteRepo surfaces the refusal");
+    s.client(ADMIN).open_verified(&h, None, pico2peta_core::ReadVerify::Strict).unwrap().read_to_end(&mut out).unwrap();
+    assert_eq!(out, data);
+    // A repository that allows eof reads.
+    let s = TestServer::start(|cfg| {
+        let mut rc = pico2peta_repo::RepoConfig::default();
+        rc.read.allow_eof = true;
+        pico2peta_repo::LocalRepo::init_config(&cfg.repo.path, &rc).unwrap();
+    });
+    let h = s.client(ADMIN).put(&data).unwrap();
+    let r = get(&s, &h, "?verify=eof");
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.bytes().unwrap().as_ref(), data.as_slice());
+    let mut out = Vec::new();
+    s.client(ADMIN).open_verified(&h, None, pico2peta_core::ReadVerify::Eof).unwrap().read_to_end(&mut out).unwrap();
+    assert_eq!(out, data);
+}

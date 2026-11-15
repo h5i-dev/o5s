@@ -313,7 +313,9 @@ The contended run checks that no update is lost: the final version equals the nu
   - Real-git test `shallow_and_partial_clone`, including refusing another repo's object.
 - ROADMAP Net 2, OCI: cosign (tag scheme and OCI 1.1 referrers) and notation sign/list/verify work against the OCI front (`tests/oci_sign.rs`, real binaries). Wiring them to core attestations waits for core P5.
 - idmap large-segment page cache: DONE (see "Requests for core").
-- Pending on the core: the `read_verify = strict | eof` option. The server will keep `strict` as its default and expose `eof` only when the server config enables it; the request parameter is to be agreed with the core.
+- **read_verify, server side: DONE** (as agreed with the core: one policy source, the repo's `[read]` config, and no server setting).
+  - `GET /v1/objects/<h>?verify=strict|eof` calls `open_verified`. `eof` gets 403 unless the repo allows it, and a bad value gets 400. With no parameter, the plain `open` follows `[read] verify`, so strict is the default by construction.
+  - `RemoteRepo::open_verified` sends the parameter. Test `read_verify_parameter_follows_repo_policy`.
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 

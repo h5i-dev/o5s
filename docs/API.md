@@ -78,6 +78,8 @@ curl -X POST -H "Authorization: Bearer $T" $S/v1/flush
 - Objects are immutable. The ETag is the hash, and responses are `Cache-Control: private, immutable`.
 - **Lease:** a newly put object that no name references is reclaimed by GC after `gc.grace_secs` (default 1 h). Point a name at it within that time, or put it again.
 
+- `GET /v1/objects/<hash>?verify=strict|eof` (API v1.17): read verification for this request. Without it, the repository's `[read] verify` default applies (strict unless the operator configured otherwise). `eof` is refused with 403 unless the repository allows it (`[read] allow_eof = true`); a bad value gets 400. `RemoteRepo::open_verified` sends it.
+
 ### Names (OCC)
 ```sh
 curl -H "Authorization: Bearer $T" $S/v1/refs/team/app/heads/main      # {"name","hash","version"}
