@@ -259,6 +259,8 @@ pub trait ObjectStore: Send + Sync {
                     Some(w) => self.put_delta_mapped_grouped(&d.base, &d.segments, src, w),
                     None => self.put_delta_mapped(&d.base, &d.segments, src),
                 },
+                // Stores without anchored alignment fall back to offset alignment.
+                PatchFormat::XorAnchored => self.put_delta(&d.base, src),
             },
             (None, Some(w)) => self.put_stream_grouped(src, w),
             (None, None) => self.put_stream(src),

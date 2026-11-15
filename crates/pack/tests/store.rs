@@ -952,3 +952,121 @@ fn frame3_reference_prefix_roundtrip_recovery_and_gc_child() {
     let with_ref = dir_bytes(&d2.path().join("objects")) - before;
     assert!(with_ref < 20_000, "one near-copy against its reference: {with_ref} bytes");
 }
+
+/// Large frames are decoded only as far as a read needs (prefix decoding),
+/// with members still verified: random, sequential and reverse reads all
+/// return exact bytes (Frame2 and Frame3); a corrupt byte in a frame is
+/// detected (the record CRC covers the whole record, and every member is also
+/// checked against its content hash, so a partial decode never returns
+/// unverified bytes).
+#[test]
+fn frame_prefix_decoding_reads_exact_and_verified() {
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { pack_cap: 1 << 30, chunk_threshold: 1 << 20, ..PackConfig::default() };
+    let members: Vec<Vec<u8>> = (0..48).map(|i| pseudo(64 << 10, 500 + i)).collect();
+    let refs: Vec<&[u8]> = members.iter().map(|m| m.as_slice()).collect();
+    let (h2, h3) = {
+        let s = open(d.path(), cfg.clone());
+        let h2 = s.put_frame(&refs, 3).unwrap();
+        let base = s.put(&members[0]).unwrap();
+        let h3 = s.put_frame_ref(&refs[1..], 3, Some(&base)).unwrap();
+        s.flush().unwrap();
+        (h2, h3)
+    };
+    let s = open(d.path(), cfg.clone());
+    let order: Vec<usize> = (0..48).map(|i| (i * 29) % 48).chain(0..48).chain((0..48).rev()).collect();
+    for &i in &order {
+        assert_eq!(s.get(&h2[i], None).unwrap(), members[i], "frame2 member {i}");
+        if i > 0 {
+            assert_eq!(s.get(&h3[i - 1], None).unwrap(), members[i], "frame3 member {i}");
+        }
+    }
+    // Corrupt one byte near the end of the first frame's compressed body.
+    let dir = d.path().join("objects/packs");
+    let pack = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "pack"))
+        .unwrap();
+    let mut b = std::fs::read(&pack).unwrap();
+    // The first record after the 24-byte pack header is the Frame2: its payload
+    // ends well before 3 MiB; flip a byte at ~95% of it.
+    let at = 24 + (members.len() * (64 << 10)) * 95 / 100;
+    if at < b.len() {
+        b[at] ^= 0x10;
+    }
+    std::fs::write(&pack, b).unwrap();
+    let s = open(d.path(), cfg);
+    assert!(s.get(&h2[47], None).is_err(), "corruption is detected");
+    assert!(s.get(&h2[0], None).is_err(), "the record CRC covers every member");
+}
+
+/// Chunk-anchored XOR deltas: scattered in-place edits, an insertion and a
+/// deletion all read back exactly (whole and ranged, after reopen), and cost
+/// a small fraction of a full copy; a small object falls back cleanly.
+#[test]
+fn anchored_xor_deltas_handle_edits_and_shifts() {
+    use pico2peta_core::{Derive, Encoding, PatchFormat};
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { chunk_threshold: 1 << 20, pack_cap: 1 << 30, ..PackConfig::default() };
+    let base = pseudo(8 << 20, 41);
+    let mut scattered = base.clone();
+    for i in (0..scattered.len()).step_by(997) {
+        scattered[i] = scattered[i].wrapping_add(1);
+    }
+    let mut inserted = base.clone();
+    inserted.splice(3_000_000..3_000_000, pseudo(1 << 20, 42));
+    let mut deleted = base.clone();
+    deleted.drain(5_000_000..5_500_000);
+    let small = b"tiny new version".to_vec();
+    let enc = |b: &Hash| Encoding {
+        derive: Some(Derive { base: *b, patch: PatchFormat::XorAnchored, segments: Vec::new() }),
+        ..Default::default()
+    };
+    let mut cost = Vec::new();
+    let hashes: Vec<(Hash, &Vec<u8>)>;
+    {
+        let s = open(d.path(), cfg.clone());
+        let hb = s.put_stream(&mut &base[..]).unwrap();
+        s.flush().unwrap();
+        let mut hs = Vec::new();
+        for v in [&scattered, &inserted, &deleted, &small] {
+            let before = dir_bytes(&d.path().join("objects"));
+            let h = s.put_encoded(&mut &v[..], &enc(&hb)).unwrap();
+            s.flush().unwrap();
+            cost.push(dir_bytes(&d.path().join("objects")) - before);
+            assert_eq!(h, Hash::of(v));
+            hs.push((h, v));
+        }
+        hashes = hs;
+    }
+    let s = open(d.path(), cfg);
+    for (h, v) in &hashes {
+        assert_eq!(&&s.get(h, None).unwrap(), v);
+        if v.len() > 4_000_000 {
+            assert_eq!(s.get(h, Some(2_999_000..3_001_000)).unwrap(), v[2_999_000..3_001_000]);
+            assert_eq!(s.get(h, Some(4_000_000..6_000_000)).unwrap(), v[4_000_000..6_000_000]);
+        }
+    }
+    // 8 MiB incompressible base: the deltas cost far less than a copy.
+    assert!(cost[0] < 200_000, "scattered edits: {cost:?}"); // 0.1 % edits, offset-aligned
+    assert!(cost[1] < (1 << 20) + 300_000, "insertion: {cost:?}"); // ~ the inserted MiB
+    assert!(cost[2] < 300_000, "deletion: {cost:?}");
+    // A chain: each version derived from the previous (a derived base has no
+    // stored chunks; anchors come from chunking its content).
+    let d2 = tempfile::tempdir().unwrap();
+    let s2 = open(d2.path(), PackConfig { chunk_threshold: 1 << 20, pack_cap: 1 << 30, ..PackConfig::default() });
+    let mut cur = base.clone();
+    let mut prev = s2.put_stream(&mut &cur[..]).unwrap();
+    s2.flush().unwrap();
+    let one = dir_bytes(&d2.path().join("objects"));
+    for v in 0..5u64 {
+        let at = (1_000_000 + v * 1_234_567) as usize;
+        cur.splice(at..at, pseudo(1 << 18, 60 + v));
+        prev = s2.put_encoded(&mut &cur[..], &enc(&prev)).unwrap();
+        assert_eq!(s2.get(&prev, None).unwrap(), cur);
+    }
+    s2.flush().unwrap();
+    let chain = dir_bytes(&d2.path().join("objects")) - one;
+    assert!(chain < 5 * (1 << 18) + 1_500_000, "5 insertions of 256 KiB along a chain cost {chain}");
+}

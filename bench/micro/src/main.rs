@@ -477,6 +477,21 @@ fn small(dir: &str, n: usize) -> Result<(), Box<dyn std::error::Error>> {
         let _ = repo.get(h, None)?;
     }
     let get1 = n as f64 / t.elapsed().as_secs_f64();
+    // Re-put of already-stored objects (all dedup hits), then ensure_live on each:
+    // what a front does when the same content is pushed again.
+    let t = Instant::now();
+    for o in &objs {
+        repo.put(o)?;
+    }
+    repo.flush()?;
+    let reput = n as f64 / t.elapsed().as_secs_f64();
+    let t = Instant::now();
+    for h in &hashes {
+        repo.ensure_live(h)?;
+    }
+    let live = n as f64 / t.elapsed().as_secs_f64();
+    println!("| re-put (all dedup) | {:.1}k/s | |", reput / 1e3);
+    println!("| ensure_live | {:.1}k/s | |", live / 1e3);
     // 4 threads: distinct objects per thread.
     let objs4: Vec<Vec<u8>> = (0..n).map(|i| bytes(10_000_000 + i as u64, 1024)).collect();
     let t = Instant::now();
@@ -512,7 +527,189 @@ fn small(dir: &str, n: usize) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// `p2p-bench commits <dir> [n]`: durable `replace` throughput on one repository
+/// handle, with 1, 4 and 8 threads committing to distinct names (group commit
+/// batches concurrent commits of one process into shared fsyncs).
+fn commits(dir: &str, n: usize) -> Result<(), Box<dyn std::error::Error>> {
+    println!("| threads (one handle, distinct names) | commits/s |");
+    println!("|---|---|");
+    for threads in [1usize, 4, 8] {
+        let root = std::path::Path::new(dir).join(format!("commits-{}-{threads}", std::process::id()));
+        let repo = LocalRepo::init(&root, &PackConfig::default())?;
+        let h = repo.put(b"target")?;
+        let t = Instant::now();
+        std::thread::scope(|sc| {
+            for k in 0..threads {
+                let repo = &repo;
+                sc.spawn(move || {
+                    for i in 0..n / threads {
+                        let name = Name::new(format!("b/{k}/{i}")).unwrap_or_else(|_| unreachable!());
+                        let _ = repo.replace(&name, &[(name.clone(), Observed::Absent)], h);
+                    }
+                });
+            }
+        });
+        let rate = n as f64 / t.elapsed().as_secs_f64();
+        println!("| {threads} | {rate:.0} |");
+        std::fs::remove_dir_all(&root)?;
+    }
+    Ok(())
+}
+
+/// `p2p-bench generic <dir> [MiB]`: the generic front's pre-registered metrics
+/// (PLAN §6.4), each with its baseline measured here on the same volume:
+/// durable write vs `dd conv=fsync`, verified read vs `cat`, 4 KiB range-read
+/// p99, and storage of 10 versions (scattered 0.1 % edits; 1 MiB insertions).
+/// Hold the bench lock. Prints one JSON line.
+fn generic(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
+    use std::process::Command;
+    let size = (mib as u64) << 20;
+    let base = std::path::Path::new(dir).join(format!("generic-{}", std::process::id()));
+    std::fs::create_dir_all(&base)?;
+    // Input: incompressible, generated into tmpfs (so the source isn't the bottleneck).
+    let input = std::path::Path::new("/dev/shm").join(format!("p2p-generic-{}", std::process::id()));
+    std::io::copy(&mut Gen(77).take(size), &mut std::io::BufWriter::new(std::fs::File::create(&input)?))?;
+    let secs =
+        |f: &mut dyn FnMut() -> Result<(), Box<dyn std::error::Error>>| -> Result<f64, Box<dyn std::error::Error>> {
+            let t = Instant::now();
+            f()?;
+            Ok(t.elapsed().as_secs_f64())
+        };
+    // Baseline write: dd with fsync on the same volume.
+    let ddout = base.join("dd.bin");
+    let dd_s = secs(&mut || {
+        let st = Command::new("dd")
+            .arg(format!("if={}", input.display()))
+            .arg(format!("of={}", ddout.display()))
+            .args(["bs=1M", "conv=fsync", "status=none"])
+            .status()?;
+        if !st.success() {
+            return Err("dd failed".into());
+        }
+        Ok(())
+    })?;
+    // Baseline read: cat (warm).
+    let _ = std::fs::read(&ddout)?;
+    let cat_s = secs(&mut || {
+        let st = Command::new("sh").arg("-c").arg(format!("cat '{}' > /dev/null", ddout.display())).status()?;
+        if !st.success() {
+            return Err("cat failed".into());
+        }
+        Ok(())
+    })?;
+    std::fs::remove_file(&ddout)?;
+    // Store: durable write (put_stream + flush) and verified read (warm).
+    let repo = LocalRepo::init(base.join("repo"), &PackConfig::default())?;
+    let mut h = None;
+    let put_s = secs(&mut || {
+        h = Some(repo.put_stream(&mut std::fs::File::open(&input)?)?);
+        repo.flush()?;
+        Ok(())
+    })?;
+    let h = h.ok_or("no hash")?;
+    let mut sink = Vec::new();
+    repo.open(&h, None)?.read_to_end(&mut sink)?; // warm
+    drop(sink);
+    let get_s = secs(&mut || {
+        let mut r = repo.open(&h, None)?;
+        let mut b = vec![0u8; 1 << 20];
+        while r.read(&mut b)? > 0 {}
+        Ok(())
+    })?;
+    // 4 KiB range reads, warm, uniform offsets.
+    let mut lat = Vec::new();
+    let mut x = 0x2545_F491_4F6C_DD1Du64;
+    for _ in 0..2000 {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        let off = x % (size - 4096);
+        let t = Instant::now();
+        let _ = repo.get(&h, Some(off..off + 4096))?;
+        lat.push(t.elapsed().as_secs_f64() * 1e3);
+    }
+    lat.sort_by(|a, b| a.total_cmp(b));
+    let p99 = lat[(lat.len() as f64 * 0.99) as usize];
+    // Storage: 10 versions, each derived from the previous one.
+    let disk = |p: &std::path::Path| -> u64 {
+        fn walk(p: &std::path::Path) -> u64 {
+            std::fs::read_dir(p).map_or(0, |rd| {
+                rd.flatten()
+                    .map(|e| if e.path().is_dir() { walk(&e.path()) } else { e.metadata().map_or(0, |m| m.len()) })
+                    .sum()
+            })
+        }
+        walk(p)
+    };
+    let versions = |name: &str, edit: &dyn Fn(&mut Vec<u8>, u64)| -> Result<u64, Box<dyn std::error::Error>> {
+        let root = base.join(name);
+        // The generic front's profile: new versions derive from the previous one
+        // (chunk-anchored XOR), for any data format.
+        let mut cfg = pico2peta_repo::RepoConfig::new(&PackConfig::default());
+        cfg.profiles.insert(
+            "generic".into(),
+            pico2peta_repo::Profile { derive: pico2peta_repo::DerivePolicy::Previous, ..Default::default() },
+        );
+        cfg.namespaces.insert("data/".into(), "generic".into());
+        let r = LocalRepo::init_config(&root, &cfg)?;
+        let n = Name::new(format!("data/{name}"))?;
+        let mut cur = std::fs::read(&input)?;
+        for v in 0..10u64 {
+            if v > 0 {
+                edit(&mut cur, v);
+            }
+            let hv = r.put_named(&n, &mut &cur[..])?;
+            let obs = RefValue::observed(r.resolve(&n)?);
+            r.replace(&n, &[(n.clone(), obs)], hv)?;
+            if std::env::var_os("P2P_BENCH_VERBOSE").is_some() {
+                r.flush()?;
+                eprintln!("{name} v{v}: {} bytes stored so far", disk(&root.join("objects")));
+            }
+        }
+        r.flush()?;
+        Ok(disk(&root.join("objects")))
+    };
+    let scattered = versions("scattered", &|b, v| {
+        let mut y = 0x9E37_79B9_7F4A_7C15u64 ^ v;
+        for _ in 0..b.len() / 1000 {
+            y ^= y << 13;
+            y ^= y >> 7;
+            y ^= y << 17;
+            let i = (y % b.len() as u64) as usize;
+            b[i] = b[i].wrapping_add(1);
+        }
+    })?;
+    let inserted = versions("inserted", &|b, v| {
+        let at = ((v.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 11) % b.len() as u64) as usize;
+        let ins: Vec<u8> = (0..1 << 20).map(|i: u32| (i.wrapping_mul(2654435761) >> 13) as u8 ^ v as u8).collect();
+        b.splice(at..at, ins);
+    })?;
+    let mb = |s: f64| size as f64 / s / 1e6;
+    println!(
+        "{{\"mib\":{mib},\"dd_fsync_mb_s\":{:.0},\"put_mb_s\":{:.0},\"write_ratio\":{:.3},\"cat_mb_s\":{:.0},\"get_mb_s\":{:.0},\"read_ratio\":{:.3},\"range4k_p99_ms\":{p99:.3},\"scattered_10v_bytes\":{scattered},\"inserted_10v_bytes\":{inserted},\"one_copy_bytes\":{size}}}",
+        mb(dd_s),
+        mb(put_s),
+        dd_s / put_s,
+        mb(cat_s),
+        mb(get_s),
+        cat_s / get_s,
+    );
+    std::fs::remove_dir_all(&base)?;
+    std::fs::remove_file(&input)?;
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("generic") {
+        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench generic <dir> [MiB]")?;
+        let mib = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(1024);
+        return generic(&dir, mib);
+    }
+    if std::env::args().nth(1).as_deref() == Some("commits") {
+        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench commits <dir> [n]")?;
+        let n = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(20_000);
+        return commits(&dir, n);
+    }
     if std::env::args().nth(1).as_deref() == Some("small") {
         let dir = std::env::args().nth(2).ok_or("usage: p2p-bench small <dir> [n]")?;
         let n = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(100_000);

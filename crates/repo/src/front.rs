@@ -242,9 +242,13 @@ impl Profile {
             chunker: self.chunker.clone(),
             group_width: None,
             derive: match (self.derive, previous) {
-                (DerivePolicy::Previous, Some(base)) => {
-                    Some(pico2peta_core::Derive { base, patch: pico2peta_core::PatchFormat::Xor, segments: Vec::new() })
-                }
+                // Chunk-anchored alignment: handles in-place edits and
+                // insertions alike, with no knowledge of the format.
+                (DerivePolicy::Previous, Some(base)) => Some(pico2peta_core::Derive {
+                    base,
+                    patch: pico2peta_core::PatchFormat::XorAnchored,
+                    segments: Vec::new(),
+                }),
                 _ => None,
             },
         }

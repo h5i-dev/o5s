@@ -371,6 +371,8 @@ const MANIFEST_CACHE: usize = 16;
 
 /// Frames kept decompressed per handle (at most ~4 MiB each by default).
 const FRAME_CACHE: usize = 8;
+/// Smallest frame prefix decoded at once (see `frame_bodies`).
+const FRAME_PREFIX_MIN: usize = 256 << 10;
 
 impl Inner {
     fn fault(&self, point: &'static str) -> Result<()> {
@@ -1225,8 +1227,8 @@ impl PackStore {
         }
         let (_, payload) = decode_record(&raw)?;
         if let Some((inner, _)) = loc.frame {
-            let bodies = self.frame_bodies(&h, payload, &loc)?;
             let (a, b) = (inner as usize, inner as usize + loc.raw_len as usize);
+            let bodies = self.frame_bodies(&h, payload, &loc, b)?;
             let d = bodies.get(a..b).ok_or_else(|| Error::Corrupt(format!("frame member {hash} out of range")))?;
             return Ok((h, d.to_vec()));
         }
@@ -1258,20 +1260,33 @@ impl PackStore {
 
     /// Decompressed frame bodies, through a small cache (recently used
     /// frames). Sequential reads of grouped objects then decompress each frame once.
-    fn frame_bodies(&self, h: &RecHeader, payload: &[u8], loc: &Loc) -> Result<Arc<Vec<u8>>> {
+    fn frame_bodies(&self, h: &RecHeader, payload: &[u8], loc: &Loc, need: usize) -> Result<Arc<Vec<u8>>> {
         let key = (h.hash, loc.offset);
-        {
+        let cached = {
             let c = self.inner.frame_cache.lock().map_err(poisoned)?;
-            if let Some((_, v)) = c.iter().find(|(k, _)| *k == key) {
-                return Ok(v.clone());
-            }
+            c.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())
+        };
+        if let Some(v) = &cached
+            && v.len() >= need
+        {
+            return Ok(v.clone());
         }
         let reference = match frame_ref(h, payload)? {
             Some(r) => Some(self.get_reference(&r)?),
             None => None,
         };
-        let v = Arc::new(decode_frame_bodies(h, payload, reference.as_deref())?);
+        // Decode only as far as needed (random reads of large frames), but at
+        // least double what is cached (sequential reads stay linear), and
+        // decode (and verify) the whole frame once past half of it.
+        let raw = h.raw_len as usize;
+        let want = need.max(cached.as_ref().map_or(0, |v| v.len() * 2)).max(FRAME_PREFIX_MIN);
+        let v = if want * 2 >= raw {
+            Arc::new(decode_frame_bodies(h, payload, reference.as_deref())?)
+        } else {
+            Arc::new(decode_frame_prefix(h, payload, reference.as_deref(), want)?)
+        };
         let mut c = self.inner.frame_cache.lock().map_err(poisoned)?;
+        c.retain(|(k, _)| *k != key);
         if c.len() >= FRAME_CACHE {
             c.remove(0);
         }
@@ -1540,6 +1555,135 @@ impl PackStore {
         entries.clear();
         *len = 0;
         Ok((h, l))
+    }
+
+    /// Leaf chunks of `hash` with their offsets: `(chunk hash, offset, len)`.
+    /// A blob is one chunk at 0.
+    fn leaf_chunks(&self, hash: &Hash) -> Result<Vec<(Hash, u64, u64)>> {
+        let mut out = Vec::new();
+        let mut stack: Vec<(Hash, u64)> = vec![(*hash, 0)];
+        while let Some((h, off)) = stack.pop() {
+            let loc = self.lookup(&h)?.ok_or(Error::NotFound(h))?;
+            match loc.kind {
+                Kind::Manifest => {
+                    let m = self.read_manifest(&h, loc)?;
+                    let mut o = off;
+                    let mut kids = Vec::with_capacity(m.len());
+                    for (c, l) in m {
+                        kids.push((c, o));
+                        o += l;
+                    }
+                    stack.extend(kids.into_iter().rev());
+                }
+                _ => out.push((h, off, loc.raw_len)),
+            }
+            if out.len() > MAX_DELTA_SEGS {
+                return Err(Error::Parse("base has too many chunks for an anchored delta".into()));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Content-defined chunk hash → offset in `base`, for anchoring. A chunked
+    /// base gives its stored chunks; any other base (a delta, a frame member)
+    /// is chunked now with the store's FastCDC parameters, streaming.
+    fn anchor_map(&self, base: &Hash) -> Result<HashMap<Hash, u64>> {
+        let loc = self.lookup(base)?.ok_or(Error::NotFound(*base))?;
+        if loc.kind == Kind::Manifest {
+            return Ok(self.leaf_chunks(base)?.into_iter().map(|(h, o, _)| (h, o)).collect());
+        }
+        let cfg = &self.inner.cfg;
+        let mut out = HashMap::new();
+        let mut off = 0u64;
+        for c in fastcdc::v2020::StreamCDC::new(self.open(base, None)?, cfg.cdc_min, cfg.cdc_avg, cfg.cdc_max) {
+            let c = c.map_err(|e| Error::Corrupt(format!("chunking the base: {e:?}")))?;
+            out.entry(Hash::of(&c.data)).or_insert(off);
+            off += c.data.len() as u64;
+        }
+        Ok(out)
+    }
+
+    /// Stores `src` as a derived object of `base` with chunk-anchored XOR
+    /// alignment (see [`pico2peta_core::PatchFormat::XorAnchored`]). Objects
+    /// under the chunk threshold use an offset-aligned delta.
+    pub fn put_delta_anchored(&self, base: &Hash, src: &mut dyn Read, opts: PutOpts) -> Result<Hash> {
+        if !self.ensure_live_impl(base)? {
+            return Err(Error::NotFound(*base));
+        }
+        let thr = self.inner.cfg.chunk_threshold;
+        let mut head = Vec::with_capacity(thr.min(1 << 16));
+        src.take(thr as u64).read_to_end(&mut head)?;
+        if head.len() < thr {
+            return self.put_delta_opts(base, None, &mut &head[..], opts);
+        }
+        let base_len = self.size(base)?;
+        let anchors = self.anchor_map(base)?;
+        let cfg = &self.inner.cfg;
+        let reader = std::io::Cursor::new(head).chain(src);
+        let mut cdc = fastcdc::v2020::StreamCDC::new(reader, cfg.cdc_min, cfg.cdc_avg, cfg.cdc_max);
+        let mut whole = blake3::Hasher::new();
+        let mut segs: Vec<DeltaSeg> = Vec::new();
+        let mut shift: i64 = 0;
+        let mut pos: u64 = 0;
+        let mut failed: Option<Error> = None;
+        let xor_chunks = std::iter::from_fn(|| {
+            if failed.is_some() {
+                return None;
+            }
+            let c = match cdc.next()? {
+                Ok(c) => c.data,
+                Err(fastcdc::v2020::Error::IoError(e)) => return Some(Err(Error::Io(e))),
+                Err(e) => return Some(Err(Error::Corrupt(format!("chunker: {e:?}")))),
+            };
+            whole.update(&c);
+            let o = pos;
+            let l = c.len() as u64;
+            pos += l;
+            let anchored = anchors.get(&Hash::of(&c)).copied();
+            if let Some(src_off) = anchored {
+                shift = src_off as i64 - o as i64;
+            }
+            let src_off = o as i64 + shift;
+            let mut x = c;
+            if src_off >= 0 && (src_off as u64) < base_len {
+                let s0 = src_off as u64;
+                let n = l.min(base_len - s0);
+                // Merge with the previous segment when contiguous on both sides.
+                match segs.last_mut() {
+                    Some(g) if g.dst + g.len == o && g.src + g.len == s0 => g.len += n,
+                    _ => segs.push(DeltaSeg { dst: o, src: s0, len: n }),
+                }
+                if anchored.is_some() && n == l {
+                    x.iter_mut().for_each(|b| *b = 0); // identical content
+                } else {
+                    match self.get(base, Some(s0..s0 + n)) {
+                        Ok(b) => x.iter_mut().zip(&b).for_each(|(a, b)| *a ^= b),
+                        Err(e) => {
+                            failed = Some(Error::Corrupt(format!("reading the base: {e}")));
+                            return Some(Err(Error::Corrupt("base read failed".into())));
+                        }
+                    }
+                }
+            }
+            if segs.len() > MAX_DELTA_SEGS {
+                return Some(Err(Error::Parse("too many delta segments".into())));
+            }
+            Some(Ok(x))
+        });
+        let xor = self.put_chunks(xor_chunks, opts.group_width.filter(|w| *w > 1))?;
+        if let Some(e) = failed {
+            return Err(e);
+        }
+        let hash = Hash(*whole.finalize().as_bytes());
+        validate_segs(&segs, Some(base_len)).map_err(|e| Error::Corrupt(format!("anchored delta: {e}")))?;
+        if self.dedup_hit(&hash)? {
+            return Ok(hash);
+        }
+        // Always explicit segments (possibly none): `None` would mean offset alignment.
+        let mut w = self.inner.writer.lock().map_err(poisoned)?;
+        self.append(&mut w, Kind::Delta, hash, pos, &encode_delta(base, &xor, Some(&segs)))?;
+        self.maybe_seal(&mut w)?;
+        Ok(hash)
     }
 
     /// [`ObjectStore::put_stream`] with an explicit chunker. Objects under
@@ -2083,6 +2227,7 @@ impl ObjectStore for PackStore {
                     let segs = if segs.is_empty() { None } else { Some(&segs[..]) };
                     self.put_delta_opts(&d.base, segs, src, opts)
                 }
+                pico2peta_core::PatchFormat::XorAnchored => self.put_delta_anchored(&d.base, src, opts),
                 _ => Err(Error::Unsupported("patch format not supported by this store")),
             },
         }

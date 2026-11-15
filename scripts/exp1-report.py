@@ -16,8 +16,14 @@ BUILD_RATIO = 1.0
 RSS_KB = 6 * 1024 * 1024
 import os
 # Exp1 (§4.5): V1, V2. Exp1b (§4.8): V4, V5 (set EXP1_ELIGIBLE=v4,v5).
+# Exp3 (§6.6): A3, A4 (set EXP1_ELIGIBLE=a3,a4; ablations A0-A2 are shown too).
 ELIGIBLE = tuple(os.environ.get("EXP1_ELIGIBLE", "v1,v2").split(","))
-SHOWN = ("v0", "v1", "v2", "v3") if ELIGIBLE == ("v1", "v2") else ELIGIBLE
+if ELIGIBLE == ("v1", "v2"):
+    SHOWN = ("v0", "v1", "v2", "v3")
+elif ELIGIBLE == ("a3", "a4"):
+    SHOWN = ("a0", "a1", "a2", "a3", "a4")
+else:
+    SHOWN = ELIGIBLE
 
 
 def load(paths):
@@ -41,7 +47,8 @@ def main(path):
     repos = [r for r in ("ripgrep", "jq", "redis", "git") if (r, "git-aggressive") in rows]
     complete = [r for r in repos if all((r, v) in rows for v in SHOWN)]
     out = []
-    names = {"v0": "V0", "v1": "V1", "v2": "V2", "v3": "V3 (ceiling)", "v4": "V4", "v5": "V5"}
+    names = {"v0": "V0", "v1": "V1", "v2": "V2", "v3": "V3 (ceiling)", "v4": "V4", "v5": "V5",
+             "a0": "A0 (V2)", "a1": "A1", "a2": "A2", "a3": "A3", "a4": "A4 (no hints)"}
     out.append("| repo | objects | git --aggressive (B) | git gc (B) | " + " | ".join(names[v] for v in SHOWN) + " |")
     out.append("|---|---|---|---|" + "---|" * len(SHOWN))
     for r in repos:
@@ -115,6 +122,10 @@ def main(path):
     else:
         out.append("- Secondary thresholds: all met.")
     out.append(f"\n**Verdict (pre-registered rules): {verdict}.**")
+    if ELIGIBLE == ("a3", "a4"):
+        # PLAN §6.6: reported as its own line, VISION.md's target.
+        parity = all(rows[(r, v)]["total_bytes"] <= rows[(r, "git-aggressive")]["total_bytes"] for r in complete)
+        out.append(f"- Git storage parity (every repo R(V*) <= 1.00): {'met' if parity else 'not met'}.")
     print("\n".join(out))
 
 
