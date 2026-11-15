@@ -29,11 +29,57 @@
   - The binary lives at `/mnt/scratch/pico2peta/minio/minio`, built from source tag `RELEASE.2025-09-07T16-13-09Z`, because MinIO no longer publishes community binaries (dl.min.io returns 410).
   - To run the tests: `eval "$(scripts/minio-test.sh env)"; cargo test -p pico2peta-backend-s3`.
 
+### Goal 2: server (`crates/server`, binary `pico2peta-server`). Done.
+- HTTP API v1 on axum. The table is in `crates/client/src/wire.rs`.
+  - `PUT /v1/objects` streams the upload, with an optional `x-p2p-expect-hash` check.
+  - `GET`/`HEAD /v1/objects/{hash}` support single `Range` (`a-b`, `a-`, `-n`) and return 206 or 416 with `Content-Range: */n`, plus an ETag and an immutable cache header.
+  - Also: `GET /v1/refs/{name}`, `GET /v1/refs?prefix=`, `POST /v1/replace` (200 for Ok, 409 for Conflict), `GET`/`PUT /v1/namespaces[/{prefix}]`, `POST /v1/flush` and `GET /v1/whoami`.
+  - Errors are JSON `{error:{code,message,rule?,subject?}}`. `code` is the core `Error::code()` or an HTTP-only code.
+- **Authn:** an `Authenticator` trait (async, pluggable for OIDC). `TokenAuthenticator` keeps static bearer tokens as SHA-256 only, read inline or from `auth.token_file`. Anonymous access is opt-in, and a bad token is never downgraded to anonymous.
+- **Authz:** per-namespace grants with `read < write < admin` on segment-aligned prefixes. A principal is a name, `*` (any authenticated) or `anonymous`.
+  - Each operation needs read on the name, or write on the replace target plus read on every read-set name (because conflicts reveal versions).
+  - `set_rule` needs admin. Ref listings are filtered.
+  - Objects are global: reading one needs read somewhere, storing one needs write somewhere.
+- **Audit:** append-only JSON lines with a BLAKE3 hash chain (`seq`, `prev`).
+  - A writer thread group-commits with fdatasync. Mutations wait until their record is durable before replying.
+  - Denials and (optionally) reads are logged too. Records carry the request id and client address (TCP peer, or `X-Forwarded-For` with `trust_forwarded_for`).
+  - A torn tail is truncated at open. After a write failure the server refuses all mutations and `/readyz` returns 503.
+  - `pico2peta-server verify-audit` checks the chain.
+- **Ops:**
+  - Prometheus `/metrics`: HTTP count, latency histogram, in-flight, bytes, replace outcomes, auth failures, denials, audit failures, and S3 client counters.
+  - `/healthz` and `/readyz`.
+  - `tracing` logs in JSON or text: one INFO access line per request plus a request-id span, and the `Authorization` header is marked sensitive.
+  - Graceful shutdown on SIGTERM/SIGINT: readiness turns to 503, new requests get 503, in-flight requests get `shutdown_grace_secs`, then flush and audit sync.
+  - TOML config with `deny_unknown_fields`, validated at startup, plus a `check-config` subcommand.
+- **Bounded memory and backpressure:**
+  - Uploads go through a bounded channel of 8 frames into `put_stream` on the blocking pool. Downloads go in 256 KiB chunks through a bounded channel of 4, read by short `spawn_blocking` calls, so no blocking thread waits on a slow client. A client idle for 60 s is cut off.
+  - `max_upload_bytes` is enforced both from Content-Length and mid-stream.
+  - Load shedding: beyond `max_concurrent_requests` the server returns 503 with `Retry-After`. Permits are held until the response body finishes.
+  - Measured: 19 MiB peak RSS growth for a 512 MiB upload plus download in one process (`tests/memory.rs`, bound set at 96 MiB).
+- Tests: 9 unit tests (ranges, auth, policy, audit chain, torn tail, tamper detection, config) and 14 end-to-end tests (`tests/server.rs`, `tests/memory.rs`).
+  - Covered: client roundtrip and typed errors, 24 MiB streaming, rules and conflicts, authn, anonymous access, namespace authz isolation, audit content, HTTP ranges and headers, upload limits and hash mismatch, metrics, overload 503, graceful shutdown (drain, then flush, then durability on reopen), bounded memory, and the full server on the S3/MinIO backend.
+
+### Goal 3: client (`crates/client`). Library done; CLI wiring is with the lead.
+- `RemoteRepo::connect(url, token)` (checks via whoami) and `RemoteRepo::new(url, token, ClientConfig)`. It implements `Repository + ObjectStore`.
+- End-to-end BLAKE3 verification:
+  - `put` sends the expected hash.
+  - `put_stream` hashes while streaming and compares with the server's answer.
+  - Whole-object `get`/`open` re-hash at EOF and fail with `Error::Corrupt`.
+- Idempotent calls retry with jitter on transport errors and 502/503/504. `replace` retries only on connect failures, and `put_stream` never retries (its source is one-shot).
+- Typed core errors are rebuilt from wire codes, including `Forbidden{rule}`, `MissingObject`, `InvalidRange{len}` and `TargetNotInReadSet`.
+- The lead plans `pico2peta --remote URL`, with the token from `--token` or `P2P_TOKEN`.
+
+### Goal 4: CI (`.github/workflows/ci.yml`). Done.
+- Jobs: rustfmt check, clippy `--workspace --all-targets -D warnings`, `cargo test --workspace --locked`, rustdoc `-D warnings`, and a MinIO integration job.
+- The MinIO job builds MinIO from the pinned source tag with Go (`scripts/build-minio.sh`) and caches the binary, because community binaries and images are gone. It then runs the S3 backend and server tests against it.
+- All of these commands pass locally on the current workspace. The workflow has not run on GitHub yet, since nothing has been pushed.
+
+### Goal 5: deploy (`deploy/`). Done.
+- A distroless nonroot Dockerfile, sample configs (`server.toml`, `server.docker.toml`, `tokens.example.toml`), a hardened systemd unit (`systemd-analyze verify` clean), and `deploy/README.md` (install, TLS, S3 lifecycle and IAM, observability, audit, capacity).
+- Smoke-tested the real binary with the sample config: gen-token, check-config, put, replace, resolve, ranged get, SIGTERM drain and flush, verify-audit.
+
 ### Next
-- Goal 2: server (`crates/server`).
-- Goal 3: client (`crates/client`).
-- Goal 4: CI (`.github/workflows/`).
-- Goal 5: deploy (`deploy/`).
+- Goal 6: Git smart-HTTP and OCI distribution adapters. The hash-mapping design proposal is below, waiting for the lead's agreement.
 
 ## Production gaps
 - **S3 credentials:** only static and environment credentials exist. There is no IMDSv2 instance profile, STS web identity or `~/.aws` profile support yet. These can plug into the `CredentialsProvider` trait.
@@ -42,6 +88,13 @@
 - **GET checksums:** a GET is not checksummed end to end beyond TCP and TLS. Integrity of pack records relies on the core pack CRCs.
 - **Virtual-hosted style and real AWS:** neither has been tested, because no AWS credentials are available here. Only path style against MinIO has run.
 - **Extra copy:** `PutSource::Bytes` is copied once into the runtime, because `Backend` is sync and borrows the bytes.
+- **Server TLS:** none built in; terminate TLS at a reverse proxy (documented). Native rustls listener is a possible addition.
+- **OIDC/JWT authenticator:** not implemented; the `Authenticator` trait is async and ready for it.
+- **Token management:** only via config/token file plus restart. There is no admin API to issue or revoke tokens, and no hot reload (SIGHUP).
+- **Audit log rotation and shipping:** manual (stop, move, start). There is no remote sink (syslog, S3).
+- **Unauthenticated `/metrics`:** restrict it at the network level. There is no separate metrics listener yet.
+- **Rate limiting:** only a global concurrency cap. There is no per-principal rate limit or quota.
+- **Durability of server puts:** an unreferenced `put` becomes durable at the next replace or flush (core semantics, since the open pack is not fsynced per put). If the server crashes before that, the client's later `replace` gets `MissingObject` and must re-put. Clients needing durability without a replace call `POST /v1/flush`.
 - **Large listings:** `list()` buffers all keys in memory. The trait returns a `Vec`, so a paginated or streaming list would need a trait change if a prefix grows to millions of keys.
 
 ## Requests for core

@@ -187,6 +187,10 @@ fn audit_log_records_and_chains() {
     assert!(has("auth", "denied"));
     assert!(recs.iter().filter(|r| r.action == "replace").all(|r| r.principal == "alice" && r.target == "alice/a"));
     assert!(recs.iter().all(|r| r.request_id.len() == 32), "every record carries the request id");
+    assert!(
+        recs.iter().all(|r| r.remote.as_deref().is_some_and(|a| a.starts_with("127.0.0.1:"))),
+        "every record carries the client address"
+    );
 }
 
 #[test]

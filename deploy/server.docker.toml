@@ -1,0 +1,58 @@
+# pico2peta-server sample configuration (systemd install).
+# Check with: pico2peta-server check-config -c /etc/pico2peta/server.toml
+
+[server]
+listen = "0.0.0.0:8080"
+max_upload_bytes = 1099511627776   # 1 TiB per object
+max_concurrent_requests = 256      # beyond this: 503 + Retry-After (load shedding)
+request_timeout_secs = 3600        # until response headers (covers whole uploads)
+shutdown_grace_secs = 30           # drain time after SIGTERM
+trust_forwarded_for = false        # true behind a reverse proxy that sets X-Forwarded-For
+
+[repo]
+path = "/var/lib/pico2peta/repo"
+create = true                      # initialize on first start
+
+# Sealed packs on S3 (staging and refs stay on local disk under repo.path).
+# Credentials come from AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN.
+# Omit this section to keep packs on local disk.
+#[backend]
+#type = "s3"
+#endpoint = "https://s3.us-east-1.amazonaws.com"
+#region = "us-east-1"
+#bucket = "my-pico2peta-bucket"
+#prefix = "prod"
+#path_style = false                # true for MinIO / most S3-compatible stores
+#conditional_writes = true         # If-None-Match: *; disable only if the store rejects it
+#max_in_flight = 32
+
+[auth]
+allow_anonymous = false
+# Tokens live in a separate file (mode 0600). Create entries with:
+#   pico2peta-server gen-token <principal>
+token_file = "/etc/pico2peta/tokens.toml"   # mount as a secret
+
+# Grants: principal (name, "*" = any authenticated, "anonymous"),
+# namespace prefix ("" = all), access = read | write | admin.
+[[policy]]
+principal = "admin"
+namespace = ""
+access = "admin"
+
+[[policy]]
+principal = "ci"
+namespace = "pkgs"
+access = "write"
+
+[[policy]]
+principal = "*"
+namespace = "pkgs"
+access = "read"
+
+[audit]
+path = "/var/lib/pico2peta/audit/audit.jsonl"
+log_reads = false                  # true: also audit every object read
+
+[log]
+format = "json"
+filter = "info"                    # RUST_LOG overrides

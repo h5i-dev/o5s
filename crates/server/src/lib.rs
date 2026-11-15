@@ -86,6 +86,7 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         max_upload_bytes: cfg.server.max_upload_bytes,
         shutting_down: Arc::new(AtomicBool::new(false)),
         limiter: Arc::new(tokio::sync::Semaphore::new(cfg.server.max_concurrent_requests)),
+        trust_forwarded_for: cfg.server.trust_forwarded_for,
     }))
 }
 
@@ -106,10 +107,17 @@ pub fn app(state: Arc<AppState>, request_timeout: Duration) -> axum::Router {
     use tower_http::timeout::TimeoutLayer;
     use tower_http::trace::TraceLayer;
     let rid = HeaderName::from_static(pico2peta_client::wire::REQUEST_ID_HEADER);
-    let trace = TraceLayer::new_for_http().make_span_with(|req: &Request<axum::body::Body>| {
-        let id = req.headers().get("x-request-id").and_then(|v| v.to_str().ok()).unwrap_or("-");
-        tracing::info_span!("http", method = %req.method(), path = %req.uri().path(), request_id = %id)
-    });
+    let trace = TraceLayer::new_for_http()
+        .on_response(
+            tower_http::trace::DefaultOnResponse::new()
+                .level(tracing::Level::INFO)
+                .latency_unit(tower_http::LatencyUnit::Micros),
+        )
+        .on_failure(tower_http::trace::DefaultOnFailure::new().level(tracing::Level::WARN))
+        .make_span_with(|req: &Request<axum::body::Body>| {
+            let id = req.headers().get("x-request-id").and_then(|v| v.to_str().ok()).unwrap_or("-");
+            tracing::info_span!("http", method = %req.method(), path = %req.uri().path(), request_id = %id)
+        });
     api::router(state)
         .layer(TimeoutLayer::with_status_code(axum::http::StatusCode::REQUEST_TIMEOUT, request_timeout))
         .layer(CatchPanicLayer::new())
@@ -138,7 +146,8 @@ pub async fn serve(
         info!("shutdown requested; draining");
         let _ = stopping_tx.send(());
     };
-    let server = axum::serve(listener, app).with_graceful_shutdown(graceful);
+    let server = axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+        .with_graceful_shutdown(graceful);
     let server = server.into_future();
     tokio::pin!(server);
     tokio::select! {

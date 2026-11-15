@@ -1,0 +1,6 @@
+# /etc/pico2peta/tokens.toml (mode 0600, owner pico2peta).
+# Only SHA-256 hashes of tokens are stored. Generate with:
+#   pico2peta-server gen-token <principal>
+[[tokens]]
+principal = "admin"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"  # replace

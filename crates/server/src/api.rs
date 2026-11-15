@@ -49,9 +49,29 @@ pub struct AppState {
     pub max_upload_bytes: u64,
     pub shutting_down: Arc<AtomicBool>,
     pub limiter: Arc<Semaphore>,
+    pub trust_forwarded_for: bool,
 }
 
 type St = State<Arc<AppState>>;
+
+/// Per-request metadata for audit records.
+#[derive(Clone, Debug)]
+pub struct Caller {
+    pub request_id: String,
+    /// Client address: the TCP peer, or the first `X-Forwarded-For` hop when
+    /// `server.trust_forwarded_for` is set (only behind a trusted proxy).
+    pub remote: Option<String>,
+}
+
+fn client_addr(req: &Request, trust_forwarded_for: bool) -> Option<String> {
+    if trust_forwarded_for
+        && let Some(f) = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok())
+        && let Some(first) = f.split(',').next().map(str::trim).filter(|s| !s.is_empty() && s.len() <= 64)
+    {
+        return Some(first.to_string());
+    }
+    req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|ci| ci.0.to_string())
+}
 
 /// The request id assigned by the request-id layer.
 fn request_id(h: &HeaderMap) -> String {
@@ -117,6 +137,9 @@ async fn shed_load(State(st): St, req: Request, next: Next) -> Response {
 
 /// Authenticates the caller and stores the [`Principal`] in request extensions.
 async fn authenticate(State(st): St, mut req: Request, next: Next) -> Response {
+    let caller_remote = client_addr(&req, st.trust_forwarded_for);
+    let rid = request_id(req.headers());
+    req.extensions_mut().insert(Caller { request_id: rid, remote: caller_remote.clone() });
     match st.authn.authenticate(req.headers()).await {
         Ok(p) => {
             req.extensions_mut().insert(p);
@@ -138,7 +161,7 @@ async fn authenticate(State(st): St, mut req: Request, next: Next) -> Response {
                     target: req.uri().path().to_string(),
                     outcome: "denied".into(),
                     detail: Some(reason.into()),
-                    remote: None,
+                    remote: caller_remote.clone(),
                 });
             }
             if let crate::auth::AuthError::Unavailable(m) = e {
@@ -155,18 +178,19 @@ async fn authenticate(State(st): St, mut req: Request, next: Next) -> Response {
 
 impl AppState {
     /// Fails with 403 (and audits the denial) unless `cond`.
-    fn require(&self, cond: bool, p: &Principal, h: &HeaderMap, action: &'static str, target: &str) -> ApiResult<()> {
+    fn require(&self, cond: bool, p: &Principal, c: &Caller, action: &'static str, target: &str) -> ApiResult<()> {
         if cond {
             return Ok(());
         }
         self.metrics.denied.inc();
         self.audit.record_nowait(Event {
-            request_id: request_id(h),
+            request_id: c.request_id.clone(),
             principal: p.name.clone(),
             action,
             target: target.to_string(),
             outcome: "denied".into(),
-            ..Default::default()
+            detail: None,
+            remote: c.remote.clone(),
         });
         Err(ApiError::denied(format!("{} may not {action} {target}", p.name)))
     }
@@ -267,10 +291,11 @@ impl Read for ChannelReader {
 async fn put_object(
     State(st): St,
     Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
     headers: HeaderMap,
     body: Body,
 ) -> ApiResult<Response> {
-    st.require(st.authz.allows_somewhere(&p, Access::Write), &p, &headers, "put", "objects")?;
+    st.require(st.authz.allows_somewhere(&p, Access::Write), &p, &c, "put", "objects")?;
     st.require_audit_healthy()?;
     let max = st.max_upload_bytes;
     if let Some(cl) =
@@ -345,13 +370,13 @@ async fn put_object(
         );
     }
     st.audit_mutation(Event {
-        request_id: request_id(&headers),
+        request_id: c.request_id.clone(),
         principal: p.name.clone(),
         action: "put",
         target: hash.to_hex(),
         outcome: "ok".into(),
         detail: Some(format!("size={size}")),
-        remote: None,
+        remote: c.remote.clone(),
     })
     .await?;
     Ok((StatusCode::OK, Json(wire::PutResponse { hash: hash.to_hex(), size })).into_response())
@@ -377,10 +402,10 @@ fn object_headers(h: &mut HeaderMap, hash: &Hash) {
 async fn head_object(
     State(st): St,
     Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
     Path(hash): Path<String>,
-    headers: HeaderMap,
 ) -> ApiResult<Response> {
-    st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &headers, "get", "objects")?;
+    st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &c, "get", "objects")?;
     let hash = parse_hash(&hash)?;
     let repo = st.repo.clone();
     let size = blocking(move || repo.size(&hash)).await?;
@@ -393,10 +418,11 @@ async fn head_object(
 async fn get_object(
     State(st): St,
     Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
     Path(hash): Path<String>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
-    st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &headers, "get", "objects")?;
+    st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &c, "get", "objects")?;
     let hash = parse_hash(&hash)?;
     let repo = st.repo.clone();
     let size = blocking(move || repo.size(&hash)).await?;
@@ -416,13 +442,13 @@ async fn get_object(
     let reader = blocking(move || repo.open(&hash, rr)).await?;
     if st.log_reads {
         st.audit.record_nowait(Event {
-            request_id: request_id(&headers),
+            request_id: c.request_id.clone(),
             principal: p.name.clone(),
             action: "get",
             target: hash.to_hex(),
             outcome: "ok".into(),
             detail: range.as_ref().map(|r| format!("range={}-{}", r.start, r.end)),
-            remote: None,
+            remote: c.remote.clone(),
         });
     }
     let len = range.as_ref().map_or(size, |r| r.end - r.start);
@@ -496,8 +522,12 @@ fn stream_reader(reader: Box<dyn Read + Send>, len: u64, metrics: Arc<Metrics>) 
     Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|i| (i, rx)) }))
 }
 
-async fn flush(State(st): St, Extension(p): Extension<Principal>, headers: HeaderMap) -> ApiResult<StatusCode> {
-    st.require(st.authz.allows_somewhere(&p, Access::Write), &p, &headers, "flush", "objects")?;
+async fn flush(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
+) -> ApiResult<StatusCode> {
+    st.require(st.authz.allows_somewhere(&p, Access::Write), &p, &c, "flush", "objects")?;
     let repo = st.repo.clone();
     blocking(move || repo.flush()).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -510,11 +540,11 @@ async fn flush(State(st): St, Extension(p): Extension<Principal>, headers: Heade
 async fn resolve(
     State(st): St,
     Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
     Path(name): Path<String>,
-    headers: HeaderMap,
 ) -> ApiResult<Json<wire::RefJson>> {
     let name = parse_name(&name)?;
-    st.require(st.authz.allows(&p, name.as_str(), Access::Read), &p, &headers, "resolve", name.as_str())?;
+    st.require(st.authz.allows(&p, name.as_str(), Access::Read), &p, &c, "resolve", name.as_str())?;
     let repo = st.repo.clone();
     let n = name.clone();
     match blocking(move || repo.resolve(&n)).await? {
@@ -551,16 +581,16 @@ async fn list_refs(
 async fn replace(
     State(st): St,
     Extension(p): Extension<Principal>,
-    headers: HeaderMap,
+    Extension(c): Extension<Caller>,
     body: Bytes,
 ) -> ApiResult<Response> {
     let req: wire::ReplaceRequest =
         serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("bad replace request: {e}")))?;
     let (name, read_set, new) = req.to_core().map_err(ApiError::from)?;
-    st.require(st.authz.allows(&p, name.as_str(), Access::Write), &p, &headers, "replace", name.as_str())?;
+    st.require(st.authz.allows(&p, name.as_str(), Access::Write), &p, &c, "replace", name.as_str())?;
     // Conflict responses reveal versions of read-set names, so require read on them.
     for (n, _) in &read_set {
-        st.require(st.authz.allows(&p, n.as_str(), Access::Read), &p, &headers, "replace", n.as_str())?;
+        st.require(st.authz.allows(&p, n.as_str(), Access::Read), &p, &c, "replace", n.as_str())?;
     }
     st.require_audit_healthy()?;
     let repo = st.repo.clone();
@@ -575,13 +605,13 @@ async fn replace(
     };
     st.metrics.replace.get_or_create(&OutcomeLabels { outcome: outcome.into() }).inc();
     st.audit_mutation(Event {
-        request_id: request_id(&headers),
+        request_id: c.request_id.clone(),
         principal: p.name.clone(),
         action: "replace",
         target: name.to_string(),
         outcome: outcome.into(),
         detail: Some(detail),
-        remote: None,
+        remote: c.remote.clone(),
     })
     .await?;
     let out = res?;
@@ -597,9 +627,9 @@ async fn replace(
 async fn list_rules(
     State(st): St,
     Extension(p): Extension<Principal>,
-    headers: HeaderMap,
+    Extension(c): Extension<Caller>,
 ) -> ApiResult<Json<wire::RuleList>> {
-    st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &headers, "list_rules", "namespaces")?;
+    st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &c, "list_rules", "namespaces")?;
     let repo = st.repo.clone();
     let rules = blocking(move || repo.rules()).await?;
     Ok(Json(wire::RuleList {
@@ -610,27 +640,27 @@ async fn list_rules(
 async fn set_rule(
     State(st): St,
     Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
     Path(prefix): Path<String>,
-    headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult<StatusCode> {
     validate_path(&prefix).map_err(ApiError::from)?;
     let req: wire::SetRuleRequest =
         serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("bad set-rule request: {e}")))?;
     let rule = wire::rule_from_wire(&req.rule).map_err(ApiError::from)?;
-    st.require(st.authz.allows(&p, &prefix, Access::Admin), &p, &headers, "set_rule", &prefix)?;
+    st.require(st.authz.allows(&p, &prefix, Access::Admin), &p, &c, "set_rule", &prefix)?;
     st.require_audit_healthy()?;
     let repo = st.repo.clone();
     let pf = prefix.clone();
     let res = blocking(move || repo.set_rule(&pf, rule)).await;
     st.audit_mutation(Event {
-        request_id: request_id(&headers),
+        request_id: c.request_id.clone(),
         principal: p.name.clone(),
         action: "set_rule",
         target: prefix,
         outcome: if res.is_ok() { "ok".into() } else { "rejected".into() },
         detail: Some(format!("rule={}", rule.as_str())),
-        remote: None,
+        remote: c.remote.clone(),
     })
     .await?;
     res?;

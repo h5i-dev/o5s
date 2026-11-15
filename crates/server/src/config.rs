@@ -7,6 +7,7 @@
 //! max_concurrent_requests = 256
 //! request_timeout_secs = 3600        # whole request, including body transfer
 //! shutdown_grace_secs = 30
+//! trust_forwarded_for = false      # true only behind a proxy that sets X-Forwarded-For
 //!
 //! [repo]
 //! path = "/var/lib/pico2peta/repo"
@@ -70,6 +71,9 @@ pub struct ServerSection {
     pub max_concurrent_requests: usize,
     pub request_timeout_secs: u64,
     pub shutdown_grace_secs: u64,
+    /// Take the client address for audit records from `X-Forwarded-For`.
+    /// Enable only behind a reverse proxy that sets it.
+    pub trust_forwarded_for: bool,
 }
 
 impl Default for ServerSection {
@@ -80,6 +84,7 @@ impl Default for ServerSection {
             max_concurrent_requests: 256,
             request_timeout_secs: 3600,
             shutdown_grace_secs: 30,
+            trust_forwarded_for: false,
         }
     }
 }
