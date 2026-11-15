@@ -9,7 +9,7 @@
 | M2 Pack store | done | `crates/pack` |
 | M3 Ref store | done: local journal engine plus a multi-host log engine on any Backend | `crates/refs` |
 | M4 Local repo + CLI | done; local and `--remote` | `crates/repo`, `crates/cli` |
-| M5 Experiment 1 | **FAIL** by the pre-registered rules: redis V2 = 1.336× > 1.30 (ripgrep 0.85×, jq 0.93×; the V3 ceiling is 0.71–0.84×). git.git is still running for completeness. **Exp1b** (delta vs previous version, §4.8) is registered and queued after it | `docs/EXP1.md`, `scripts/exp1-report.py`, `scripts/exp1b.sh` |
+| M5 Experiment 1 | **complete: FAIL** by the pre-registered rules. V2 geomean is 1.051×, but redis is 1.336× > the 1.30 max (ripgrep 0.85, jq 0.93, git 1.16); the V3 ceiling is 0.71–0.84×. **Exp1b** (delta vs previous version, §4.8) is running | `docs/EXP1.md`, `scripts/exp1-report.py`, `scripts/exp1b.sh` |
 | M6 GC / repack | done, including grouped repack | `crates/repo/src/gc.rs` |
 | N1–N5 (net) | done: S3, server, client, CI, deploy, Git + OCI adapters | `docs/NET_PROGRESS.md`, `docs/API.md` |
 | M7 Hardening | done (two independent code reviews, all findings fixed) except quiet-host benchmark numbers | `fuzz/`, `docs/BENCH.md`, `scripts/check.sh` |
