@@ -300,6 +300,11 @@ impl RemoteRepo {
         self.put_stream_to(format!("/v1/objects?for_name={}", name), src)
     }
 
+    /// [`Self::put_stream_for`] with byte grouping of `width`-byte elements (API v1.12).
+    pub fn put_stream_for_grouped(&self, name: &Name, src: &mut dyn Read, width: u8) -> Result<Hash> {
+        self.put_stream_to(format!("/v1/objects?for_name={name}&group_width={width}"), src)
+    }
+
     /// Base URL of the server.
     pub fn url(&self) -> &str {
         &self.inner.base
@@ -405,6 +410,10 @@ impl ObjectStore for RemoteRepo {
 
     fn put_stream(&self, src: &mut dyn Read) -> Result<Hash> {
         self.put_stream_to("/v1/objects".to_string(), src)
+    }
+
+    fn put_stream_grouped(&self, src: &mut dyn Read, width: u8) -> Result<Hash> {
+        self.put_stream_to(format!("/v1/objects?group_width={width}"), src)
     }
 
     fn put_delta(&self, base: &Hash, src: &mut dyn Read) -> Result<Hash> {

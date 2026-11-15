@@ -78,9 +78,33 @@ fn main() -> Result<(), String> {
         }
     }
     println!("group: {:.2} GB/s (round-trip verified)", raw as f64 / gsecs / 1e9);
+    println!(
+        "Granularity: \"tensor-grouped\" groups each whole tensor and then compresses it (in 64 KiB blocks or whole)."
+    );
+    println!("\"per-block\" groups each 64 KiB block on its own, which is what a per-chunk record codec can do.");
     println!("| granularity | zstd level | plain | grouped | gain |");
     println!("|---|---|---|---|---|");
-    for (gran, block) in [("64 KiB blocks", Some(64usize << 10)), ("whole tensor", None)] {
+    for level in [3, 19] {
+        let bs = 64usize << 10;
+        let plain: usize = items.iter().map(|i| zsize(&i.2, level, Some(bs))).sum();
+        let per_block: usize = items
+            .iter()
+            .map(|(_, w, b)| {
+                b.chunks(bs).map(|c| zsize(&group(c, *w).unwrap_or_else(|_| c.to_vec()), level, None)).sum::<usize>()
+            })
+            .sum();
+        println!(
+            "| 64 KiB blocks, per-block grouping | {level} | {:.1} MB ({:.3}) | {:.1} MB ({:.3}) | {:+.1}% |",
+            plain as f64 / 1e6,
+            plain as f64 / raw as f64,
+            per_block as f64 / 1e6,
+            per_block as f64 / raw as f64,
+            (1.0 - per_block as f64 / plain as f64) * 100.0
+        );
+    }
+    for (gran, block) in
+        [("64 KiB blocks, tensor-grouped", Some(64usize << 10)), ("whole tensor, tensor-grouped", None)]
+    {
         for level in [3, 19] {
             let plain: usize = items.iter().map(|i| zsize(&i.2, level, block)).sum();
             let grp: usize = grouped.iter().map(|g| zsize(g, level, block)).sum();

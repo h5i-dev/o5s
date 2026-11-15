@@ -173,7 +173,7 @@ The contended run checks that no update is lost: the final version equals the nu
 - **A. Experiment 1c:** pre-registered as PLAN §4.9 (52443e5, committed before any 1c code). Harness: `bench/exp1c`, `scripts/exp1c.sh`. Git 2.56.1 for the extra baselines is built in `/mnt/scratch/pico2peta/git-2.56`. Running under the bench lock; results go in EXP1.md.
 - **B. Xet chunker:** `crates/chunk`. Byte-exact Xet chunking that **matches all 796 published reference boundaries** (`xet-team/xet-spec-reference-files`), plus FastCDC v2020 identical to the pack store's chunking, behind a streaming `Chunker` trait. Benchmark: `chunk-bench`.
 - **Per-namespace chunking in the server (core API v1.11):** `PUT /v1/objects?for_name=<name>` (write access on that name) and OCI blob uploads (namespace `oci/<repo>`) go through `LocalRepo::put_stream_for`, and `RemoteRepo::put_stream_for` exists. Test `put_for_name_uses_namespace_chunker`: the pack store's chunk record counts match `crates/chunk`'s Xet count for `alice/models/` and its FastCDC count elsewhere.
-- **C. Byte grouping:** `crates/weights/src/bytegroup.rs` (`group` / `ungroup`, with proptest round-trip and no-panic tests). The measurement uses SmolLM2-135M → SmolLM2-135M-Instruct (real bf16 checkpoints) via `examples/bytegroup_measure.rs`.
+- **C. Byte grouping: DONE.** `crates/weights/src/bytegroup.rs` (`group` / `ungroup`, with proptest round-trip and no-panic tests). Measured on real checkpoints: bf16 SmolLM2-135M → Instruct delta and raw, and fp32 GPT-2 raw. Gains are 8–14% smaller zstd output; see the request in "Requests for core".
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
@@ -242,7 +242,8 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
   - Measured on a real bf16 pair (SmolLM2-135M → SmolLM2-135M-Instruct, 272 tensors, 269 MB tensor-aligned XOR delta, 43% zero bytes; `crates/weights/examples/bytegroup_measure.rs`, run under the bench lock).
   - Gains: **zstd output −10.5% at level 3 and −14.0% at level 19** for 64 KiB blocks (the pack chunk granularity), and −9.7% / −14.0% per whole tensor.
   - The transform runs at 1.06 GB/s on one core and its round trip is verified.
-  - Raw bf16 checkpoint (SmolLM2-135M-Instruct, no delta): −9.4% (level 3) and −14.0% (level 19) for 64 KiB blocks; −8.4% / −11.6% per whole tensor. The fp32 (GPT-2) number will follow.
+  - Raw bf16 checkpoint (SmolLM2-135M-Instruct, no delta): −9.4% (level 3) and −14.0% (level 19) for 64 KiB blocks; −8.4% / −11.6% per whole tensor.
+  - Raw fp32 checkpoint (GPT-2, 160 tensors, 548 MB, width 4): −8.0% (level 3) and −9.8% (level 19) for 64 KiB blocks; −7.7% / −9.4% per whole tensor. There is no fp32 fine-tune pair, so the fp32 delta case is unmeasured.
 - **RESOLVED (2026-11-15):** a ref-log double-Ok regression (core 8e845fd) was caught by `two_servers_share_a_repo_via_s3`. 60 acknowledged commits had produced only 50–54 versions, because identical CAS records from two writers were both treated as "ours".
   - Fixed in core e7a75c4: each log entry now carries a per-attempt nonce, and only our own nonce counts as ours.
   - Re-verified on MinIO: 5 of 5 runs give 60 commits with final version 60 (75–83 conflicts), and `ref_log_commit_survives_lost_response` still passes.
