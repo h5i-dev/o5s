@@ -16,7 +16,7 @@
 
 pub mod gc;
 
-pub use gc::{GcOptions, GcReport, OpaqueObjects, Tracer};
+pub use gc::{GcOptions, GcReport, GroupKey, Grouper, OpaqueObjects, Tracer};
 use pico2peta_core::backend::{Backend, LocalDisk};
 use pico2peta_core::{Error, Hash, Name, ObjectStore, Observed, RefValue, ReplaceOutcome, Repository, Result, Rule};
 use pico2peta_pack::{PackStats, PackStore};

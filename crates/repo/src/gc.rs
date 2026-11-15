@@ -54,6 +54,23 @@ impl Tracer for OpaqueObjects {
     }
 }
 
+/// Where an object should be placed in a similarity-grouped repack: objects
+/// with the same `group` are compressed together in frames, in `order`.
+/// Example (Git): group = file extension, order = path + commit time.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct GroupKey {
+    pub group: String,
+    pub order: String,
+}
+
+/// Supplies grouping hints for repack (Experiment 1, V2 layout). It's called
+/// once per sweep with the live objects being repacked and returns keys for
+/// those it knows; unknown objects are copied verbatim. Adapters implement it
+/// (e.g. the Git adapter by walking trees: paths are known only from trees).
+pub trait Grouper: Send + Sync {
+    fn assign(&self, repo: &dyn Repository, live: &HashSet<Hash>) -> Result<HashMap<Hash, GroupKey>>;
+}
+
 /// GC tuning.
 #[derive(Clone, Debug)]
 pub struct GcOptions {
@@ -67,6 +84,13 @@ pub struct GcOptions {
     pub small_pack_bytes: u64,
     /// Only report what would happen.
     pub dry_run: bool,
+    /// Repack every planned pack, even fully live ones (like
+    /// `git gc --aggressive`). Use it with a [`Grouper`] to regroup a whole repository.
+    pub repack_all: bool,
+    /// zstd level for frames written by a grouped repack (Exp1: 19).
+    pub frame_level: i32,
+    /// Maximum uncompressed frame size for a grouped repack (Exp1: 4 MiB).
+    pub frame_cap: usize,
 }
 
 impl Default for GcOptions {
@@ -77,6 +101,9 @@ impl Default for GcOptions {
             min_garbage_ratio: 0.2,
             small_pack_bytes: 16 << 20,
             dry_run: false,
+            repack_all: false,
+            frame_level: 19,
+            frame_cap: 4 << 20,
         }
     }
 }
@@ -178,6 +205,11 @@ impl LocalRepo {
 
     /// Runs whichever GC phases are due. See the module docs.
     pub fn gc(&self, opts: &GcOptions, tracer: &dyn Tracer) -> Result<GcReport> {
+        self.gc_with(opts, tracer, None)
+    }
+
+    /// Like [`LocalRepo::gc`], with an optional [`Grouper`] for similarity-grouped repack.
+    pub fn gc_with(&self, opts: &GcOptions, tracer: &dyn Tracer, grouper: Option<&dyn Grouper>) -> Result<GcReport> {
         if opts.grace < Duration::from_secs(600) && !opts.allow_short_grace {
             return Err(Error::Parse("GC grace period must be at least 10 minutes".into()));
         }
@@ -247,19 +279,24 @@ impl LocalRepo {
                     entries.iter().filter(|e| live.contains(&e.hash)).map(|e| e.stored_len as u64).sum();
                 let garbage = if total == 0 { 1.0 } else { 1.0 - live_bytes as f64 / total as f64 };
                 let size = self.packs.pack_bytes(p)?;
-                if garbage >= opts.min_garbage_ratio || size < opts.small_pack_bytes {
+                if opts.repack_all || garbage >= opts.min_garbage_ratio || size < opts.small_pack_bytes {
                     victims.push((p.clone(), entries));
                 }
             }
             // Consolidating a single small, fully live pack is pointless churn.
-            if victims.len() == 1 && victims[0].1.iter().all(|e| live.contains(&e.hash)) {
+            if !opts.repack_all && victims.len() == 1 && victims[0].1.iter().all(|e| live.contains(&e.hash)) {
                 victims.clear();
             }
             if !opts.dry_run {
                 let mut copied: HashSet<Hash> = HashSet::new();
+                let to_copy: HashSet<Hash> =
+                    victims.iter().flat_map(|(_, es)| es.iter().map(|e| e.hash)).filter(|h| live.contains(h)).collect();
+                if let Some(g) = grouper {
+                    copied.extend(self.write_grouped(g, &to_copy, opts)?);
+                }
                 for (_, entries) in &victims {
                     for e in entries {
-                        if live.contains(&e.hash) && copied.insert(e.hash) {
+                        if to_copy.contains(&e.hash) && copied.insert(e.hash) {
                             self.packs.copy_record(&e.hash)?;
                         }
                     }
@@ -292,6 +329,42 @@ impl LocalRepo {
             self.mark(tracer, &mut report)?;
         }
         Ok(report)
+    }
+}
+
+impl LocalRepo {
+    /// Writes the grouper-assigned small blobs of `set` as frames, grouped and
+    /// ordered (Exp1 V2). Returns the hashes written.
+    fn write_grouped(&self, g: &dyn Grouper, set: &HashSet<Hash>, opts: &GcOptions) -> Result<HashSet<Hash>> {
+        let keys = g.assign(self, set)?;
+        let thr = self.packs.config().chunk_threshold as u64;
+        let mut items: Vec<(&GroupKey, Hash)> = Vec::new();
+        for (h, k) in &keys {
+            if set.contains(h) && self.packs.chunks(h)?.is_none() && self.packs.size(h)? < thr {
+                items.push((k, *h));
+            }
+        }
+        items.sort();
+        let mut done = HashSet::new();
+        let mut i = 0;
+        while i < items.len() {
+            let group = &items[i].0.group;
+            let mut frame: Vec<Vec<u8>> = Vec::new();
+            let mut bytes = 0usize;
+            while i < items.len() && &items[i].0.group == group {
+                let d = self.packs.get(&items[i].1, None)?;
+                if !frame.is_empty() && bytes + d.len() > opts.frame_cap {
+                    break;
+                }
+                bytes += d.len();
+                frame.push(d);
+                done.insert(items[i].1);
+                i += 1;
+            }
+            let refs: Vec<&[u8]> = frame.iter().map(|v| v.as_slice()).collect();
+            self.packs.put_frame(&refs, opts.frame_level)?;
+        }
+        Ok(done)
     }
 }
 

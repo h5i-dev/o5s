@@ -385,3 +385,28 @@ fn v1_staging_files_are_still_recovered() {
     let s = open(d.path(), PackConfig::tiny());
     assert_eq!(s.get(&Hash::of(b"v1"), None).unwrap(), b"v1");
 }
+
+#[test]
+fn frames_roundtrip_and_survive_crash_recovery() {
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { pack_cap: 1 << 30, ..PackConfig::tiny() };
+    let members: Vec<Vec<u8>> = (0..20).map(|i| pseudo(100 + i * 30, i as u64)).collect();
+    let refs: Vec<&[u8]> = members.iter().map(|m| m.as_slice()).collect();
+    let hashes;
+    {
+        // Crash right after the frame write (no flush, no seal).
+        let f = Faults::crash_after(2); // open.create, frame.write
+        let s = PackStore::open_with_faults(d.path().join("staging"), backend(d.path()), cfg.clone(), f).unwrap();
+        hashes = s.put_frame(&refs, 19).unwrap();
+        for (h, m) in hashes.iter().zip(&members) {
+            assert_eq!(&s.get(h, None).unwrap(), m);
+        }
+        assert!(s.put(b"next write crashes").is_err());
+    }
+    let s = open(d.path(), cfg);
+    for (h, m) in hashes.iter().zip(&members) {
+        assert_eq!(&s.get(h, None).unwrap(), m, "frame member recovered from orphaned staging");
+        assert_eq!(s.size(h).unwrap(), m.len() as u64);
+    }
+    assert!(s.put_frame(&[&vec![0u8; 5000][..]], 3).is_err(), "members must be below the chunk threshold");
+}

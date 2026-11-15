@@ -46,7 +46,7 @@ proptest! {
                            cut in proptest::option::of(any::<usize>()),
                            use_valid in any::<bool>()) {
         let b = if use_valid {
-            let mut es = vec![IdxEntry { hash: Hash::of(b"a"), offset: 8, stored_len: 5, raw_len: 5, kind: Kind::Blob, codec: Codec::Raw }];
+            let mut es = vec![IdxEntry { hash: Hash::of(b"a"), offset: 8, stored_len: 5, raw_len: 5, kind: Kind::Blob, codec: Codec::Raw, frame: None }];
             mutate(encode_index(&mut es), &edits, cut)
         } else { raw };
         let _ = decode_index(&b);
@@ -96,5 +96,16 @@ proptest! {
         }
         let h = s.put(b"after").unwrap();
         prop_assert_eq!(s.get(&h, None).unwrap(), b"after");
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 2000, ..ProptestConfig::default() })]
+    #[test]
+    fn frame_decoder_total(raw in proptest::collection::vec(any::<u8>(), 0..400)) {
+        if let Ok(h) = parse_header(&raw) {
+            let _ = decode_frame_bodies(&h, &raw);
+        }
+        let _ = decode_frame_dir(&raw);
     }
 }
