@@ -172,12 +172,64 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/xet/{*rest}", axum::routing::any(crate::hf::xet_cas))
         .merge(api)
         .layer(middleware::from_fn_with_state(state.clone(), observe))
+        .layer(middleware::from_fn(close_if_body_unread))
         .with_state(state)
 }
 
 // ---------------------------------------------------------------------------
 // Middleware
 // ---------------------------------------------------------------------------
+
+/// A request body that records whether it was read to the end.
+struct Tracked {
+    inner: Body,
+    done: Arc<AtomicBool>,
+}
+
+impl http_body::Body for Tracked {
+    type Data = Bytes;
+    type Error = axum::Error;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<std::result::Result<http_body::Frame<Bytes>, axum::Error>>> {
+        let r = std::pin::Pin::new(&mut self.inner).poll_frame(cx);
+        if let std::task::Poll::Ready(None) = r {
+            self.done.store(true, Ordering::Release);
+        }
+        r
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+/// A handler that answers without reading the whole request body (an early rejection) leaves
+/// unread bytes on an HTTP/1 connection, so hyper closes it after the response. Say so with
+/// `Connection: close`, or a client may already be reusing the connection for its next
+/// request and see a reset (seen with reqwest, and with Go clients in OCI conformance).
+async fn close_if_body_unread(req: Request, next: Next) -> Response {
+    let h1 = matches!(req.version(), axum::http::Version::HTTP_10 | axum::http::Version::HTTP_11);
+    let has_body = req.headers().get(header::CONTENT_LENGTH).is_some_and(|v| v.as_bytes() != b"0")
+        || req.headers().contains_key(header::TRANSFER_ENCODING);
+    if !h1 || !has_body {
+        return next.run(req).await;
+    }
+    let done = Arc::new(AtomicBool::new(false));
+    let (parts, body) = req.into_parts();
+    let body = Body::new(Tracked { inner: body, done: done.clone() });
+    let mut resp = next.run(Request::from_parts(parts, body)).await;
+    if !done.load(Ordering::Acquire) {
+        resp.headers_mut().insert(header::CONNECTION, HeaderValue::from_static("close"));
+    }
+    resp
+}
 
 /// Records request count, latency and in-flight gauge.
 async fn observe(State(st): St, req: Request, next: Next) -> Response {

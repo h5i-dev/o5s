@@ -217,12 +217,12 @@ The contended run checks that no update is lost: the final version equals the nu
     - `git` claims `git/`: Git repos, the HF repos, and the `git/_oidmap`, `git/_lfs*` and `git/_xet` maps.
     - `oci` claims `oci/`.
     - `safetensors` is registered too, so repos configured by the CLI open in the server.
-  - Each front's `gc_tracer` takes a snapshot per GC run (`GitTracer`, `OciTracer`). `GitFront::group` is `GitGrouper`; it stays until the core's similarity-orderer hint API lands (docs/ORDERING.md).
+  - Each front's `gc_tracer` takes a snapshot per GC run (`GitTracer`, `OciTracer`). `GitFront::group` is `GitGrouper`, which since API v1.15 (merged) is a hint provider: the core's similarity orderer decides the layout, and Git's kind, path and time keys only break ties (docs/ORDERING.md). New fronts supply no hints.
   - GitState, OciState and HfState write through owned front handles. The fronts hold `Weak` references to them (no Arc cycle through the registry).
   - Server GC is `gc_with_fronts`, with provenance as the extra tracer.
   - Claims are now enforced by the core and not just by the `/v1` check: the plain repository refuses `git/` and `oci/` names. Global admins (`/v1` replace, delete, multi-update) and namespace admins (`set_rule`, e.g. immutable git tags) act through the owning front's handle. A multi-update spanning two fronts is refused.
   - Tests: `tests/fronts.rs`. The HF GC tests now use the real server GC path.
-  - Not done: `segmap` is not yet a re-export of `pico2peta_repo::idmap` (same format; the async wrappers stay here). That is a mechanical swap, left for later.
+  - `segmap` is now a re-export of `pico2peta_repo::idmap` (same on-disk format); the server keeps only an `AsyncMap` extension trait for its async handlers.
 - **PyPI front: DONE** (`crates/server/src/pypi.rs`, `tests/pypi.rs`).
   - Tested with real twine 6.1, pip 26 and uv 0.13:
     - upload; reader 403; identical re-upload OK; replacement 409;
@@ -250,7 +250,39 @@ The contended run checks that no update is lost: the final version equals the nu
   - The test needs network access to Maven Central and skips without it. The Maven distribution is at `/mnt/scratch/pico2peta/tools/maven` (sha512-verified 3.9.9).
 - The 401 for unauthenticated `/pypi/` and `/maven/` requests now carries a Basic challenge, as `/git/` already did: pip and Maven send credentials only after one.
 - **All Phase 3 (3) fronts are DONE:** HF (LFS + Xet upload), PyPI, npm, Maven, and OCI (conformance 73/0), each tested with its real client.
-- Next: Phase 3 (4), the comparison benchmarks against the specialist systems, in one batch per PLAN §6.5 (disk budget: clean up after each run). Then switch segmap to a re-export of `pico2peta_repo::idmap`.
+- **Phase 3 (4) harness: DONE** (`bench/fronts/`, `scripts/fronts-bench.sh`). It follows PLAN §6.5 with the real clients and local specialists:
+  - `git-daemon` 2.50.1 (extracted from the signed AL2023 rpm into tools/bin, since the system git has no daemon);
+  - CNCF Distribution 3.0.0 with crane 0.20.6 and oras 1.2.3;
+  - devpi-server 6.14.0, verdaccio 6.1.6, reposilite 3.5.19 and Maven 3.9.9.
+
+  Every binary was checksum- or signature-verified, and all of them live under `/mnt/scratch/pico2peta/tools`.
+  - **Batch status (2026-11-15): paused at the human's request** (implementation first; no batch until the human asks).
+    - Git front: ripgrep and jq ran completely. **redis: not run (stopped by the human; rerun in the final batch).** Its partial raw rows are in `/mnt/scratch/pico2peta/bench-fronts-results.jsonl` and are not a result.
+    - OCI, HF, PyPI, npm, Maven: not run (rerun in the final batch).
+    - Two findings from the partial redis rows, recorded as leads, not results:
+      - repeat pushes slow down (see "Requests for core");
+      - pico2peta's redis clone took ~370 s, against ~13 s for git daemon. The git front deltifies every served pack on the fly, in one thread; the clone path needs work on our side (a served-pack cache and/or parallel encoding).
+  - Smoke runs (one run each, not the measurement): the package proxies are at about parity, while throughput-bound transfers (Git push and clone, OCI, HF) are 1.7–2.6× the specialist. That matches the store's put/get pipeline throughput and is relayed to the core.
+  - Deviations from the §6.5 wording:
+    - PyPI timing uses pip (uv is covered functionally in `tests/pypi.rs`).
+    - Maven's "per file" is per artifact (`dependency:get -Dtransitive=false` fetches the jar, its pom and parent poms), and its one-fetch check is "hot requests cause no upstream fetch".
+- Segmap → idmap swap: DONE (see the Front API port above). The Git front no longer re-puts pushed objects whose oid is already mapped (it checks `ensure_live` first).
+- **Fix: connection reuse after early rejections (all routes).** A handler that answers before reading the request body (an auth or authz rejection, a bad digest...) leaves unread bytes, so hyper closes the HTTP/1 connection. A client reusing it saw EOF or a reset. This made OCI conformance flaky (4 of 15 runs failed on the merged tree, with `Put ...: EOF` cascading into later specs), and earlier the HF test.
+  - The middleware `close_if_body_unread` (api.rs) tracks whether the body was read to the end and, if not, answers HTTP/1.x with `Connection: close`. The per-handler workarounds are removed.
+  - Results: OCI conformance 15/15 runs at 73/0; test `early_rejection_closes_the_connection`.
+- **Git front clone path: about 2× faster.**
+  - Changes in `write_pack`:
+    - it works in windows of up to 256 objects / 64 MiB, and loading, delta encoding and zlib run in parallel across cores;
+    - base choice and pack offsets stay sequential, so the pack layout is deterministic;
+    - zlib level 3 → 1;
+    - the delta index uses an identity hasher instead of SipHash.
+  - Development check (not a benchmark result): 3 jq clones took 8.4 s before and 5.0 s after; git daemon takes ~0.84 s per clone.
+  - Remaining profile (perf, cpu-clock:u):
+    - ~40% is the core read path: zstd decompress ~24%, `ZSTD_createDCtx` per read ~3%, BLAKE3 verify ~8%, zero-filled output buffers ~6%. Reported under "Requests for core".
+    - 19% is `encode_delta`.
+    - The core's `Index::get` is 0.4%, so lookups are not the cost, as the core lead measured.
+  - Not done: a served-pack cache (it would double Git storage, so I'm not doing it without a decision).
+- Next: the PyPI/npm/Maven/HF follow-ups listed under each front.
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
@@ -315,6 +347,32 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **Large listings:** `list()` buffers all keys in memory. The trait returns a `Vec`, so a paginated or streaming list would need a trait change if a prefix grows to millions of keys.
 
 ## Requests for core
+- **Read path cost per object (2026-11-15, from a profile of the git front serving jq clones).** Every `get` of a small object pays:
+  - a fresh zstd decompression context (`ZSTD_createDCtx`, ~3% of server CPU);
+  - zero-filled output buffers (`memset`, ~6%);
+  - BLAKE3 verification (~8%);
+  - the decompression itself (~24%).
+
+  Ask: reuse a decompression context per thread, and decode into uninitialized or reused buffers. Verification is by design; noting its share only. Front-side work is reported separately (the delta encoder, now parallel).
+- **Bug (perf): repeat pushes into a large store get 6× slower** (2026-11-15, found by the §6.5 Git benchmark; cause not yet confirmed by a profile).
+  - Evidence, from `git push` of heads+tags into a fresh, empty repo name on the same server each run (`bench/fronts/git_bench.py`; results in `/mnt/scratch/pico2peta/bench-fronts-results.jsonl`; host load average ~1.1, so not contention):
+
+    | corpus | run 0 (store empty) | run 1 (all objects already stored) | run 2 | git daemon (each run) |
+    |---|---|---|---|---|
+    | ripgrep | 2.02 s | 1.26 s | 0.89 s | 0.6–0.8 s |
+    | jq | 2.28 s | 1.04 s | 0.91 s | 0.55–0.7 s |
+    | redis (~300k objects) | 31.6 s | **196.4 s** | **182.7 s** | 11.9–14.3 s |
+
+    Small repos get *faster* on repeat pushes, as dedup should make them. Redis, where every put is a dedup hit against a large index, gets 6× slower.
+  - **Correction to my first hypothesis** (relayed to the human as "`dedup_hit` → `refresh()` relists packs on every put once the index is 60 s old"): the code does not do that. `refresh()` sets `last_refresh` unconditionally at its end (`crates/pack/src/store.rs:666` @ b5872b5; its only early returns are errors). So `dedup_hit` (line 818) refreshes at most once per `DEDUP_REFRESH_INTERVAL` (60 s), roughly 3 times in a 190 s push. That is not the cause unless a single refresh is very expensive. It can be: a refresh that sees a changed condemned set or a removed pack rebuilds from all indexes (lines 559–564).
+  - The remaining suspect on the per-put path is `Index::get` (line 269). A hash that is not in the in-memory `map` at rank 0 falls through to the multi-index, and then to a **linear scan over every big (mmap) pack index not covered by it** (line 292). After a redis-sized first push, most objects may live in big indexes. A store-wide dedup hit would then cost O(number of big packs) binary searches per object, and a push does ~300k of them.
+  - Ask:
+    1. Profile a second push. Repro: start a server, push `bench-data/mirrors/redis.git` heads+tags to `git/a/r1`, then the same to `git/a/r2`; the second push is the slow one.
+    2. If `Index::get` dominates, keep the multi-index covering all big indexes (or build one on refresh).
+    3. Check whether `refresh()` took the rebuild branch during the push.
+
+    I can send a `perf` profile; I skipped it so as not to hold the bench lock longer.
+  - On the net side I'm also removing the redundant work: the Git front re-`put`s every pushed object even when its oid is already mapped. It will now skip the put (and the oid-map insert) for objects already in the map, after `ensure_live`.
 - **Byte-grouping pack codec (Phase 2 C): delivered by the core as record codec 2 (`GroupedZstd`, API v1.12).** Measured with `crates/weights/examples/bytegroup_measure.rs` under the bench lock, on real checkpoints. Two granularities are reported. *Per-block* means each 64 KiB block is grouped on its own, which is what the record codec does. *Tensor-grouped* means each whole tensor is grouped first, which is the possible object-level follow-up. My first report gave only the tensor-grouped numbers under a "64 KiB blocks" label; the core lead caught that.
 
   | data (zstd output, 64 KiB blocks) | per-block, L3 | per-block, L19 | tensor-grouped, L3 | tensor-grouped, L19 |

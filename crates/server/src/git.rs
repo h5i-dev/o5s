@@ -298,6 +298,14 @@ impl<'a> View<'a> {
         }
     }
 
+    /// Body length recorded in the oid map (`None` if unknown or added by this push).
+    pub(crate) fn body_len(&self, oid: &Oid) -> Result<Option<u64>> {
+        if self.extra.contains_key(oid) {
+            return Ok(None);
+        }
+        Ok(self.st.oidmap.get_in(&self.root, &key_of(oid))?.map(|v| v.aux & ((1 << 56) - 1)))
+    }
+
     /// Present, and safe to reference: `ensure_live` rewrites the object if GC
     /// has condemned its only copy (the client assumes the server has it).
     pub(crate) fn has(&self, oid: &Oid) -> Result<bool> {
@@ -698,10 +706,24 @@ fn index_pack(view: &mut View<'_>, file: &mut std::fs::File, pack_off: u64) -> R
                     let canon = canonical(kind, &body);
                     let oid = oid_of(&canon);
                     if !in_pack.contains(&oid) {
-                        let h = view.st.repo.put(&canon)?;
+                        // Already stored under this oid (a re-push, or a fork's objects): skip the
+                        // put and the oid-map entry. `ensure_live` rewrites it if GC condemned it.
+                        let known = match view.lookup(&oid)? {
+                            Some((k, h)) if k == kind && view.st.repo.ensure_live(&h)? => Some(h),
+                            _ => None,
+                        };
+                        let h = match known {
+                            Some(h) => h,
+                            None => {
+                                let h = view.st.repo.put(&canon)?;
+                                new_entries.push((
+                                    key_of(&oid),
+                                    Value { hash: h, aux: ((kind as u64) << 56) | body.len() as u64 },
+                                ));
+                                h
+                            }
+                        };
                         view.extra.insert(oid, (kind, h));
-                        new_entries
-                            .push((key_of(&oid), Value { hash: h, aux: ((kind as u64) << 56) | body.len() as u64 }));
                         needed.extend(refs_of(kind, &body)?);
                         in_pack.insert(oid);
                     }
@@ -788,8 +810,31 @@ fn resolve(
 // Pack writing (upload-pack)
 // ---------------------------------------------------------------------------
 
-/// A previously sent object usable as a delta base: (pack offset, body, chain depth).
-type SentBase = (u64, Arc<Vec<u8>>, u32);
+/// A previously sent object usable as a delta base: (its index in the pack, body, chain depth).
+type SentBase = (usize, Arc<Vec<u8>>, u32);
+
+/// Objects encoded together (in parallel) while writing a pack: at most this many...
+const SEND_WINDOW: usize = 256;
+/// ...and at most about this many body bytes.
+const SEND_WINDOW_BYTES: u64 = 64 << 20;
+
+/// `HashMap` hasher for keys that are already well-mixed `u64`s (delta block hashes).
+#[derive(Default)]
+struct IdHash(u64);
+
+impl std::hash::Hasher for IdHash {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, b: &[u8]) {
+        for &x in b {
+            self.0 = (self.0 << 8) ^ u64::from(x);
+        }
+    }
+    fn write_u64(&mut self, v: u64) {
+        self.0 = v;
+    }
+}
 
 const DELTA_BLOCK: usize = 16;
 /// Longest delta chain we emit (git's default `pack.depth` is 50).
@@ -859,7 +904,8 @@ pub fn encode_delta(base: &[u8], target: &[u8]) -> Vec<u8> {
         push_insert(&mut out, target);
         return out;
     }
-    let mut index: HashMap<u64, usize> = HashMap::with_capacity(base.len() / DELTA_BLOCK + 1);
+    let mut index: HashMap<u64, usize, std::hash::BuildHasherDefault<IdHash>> =
+        HashMap::with_capacity_and_hasher(base.len() / DELTA_BLOCK + 1, Default::default());
     let mut p = 0;
     while p + DELTA_BLOCK <= base.len() {
         index.entry(block_hash(&base[p..p + DELTA_BLOCK])).or_insert(p);
@@ -1503,6 +1549,39 @@ fn serve_upload(
     Ok(())
 }
 
+/// zlib for pack entries. Level 1: served packs are built per request, so speed wins over the
+/// last few percent of size.
+fn zlib(data: &[u8]) -> Result<Vec<u8>> {
+    let mut z = flate2::write::ZlibEncoder::new(Vec::with_capacity(data.len() / 2 + 64), flate2::Compression::new(1));
+    z.write_all(data)?;
+    Ok(z.finish()?)
+}
+
+/// `f(0..n)` on up to `workers` threads, results in order.
+fn par_map<T: Send>(n: usize, workers: usize, f: impl Fn(usize) -> Result<T> + Sync) -> Result<Vec<T>> {
+    if workers <= 1 || n < 8 {
+        return (0..n).map(&f).collect();
+    }
+    let per = n.div_ceil(workers);
+    let parts: Vec<Result<Vec<T>>> = std::thread::scope(|sc| {
+        let hs: Vec<_> = (0..n)
+            .step_by(per)
+            .map(|a| {
+                let f = &f;
+                sc.spawn(move || (a..(a + per).min(n)).map(f).collect::<Result<Vec<T>>>())
+            })
+            .collect();
+        hs.into_iter()
+            .map(|h| h.join().unwrap_or_else(|_| Err(Error::Corrupt("pack worker panicked".into()))))
+            .collect()
+    });
+    let mut out = Vec::with_capacity(n);
+    for p in parts {
+        out.extend(p?);
+    }
+    Ok(out)
+}
+
 /// Streams a pack of everything reachable from `wants` but not from `common`.
 fn write_pack(
     view: &View<'_>,
@@ -1536,44 +1615,49 @@ fn write_pack(
         }
         Ok(())
     };
-    // (kind, path) -> (pack offset, body, chain depth)
+    // (kind, path) -> the latest object at that path (the next version's delta base).
     let mut bases: HashMap<(Kind, String), SentBase> = HashMap::new();
     let mut base_bytes = 0usize;
     let mut deltas = 0usize;
-    let zlib = |data: &[u8]| -> Result<Vec<u8>> {
-        let mut z =
-            flate2::write::ZlibEncoder::new(Vec::with_capacity(data.len() / 2 + 64), flate2::Compression::new(3));
-        z.write_all(data)?;
-        Ok(z.finish()?)
-    };
-    for (oid, kind, path) in &objs {
-        let (k2, body) = view.load(oid)?.ok_or_else(|| Error::Corrupt(format!("object {} vanished", hex(oid))))?;
-        debug_assert_eq!(*kind, k2);
-        let body = Arc::new(body);
-        let key = (*kind, path.clone());
-        let deltable = matches!(kind, Kind::Blob | Kind::Tree) && body.len() >= 64 && body.len() <= MAX_DELTA_INPUT;
-        let mut entry: Option<(Vec<u8>, Vec<u8>, u32)> = None; // (header, data, depth)
-        if deltable
-            && !path.is_empty()
-            && let Some((boff, base, depth)) = bases.get(&key)
-            && *depth < MAX_SEND_DEPTH
-        {
-            let d = encode_delta(base, &body);
-            if d.len() < body.len() / 2 {
-                let mut eh = pack_entry_header(Kind::Commit, d.len()); // type patched below
-                eh[0] = (eh[0] & 0x8f) | (6 << 4);
-                eh.extend_from_slice(&ofs_encode(offset - boff));
-                entry = Some((eh, zlib(&d)?, depth + 1));
-                deltas += 1;
-            }
+    let mut offsets: Vec<u64> = Vec::with_capacity(objs.len());
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 8);
+    let mut start = 0;
+    while start < objs.len() {
+        // A window of objects, bounded by count and by (recorded) body bytes.
+        let mut end = start;
+        let mut bytes = 0u64;
+        while end < objs.len() && end - start < SEND_WINDOW && (end == start || bytes < SEND_WINDOW_BYTES) {
+            bytes += view.body_len(&objs[end].0)?.unwrap_or(0);
+            end += 1;
         }
-        let (eh, data, depth) = match entry {
-            Some(e) => e,
-            None => (pack_entry_header(*kind, body.len()), zlib(&body)?, 0),
-        };
-        if deltable && !path.is_empty() {
+        let win = &objs[start..end];
+        // 1. Load the bodies (parallel).
+        let bodies: Vec<Arc<Vec<u8>>> = par_map(win.len(), workers, |j| {
+            let (oid, kind, _) = &win[j];
+            let (k2, body) = view.load(oid)?.ok_or_else(|| Error::Corrupt(format!("object {} vanished", hex(oid))))?;
+            if k2 != *kind {
+                return Err(Error::Corrupt(format!("object {} changed kind", hex(oid))));
+            }
+            Ok(Arc::new(body))
+        })?;
+        // 2. Pick delta bases: the previous object at the same path (sequential, cheap). Depth is
+        //    predicted as if every delta is taken; a rejected delta only shortens a chain.
+        let mut plan: Vec<Option<(usize, Arc<Vec<u8>>)>> = Vec::with_capacity(win.len());
+        for (j, (_, kind, path)) in win.iter().enumerate() {
+            let body = &bodies[j];
+            let deltable = matches!(kind, Kind::Blob | Kind::Tree) && body.len() >= 64 && body.len() <= MAX_DELTA_INPUT;
+            if !deltable || path.is_empty() {
+                plan.push(None);
+                continue;
+            }
+            let key = (*kind, path.clone());
+            let (base, depth) = match bases.get(&key) {
+                Some((bi, bb, bd)) if *bd < MAX_SEND_DEPTH => (Some((*bi, bb.clone())), bd + 1),
+                _ => (None, 0),
+            };
+            plan.push(base);
             let add = body.len();
-            let prev = bases.insert(key, (offset, body, depth));
+            let prev = bases.insert(key, (start + j, body.clone(), depth));
             base_bytes = base_bytes + add - prev.map_or(0, |p| p.1.len());
             if base_bytes > SEND_BASE_CACHE {
                 // Over budget: stop remembering new bases (existing ones keep working).
@@ -1581,12 +1665,40 @@ fn write_pack(
                 base_bytes = bases.values().map(|v| v.1.len()).sum();
             }
         }
-        h.update(&eh);
-        h.update(&data);
-        offset += (eh.len() + data.len()) as u64;
-        buf.extend_from_slice(&eh);
-        buf.extend_from_slice(&data);
-        flush(&mut buf, false)?;
+        // 3. Delta-encode and compress (parallel).
+        let encoded: Vec<(Option<usize>, Vec<u8>, usize)> = par_map(win.len(), workers, |j| {
+            let body = &bodies[j];
+            if let Some((bi, bb)) = &plan[j] {
+                let d = encode_delta(bb, body);
+                if d.len() < body.len() / 2 {
+                    return Ok((Some(*bi), zlib(&d)?, d.len()));
+                }
+            }
+            Ok((None, zlib(body)?, body.len()))
+        })?;
+        drop(plan);
+        drop(bodies);
+        // 4. Write in order.
+        for (j, (base, data, raw)) in encoded.into_iter().enumerate() {
+            let eh = match base {
+                Some(bi) => {
+                    deltas += 1;
+                    let mut eh = pack_entry_header(Kind::Commit, raw); // type patched below
+                    eh[0] = (eh[0] & 0x8f) | (6 << 4);
+                    eh.extend_from_slice(&ofs_encode(offset - offsets[bi]));
+                    eh
+                }
+                None => pack_entry_header(win[j].1, raw),
+            };
+            offsets.push(offset);
+            h.update(&eh);
+            h.update(&data);
+            offset += (eh.len() + data.len()) as u64;
+            buf.extend_from_slice(&eh);
+            buf.extend_from_slice(&data);
+            flush(&mut buf, false)?;
+        }
+        start = end;
     }
     let trailer: [u8; 20] = h.finalize().into();
     buf.extend_from_slice(&trailer);
@@ -1872,7 +1984,10 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
 // Grouped repack hints
 // ---------------------------------------------------------------------------
 
-/// `pico2peta_repo::Grouper` for git content (the Experiment 1 V2 layout):
+/// Ordering **hints** for git content (`pico2peta_repo::Grouper`; docs/ORDERING.md). Since API
+/// v1.15 the core orders every small live object by content similarity itself; these keys only
+/// break ties between equally similar objects, and objects without a key are ordered too.
+/// The keys are the Experiment 1 V2 layout:
 /// * blobs: group `blob:<ext>` (or `blob:<basename>` without an extension),
 ///   ordered by path, then the time of the oldest commit that contains them;
 /// * trees: group `tree`, ordered by directory path, then time;

@@ -27,7 +27,7 @@ use crate::api::{AppState, Caller, IDLE_TIMEOUT, Unsatisfiable, parse_range, str
 use crate::audit::Event;
 use crate::auth::Principal;
 use crate::config::Access;
-use crate::segmap::{Key, SegCache, SegMap, Value};
+use crate::segmap::{AsyncMap, Key, SegCache, SegMap, Value};
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};

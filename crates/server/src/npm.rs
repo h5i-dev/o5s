@@ -210,7 +210,7 @@ fn check(st: &AppState, p: &Principal, c: &Caller, reg: &str, need: Access) -> s
         detail: None,
         remote: c.remote.clone(),
     });
-    let mut r = if p.name == crate::auth::ANONYMOUS {
+    let r = if p.name == crate::auth::ANONYMOUS {
         npm_err(StatusCode::UNAUTHORIZED, "authentication required")
     } else {
         npm_err(
@@ -218,7 +218,6 @@ fn check(st: &AppState, p: &Principal, c: &Caller, reg: &str, need: Access) -> s
             format!("{} may not {} {ns}", p.name, if need == Access::Read { "read" } else { "write" }),
         )
     };
-    r.headers_mut().insert(header::CONNECTION, HeaderValue::from_static("close"));
     Err(r)
 }
 
@@ -663,6 +662,7 @@ async fn fetch_upstream(
             return Err(npm_err(StatusCode::BAD_GATEWAY, format!("upstream: {e}")));
         }
     };
+    st.metrics.upstream_fetches.get_or_create(&crate::metrics::FrontLabels { front: "npm".into() }).inc();
     let ns = Name::new(format!("npm/{reg}/{}", pkg.seg())).map_err(core_err)?;
     let x = npm.store.put_stream(ns, Box::pin(resp.bytes_stream()), st.max_upload_bytes).await?;
     verify_integrity(&x, man["dist"]["integrity"].as_str(), man["dist"]["shasum"].as_str())
