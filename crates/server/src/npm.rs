@@ -531,6 +531,7 @@ fn verify_integrity(
     if checked { Ok(()) } else { Err("no integrity or shasum to verify against".into()) }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn publish(
     st: &Arc<AppState>,
     npm: &Arc<NpmState>,
