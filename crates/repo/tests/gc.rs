@@ -198,3 +198,59 @@ fn ensure_live_rewrites_condemned_only_objects() {
     assert_eq!(fresh.get(&small, None).unwrap(), b"old layer, unreferenced");
     assert_eq!(fresh.get(&big, None).unwrap(), big_data);
 }
+
+struct OneFile(Vec<Hash>);
+impl pico2peta_repo::Grouper for OneFile {
+    fn assign(
+        &self,
+        _: &dyn Repository,
+        live: &std::collections::HashSet<Hash>,
+    ) -> pico2peta_core::Result<std::collections::HashMap<Hash, pico2peta_repo::GroupKey>> {
+        Ok(self
+            .0
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| live.contains(h))
+            .map(|(i, h)| (*h, pico2peta_repo::GroupKey { group: "file.rs".into(), order: format!("{i:06}") }))
+            .collect())
+    }
+}
+
+/// Exp1-V2 in production: 60 versions of one file, each a small edit of the
+/// last, stored individually and then regrouped into frames by GC.
+#[test]
+fn grouped_repack_shrinks_versioned_history() {
+    let d = tempfile::tempdir().unwrap();
+    let r = LocalRepo::init(d.path(), &PackConfig { pack_cap: 1 << 20, ..PackConfig::tiny() }).unwrap();
+    let mut text = blob(1, 1500);
+    let mut versions = Vec::new();
+    for v in 0..60u32 {
+        let at = (v as usize * 37) % 1400;
+        text[at..at + 8].copy_from_slice(&v.to_le_bytes().repeat(2));
+        let h = r.put(&text).unwrap();
+        set(&r, &format!("v/{v}"), h);
+        versions.push((h, text.clone()));
+    }
+    r.flush().unwrap();
+    let before = walk(&d.path().join("objects"));
+    let g = OneFile(versions.iter().map(|v| v.0).collect());
+    let o = GcOptions { repack_all: true, ..opts() };
+    for _ in 0..3 {
+        r.gc_with(&o, &OpaqueObjects, Some(&g)).unwrap();
+    }
+    let after = walk(&d.path().join("objects"));
+    assert!(after * 3 < before, "grouped frames should compress versions together: {before} -> {after}");
+    let fresh = LocalRepo::open(d.path()).unwrap();
+    for (h, data) in &versions {
+        assert_eq!(&fresh.get(h, None).unwrap(), data);
+        assert_eq!(fresh.get(h, Some(10..20)).unwrap(), &data[10..20]);
+    }
+    // Copying a framed member out again (another GC cycle) works too.
+    for _ in 0..3 {
+        r.gc(&GcOptions { repack_all: true, ..opts() }, &OpaqueObjects).unwrap();
+    }
+    let fresh = LocalRepo::open(d.path()).unwrap();
+    for (h, data) in &versions {
+        assert_eq!(&fresh.get(h, None).unwrap(), data);
+    }
+}

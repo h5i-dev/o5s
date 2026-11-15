@@ -138,6 +138,7 @@ impl GcSection {
             min_garbage_ratio: self.min_garbage_ratio,
             small_pack_bytes: self.small_pack_bytes,
             dry_run,
+            ..Default::default()
         }
     }
 }

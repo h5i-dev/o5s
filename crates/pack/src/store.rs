@@ -125,6 +125,8 @@ struct Loc {
     stored_len: u32,
     raw_len: u64,
     kind: Kind,
+    /// `(inner offset, frame length)` when the object lives in a frame record.
+    frame: Option<(u32, u32)>,
 }
 
 /// Summary counters.
@@ -195,7 +197,14 @@ struct Inner {
     writer: Mutex<Option<OpenPack>>,
     generation: AtomicU64,
     dedup_refresh_ms: AtomicU64,
+    /// Recently decompressed frames: `((frame hash, record offset), bodies)`.
+    frame_cache: Mutex<Vec<FrameCacheEntry>>,
 }
+
+type FrameCacheEntry = ((Hash, u64), Arc<Vec<u8>>);
+
+/// Frames kept decompressed per handle (at most ~4 MiB each by default).
+const FRAME_CACHE: usize = 8;
 
 impl Inner {
     fn fault(&self, point: &'static str) -> Result<()> {
@@ -276,6 +285,7 @@ impl PackStore {
                 writer: Mutex::new(None),
                 generation: AtomicU64::new(1),
                 dedup_refresh_ms: AtomicU64::new(DEDUP_REFRESH_INTERVAL.as_millis() as u64),
+                frame_cache: Mutex::new(Vec::new()),
             }),
         };
         s.refresh()?;
@@ -384,6 +394,7 @@ impl PackStore {
                     stored_len: e.stored_len,
                     raw_len: e.raw_len,
                     kind: e.kind,
+                    frame: e.frame,
                 };
                 insert_loc(&mut idx, e.hash, loc);
             }
@@ -466,17 +477,32 @@ impl PackStore {
                 }
                 let mut rec = vec![0u8; h.total_len() as usize];
                 f.read_exact_at(&mut rec, good)?;
-                if decode_record(&rec).is_err() {
-                    break;
+                let Ok((_, payload)) = decode_record(&rec) else { break };
+                if h.kind == Kind::Frame {
+                    // A CRC-valid frame with a bad directory is corruption, not a torn tail.
+                    let (members, _) = decode_frame_dir(payload)?;
+                    for (mh, inner, mlen) in members {
+                        entries.push(IdxEntry {
+                            hash: mh,
+                            offset: good,
+                            stored_len: h.stored_len,
+                            raw_len: mlen as u64,
+                            kind: Kind::Blob,
+                            codec: h.codec,
+                            frame: Some((inner, h.raw_len as u32)),
+                        });
+                    }
+                } else {
+                    entries.push(IdxEntry {
+                        hash: h.hash,
+                        offset: good,
+                        stored_len: h.stored_len,
+                        raw_len: h.raw_len,
+                        kind: h.kind,
+                        codec: h.codec,
+                        frame: None,
+                    });
                 }
-                entries.push(IdxEntry {
-                    hash: h.hash,
-                    offset: good,
-                    stored_len: h.stored_len,
-                    raw_len: h.raw_len,
-                    kind: h.kind,
-                    codec: h.codec,
-                });
                 good += h.total_len();
             }
         }
@@ -538,8 +564,8 @@ impl PackStore {
         op.file.write_all_at(&rec, offset)?;
         op.len += rec.len() as u64;
         let stored_len = payload.len() as u32;
-        op.entries.push(IdxEntry { hash, offset, stored_len, raw_len, kind, codec });
-        let loc = Loc { pack: PackRef::Open(op.generation), offset, stored_len, raw_len, kind };
+        op.entries.push(IdxEntry { hash, offset, stored_len, raw_len, kind, codec, frame: None });
+        let loc = Loc { pack: PackRef::Open(op.generation), offset, stored_len, raw_len, kind, frame: None };
         insert_loc(&mut *self.inner.index.write().map_err(poisoned)?, hash, loc);
         Ok(())
     }
@@ -575,6 +601,7 @@ impl PackStore {
                 stored_len: e.stored_len,
                 raw_len: e.raw_len,
                 kind: e.kind,
+                frame: e.frame,
             };
             match idx.map.get(&e.hash) {
                 Some(Loc { pack: PackRef::Open(g), .. }) if *g == generation => {
@@ -611,7 +638,7 @@ impl PackStore {
 
     /// Reads the raw bytes of `hash`'s record (CRC verified), following
     /// relocations caused by seals and GC.
-    fn read_raw(&self, hash: &Hash, mut loc: Loc) -> Result<(RecHeader, Vec<u8>)> {
+    fn read_raw(&self, hash: &Hash, mut loc: Loc) -> Result<(RecHeader, Vec<u8>, Loc)> {
         for _ in 0..4 {
             let total = (REC_HEADER + loc.stored_len as usize + REC_TRAILER) as u64;
             let raw = match loc.pack {
@@ -648,18 +675,44 @@ impl PackStore {
                 }
             };
             let (h, _) = decode_record(&raw)?;
-            if h.hash != *hash {
+            let framed = loc.frame.is_some();
+            if framed != (h.kind == Kind::Frame) || (!framed && h.hash != *hash) {
                 return Err(Error::Corrupt(format!("record at index location holds {} not {hash}", h.hash)));
             }
-            return Ok((h, raw));
+            return Ok((h, raw, loc));
         }
         Err(Error::Corrupt(format!("could not resolve location of {hash}")))
     }
 
     fn read_record(&self, hash: &Hash, loc: Loc) -> Result<(RecHeader, Vec<u8>)> {
-        let (h, raw) = self.read_raw(hash, loc)?;
+        let (h, raw, loc) = self.read_raw(hash, loc)?;
         let (_, payload) = decode_record(&raw)?;
+        if let Some((inner, _)) = loc.frame {
+            let bodies = self.frame_bodies(&h, payload, &loc)?;
+            let (a, b) = (inner as usize, inner as usize + loc.raw_len as usize);
+            let d = bodies.get(a..b).ok_or_else(|| Error::Corrupt(format!("frame member {hash} out of range")))?;
+            return Ok((h, d.to_vec()));
+        }
         Ok((h, unpack_payload(&h, payload)?))
+    }
+
+    /// Decompressed frame bodies, through a small cache (recently used
+    /// frames). Sequential reads of grouped objects then decompress each frame once.
+    fn frame_bodies(&self, h: &RecHeader, payload: &[u8], loc: &Loc) -> Result<Arc<Vec<u8>>> {
+        let key = (h.hash, loc.offset);
+        {
+            let c = self.inner.frame_cache.lock().map_err(poisoned)?;
+            if let Some((_, v)) = c.iter().find(|(k, _)| *k == key) {
+                return Ok(v.clone());
+            }
+        }
+        let v = Arc::new(decode_frame_bodies(h, payload)?);
+        let mut c = self.inner.frame_cache.lock().map_err(poisoned)?;
+        if c.len() >= FRAME_CACHE {
+            c.remove(0);
+        }
+        c.push((key, v.clone()));
+        Ok(v)
     }
 
     fn read_blob(&self, hash: &Hash, loc: Loc) -> Result<Vec<u8>> {
@@ -778,6 +831,7 @@ impl PackStore {
         };
         for l in idx.map.values() {
             match l.kind {
+                Kind::Frame => {}
                 Kind::Blob => {
                     s.blobs += 1;
                     s.logical_blob_bytes += l.raw_len;
@@ -836,6 +890,7 @@ impl PackStore {
         match loc.kind {
             Kind::Blob => Ok(None),
             Kind::Manifest => Ok(Some(self.read_manifest(hash, loc)?.into_iter().map(|c| c.0).collect())),
+            Kind::Frame => Err(Error::Corrupt("frame record indexed as an object".into())),
         }
     }
 
@@ -844,7 +899,15 @@ impl PackStore {
     /// of a manifest aren't copied, so callers copy every live hash themselves.
     pub fn copy_record(&self, hash: &Hash) -> Result<()> {
         let loc = self.lookup(hash)?.ok_or(Error::NotFound(*hash))?;
-        let (h, raw) = self.read_raw(hash, loc)?;
+        if loc.frame.is_some() {
+            // A framed member is copied out as a plain blob record.
+            let data = self.read_blob(hash, loc)?;
+            let mut w = self.inner.writer.lock().map_err(poisoned)?;
+            self.inner.faults.hit("copy.write")?;
+            self.append(&mut w, Kind::Blob, *hash, data.len() as u64, &data)?;
+            return self.maybe_seal(&mut w);
+        }
+        let (h, raw, _) = self.read_raw(hash, loc)?;
         let mut w = self.inner.writer.lock().map_err(poisoned)?;
         if w.is_none() {
             *w = Some(self.new_open_pack()?);
@@ -861,6 +924,7 @@ impl PackStore {
             raw_len: h.raw_len,
             kind: h.kind,
             codec: h.codec,
+            frame: None,
         });
         let l = Loc {
             pack: PackRef::Open(op.generation),
@@ -868,9 +932,62 @@ impl PackStore {
             stored_len: h.stored_len,
             raw_len: h.raw_len,
             kind: h.kind,
+            frame: None,
         };
         insert_loc(&mut *self.inner.index.write().map_err(poisoned)?, h.hash, l);
         self.maybe_seal(&mut w)
+    }
+
+    /// Writes `members` as one frame record compressed together at `level`.
+    /// This is the similarity-grouped layout of Experiment 1 (V2): callers pass
+    /// related objects in a meaningful order. Members are always written, even
+    /// if a copy already exists elsewhere (repack relies on this). Durable on flush.
+    pub fn put_frame(&self, members: &[&[u8]], level: i32) -> Result<Vec<Hash>> {
+        if members.iter().any(|m| m.len() >= self.inner.cfg.chunk_threshold) {
+            return Err(Error::Parse("frame members must be smaller than the chunk threshold".into()));
+        }
+        let with_hash: Vec<(Hash, &[u8])> = members.iter().map(|m| (Hash::of(m), *m)).collect();
+        let (codec, payload, fh, raw_len) = encode_frame(&with_hash, level)?;
+        let rec = encode_record(Kind::Frame, codec, &fh, raw_len, &payload);
+        let mut w = self.inner.writer.lock().map_err(poisoned)?;
+        if w.is_none() {
+            *w = Some(self.new_open_pack()?);
+        }
+        let op = w.as_mut().ok_or_else(|| Error::Corrupt("no open pack".into()))?;
+        let offset = op.len;
+        if let Err(e) = self.inner.faults.hit("frame.write") {
+            let _ = op.file.write_all_at(&rec[..rec.len() / 2], offset);
+            return Err(e.into());
+        }
+        op.file.write_all_at(&rec, offset)?;
+        op.len += rec.len() as u64;
+        let stored_len = payload.len() as u32;
+        let (dir, _) = decode_frame_dir(&payload)?;
+        let mut idx = self.inner.index.write().map_err(poisoned)?;
+        for (mh, inner, mlen) in dir {
+            let frame = Some((inner, raw_len as u32));
+            op.entries.push(IdxEntry {
+                hash: mh,
+                offset,
+                stored_len,
+                raw_len: mlen as u64,
+                kind: Kind::Blob,
+                codec,
+                frame,
+            });
+            let l = Loc {
+                pack: PackRef::Open(op.generation),
+                offset,
+                stored_len,
+                raw_len: mlen as u64,
+                kind: Kind::Blob,
+                frame,
+            };
+            insert_loc(&mut idx, mh, l);
+        }
+        drop(idx);
+        self.maybe_seal(&mut w)?;
+        Ok(with_hash.into_iter().map(|(h, _)| h).collect())
     }
 
     /// See [`ObjectStore::ensure_live`]. Walks manifest trees, so cost is
@@ -965,6 +1082,7 @@ impl ObjectStore for PackStore {
         let whole = range.is_none();
         let r = check_range(range, loc.raw_len)?;
         match loc.kind {
+            Kind::Frame => Err(Error::Corrupt("frame record indexed as an object".into())),
             Kind::Blob => {
                 let d = self.read_blob(hash, loc)?;
                 Ok(Box::new(std::io::Cursor::new(d[r.start as usize..r.end as usize].to_vec())))
@@ -1094,6 +1212,7 @@ impl Read for ChunkReader {
                 .map_err(io_err)?
                 .ok_or_else(|| io_err(Error::Corrupt(format!("missing chunk {h}"))))?;
             match loc.kind {
+                Kind::Frame => return Err(io_err(Error::Corrupt("frame record indexed as an object".into()))),
                 Kind::Manifest => {
                     if self.stack.len() >= self.depth_limit {
                         return Err(io_err(Error::Corrupt("manifest tree too deep".into())));
