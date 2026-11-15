@@ -457,7 +457,67 @@ fn group_align(path: &str, level: i32) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
+/// `p2p-bench small <dir> [n]`: n × 1 KiB distinct puts then one flush, and n
+/// random gets (warm), single thread, plus 4-thread puts and gets.
+fn small(dir: &str, n: usize) -> Result<(), Box<dyn std::error::Error>> {
+    let root = std::path::Path::new(dir).join(format!("small-{}", std::process::id()));
+    let repo = LocalRepo::init(&root, &PackConfig::default())?;
+    let objs: Vec<Vec<u8>> = (0..n).map(|i| bytes(i as u64 + 1, 1024)).collect();
+    let t = Instant::now();
+    let hashes: Vec<_> = objs.iter().map(|o| repo.put(o)).collect::<Result<_, _>>()?;
+    repo.flush()?;
+    let put1 = n as f64 / t.elapsed().as_secs_f64();
+    let mut x = 88172645463325252u64;
+    let t = Instant::now();
+    for _ in 0..n {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        let h = &hashes[(x % n as u64) as usize];
+        let _ = repo.get(h, None)?;
+    }
+    let get1 = n as f64 / t.elapsed().as_secs_f64();
+    // 4 threads: distinct objects per thread.
+    let objs4: Vec<Vec<u8>> = (0..n).map(|i| bytes(10_000_000 + i as u64, 1024)).collect();
+    let t = Instant::now();
+    std::thread::scope(|sc| {
+        for part in objs4.chunks(n.div_ceil(4)) {
+            let repo = &repo;
+            sc.spawn(move || part.iter().for_each(|o| drop(repo.put(o))));
+        }
+    });
+    repo.flush()?;
+    let put4 = n as f64 / t.elapsed().as_secs_f64();
+    let t = Instant::now();
+    std::thread::scope(|sc| {
+        for k in 0..4u64 {
+            let (repo, hashes) = (&repo, &hashes);
+            sc.spawn(move || {
+                let mut x = 0x9e3779b97f4a7c15u64 ^ k;
+                for _ in 0..n / 4 {
+                    x ^= x << 13;
+                    x ^= x >> 7;
+                    x ^= x << 17;
+                    let _ = repo.get(&hashes[(x % n as u64) as usize], None);
+                }
+            });
+        }
+    });
+    let get4 = n as f64 / t.elapsed().as_secs_f64();
+    println!("| 1 KiB objects (n = {n}) | 1 thread | 4 threads |");
+    println!("|---|---|---|");
+    println!("| put (+ flush) | {:.1}k/s | {:.1}k/s |", put1 / 1e3, put4 / 1e3);
+    println!("| get (warm, random) | {:.1}k/s | {:.1}k/s |", get1 / 1e3, get4 / 1e3);
+    std::fs::remove_dir_all(&root)?;
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("small") {
+        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench small <dir> [n]")?;
+        let n = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(100_000);
+        return small(&dir, n);
+    }
     if std::env::args().nth(1).as_deref() == Some("group-align") {
         let f = std::env::args().nth(2).ok_or("usage: p2p-bench group-align <safetensors> <level>")?;
         let level = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(6);
