@@ -66,6 +66,36 @@ Notes:
 - `[gc]` should run on one server only. GC is safe with concurrent writers, but parallel GC runs only duplicate work.
 - An object put on one server becomes visible to the others once it is flushed (any `replace` does that).
 
+## Fronts and proxy-caches
+
+All fronts are on by default and share one store, one token set, one policy and one audit log. Each is authorized on its own namespace: `git/<repo>`, `git/hf/<type>s/<ns>/<name>` (HF), `oci/<repo>`, `pypi/<index>`, `npm/<registry>` and `maven/<repo>`. Any `[git]`, `[oci]`, `[hf]`, `[pypi]`, `[npm]` or `[maven]` front can be turned off with `enabled = false`.
+
+To make an index a cache of a public registry, give it an upstream:
+
+```toml
+[pypi.upstream.pypi]            # https://host/pypi/pypi/simple/
+url = "https://pypi.org/simple"
+
+[npm.upstream.npmjs]            # registry=https://host/npm/npmjs/
+url = "https://registry.npmjs.org"
+
+[maven.upstream.central]        # mirror URL https://host/maven/central
+url = "https://repo.maven.apache.org/maven2"
+# token = "..."                 # bearer token for a private upstream
+# ttl_secs = 600                # how long fetched listings or metadata are reused
+```
+
+- Proxied files are verified against the upstream's checksums (sha256, npm integrity, Maven `.sha1`) and stored once. After that they are served from the store, including when the upstream is down. `p2p_upstream_fetches_total{front}` counts upstream file fetches.
+- Uploads to a proxied index are allowed and take precedence over the upstream's files.
+- For HF repos, configure the Xet chunker on their content in the repo's `config.toml`, so that Xet uploads and the rebuilt files dedup chunk for chunk:
+
+```toml
+[profiles.hf]
+chunker = "xet"
+[namespaces]
+"hf/" = "hf"
+```
+
 ## Observability
 - `GET /healthz` is liveness (the process is up). `GET /readyz` is readiness: it is 503 while draining, after an audit-log failure, or when the repository is unreachable. Neither needs credentials.
 - `GET /metrics` serves OpenMetrics text with no credentials. Set `server.metrics_listen` to a private address so it is served only there (the API port then returns 404 for it), or restrict it at the proxy or firewall. Key series:
