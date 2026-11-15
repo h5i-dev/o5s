@@ -50,7 +50,7 @@
 //! [gc]
 //! interval_secs = 0                  # background GC period; 0 = off
 //! grace_secs = 3600                  # >= 600; also the put->replace lease
-//! grouped = false                    # opt-in similarity-grouped repack (EXP1 did not pass)
+//! # grouped = true                   # deprecated: the repo's [gc] similarity_repack decides (default true)
 //! repack_all = false                 # regroup fully-live packs too (aggressive)
 //!
 //! [log]
@@ -269,10 +269,10 @@ pub struct GcSection {
     pub grace_secs: u64,
     pub min_garbage_ratio: f64,
     pub small_pack_bytes: u64,
-    /// Similarity-grouped repack of git content (Experiment 1 V2 layout).
-    /// Off by default: Experiment 1 failed its pre-registered thresholds
-    /// (redis 1.336x git --aggressive > 1.30), see docs/EXP1.md.
-    pub grouped: bool,
+    /// Deprecated override of the repository's `[gc] similarity_repack` (in the repo's
+    /// config.toml, default true since Experiment 3). Unset = the repository decides.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grouped: Option<bool>,
     /// Regroup even fully-live packs (like `git gc --aggressive`). Expensive.
     pub repack_all: bool,
 }
@@ -285,25 +285,33 @@ impl Default for GcSection {
             grace_secs: d.grace.as_secs(),
             min_garbage_ratio: d.min_garbage_ratio,
             small_pack_bytes: d.small_pack_bytes,
-            grouped: false,
+            grouped: None,
             repack_all: false,
         }
     }
 }
 
 impl GcSection {
-    pub fn options_with(&self, dry_run: bool, repack_all: bool) -> pico2peta_repo::GcOptions {
-        pico2peta_repo::GcOptions { repack_all: repack_all || self.repack_all, ..self.options(dry_run) }
+    /// GC options: the repository's defaults (`LocalRepo::gc_options`, e.g. similarity repack)
+    /// with the server's schedule-related settings on top.
+    pub fn options_with(
+        &self,
+        base: pico2peta_repo::GcOptions,
+        dry_run: bool,
+        repack_all: bool,
+    ) -> pico2peta_repo::GcOptions {
+        pico2peta_repo::GcOptions { repack_all: repack_all || self.repack_all, ..self.options(base, dry_run) }
     }
 
-    pub fn options(&self, dry_run: bool) -> pico2peta_repo::GcOptions {
+    pub fn options(&self, base: pico2peta_repo::GcOptions, dry_run: bool) -> pico2peta_repo::GcOptions {
         pico2peta_repo::GcOptions {
             grace: std::time::Duration::from_secs(self.grace_secs),
             allow_short_grace: false,
             min_garbage_ratio: self.min_garbage_ratio,
             small_pack_bytes: self.small_pack_bytes,
+            similarity_repack: self.grouped.unwrap_or(base.similarity_repack),
             dry_run,
-            ..Default::default()
+            ..base
         }
     }
 }

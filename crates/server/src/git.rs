@@ -154,6 +154,9 @@ impl PackHasher {
 const AGENT: &str = "agent=pico2peta/0.1";
 /// Budget for resolved delta bases kept in memory while indexing a pack.
 const DELTA_CACHE_BYTES: usize = 256 << 20;
+/// Canonical object bytes kept while indexing a pushed pack, until the batched "already
+/// stored?" lookup; objects beyond it are re-resolved if they turn out to be new.
+const KEEP_CANON_BYTES: usize = 256 << 20;
 /// Largest single object accepted in a push.
 const MAX_OBJECT: usize = 1 << 30;
 const MAX_DELTA_DEPTH: usize = 10_000;
@@ -417,6 +420,13 @@ pub(crate) struct View<'a> {
     pub(crate) fmt: Fmt,
 }
 
+/// A looked-up object: kind, stored object, recorded body length (`None` for this push's).
+pub(crate) type Located = (Kind, Hash, Option<u64>);
+/// A unique object of a received pack: (entry, kind, oid, body length, canonical bytes if kept).
+type PackObj = (usize, Kind, Oid, usize, Option<Vec<u8>>);
+/// One looked-up object of a walk wave: (oid, path, kind, stored object, body length).
+type WaveItem = (Oid, String, Kind, Hash, Option<u64>);
+
 impl<'a> View<'a> {
     pub(crate) fn new(st: &'a GitState) -> Result<View<'a>> {
         Ok(View { st, root: st.oidmap.root_blocking()?.1, extra: HashMap::new(), fmt: Fmt::Sha1 })
@@ -447,26 +457,41 @@ impl<'a> View<'a> {
         }
     }
 
-    /// Body length recorded in the oid map (`None` if unknown or added by this push).
-    pub(crate) fn body_len(&self, oid: &Oid) -> Result<Option<u64>> {
-        if self.extra.contains_key(oid) {
-            return Ok(None);
-        }
-        Ok(self.st.oidmap.get_in(&self.root, &key_of(oid))?.map(|v| v.aux & ((1 << 56) - 1)))
+    /// [`Self::lookup`] for many oids with one batched oid-map query (results in input order).
+    pub(crate) fn lookup_many(&self, oids: &[Oid]) -> Result<Vec<Option<(Kind, Hash)>>> {
+        Ok(self.lookup_many_len(oids)?.into_iter().map(|x| x.map(|(k, h, _)| (k, h))).collect())
     }
 
-    /// Present, and safe to reference: `ensure_live` rewrites the object if GC
-    /// has condemned its only copy (the client assumes the server has it).
-    pub(crate) fn has(&self, oid: &Oid) -> Result<bool> {
-        Ok(match self.lookup(oid)? {
-            Some((_, h)) => self.extra.contains_key(oid) || self.st.repo.ensure_live(&h)?,
-            None => false,
-        })
+    /// [`Self::lookup_many`] plus the recorded body length (`None` for objects of this push).
+    pub(crate) fn lookup_many_len(&self, oids: &[Oid]) -> Result<Vec<Option<Located>>> {
+        let keys: Vec<Key> = oids.iter().filter(|o| !self.extra.contains_key(*o)).map(key_of).collect();
+        let mut got = self.st.oidmap.get_many(&self.root, &keys)?.into_iter();
+        oids.iter()
+            .map(|o| {
+                if let Some((k, h)) = self.extra.get(o) {
+                    return Ok(Some((*k, *h, None)));
+                }
+                match got.next().flatten() {
+                    Some(v) => {
+                        let kind = Kind::from_code((v.aux >> 56) as u8)
+                            .ok_or_else(|| Error::Corrupt(format!("oid map: bad type for {}", hex(o))))?;
+                        Ok(Some((kind, v.hash, Some(v.aux & ((1 << 56) - 1)))))
+                    }
+                    None => Ok(None),
+                }
+            })
+            .collect()
     }
 
     /// `(kind, body)` of `oid`, or `None` if unknown/collected.
     pub(crate) fn load(&self, oid: &Oid) -> Result<Option<(Kind, Vec<u8>)>> {
         let Some((kind, h)) = self.lookup(oid)? else { return Ok(None) };
+        Ok(self.load_stored(kind, &h)?.map(|b| (kind, b)))
+    }
+
+    /// The body of a stored object already looked up (`None` if collected).
+    pub(crate) fn load_stored(&self, kind: Kind, h: &Hash) -> Result<Option<Vec<u8>>> {
+        let h = *h;
         let bytes = match self.st.repo.get(&h, None) {
             Ok(b) => b,
             Err(Error::NotFound(_)) => return Ok(None),
@@ -477,7 +502,7 @@ impl<'a> View<'a> {
         if k != kind || hl + size != bytes.len() {
             return Err(Error::Corrupt(format!("object {h}: header disagrees with oid map")));
         }
-        Ok(Some((kind, bytes[hl..].to_vec())))
+        Ok(Some(bytes[hl..].to_vec()))
     }
 }
 
@@ -837,6 +862,12 @@ fn index_pack(view: &mut View<'_>, file: &mut std::fs::File, pack_off: u64) -> R
     let mut new_entries = Vec::new();
     let mut needed: HashSet<Oid> = HashSet::new();
     let mut in_pack: HashSet<Oid> = HashSet::new();
+    // Unique objects in pack order: (entry, kind, oid, body length, canonical bytes if kept).
+    // Whether each is already stored is decided afterwards with one batched oid-map lookup.
+    let mut objs: Vec<PackObj> = Vec::new();
+    let mut kept = 0usize;
+    // Resolved in-pack objects by oid (REF_DELTA bases).
+    let mut by_oid: HashMap<Oid, usize> = HashMap::new();
 
     // Resolve in rounds: REF_DELTA bases may appear later in the pack.
     let mut pending: Vec<usize> = (0..entries.len()).collect();
@@ -844,33 +875,22 @@ fn index_pack(view: &mut View<'_>, file: &mut std::fs::File, pack_off: u64) -> R
         let mut next = Vec::new();
         let before = pending.len();
         for idx in pending {
-            match resolve(view, file, &mut entries, &by_offset, &mut cache, idx, 0)? {
+            match resolve(view, file, &mut entries, &by_offset, &by_oid, &mut cache, idx, 0)? {
                 Some((kind, body)) => {
                     let canon = canonical(kind, &body);
                     let oid = view.fmt.hash(&canon);
                     if !in_pack.contains(&oid) {
-                        // Already stored under this oid (a re-push, or a fork's objects): skip the
-                        // put and the oid-map entry. `ensure_live` rewrites it if GC condemned it.
-                        let known = match view.lookup(&oid)? {
-                            Some((k, h)) if k == kind && view.st.repo.ensure_live(&h)? => Some(h),
-                            _ => None,
-                        };
-                        let h = match known {
-                            Some(h) => h,
-                            None => {
-                                let h = view.st.repo.put(&canon)?;
-                                new_entries.push((
-                                    key_of(&oid),
-                                    Value { hash: h, aux: ((kind as u64) << 56) | body.len() as u64 },
-                                ));
-                                h
-                            }
-                        };
-                        view.extra.insert(oid, (kind, h));
                         needed.extend(view.refs(kind, &body)?);
                         in_pack.insert(oid);
+                        // Keep canonical bytes up to a budget; the rest is re-resolved if new.
+                        let keep = kept + canon.len() <= KEEP_CANON_BYTES;
+                        if keep {
+                            kept += canon.len();
+                        }
+                        objs.push((idx, kind, oid, body.len(), keep.then_some(canon)));
                     }
                     entries[idx].done = Some((kind, oid));
+                    by_oid.entry(oid).or_insert(idx);
                 }
                 None => next.push(idx),
             }
@@ -888,21 +908,57 @@ fn index_pack(view: &mut View<'_>, file: &mut std::fs::File, pack_off: u64) -> R
         }
         pending = next;
     }
+    // One batched lookup: the pack's objects (already stored under this oid, e.g. a re-push or
+    // a fork's objects: skip the put and the oid-map entry; `ensure_live` rewrites it if GC
+    // condemned it) and the outside objects the pack references (connectivity).
+    let outside: Vec<Oid> = needed.into_iter().filter(|o| !in_pack.contains(o)).collect();
+    let all: Vec<Oid> = objs.iter().map(|o| o.2).chain(outside.iter().copied()).collect();
+    let found = view.lookup_many(&all)?;
+    let (found_pack, found_out) = found.split_at(objs.len());
+    for ((idx, kind, oid, body_len, canon), f) in objs.into_iter().zip(found_pack) {
+        let known = match f {
+            Some((k, h)) if *k == kind && view.st.repo.ensure_live(h)? => Some(*h),
+            _ => None,
+        };
+        let h = match known {
+            Some(h) => h,
+            None => {
+                let canon = match canon {
+                    Some(c) => c,
+                    None => {
+                        let (k, body) = resolve(view, file, &mut entries, &by_offset, &by_oid, &mut cache, idx, 0)?
+                            .ok_or_else(|| Error::Corrupt("pack entry no longer resolves".into()))?;
+                        canonical(k, &body)
+                    }
+                };
+                let h = view.st.repo.put(&canon)?;
+                new_entries.push((key_of(&oid), Value { hash: h, aux: ((kind as u64) << 56) | body_len as u64 }));
+                h
+            }
+        };
+        view.extra.insert(oid, (kind, h));
+    }
     // Connectivity: everything referenced exists in the pack or the repository.
-    for oid in needed {
-        if !in_pack.contains(&oid) && !view.has(&oid)? {
-            return Err(Error::Parse(format!("pack references missing object {}", hex(&oid))));
+    for (oid, f) in outside.iter().zip(found_out) {
+        let live = match f {
+            Some((_, h)) => view.st.repo.ensure_live(h)?,
+            None => false,
+        };
+        if !live {
+            return Err(Error::Parse(format!("pack references missing object {}", hex(oid))));
         }
     }
     Ok(Indexed { objects: count, new_entries })
 }
 
 /// Resolves entry `idx` to `(kind, body)`. `None` = its REF_DELTA base is not available yet.
+#[allow(clippy::too_many_arguments)]
 fn resolve(
     view: &View<'_>,
     file: &mut std::fs::File,
     entries: &mut [Entry],
     by_offset: &HashMap<u64, usize>,
+    by_oid: &HashMap<Oid, usize>,
     cache: &mut BodyCache,
     idx: usize,
     depth: usize,
@@ -922,16 +978,16 @@ fn resolve(
         }
         Base::Ofs(boff) => {
             let bidx = *by_offset.get(&boff).ok_or_else(|| Error::Parse("ofs-delta base is not an entry".into()))?;
-            let Some((kind, b)) = resolve(view, file, entries, by_offset, cache, bidx, depth + 1)? else {
+            let Some((kind, b)) = resolve(view, file, entries, by_offset, by_oid, cache, bidx, depth + 1)? else {
                 return Ok(None);
             };
             let delta = inflate_at(file, data_off, size)?.0;
             (kind, Arc::new(apply_delta(&b, &delta)?))
         }
         Base::Ref(boid) => {
-            let in_pack = entries.iter().position(|x| x.done.is_some_and(|(_, o)| o == boid));
+            let in_pack = by_oid.get(&boid).copied();
             let (kind, b) = match in_pack {
-                Some(bidx) => match resolve(view, file, entries, by_offset, cache, bidx, depth + 1)? {
+                Some(bidx) => match resolve(view, file, entries, by_offset, by_oid, cache, bidx, depth + 1)? {
                     Some(x) => x,
                     None => return Ok(None),
                 },
@@ -1251,80 +1307,139 @@ const MAX_BOUNDARY: usize = 16;
 
 /// Objects to send with the path they were reached by (for delta pairing):
 /// reachable from `tips`, minus `exclude`. Newest history first.
-fn walk_paths(view: &View<'_>, tips: &[Oid], exclude: &HashSet<Oid>) -> Result<Vec<(Oid, Kind, String)>> {
+fn walk_paths(view: &View<'_>, tips: &[Oid], exclude: &HashSet<Oid>) -> Result<Vec<Walked>> {
     walk_paths_with(view, tips, exclude, None, None)
+}
+
+/// An object to send: its oid, kind, the path it was reached by (for delta pairing), the stored
+/// object and its body length if recorded.
+pub(crate) struct Walked {
+    pub(crate) oid: Oid,
+    pub(crate) kind: Kind,
+    pub(crate) path: String,
+    pub(crate) hash: Hash,
+    pub(crate) len: Option<u64>,
 }
 
 /// [`walk_paths`] limited to the `commits` set (shallow) and omitting blobs over `blob_limit`
 /// bytes (partial clone). Blobs named directly as tips are always sent.
+///
+/// The walk goes in breadth-first waves with one batched oid-map lookup per wave: commits (and
+/// tags) generation by generation from the tips, then trees level by level, then all blobs.
+/// Blob bodies aren't read here. Within a kind, newer history comes first, so each path's
+/// newest version precedes its older ones (they become deltas against it).
 fn walk_paths_with(
     view: &View<'_>,
     tips: &[Oid],
     exclude: &HashSet<Oid>,
     commits: Option<&HashSet<Oid>>,
     blob_limit: Option<u64>,
-) -> Result<Vec<(Oid, Kind, String)>> {
+) -> Result<Vec<Walked>> {
     let tip_set: HashSet<Oid> = tips.iter().copied().collect();
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 8);
     let mut seen: HashSet<Oid> = HashSet::new();
-    let mut out = Vec::new();
-    let mut stack: Vec<(Oid, String)> =
-        tips.iter().filter(|o| !exclude.contains(*o)).map(|o| (*o, String::new())).collect();
-    stack.reverse();
-    while let Some((oid, path)) = stack.pop() {
-        if exclude.contains(&oid) || !seen.insert(oid) {
-            continue;
+    let mut out: Vec<Walked> = Vec::new();
+    // Oids of one wave, deduplicated against everything seen; looked up together.
+    let take = |wave: Vec<(Oid, String)>, seen: &mut HashSet<Oid>| -> Result<Vec<WaveItem>> {
+        let wave: Vec<(Oid, String)> =
+            wave.into_iter().filter(|(o, _)| !exclude.contains(o) && seen.insert(*o)).collect();
+        let oids: Vec<Oid> = wave.iter().map(|w| w.0).collect();
+        let found = view.lookup_many_len(&oids)?;
+        wave.into_iter()
+            .zip(found)
+            .map(|((o, p), f)| {
+                let (k, h, len) = f.ok_or_else(|| Error::Corrupt(format!("missing git object {}", hex(&o))))?;
+                Ok((o, p, k, h, len))
+            })
+            .collect()
+    };
+    let load_all = |items: &[WaveItem]| -> Result<Vec<Vec<u8>>> {
+        par_map(items.len(), workers, |j| {
+            let (o, _, k, h, _) = &items[j];
+            view.load_stored(*k, h)?.ok_or_else(|| Error::Corrupt(format!("missing git object {}", hex(o))))
+        })
+    };
+    let mut trees: Vec<(Oid, String)> = Vec::new();
+    let mut blobs: Vec<(Oid, String)> = Vec::new();
+    // 1. Commits and tags, generation by generation.
+    let mut wave: Vec<(Oid, String)> = tips.iter().map(|o| (*o, String::new())).collect();
+    while !wave.is_empty() {
+        let items = take(std::mem::take(&mut wave), &mut seen)?;
+        let (history, other): (Vec<_>, Vec<_>) =
+            items.into_iter().partition(|x| matches!(x.2, Kind::Commit | Kind::Tag));
+        for (o, p, k, ..) in other {
+            // A tree or blob named directly (a tip or a tag target): walked in its own phase.
+            seen.remove(&o);
+            match k {
+                Kind::Tree => trees.push((o, p)),
+                _ => blobs.push((o, p)),
+            }
+        }
+        let bodies = load_all(&history)?;
+        for ((o, p, k, h, len), body) in history.into_iter().zip(bodies) {
+            let refs = view.refs(k, &body)?;
+            match k {
+                Kind::Commit => {
+                    if let Some(t) = refs.first() {
+                        trees.push((*t, String::new()));
+                    }
+                    for par in refs.iter().skip(1) {
+                        if commits.is_none_or(|c| c.contains(par)) {
+                            wave.push((*par, String::new()));
+                        }
+                    }
+                }
+                _ => wave.extend(refs.into_iter().map(|r| (r, String::new()))),
+            }
+            out.push(Walked { oid: o, kind: k, path: p, hash: h, len });
+        }
+    }
+    // 2. Trees, level by level.
+    let mut level = trees;
+    while !level.is_empty() {
+        let items = take(std::mem::take(&mut level), &mut seen)?;
+        let bodies = load_all(&items)?;
+        for ((oid, path, kind, h, len), body) in items.into_iter().zip(bodies) {
+            if kind != Kind::Tree {
+                // Recorded under another kind than its tree entry says: send it as what it is.
+                seen.remove(&oid);
+                blobs.push((oid, path));
+                continue;
+            }
+            let mut i = 0;
+            while i < body.len() {
+                let Some(sp) = body[i..].iter().position(|&c| c == b' ').map(|x| x + i) else { break };
+                let Some(nul) = body[sp..].iter().position(|&c| c == 0).map(|x| x + sp) else { break };
+                // Entries hash like the tree itself (SHA-1 or SHA-256 repository).
+                let hl = oid.len();
+                if nul + 1 + hl > body.len() {
+                    break;
+                }
+                let mode = &body[i..sp];
+                let Some(o) = Oid::from_slice(&body[nul + 1..nul + 1 + hl]) else { break };
+                if mode != b"160000" {
+                    let name = String::from_utf8_lossy(&body[sp + 1..nul]);
+                    let p = if path.is_empty() { name.to_string() } else { format!("{path}/{name}") };
+                    if mode == b"40000" { level.push((o, p)) } else { blobs.push((o, p)) }
+                }
+                i = nul + 1 + hl;
+            }
+            out.push(Walked { oid, kind, path, hash: h, len });
+        }
+    }
+    // 3. Blobs (bodies are read when the pack is written).
+    for (oid, path, kind, hash, len) in take(blobs, &mut seen)? {
+        if kind == Kind::Tree {
+            return Err(Error::Corrupt(format!("tree {} listed as a blob", hex(&oid))));
         }
         if let Some(limit) = blob_limit
+            && kind == Kind::Blob
             && !tip_set.contains(&oid)
-            && let Some((Kind::Blob, _)) = view.lookup(&oid)?
-            && view.body_len(&oid)?.is_some_and(|n| n > limit)
+            && len.is_some_and(|n| n > limit)
         {
             continue; // filtered out (partial clone)
         }
-        let (kind, body) =
-            view.load(&oid)?.ok_or_else(|| Error::Corrupt(format!("missing git object {}", hex(&oid))))?;
-        match kind {
-            Kind::Commit => {
-                let refs = view.refs(kind, &body)?;
-                // Parents go below the tree on the stack: content first, then history.
-                for p in refs.iter().skip(1).rev() {
-                    if commits.is_none_or(|c| c.contains(p)) {
-                        stack.push((*p, String::new()));
-                    }
-                }
-                if let Some(t) = refs.first() {
-                    stack.push((*t, String::new()));
-                }
-            }
-            Kind::Tag => {
-                for o in view.refs(kind, &body)? {
-                    stack.push((o, String::new()));
-                }
-            }
-            Kind::Tree => {
-                let mut i = 0;
-                let mut kids = Vec::new();
-                while i < body.len() {
-                    let Some(sp) = body[i..].iter().position(|&c| c == b' ').map(|x| x + i) else { break };
-                    let Some(nul) = body[sp..].iter().position(|&c| c == 0).map(|x| x + sp) else { break };
-                    // Entries hash like the tree itself (SHA-1 or SHA-256 repository).
-                    let hl = oid.len();
-                    if nul + 1 + hl > body.len() {
-                        break;
-                    }
-                    let mode = &body[i..sp];
-                    let Some(o) = Oid::from_slice(&body[nul + 1..nul + 1 + hl]) else { break };
-                    if mode != b"160000" {
-                        let name = String::from_utf8_lossy(&body[sp + 1..nul]);
-                        kids.push((o, if path.is_empty() { name.to_string() } else { format!("{path}/{name}") }));
-                    }
-                    i = nul + 1 + hl;
-                }
-                stack.extend(kids.into_iter().rev());
-            }
-            Kind::Blob => {}
-        }
-        out.push((oid, kind, path));
+        out.push(Walked { oid, kind, path, hash, len });
     }
     Ok(out)
 }
@@ -1640,7 +1755,8 @@ fn negotiate(view: &View<'_>, git: &GitState, repo: &str, wants: &[Oid], haves: 
     let others: Vec<&Oid> = wants.iter().filter(|w| !tips.contains(*w)).collect();
     if !others.is_empty() {
         let tip_list: Vec<Oid> = tips.iter().copied().collect();
-        let reachable: HashSet<Oid> = walk_paths(view, &tip_list, &HashSet::new())?.into_iter().map(|o| o.0).collect();
+        let reachable: HashSet<Oid> =
+            walk_paths(view, &tip_list, &HashSet::new())?.into_iter().map(|o| o.oid).collect();
         if let Some(w) = others.into_iter().find(|w| !reachable.contains(*w)) {
             return Err(Error::Parse(format!("not our ref {}", hex(w))));
         }
@@ -1997,23 +2113,22 @@ fn write_pack(
         let mut end = start;
         let mut bytes = 0u64;
         while end < objs.len() && end - start < SEND_WINDOW && (end == start || bytes < SEND_WINDOW_BYTES) {
-            bytes += view.body_len(&objs[end].0)?.unwrap_or(0);
+            bytes += objs[end].len.unwrap_or(0);
             end += 1;
         }
         let win = &objs[start..end];
         // 1. Load the bodies (parallel).
         let bodies: Vec<Arc<Vec<u8>>> = par_map(win.len(), workers, |j| {
-            let (oid, kind, _) = &win[j];
-            let (k2, body) = view.load(oid)?.ok_or_else(|| Error::Corrupt(format!("object {} vanished", hex(oid))))?;
-            if k2 != *kind {
-                return Err(Error::Corrupt(format!("object {} changed kind", hex(oid))));
-            }
+            let w = &win[j];
+            let body = view
+                .load_stored(w.kind, &w.hash)?
+                .ok_or_else(|| Error::Corrupt(format!("object {} vanished", hex(&w.oid))))?;
             Ok(Arc::new(body))
         })?;
         // 2. Pick delta bases: the previous object at the same path (sequential, cheap). Depth is
         //    predicted as if every delta is taken; a rejected delta only shortens a chain.
         let mut plan: Vec<Option<(usize, Arc<Vec<u8>>)>> = Vec::with_capacity(win.len());
-        for (j, (_, kind, path)) in win.iter().enumerate() {
+        for (j, Walked { kind, path, .. }) in win.iter().enumerate() {
             let body = &bodies[j];
             let deltable = matches!(kind, Kind::Blob | Kind::Tree) && body.len() >= 64 && body.len() <= MAX_DELTA_INPUT;
             if !deltable || path.is_empty() {
@@ -2058,7 +2173,7 @@ fn write_pack(
                     eh.extend_from_slice(&ofs_encode(offset - offsets[bi]));
                     eh
                 }
-                None => pack_entry_header(win[j].1, raw),
+                None => pack_entry_header(win[j].kind, raw),
             };
             offsets.push(offset);
             h.update(&eh);
@@ -2705,14 +2820,8 @@ impl GitTracer {
         }
         let bytes = store.get(h, None)?;
         // The tracer sees core objects, not repositories: accept either object format.
-        let oids = refs_any(kind, &bytes[hl..]);
-        let mut out = Vec::with_capacity(oids.len());
-        for o in oids {
-            if let Some(v) = self.oidmap.get_in(&self.root, &key_of(&o))? {
-                out.push(v.hash);
-            }
-        }
-        Ok(Some(out))
+        let keys: Vec<Key> = refs_any(kind, &bytes[hl..]).iter().map(key_of).collect();
+        Ok(Some(self.oidmap.get_many(&self.root, &keys)?.into_iter().flatten().map(|v| v.hash).collect()))
     }
 }
 

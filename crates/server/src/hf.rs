@@ -113,6 +113,22 @@ impl HfState {
     fn lfs_for(&self, repo: &RepoId, sha: &str) -> Result<Option<Value>> {
         self.acl.get_live_blocking(&Self::acl_key(repo, sha))
     }
+
+    /// [`Self::lfs_for`] for many objects, with one batched map lookup (input order).
+    fn lfs_for_many(&self, repo: &RepoId, shas: &[String]) -> Result<Vec<Option<Value>>> {
+        let keys: Vec<Key> = shas.iter().map(|s| Self::acl_key(repo, s)).collect();
+        let (_, root) = self.acl.root_blocking()?;
+        let mut out = self.acl.get_many(&root, &keys)?;
+        for v in &mut out {
+            // Same as get_live_blocking: collected content is a miss; a hit is made safe to use.
+            if let Some(x) = v
+                && !self.git.repo.ensure_live(&x.hash)?
+            {
+                *v = None;
+            }
+        }
+        Ok(out)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -597,6 +613,20 @@ fn make_commit(
         }
         let mut tree = load_tree(&view, &res.tree)?;
         let mut w = Writer { st, entries: Vec::new() };
+        // Every LFS file of the commit, checked with one batched lookup.
+        let lfs_shas: Vec<String> = ops
+            .iter()
+            .filter_map(|op| match op {
+                Op::AddLfs { sha, .. } => Some(sha.clone()),
+                _ => None,
+            })
+            .collect();
+        let lfs_have: HashMap<String, Value> = lfs_shas
+            .iter()
+            .cloned()
+            .zip(hf.lfs_for_many(repo, &lfs_shas)?)
+            .filter_map(|(s, v)| v.map(|v| (s, v)))
+            .collect();
         for op in ops {
             match op {
                 Op::Add { path, content } => {
@@ -604,7 +634,7 @@ fn make_commit(
                     insert_path(&mut tree, path, Node::File { mode: "100644".into(), oid })?;
                 }
                 Op::AddLfs { path, sha, size } => {
-                    match hf.lfs_for(repo, sha)? {
+                    match lfs_have.get(sha) {
                         Some(v) if v.aux == *size => {}
                         _ => {
                             return Ok(Err((
@@ -1499,20 +1529,35 @@ async fn lfs_batch(
         return r;
     }
     let base = base_url(headers);
+    let reqs: Vec<(String, u64)> = v
+        .get("objects")
+        .and_then(|x| x.as_array())
+        .into_iter()
+        .flatten()
+        .map(|o| {
+            let sha = o.get("oid").and_then(|x| x.as_str()).unwrap_or_default().to_ascii_lowercase();
+            (sha, o.get("size").and_then(|x| x.as_u64()).unwrap_or(0))
+        })
+        .collect();
+    // One batched lookup for every valid oid of the request.
+    let valid: Vec<String> = reqs.iter().filter(|(s, _)| sha_key(s).is_some()).map(|(s, _)| s.clone()).collect();
+    let (hf2, r2) = (hf.clone(), repo.clone());
+    let found: HashMap<String, Value> = match blocking(move || {
+        let got = hf2.lfs_for_many(&r2, &valid)?;
+        Ok(valid.into_iter().zip(got).filter_map(|(s, v)| v.map(|v| (s, v))).collect())
+    })
+    .await
+    {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
     let mut out = Vec::new();
-    for o in v.get("objects").and_then(|x| x.as_array()).into_iter().flatten() {
-        let sha = o.get("oid").and_then(|x| x.as_str()).unwrap_or_default().to_ascii_lowercase();
-        let size = o.get("size").and_then(|x| x.as_u64()).unwrap_or(0);
-        let Some(key) = sha_key(&sha) else {
+    for (sha, size) in reqs {
+        if sha_key(&sha).is_none() {
             out.push(serde_json::json!({ "oid": sha, "size": size, "error": { "code": 422, "message": "bad oid" } }));
             continue;
-        };
-        let _ = key;
-        let (hf2, r2, s2) = (hf.clone(), repo.clone(), sha.clone());
-        let have = match blocking(move || hf2.lfs_for(&r2, &s2)).await {
-            Ok(x) => x.is_some_and(|v| v.aux == size),
-            Err(r) => return r,
-        };
+        }
+        let have = found.get(&sha).is_some_and(|v| v.aux == size);
         let mut e = serde_json::json!({ "oid": sha, "size": size, "authenticated": true });
         if op == "upload" {
             if !have {

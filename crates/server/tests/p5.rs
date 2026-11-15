@@ -156,3 +156,77 @@ fn provenance_attestation_promotion_and_audit_across_fronts() {
     assert_eq!(au["records"].as_array().unwrap().len(), 1);
     assert_eq!(http.get(format!("{}/v1/admin/audit", srv.url())).bearer_auth(ALICE).send().unwrap().status(), 403);
 }
+
+/// The client's P5 helpers (used by the CLI's `--remote` attest/promote/lineage/search).
+#[test]
+fn remote_repo_attest_promote_lineage_search() {
+    use pico2peta_attest::PromoteOutcome;
+    use pico2peta_client::Search;
+    let signer = pico2peta_attest::Ed25519Signer::from_seed(&[9u8; 32]);
+    let pk = hexs(&signer.verifier().public());
+    let srv = TestServer::start(move |cfg| {
+        for ns in ["dev", "prod", "staging"] {
+            cfg.policy.push(grant("alice", ns, Access::Write));
+        }
+        cfg.promotion.push(PromotionRule {
+            dst: "prod".into(),
+            required_keys: vec![pk.clone()],
+            predicate_type: None,
+            require_provenance: false,
+        });
+    });
+    let client = srv.client(ALICE);
+    let src_obj = client.put(b"source tarball").unwrap();
+    let s = Name::new("dev/lib/lib-2.0.tar.gz").unwrap();
+    client.replace(&s, &[(s.clone(), Observed::Absent)], src_obj).unwrap();
+    let wheel = client.put(b"another wheel").unwrap();
+    let n = Name::new("dev/lib/lib-2.0-py3-none-any.whl").unwrap();
+    client.replace(&n, &[(n.clone(), Observed::Absent)], wheel).unwrap();
+    let r = reqwest::blocking::Client::new()
+        .post(format!("{}/v1/provenance", srv.url()))
+        .bearer_auth(ALICE)
+        .json(&json!({ "op": "build", "inputs": { "sdist": format!("name:{s}") },
+                       "outputs": { "wheel": format!("name:{n}") }, "meta": { "builder": "runner-42" } }))
+        .send()
+        .unwrap();
+    assert_eq!(r.status(), 201);
+    assert!(client.lineage(&format!("name:{n}")).unwrap().contains(&src_obj));
+    assert!(client.impact(&format!("blake3:{}", src_obj.to_hex())).unwrap().contains(&wheel));
+    assert_eq!(client.provenance(&format!("name:{n}")).unwrap().producers[0]["op"], "build");
+
+    let pn = Name::new("prod/lib/lib-2.0-py3-none-any.whl").unwrap();
+    match client.promote(&n, &pn).unwrap() {
+        PromoteOutcome::Refused(r) => assert!(r.iter().any(|x| x.contains("signature")), "{r:?}"),
+        o => panic!("expected a refusal, got {o:?}"),
+    }
+    let stmt = pico2peta_attest::Statement {
+        subjects: vec![pico2peta_attest::Subject { name: n.to_string(), hash: wheel }],
+        predicate_type: "https://example.com/reviewed".into(),
+        predicate: json!({}),
+    };
+    let env = pico2peta_attest::Envelope::sign(&stmt, &[&signer]);
+    let (eh, trusted) = client.attest(&env).unwrap();
+    assert_eq!(trusted.len(), 1);
+    let at = client.attestations(&format!("name:{n}")).unwrap();
+    assert_eq!(at.len(), 1);
+    assert_eq!(at[0].0, eh);
+    assert_eq!(at[0].1.to_json(), env.to_json());
+    assert_eq!(at[0].2, trusted);
+    match client.promote(&n, &pn).unwrap() {
+        PromoteOutcome::Promoted { object, .. } => assert_eq!(object, wheel),
+        o => panic!("expected promotion, got {o:?}"),
+    }
+    assert_eq!(client.resolve(&pn).unwrap().unwrap().hash, wheel);
+    // No rule covers staging/: an error, not a policy refusal.
+    assert!(client.promote(&n, &Name::new("staging/lib/x.whl").unwrap()).is_err());
+    // A reader without access to dev/ can't promote from it.
+    assert!(srv.client(READER).promote(&n, &Name::new("prod/lib/y.whl").unwrap()).is_err());
+
+    let hits = client.search("runner-42").unwrap();
+    assert!(hits.iter().any(|h| h.object == wheel && h.names.iter().any(|x| x == n.as_str())), "{hits:?}");
+    let hits = client.search(Search::Exact(pn.to_string())).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].object, wheel);
+    let hits = client.search(Search::Prefix("dev/lib/".into())).unwrap();
+    assert_eq!(hits.len(), 2, "{hits:?}");
+}

@@ -463,8 +463,10 @@ pub async fn get_attestations(
     let out: Vec<Value> = envs
         .iter()
         .map(|e| {
-            let env: Value = serde_json::from_slice(&e.to_json()).unwrap_or(Value::Null);
-            json!({ "envelope": env, "trusted_keys": e.verified_by(&dyn_vs) })
+            let raw = e.to_json();
+            let env: Value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
+            // `hash` is the stored envelope object (what POST returned as `envelope`).
+            json!({ "hash": Hash::of(&raw).to_hex(), "envelope": env, "trusted_keys": e.verified_by(&dyn_vs) })
         })
         .collect();
     Ok(Json(json!({ "object": h.to_hex(), "attestations": out })).into_response())

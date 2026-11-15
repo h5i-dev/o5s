@@ -270,7 +270,12 @@ The contended run checks that no update is lost: the final version equals the nu
   - devpi-server 6.14.0, verdaccio 6.1.6, reposilite 3.5.19 and Maven 3.9.9.
 
   Every binary was checksum- or signature-verified, and all of them live under `/mnt/scratch/pico2peta/tools`.
-  - **Batch status (2026-11-15): paused at the human's request** (implementation first; no batch until the human asks).
+  - **ROADMAP Net 4 batch (2026-11-15), windows 1–2 done, window 3 (Maven) pending.** Report: `/mnt/scratch/pico2peta/bench-fronts-report-w2.md` (§6.5 tiers, medians of 3, with load averages of 2.8–5.0 on 4 cores, which is why the core's builds ran at nice/-j1). Git rows are window 2's rerun; window 1's are kept as superseded. These are the binaries from before the idmap merge-join and the batched git walk.
+    - Functional: 132/132 checks pass (git 90, OCI 24, HF 6, PyPI 6, npm 6).
+    - PASS or better: PyPI (hot 1.23×, cold 1.06×, storage 0.47×), npm (1.05×, 1.04×, storage 0.11×), git push redis 1.02× / jq 1.16×, git fetch jq 1.09× / ripgrep 0.99×, git clone bytes 0.58–1.10×, OCI push 0.61× and storage 1.00×, HF family storage 0.91× of Xet dedup.
+    - FAIL: git clone 1.7–2.8× (redis 22.4 s vs 12.1 s), git push ripgrep 1.98×, git fetch redis 2.75× (0.63 s vs 0.23 s), OCI pull 2.07×, HF transfers 2.2–8.1× the /v1 reference.
+    - The failures are throughput- and latency-bound (store read/put path, per-object lookups); the merge-join `get_many` and batched walks below target the git ones. They will be re-measured.
+  - Earlier batch status (superseded): paused at the human's request (implementation first; no batch until the human asks).
     - Git front: ripgrep and jq ran completely. **redis: not run (stopped by the human; rerun in the final batch).** Its partial raw rows are in `/mnt/scratch/pico2peta/bench-fronts-results.jsonl` and are not a result.
     - OCI, HF, PyPI, npm, Maven: not run (rerun in the final batch).
     - Two findings from the partial redis rows, recorded as leads, not results:
@@ -363,6 +368,9 @@ The contended run checks that no update is lost: the final version equals the nu
 - **read_verify, server side: DONE** (as agreed with the core: one policy source, the repo's `[read]` config, and no server setting).
   - `GET /v1/objects/<h>?verify=strict|eof` calls `open_verified`. `eof` gets 403 unless the repo allows it, and a bad value gets 400. With no parameter, the plain `open` follows `[read] verify`, so strict is the default by construction.
   - `RemoteRepo::open_verified` sends the parameter. Test `read_verify_parameter_follows_repo_policy`.
+- Core lead asks (CLI v0.1, `--remote`): DONE.
+  - Server GC options now start from the repository's `LocalRepo::gc_options()`, so `[gc] similarity_repack` (default true) decides grouped repacks, with front hints. The server's `[gc] grouped` is now an optional, deprecated override; the deploy configs no longer set it.
+  - Client: `RemoteRepo::attest`, `attestations` (with each envelope's hash: the GET response gains `hash`), `promote` (policy refusal → `Ok(Refused)`, missing access or no rule → `Err`), `provenance`, `lineage`, `impact`, and `search` (`&str` text, or `Search::Prefix`/`Exact`). Test `remote_repo_attest_promote_lineage_search`.
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
@@ -467,6 +475,12 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 
 ## Small fixes made to core crates
 - `crates/repo/src/idmap.rs` (2026-11-15, agreed with the core lead): a page cache for large-segment lookups, plus `SegMap::get_many`.
+- `crates/repo/src/idmap.rs` (2026-11-15, asked by the human; core lead told): `SegMap::get_many` internals only. There is no API change and no format change. It is now a sorted merge-join:
+  - keys are sorted and deduplicated, then each segment, newest first, is matched against the keys still missing;
+  - small segments are merged against the decoded-segment cache;
+  - large segments are split recursively around probe entries (through the page cache) until a sub-range holds about one key per 64 KiB page, or fits one 4 MiB window; that range is then read sequentially in 4 MiB-aligned ranged reads (bypassing the page cache) and merged;
+  - results come back in input order.
+  - Proptest `get_many_matches_per_key_lookups` (1–4 segments of up to 3 × `CACHE_WHOLE` entries, overrides by newer segments, misses, duplicates, dense and sparse batches) checks it against per-key `get_in`, plus a deterministic edge test. `proptest` became a dev-dependency of `pico2peta-repo`.
 - `crates/cli/src/main.rs`: wrapped a bare URL in a doc comment in `<…>` so that `cargo doc -D warnings` (CI docs job) passes.
 
 ## Questions for human

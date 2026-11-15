@@ -1241,14 +1241,10 @@ impl OciTracer {
         if digests.is_empty() {
             return Ok(None);
         }
-        let mut out = Vec::with_capacity(digests.len());
-        for hex in digests {
-            let Ok(k) = hex_key(&hex) else { continue };
-            if let Some(val) = self.digests.get_blocking(&k)? {
-                out.push(val.hash);
-            }
-        }
-        Ok(Some(out))
+        // One batched lookup for every referenced digest.
+        let keys: Vec<_> = digests.iter().filter_map(|hex| hex_key(hex).ok()).collect();
+        let (_, root) = self.digests.root_blocking()?;
+        Ok(Some(self.digests.get_many(&root, &keys)?.into_iter().flatten().map(|v| v.hash).collect()))
     }
 }
 
