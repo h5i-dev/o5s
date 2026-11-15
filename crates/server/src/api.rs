@@ -66,6 +66,9 @@ pub struct AppState {
     pub oci: Option<Arc<crate::oci::OciState>>,
     pub git: Option<Arc<crate::git::GitState>>,
     pub hf: Option<Arc<crate::hf::HfState>>,
+    pub pypi: Option<Arc<crate::pypi::PypiState>>,
+    pub npm: Option<Arc<crate::npm::NpmState>>,
+    pub maven: Option<Arc<crate::maven::MavenState>>,
     /// The domain fronts and their write handles (`None` only in tests that build state by hand).
     pub fronts: Option<Arc<crate::fronts::Fronts>>,
 }
@@ -150,6 +153,13 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v2/{*rest}", axum::routing::any(crate::oci::dispatch))
         .route("/git/{*rest}", axum::routing::any(crate::git::dispatch))
         .route("/api/{*rest}", axum::routing::any(crate::hf::api))
+        .route("/npm/{*rest}", axum::routing::any(crate::npm::dispatch))
+        .route("/maven/{*rest}", axum::routing::any(crate::maven::dispatch))
+        // Uploads stream to the store, which enforces server.max_upload_bytes.
+        .route(
+            "/pypi/{*rest}",
+            axum::routing::any(crate::pypi::dispatch).layer(axum::extract::DefaultBodyLimit::disable()),
+        )
         .fallback(crate::hf::root)
         .layer(middleware::from_fn_with_state(state.clone(), authenticate))
         .layer(middleware::from_fn_with_state(state.clone(), shed_load));
@@ -248,7 +258,8 @@ async fn authenticate(State(st): St, mut req: Request, next: Next) -> Response {
             if let crate::auth::AuthError::Unavailable(m) = e {
                 return ApiError::unavailable(codes::INTERNAL, m).into_response();
             }
-            if req.uri().path().starts_with("/git/") {
+            // Clients that only send credentials after a Basic challenge (git, pip, Maven).
+            if ["/git/", "/pypi/", "/maven/"].iter().any(|p| req.uri().path().starts_with(p)) {
                 let mut r = (StatusCode::UNAUTHORIZED, e.to_string()).into_response();
                 r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"pico2peta\""));
                 return r;
@@ -346,7 +357,7 @@ impl RateLimiter {
 
 /// Namespaces owned by protocol adapters (OCI, Git) and the provenance log.
 pub fn is_reserved(name: &str) -> bool {
-    ["oci", "git", "_prov"].iter().any(|p| pico2peta_core::is_under(name, p))
+    ["oci", "git", "pypi", "npm", "maven", "_prov"].iter().any(|p| pico2peta_core::is_under(name, p))
 }
 
 /// Runs a repository call on the blocking pool.

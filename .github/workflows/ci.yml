@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # The HF front is tested with the real client (tests/hf.rs).
+      # The HF and PyPI fronts are tested with real clients (tests/hf.rs, tests/pypi.rs).
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -54,6 +54,11 @@ jobs:
           python -m venv "$RUNNER_TEMP/hfvenv"
           "$RUNNER_TEMP/hfvenv/bin/pip" install --quiet huggingface_hub==2.4.0 hf_xet==1.8.0
           echo "PICO2PETA_HF_PYTHON=$RUNNER_TEMP/hfvenv/bin/python" >> "$GITHUB_ENV"
+          # The PyPI front is tested with real pip, twine and uv (tests/pypi.rs).
+          python -m venv "$RUNNER_TEMP/pkgvenv"
+          "$RUNNER_TEMP/pkgvenv/bin/pip" install --quiet pip==26.0.1 twine==6.1.0 uv==0.13.8
+          echo "PICO2PETA_PKG_PYTHON=$RUNNER_TEMP/pkgvenv/bin/python" >> "$GITHUB_ENV"
+          echo "PICO2PETA_UV=$RUNNER_TEMP/pkgvenv/bin/uv" >> "$GITHUB_ENV"
       # S3 integration tests skip themselves here (no P2P_S3_ENDPOINT).
       - run: cargo test --workspace --locked
 

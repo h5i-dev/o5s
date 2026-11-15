@@ -13,9 +13,13 @@ pub mod error;
 pub mod fronts;
 pub mod git;
 pub mod hf;
+pub mod maven;
 pub mod metrics;
+pub mod npm;
 pub mod oci;
 pub mod oidc;
+pub(crate) mod pkg;
+pub mod pypi;
 pub mod segmap;
 pub mod tls;
 pub mod xet;
@@ -127,6 +131,27 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         (Some(g), true) => Some(Arc::new(hf::HfState::new(g.clone(), Some(local.clone())).map_err(StartError::Hf)?)),
         _ => None,
     };
+    let pypi = if cfg.pypi.enabled {
+        let st = pypi::PypiState::new(fronts.handle("pypi")?, Some(local.clone()), cfg.pypi.upstream.clone())
+            .map_err(StartError::Hf)?;
+        Some(Arc::new(st))
+    } else {
+        None
+    };
+    let npm = if cfg.npm.enabled {
+        let st = npm::NpmState::new(fronts.handle("npm")?, Some(local.clone()), cfg.npm.upstream.clone())
+            .map_err(StartError::Hf)?;
+        Some(Arc::new(st))
+    } else {
+        None
+    };
+    let maven = if cfg.maven.enabled {
+        let st = maven::MavenState::new(fronts.handle("maven")?, Some(local.clone()), cfg.maven.upstream.clone())
+            .map_err(StartError::Hf)?;
+        Some(Arc::new(st))
+    } else {
+        None
+    };
     let tokens = Arc::new(auth::TokenAuthenticator::new(&cfg.auth.tokens, cfg.auth.allow_anonymous));
     let audit = audit::AuditLog::open_with(&cfg.audit.path, cfg.audit.rotate_bytes)
         .map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
@@ -177,6 +202,9 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         oci,
         git,
         hf,
+        pypi,
+        npm,
+        maven,
         fronts: Some(fronts),
     }))
 }

@@ -32,8 +32,12 @@ fn run_client(py: &str, srv: &TestServer, token: &str, repo: &str, xet: bool) ->
 fn run_phase(py: &str, srv: &TestServer, token: &str, repo: &str, xet: bool, phase: &str) -> std::process::Output {
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/hf/client.py");
     let home = srv.dir.path().join(format!("hfhome-{}", repo.replace('/', "_")));
+    // Backstop: anything the client leaves in TMPDIR goes away with the test's TempDir.
+    let tmp = srv.dir.path().join("tmp");
+    std::fs::create_dir_all(&tmp).unwrap();
     let mut c = Command::new(py);
-    c.arg("-I")
+    c.env("TMPDIR", &tmp)
+        .arg("-I")
         .arg(script)
         .env("HF_ENDPOINT", srv.url())
         .env("HF_TOKEN", token)
