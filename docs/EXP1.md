@@ -123,20 +123,27 @@ What the numbers say:
 
 ## Experiment 1b (PLAN.md §4.8)
 
-Interim (git.git still running). The verdict is already determined by redis:
+Final (generated with `EXP1_ELIGIBLE=v4,v5 scripts/exp1-report.py results.jsonl,results-1b.jsonl`):
 
-| repo | V4 (depth 50) | V5 (depth 10) | V4 build ratio | V4 read p50 / p99 (ms) |
-|---|---|---|---|---|
-| ripgrep | 1.164 | 1.665 | 2.44 | 0.10 / 0.38 |
-| jq | 1.089 | 1.427 | 1.41 | 0.10 / 0.59 |
-| redis | **1.347** | 1.860 | 2.74 | 0.13 / 1.52 |
+| repo | V4 (depth 50) | V5 (depth 10) | V4 build ratio | V4 read p50 / p99 (ms) | V4 mean / max chain depth |
+|---|---|---|---|---|---|
+| ripgrep | 1.164 | 1.665 | 2.44 | 0.10 / 0.38 | 21.9 / 50 |
+| jq | 1.089 | 1.427 | 1.41 | 0.10 / 0.59 | |
+| redis | **1.347** | 1.860 | 2.74 | 0.13 / 1.52 | 23.1 / 50 |
+| git | **2.160** | 3.411 | 1.23 | 0.14 / 0.75 | 21.7 / 50 |
 
 ### Verdict: **FAIL** (same thresholds as §4.5)
-V\* = V4. Redis's R = 1.347 exceeds the 1.30 per-repo limit, and V4's build time is 1.4–2.7× Git's
-(threshold ≤ 1.0). Reads are fast, with chain decode p99 ≤ 1.5 ms.
+V\* = V4: geomean R = 1.386, max R = 2.160. Both size conditions fail, and V4's build time is 1.2–2.7× Git's
+(threshold ≤ 1.0) on every repo. Reads are fast: the whole chain is decoded, with p99 ≤ 1.5 ms. All 10,000
+sampled reads per run were SHA-1-verified.
+
+git.git is the outlier. Its 861k objects are dominated by small objects: plain per-object compression (V0)
+is 19× there. Every chain root (one in 51) is compressed alone, and each small delta pays zstd frame and
+entropy-table overhead per object. That's a hypothesis consistent with the V0/V2 numbers, not something
+tested separately.
 
 **Explicit delta against the previous version of the same path loses to Git** even before the index
-model is counted: redis's V4 payload alone is 1.33× Git's pack. A plausible reason (an analysis, not
+model is counted: redis's V4 payload alone is 1.33× Git's pack, and git.git's is 2.2×. A plausible reason (an analysis, not
 something tested here) is that Git's delta search tries 250 candidate bases chosen by size and name
 similarity, so it finds better bases than "the immediately previous version". Level-19 patch-from per
 object is also slow.

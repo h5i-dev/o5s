@@ -9,10 +9,10 @@
 | M2 Pack store | done | `crates/pack` |
 | M3 Ref store | done: local journal engine plus a multi-host log engine on any Backend | `crates/refs` |
 | M4 Local repo + CLI | done; local and `--remote` | `crates/repo`, `crates/cli` |
-| M5 Experiment 1 | **complete: FAIL** by the pre-registered rules. V2 geomean is 1.051×, but redis is 1.336× > the 1.30 max (ripgrep 0.85, jq 0.93, git 1.16); the V3 ceiling is 0.71–0.84×. **Exp1b also FAILS** (V4 redis 1.347 > 1.30, build 1.4–2.7×); git.git row pending. Pre-registered consequence: Git-compatible storage stays the recommendation for source code | `docs/EXP1.md`, `scripts/exp1-report.py`, `scripts/exp1b.sh` |
+| M5 Experiment 1 | **complete: FAIL** by the pre-registered rules. V2 geomean is 1.051×, but redis is 1.336× > the 1.30 max (ripgrep 0.85, jq 0.93, git 1.16); the V3 ceiling is 0.71–0.84×. **Exp1b complete: FAIL** (V4 geomean 1.386, max 2.160 on git.git; build 1.2–2.7× Git's). Pre-registered consequence: Git-compatible storage stays the recommendation for source code | `docs/EXP1.md`, `scripts/exp1-report.py`, `scripts/exp1b.sh` |
 | M6 GC / repack | done, including grouped repack | `crates/repo/src/gc.rs` |
 | N1–N5 (net) | done: S3, server, client, CI, deploy, Git + OCI adapters | `docs/NET_PROGRESS.md`, `docs/API.md` |
-| M7 Hardening | done (two independent code reviews, all findings fixed) except quiet-host benchmark numbers | `fuzz/`, `docs/BENCH.md`, `scripts/check.sh` |
+| M7 Hardening | done: two independent code reviews (all findings fixed), and quiet-host benchmark numbers recorded | `fuzz/`, `docs/BENCH.md`, `scripts/check.sh` |
 | M8 Verification | done: Lean P1–P5 and a Lean↔Rust difftest | `lean/` |
 | M9 Later layers | provenance (core) done; Git/OCI adapters done (net) | `crates/prov` |
 
