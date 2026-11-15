@@ -107,6 +107,7 @@
 
 - S3 default credential chain (env, web identity, IMDSv2) with background refresh.
 - Separate metrics listener, and per-principal rate limiting (429 with `Retry-After`, `p2p_rate_limited_total`).
+- OIDC/JWT authentication (`tests/oidc.rs` against a mock issuer: valid token, wrong audience, expired, bad signature, tampered token, key rotation, unknown kid, static tokens alongside).
 - Git wire deltas: upload-pack deltifies blobs and trees against the previously sent version of the same path. A ripgrep clone (release) transfers 33.8 MB → **6.1 MB**, takes 3.65 s → 2.91 s, refs are identical and fsck is clean.
 
 ### Next
@@ -184,7 +185,7 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **GET checksums:** a GET is not checksummed end to end beyond TCP and TLS. Integrity of pack records relies on the core pack CRCs.
 - **Virtual-hosted style and real AWS:** neither has been tested, because no AWS credentials are available here. Only path style against MinIO has run.
 - **Extra copy:** `PutSource::Bytes` is copied once into the runtime, because `Backend` is sync and borrows the bytes.
-- **OIDC/JWT authenticator:** not implemented; the `Authenticator` trait is async and ready for it.
+- **OIDC/JWT:** `[auth.oidc]` validates bearer JWTs (RS/PS/ES algorithms; `iss`, `aud`, `exp` and `nbf` checks; JWKS discovery, caching and rotation), mapping a claim to a principal. Static tokens still work alongside it. Gaps: changes to the OIDC config need a restart (not SIGHUP), groups and roles claims are not mapped to policies, and there is no token introspection for opaque tokens.
 - **Token management:** tokens and policies live in config and reload on SIGHUP (revocation applies to the next request). There is no admin API to issue or revoke tokens.
 - **Audit log rotation and shipping:** manual (stop, move, start). There is no remote sink (syslog, S3).
 - **Metrics and rate limits:** `/metrics` can move to a separate listener (`server.metrics_listen`), but is still unauthenticated there, so bind it to a private interface. Per-principal token-bucket rate limiting exists (`server.rate_limit`; anonymous callers keyed by IP). There are no byte or storage quotas per principal or namespace.

@@ -37,6 +37,8 @@ clap.workspace = true
 getrandom = "0.3"
 tempfile.workspace = true
 base64 = "0.22"
+jsonwebtoken = { version = "9", default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 flate2 = "1"
 sha1 = "0.10"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
@@ -44,5 +46,6 @@ rustls-pki-types = { version = "1", features = ["std"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 
 [dev-dependencies]
+jsonwebtoken = "9"
 proptest.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "blocking"] }

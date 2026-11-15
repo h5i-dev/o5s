@@ -44,6 +44,7 @@ impl TestServer {
                 allow_anonymous: false,
                 tokens: vec![token("admin", ADMIN), token("alice", ALICE), token("reader", READER)],
                 token_file: None,
+                oidc: None,
             },
             policy: vec![
                 grant("admin", "", Access::Admin),

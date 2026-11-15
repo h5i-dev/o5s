@@ -13,6 +13,7 @@ pub mod error;
 pub mod git;
 pub mod metrics;
 pub mod oci;
+pub mod oidc;
 pub mod segmap;
 pub mod tls;
 
@@ -106,7 +107,13 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
     let audit = audit::AuditLog::open(&cfg.audit.path).map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
     Ok(Arc::new(AppState {
         repo,
-        authn: tokens.clone(),
+        authn: match &cfg.auth.oidc {
+            Some(o) => Arc::new(oidc::ChainAuthenticator {
+                tokens: tokens.clone(),
+                oidc: Arc::new(oidc::OidcAuthenticator::new(o.clone()).map_err(StartError::S3)?),
+            }),
+            None => tokens.clone(),
+        },
         tokens: Some(tokens),
         authz: auth::Authorizer::new(cfg.policy.clone()),
         audit,

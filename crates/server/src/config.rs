@@ -28,6 +28,10 @@
 //!
 //! [auth]
 //! allow_anonymous = false
+//! # [auth.oidc]                     # optional: JWT bearer tokens
+//! # issuer = "https://accounts.example.com"
+//! # audience = "pico2peta"
+//! # principal_claim = "email"
 //! [[auth.tokens]]
 //! principal = "ci"
 //! sha256 = "<hex sha256 of the bearer token>"
@@ -259,6 +263,38 @@ pub struct AuthSection {
     /// Optional extra TOML file with `[[tokens]]` entries (kept out of the main config).
     #[serde(default)]
     pub token_file: Option<PathBuf>,
+    /// Accept OIDC/JWT bearer tokens from this issuer (in addition to static tokens).
+    #[serde(default)]
+    pub oidc: Option<OidcSection>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OidcSection {
+    /// Exact `iss` value, e.g. `https://accounts.example.com`.
+    pub issuer: String,
+    /// Required `aud` value.
+    pub audience: String,
+    /// JWKS location; default: discovered from `<issuer>/.well-known/openid-configuration`.
+    #[serde(default)]
+    pub jwks_url: Option<String>,
+    /// Claim used as the principal name (default `sub`; `email` is common).
+    #[serde(default = "default_claim")]
+    pub principal_claim: String,
+    /// Prefix added to the claim, e.g. `oidc:` (keeps namespaces apart from static principals).
+    #[serde(default)]
+    pub principal_prefix: String,
+    /// Minimum seconds between JWKS refetches triggered by unknown key ids.
+    #[serde(default = "default_refetch")]
+    pub min_refetch_secs: u64,
+}
+
+fn default_refetch() -> u64 {
+    30
+}
+
+fn default_claim() -> String {
+    "sub".into()
 }
 
 /// A bearer token, stored only as its SHA-256.
@@ -363,6 +399,17 @@ impl Config {
         if !(0.0..=1.0).contains(&self.gc.min_garbage_ratio) {
             return bad("gc.min_garbage_ratio must be in [0, 1]".into());
         }
+        if let Some(o) = &self.auth.oidc {
+            let local = |u: &str| u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost");
+            for u in std::iter::once(&o.issuer).chain(o.jwks_url.iter()) {
+                if !(u.starts_with("https://") || local(u)) {
+                    return bad(format!("auth.oidc: {u:?} must be https"));
+                }
+            }
+            if o.audience.is_empty() || o.principal_claim.is_empty() {
+                return bad("auth.oidc: audience and principal_claim must be set".into());
+            }
+        }
         let mut seen = std::collections::HashSet::new();
         for t in &self.auth.tokens {
             if t.sha256.len() != 64 || !t.sha256.bytes().all(|c| c.is_ascii_hexdigit()) {
@@ -388,12 +435,12 @@ impl Config {
     }
 }
 
-/// Principal names: `[A-Za-z0-9._@-]{1,128}`, not the reserved `anonymous`/`*`.
+/// Principal names: `[A-Za-z0-9._@:-]{1,128}`, not the reserved `anonymous`/`*`.
 pub fn valid_principal(p: &str) -> bool {
     !p.is_empty()
         && p.len() <= 128
         && p != crate::auth::ANONYMOUS
-        && p.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'@' | b'-'))
+        && p.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'@' | b':' | b'-'))
 }
 
 #[cfg(test)]

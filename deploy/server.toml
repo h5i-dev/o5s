@@ -34,6 +34,12 @@ create = true                      # initialize on first start
 
 [auth]
 allow_anonymous = false
+# OIDC: accept JWT bearer tokens from your identity provider as well.
+#[auth.oidc]
+#issuer = "https://accounts.example.com"
+#audience = "pico2peta"
+#principal_claim = "email"         # policies then name principals "oidc:<email>"
+#principal_prefix = "oidc:"
 # Tokens live in a separate file (mode 0600). Create entries with:
 #   pico2peta-server gen-token <principal>
 token_file = "tokens.toml"
