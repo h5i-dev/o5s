@@ -21,6 +21,29 @@ pub const REC_MAGIC: u32 = u32::from_le_bytes(*b"P2PR");
 pub const REC_HEADER: usize = 4 + 1 + 1 + 2 + 32 + 8 + 4;
 pub const REC_TRAILER: usize = 4;
 pub const IDX_ENTRY: usize = 32 + 8 + 4 + 8 + 1 + 1;
+/// Upper bound on a blob record's logical length (blobs are below the
+/// chunk threshold, which `PackConfig::validate` caps at 2 GiB).
+pub const MAX_BLOB: u64 = 1 << 31;
+/// Upper bound on a stored payload. Rejects hostile lengths before allocating.
+pub const MAX_STORED: u32 = (1 << 31) + (1 << 20);
+
+// Fixed-width little-endian readers. Callers bounds-check the slice
+// first, so the copies below always see exactly N bytes.
+fn rd_u32(b: &[u8]) -> u32 {
+    let mut a = [0u8; 4];
+    a.copy_from_slice(&b[..4]);
+    u32::from_le_bytes(a)
+}
+fn rd_u64(b: &[u8]) -> u64 {
+    let mut a = [0u8; 8];
+    a.copy_from_slice(&b[..8]);
+    u64::from_le_bytes(a)
+}
+fn rd_hash(b: &[u8]) -> Hash {
+    let mut a = [0u8; 32];
+    a.copy_from_slice(&b[..32]);
+    Hash(a)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -90,14 +113,17 @@ pub fn parse_header(b: &[u8]) -> Result<RecHeader> {
     if b.len() < REC_HEADER {
         return Err(Error::Corrupt("short record header".into()));
     }
-    if u32::from_le_bytes(b[0..4].try_into().unwrap()) != REC_MAGIC {
+    if rd_u32(&b[0..4]) != REC_MAGIC {
         return Err(Error::Corrupt("bad record magic".into()));
     }
     let kind = Kind::from_u8(b[4])?;
     let codec = Codec::from_u8(b[5])?;
-    let hash = Hash(b[8..40].try_into().unwrap());
-    let raw_len = u64::from_le_bytes(b[40..48].try_into().unwrap());
-    let stored_len = u32::from_le_bytes(b[48..52].try_into().unwrap());
+    let hash = rd_hash(&b[8..40]);
+    let raw_len = rd_u64(&b[40..48]);
+    let stored_len = rd_u32(&b[48..52]);
+    if stored_len > MAX_STORED || (kind == Kind::Blob && raw_len > MAX_BLOB) {
+        return Err(Error::Corrupt("record length out of bounds".into()));
+    }
     Ok(RecHeader { kind, codec, hash, raw_len, stored_len })
 }
 
@@ -109,7 +135,7 @@ pub fn decode_record(b: &[u8]) -> Result<(RecHeader, &[u8])> {
         return Err(Error::Corrupt("short record".into()));
     }
     let body = &b[..total - REC_TRAILER];
-    let crc = u32::from_le_bytes(b[total - REC_TRAILER..total].try_into().unwrap());
+    let crc = rd_u32(&b[total - REC_TRAILER..total]);
     if crc32fast::hash(body) != crc {
         return Err(Error::Corrupt(format!("record crc mismatch for {}", h.hash)));
     }
@@ -148,14 +174,14 @@ pub fn decode_manifest(b: &[u8]) -> Result<Vec<(Hash, u64)>> {
     if b.len() < 4 {
         return Err(Error::Corrupt("short manifest".into()));
     }
-    let n = u32::from_le_bytes(b[0..4].try_into().unwrap()) as usize;
-    if b.len() != 4 + n * 40 {
+    let n = rd_u32(&b[0..4]) as usize;
+    if Some(b.len()) != n.checked_mul(40).and_then(|x| x.checked_add(4)) {
         return Err(Error::Corrupt("manifest length mismatch".into()));
     }
     Ok((0..n)
         .map(|i| {
             let o = 4 + i * 40;
-            (Hash(b[o..o + 32].try_into().unwrap()), u64::from_le_bytes(b[o + 32..o + 40].try_into().unwrap()))
+            (rd_hash(&b[o..o + 32]), rd_u64(&b[o + 32..o + 40]))
         })
         .collect())
 }
@@ -200,18 +226,20 @@ pub fn decode_index(b: &[u8]) -> Result<Vec<IdxEntry>> {
     if blake3::hash(body).as_bytes() != sum {
         return Err(Error::Corrupt("index checksum mismatch".into()));
     }
-    let n = u64::from_le_bytes(body[8..16].try_into().unwrap()) as usize;
-    if body.len() != 16 + n * IDX_ENTRY {
+    let n = rd_u64(&body[8..16]);
+    let expect = usize::try_from(n).ok().and_then(|n| n.checked_mul(IDX_ENTRY)).and_then(|x| x.checked_add(16));
+    let n = n as usize;
+    if expect != Some(body.len()) {
         return Err(Error::Corrupt("index length mismatch".into()));
     }
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
         let e = &body[16 + i * IDX_ENTRY..16 + (i + 1) * IDX_ENTRY];
         out.push(IdxEntry {
-            hash: Hash(e[0..32].try_into().unwrap()),
-            offset: u64::from_le_bytes(e[32..40].try_into().unwrap()),
-            stored_len: u32::from_le_bytes(e[40..44].try_into().unwrap()),
-            raw_len: u64::from_le_bytes(e[44..52].try_into().unwrap()),
+            hash: rd_hash(&e[0..32]),
+            offset: rd_u64(&e[32..40]),
+            stored_len: rd_u32(&e[40..44]),
+            raw_len: rd_u64(&e[44..52]),
             kind: Kind::from_u8(e[52])?,
             codec: Codec::from_u8(e[53])?,
         });

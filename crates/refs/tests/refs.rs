@@ -305,3 +305,32 @@ proptest! {
         }
     }
 }
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 2000, ..ProptestConfig::default() })]
+    #[test]
+    fn journal_decoder_total(raw in proptest::collection::vec(any::<u8>(), 0..300)) {
+        let _ = pico2peta_refs::parse_records(&raw);
+        let _ = pico2peta_refs::decode_payload(&raw);
+    }
+
+    /// Opening a journal with arbitrary bytes after a valid prefix never panics.
+    #[test]
+    fn journal_open_total(tail in proptest::collection::vec(any::<u8>(), 0..400)) {
+        let d = tempfile::tempdir().unwrap();
+        {
+            let r = RefStore::open(d.path()).unwrap();
+            let x = n("x");
+            r.replace(&x, &[(x.clone(), Observed::Absent)], h(1), &yes).unwrap();
+        }
+        let mut j = std::fs::read(d.path().join("journal")).unwrap();
+        j.extend_from_slice(&tail);
+        std::fs::write(d.path().join("journal"), &j).unwrap();
+        if let Ok(r) = RefStore::open(d.path()) {
+            // The valid prefix is intact.
+            prop_assert_eq!(r.resolve(&n("x")).unwrap().map(|v| v.hash), Some(h(1)));
+            let y = n("y");
+            let _ = r.replace(&y, &[(y.clone(), Observed::Absent)], h(2), &yes);
+        }
+    }
+}

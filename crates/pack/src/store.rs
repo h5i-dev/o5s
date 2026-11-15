@@ -134,7 +134,39 @@ struct Index {
     /// Sealed pack names (hex), indexed by `PackRef::Sealed`.
     sealed: Vec<String>,
     known: HashSet<String>,
+    /// Packs condemned by GC (still readable, scheduled for deletion).
+    condemned: HashSet<String>,
+    /// Parsed `gc/*.condemned` records, by key.
+    condemned_records: HashMap<String, Vec<String>>,
+    last_refresh: Option<std::time::Instant>,
 }
+
+/// Location preference: live sealed < own open pack < condemned sealed.
+fn rank(idx: &Index, l: &Loc) -> u8 {
+    match l.pack {
+        PackRef::Sealed(pid) if idx.condemned.contains(&idx.sealed[pid as usize]) => 2,
+        PackRef::Sealed(_) => 0,
+        PackRef::Open(_) => 1,
+    }
+}
+
+fn insert_loc(idx: &mut Index, hash: Hash, loc: Loc) {
+    let better = match idx.map.get(&hash) {
+        Some(old) => rank(idx, &loc) < rank(idx, old),
+        None => true,
+    };
+    if better {
+        idx.map.insert(hash, loc);
+    }
+}
+
+/// Interval after which writers re-list before trusting a dedup hit, so that
+/// they learn about GC condemnations promptly. GC grace periods must be much
+/// longer than this (see `pico2peta-repo` GC).
+pub const DEDUP_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Prefix of GC records on the backend.
+pub const GC_PREFIX: &str = "gc/";
 
 struct OpenPack {
     file: Arc<File>,
@@ -152,6 +184,7 @@ struct Inner {
     index: RwLock<Index>,
     writer: Mutex<Option<OpenPack>>,
     generation: AtomicU64,
+    dedup_refresh_ms: AtomicU64,
 }
 
 impl Inner {
@@ -161,7 +194,7 @@ impl Inner {
 
     /// Seals a fully written, locked staging file: fsync, upload pack, upload
     /// index, unlink. Idempotent and crash-safe at every step.
-    fn seal_file(&self, path: &Path, f: &File, len: u64, mut entries: Vec<IdxEntry>) -> Result<()> {
+    fn seal_file(&self, path: &Path, f: &File, len: u64, mut entries: Vec<IdxEntry>) -> Result<String> {
         self.fault("seal.fsync")?;
         f.sync_all()?;
         let mut hasher = blake3::Hasher::new();
@@ -182,7 +215,7 @@ impl Inner {
         self.fault("seal.unlink")?;
         fs::remove_file(path)?;
         fsync_dir(&self.staging_dir)?;
-        Ok(())
+        Ok(name)
     }
 }
 
@@ -232,6 +265,7 @@ impl PackStore {
                 index: RwLock::new(Index::default()),
                 writer: Mutex::new(None),
                 generation: AtomicU64::new(1),
+                dedup_refresh_ms: AtomicU64::new(DEDUP_REFRESH_INTERVAL.as_millis() as u64),
             }),
         };
         s.refresh()?;
@@ -247,36 +281,90 @@ impl PackStore {
         Ok(self.inner.faults.hit(point)?)
     }
 
-    /// Loads indexes of sealed packs this handle hasn't seen yet. Returns
-    /// the number of new packs.
+    /// Re-lists the backend: loads indexes of new sealed packs, forgets
+    /// deleted ones, and picks up GC condemnations. Returns the number of
+    /// newly loaded packs.
     pub fn refresh(&self) -> Result<usize> {
         let listed = self.inner.backend.list("packs/")?;
-        let names: HashSet<&str> = listed.iter().map(|m| m.key.as_str()).collect();
-        let mut new = Vec::new();
-        {
+        let keys: HashSet<&str> = listed.iter().map(|m| m.key.as_str()).collect();
+        let live_idx: Vec<String> = listed
+            .iter()
+            .filter_map(|m| m.key.strip_prefix("packs/").and_then(|k| k.strip_suffix(".idx")))
+            .map(|s| s.to_string())
+            .collect();
+        for name in &live_idx {
+            if !keys.contains(format!("packs/{name}.pack").as_str()) {
+                return Err(Error::Corrupt(format!("index without pack: {name}")));
+            }
+        }
+        // GC condemnation records (small, create-only, cached by key).
+        let gc_keys: Vec<String> = self
+            .inner
+            .backend
+            .list(GC_PREFIX)?
+            .into_iter()
+            .map(|m| m.key)
+            .filter(|k| k.ends_with(".condemned"))
+            .collect();
+        let (removed, mut records) = {
             let idx = self.inner.index.read().map_err(poisoned)?;
-            for m in &listed {
-                let Some(name) = m.key.strip_prefix("packs/").and_then(|k| k.strip_suffix(".idx")) else { continue };
-                if !idx.known.contains(name) {
-                    new.push(name.to_string());
+            let listed_set: HashSet<&String> = live_idx.iter().collect();
+            let removed = idx.known.iter().any(|k| !listed_set.contains(k));
+            let records: HashMap<String, Vec<String>> =
+                gc_keys.iter().filter_map(|k| idx.condemned_records.get(k).map(|v| (k.clone(), v.clone()))).collect();
+            (removed, records)
+        };
+        for k in &gc_keys {
+            if !records.contains_key(k) {
+                match read_name_list(self.inner.backend.as_ref(), k) {
+                    Ok(v) => {
+                        records.insert(k.clone(), v);
+                    }
+                    Err(Error::KeyNotFound(_)) => {} // deleted concurrently
+                    Err(e) => return Err(e),
                 }
             }
         }
+        let condemned: HashSet<String> = records.values().flatten().cloned().collect();
+        let rebuild = {
+            let idx = self.inner.index.read().map_err(poisoned)?;
+            removed || idx.condemned != condemned
+        };
+        let to_load: Vec<String> = if rebuild {
+            live_idx.clone()
+        } else {
+            let idx = self.inner.index.read().map_err(poisoned)?;
+            live_idx.iter().filter(|n| !idx.known.contains(*n)).cloned().collect()
+        };
         let mut loaded = Vec::new();
-        for name in new {
-            if !names.contains(format!("packs/{name}.pack").as_str()) {
-                return Err(Error::Corrupt(format!("index without pack: {name}")));
-            }
+        for name in to_load {
             let mut buf = Vec::new();
-            self.inner.backend.open(&format!("packs/{name}.idx"))?.read_to_end(&mut buf)?;
+            match self.inner.backend.open(&format!("packs/{name}.idx")) {
+                Ok(mut r) => {
+                    r.read_to_end(&mut buf)?;
+                }
+                Err(Error::KeyNotFound(_)) => continue, // deleted by GC between list and read
+                Err(e) => return Err(e),
+            }
             loaded.push((name, decode_index(&buf)?));
         }
-        let n = loaded.len();
         let mut idx = self.inner.index.write().map_err(poisoned)?;
+        if rebuild {
+            let open: Vec<(Hash, Loc)> =
+                idx.map.iter().filter(|(_, l)| matches!(l.pack, PackRef::Open(_))).map(|(h, l)| (*h, *l)).collect();
+            *idx = Index { condemned, condemned_records: records, ..Index::default() };
+            for (h, l) in open {
+                idx.map.insert(h, l);
+            }
+        } else {
+            idx.condemned_records = records;
+        }
+        let mut n = 0;
         for (name, entries) in loaded {
             if !idx.known.insert(name.clone()) {
                 continue;
             }
+            n += 1;
             let pid = idx.sealed.len() as u32;
             idx.sealed.push(name);
             for e in entries {
@@ -287,16 +375,27 @@ impl PackStore {
                     raw_len: e.raw_len,
                     kind: e.kind,
                 };
-                // Prefer sealed locations over our own open pack.
-                match idx.map.get(&e.hash) {
-                    Some(Loc { pack: PackRef::Sealed(_), .. }) => {}
-                    _ => {
-                        idx.map.insert(e.hash, loc);
-                    }
-                }
+                insert_loc(&mut idx, e.hash, loc);
             }
         }
+        idx.last_refresh = Some(std::time::Instant::now());
         Ok(n)
+    }
+
+    /// Lookup for write-side deduplication: refreshes if the local view is
+    /// older than [`DEDUP_REFRESH_INTERVAL`], and ignores copies that live
+    /// only in condemned packs (those are about to be deleted).
+    fn dedup_hit(&self, hash: &Hash) -> Result<bool> {
+        let stale = {
+            let idx = self.inner.index.read().map_err(poisoned)?;
+            let max = std::time::Duration::from_millis(self.inner.dedup_refresh_ms.load(Ordering::Relaxed));
+            idx.last_refresh.is_none_or(|t| t.elapsed() > max)
+        };
+        if stale {
+            self.refresh()?;
+        }
+        let idx = self.inner.index.read().map_err(poisoned)?;
+        Ok(idx.map.get(hash).is_some_and(|l| rank(&idx, l) < 2))
     }
 
     /// Seals every staging file whose owner is gone.
@@ -427,7 +526,7 @@ impl PackStore {
         let stored_len = payload.len() as u32;
         op.entries.push(IdxEntry { hash, offset, stored_len, raw_len, kind, codec });
         let loc = Loc { pack: PackRef::Open(op.generation), offset, stored_len, raw_len, kind };
-        self.inner.index.write().map_err(poisoned)?.map.entry(hash).or_insert(loc);
+        insert_loc(&mut *self.inner.index.write().map_err(poisoned)?, hash, loc);
         Ok(())
     }
 
@@ -435,21 +534,39 @@ impl PackStore {
     fn seal_locked(&self, w: &mut Option<OpenPack>) -> Result<()> {
         let Some(op) = w.take() else { return Ok(()) };
         let OpenPack { file, path, generation, len, entries } = op;
-        let names: Vec<Hash> = entries.iter().map(|e| e.hash).collect();
-        if let Err(e) = self.inner.seal_file(&path, &file, len, entries.clone()) {
-            // Keep the open pack so a later flush can retry. Our records stay readable.
-            *w = Some(OpenPack { file, path, generation, len, entries });
-            return Err(e);
-        }
+        let name = match self.inner.seal_file(&path, &file, len, entries.clone()) {
+            Ok(n) => n,
+            Err(e) => {
+                // Keep the open pack so a later flush can retry. Our records stay readable.
+                *w = Some(OpenPack { file, path, generation, len, entries });
+                return Err(e);
+            }
+        };
         drop(file); // releases the flock
-        self.refresh()?;
-        // Any record still pointing at this generation now lives in the sealed pack.
-        let idx = self.inner.index.read().map_err(poisoned)?;
-        for h in names {
-            if let Some(Loc { pack: PackRef::Open(g), .. }) = idx.map.get(&h)
-                && *g == generation
-            {
-                return Err(Error::Corrupt(format!("sealed pack not visible after refresh for {h}")));
+        // Re-point our records at the sealed pack directly. This doesn't
+        // depend on a refresh, which may race with GC condemning the pack.
+        let mut idx = self.inner.index.write().map_err(poisoned)?;
+        let pid = match idx.sealed.iter().position(|n| *n == name) {
+            Some(p) => p as u32,
+            None => {
+                idx.known.insert(name.clone());
+                idx.sealed.push(name);
+                (idx.sealed.len() - 1) as u32
+            }
+        };
+        for e in entries {
+            let loc = Loc {
+                pack: PackRef::Sealed(pid),
+                offset: e.offset,
+                stored_len: e.stored_len,
+                raw_len: e.raw_len,
+                kind: e.kind,
+            };
+            match idx.map.get(&e.hash) {
+                Some(Loc { pack: PackRef::Open(g), .. }) if *g == generation => {
+                    idx.map.insert(e.hash, loc);
+                }
+                _ => insert_loc(&mut idx, e.hash, loc),
             }
         }
         Ok(())
@@ -478,13 +595,24 @@ impl PackStore {
         if self.refresh()? > 0 { self.lookup_local(hash) } else { Ok(None) }
     }
 
-    fn read_record(&self, hash: &Hash, mut loc: Loc) -> Result<(RecHeader, Vec<u8>)> {
-        for _ in 0..3 {
+    /// Reads the raw bytes of `hash`'s record (CRC verified), following
+    /// relocations caused by seals and GC.
+    fn read_raw(&self, hash: &Hash, mut loc: Loc) -> Result<(RecHeader, Vec<u8>)> {
+        for _ in 0..4 {
             let total = (REC_HEADER + loc.stored_len as usize + REC_TRAILER) as u64;
             let raw = match loc.pack {
                 PackRef::Sealed(pid) => {
                     let name = self.inner.index.read().map_err(poisoned)?.sealed[pid as usize].clone();
-                    self.inner.backend.get_range(&format!("packs/{name}.pack"), loc.offset..loc.offset + total)?
+                    match self.inner.backend.get_range(&format!("packs/{name}.pack"), loc.offset..loc.offset + total) {
+                        Ok(b) => b,
+                        Err(Error::KeyNotFound(_)) => {
+                            // Deleted by GC: the live copy was rescued elsewhere.
+                            self.refresh()?;
+                            loc = self.lookup_local(hash)?.ok_or(Error::NotFound(*hash))?;
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
                 PackRef::Open(generation) => {
                     let file = {
@@ -505,13 +633,19 @@ impl PackStore {
                     }
                 }
             };
-            let (h, payload) = decode_record(&raw)?;
+            let (h, _) = decode_record(&raw)?;
             if h.hash != *hash {
                 return Err(Error::Corrupt(format!("record at index location holds {} not {hash}", h.hash)));
             }
-            return Ok((h, unpack_payload(&h, payload)?));
+            return Ok((h, raw));
         }
         Err(Error::Corrupt(format!("could not resolve location of {hash}")))
+    }
+
+    fn read_record(&self, hash: &Hash, loc: Loc) -> Result<(RecHeader, Vec<u8>)> {
+        let (h, raw) = self.read_raw(hash, loc)?;
+        let (_, payload) = decode_record(&raw)?;
+        Ok((h, unpack_payload(&h, payload)?))
     }
 
     fn read_blob(&self, hash: &Hash, loc: Loc) -> Result<Vec<u8>> {
@@ -543,7 +677,7 @@ impl PackStore {
             hasher.update(&c);
             total += c.len() as u64;
             let ch = Hash::of(&c);
-            if self.lookup_local(&ch)?.is_none() {
+            if !self.dedup_hit(&ch)? {
                 let mut w = self.inner.writer.lock().map_err(poisoned)?;
                 self.append(&mut w, Kind::Blob, ch, c.len() as u64, &c)?;
                 self.maybe_seal(&mut w)?;
@@ -551,7 +685,7 @@ impl PackStore {
             manifest.push((ch, c.len() as u64));
         }
         let hash = Hash(*hasher.finalize().as_bytes());
-        if self.lookup_local(&hash)?.is_none() {
+        if !self.dedup_hit(&hash)? {
             let mut w = self.inner.writer.lock().map_err(poisoned)?;
             self.append(&mut w, Kind::Manifest, hash, total, &encode_manifest(&manifest))?;
             self.maybe_seal(&mut w)?;
@@ -581,6 +715,101 @@ impl PackStore {
         Ok(s)
     }
 
+    // -- GC / repack support ------------------------------------------------
+
+    /// Overrides [`DEDUP_REFRESH_INTERVAL`] for this handle. GC grace
+    /// periods must stay much longer than this.
+    pub fn set_dedup_refresh_interval(&self, d: std::time::Duration) {
+        self.inner.dedup_refresh_ms.store(d.as_millis() as u64, Ordering::Relaxed);
+    }
+
+    /// The backend sealed packs live on.
+    pub fn backend(&self) -> &Arc<dyn Backend> {
+        &self.inner.backend
+    }
+
+    /// Sealed packs that are not condemned, after a refresh.
+    pub fn live_packs(&self) -> Result<Vec<String>> {
+        self.refresh()?;
+        let idx = self.inner.index.read().map_err(poisoned)?;
+        let mut v: Vec<String> = idx.sealed.iter().filter(|n| !idx.condemned.contains(*n)).cloned().collect();
+        v.sort();
+        Ok(v)
+    }
+
+    /// Packs currently condemned by GC records (as of the last refresh).
+    pub fn condemned_packs(&self) -> Result<HashSet<String>> {
+        Ok(self.inner.index.read().map_err(poisoned)?.condemned.clone())
+    }
+
+    /// Index entries of sealed pack `name`, read from the backend.
+    pub fn pack_entries(&self, name: &str) -> Result<Vec<IdxEntry>> {
+        let mut buf = Vec::new();
+        self.inner.backend.open(&format!("packs/{name}.idx"))?.read_to_end(&mut buf)?;
+        decode_index(&buf)
+    }
+
+    /// Byte size of sealed pack `name` (pack plus index).
+    pub fn pack_bytes(&self, name: &str) -> Result<u64> {
+        let b = &self.inner.backend;
+        let p = b.head(&format!("packs/{name}.pack"))?.map_or(0, |m| m.len);
+        let i = b.head(&format!("packs/{name}.idx"))?.map_or(0, |m| m.len);
+        Ok(p + i)
+    }
+
+    /// For a chunked object, the hashes of its chunks. `None` for a plain blob.
+    pub fn chunks(&self, hash: &Hash) -> Result<Option<Vec<Hash>>> {
+        let loc = self.lookup(hash)?.ok_or(Error::NotFound(*hash))?;
+        match loc.kind {
+            Kind::Blob => Ok(None),
+            Kind::Manifest => Ok(Some(self.read_manifest(hash, loc)?.into_iter().map(|c| c.0).collect())),
+        }
+    }
+
+    /// Copies `hash`'s record verbatim (no recompression) into this
+    /// handle's open pack. The copy becomes durable at the next flush. Chunks
+    /// of a manifest aren't copied, so callers copy every live hash themselves.
+    pub fn copy_record(&self, hash: &Hash) -> Result<()> {
+        let loc = self.lookup(hash)?.ok_or(Error::NotFound(*hash))?;
+        let (h, raw) = self.read_raw(hash, loc)?;
+        let mut w = self.inner.writer.lock().map_err(poisoned)?;
+        if w.is_none() {
+            *w = Some(self.new_open_pack()?);
+        }
+        let op = w.as_mut().ok_or_else(|| Error::Corrupt("no open pack".into()))?;
+        let offset = op.len;
+        self.inner.faults.hit("copy.write")?;
+        op.file.write_all_at(&raw, offset)?;
+        op.len += raw.len() as u64;
+        op.entries.push(IdxEntry {
+            hash: h.hash,
+            offset,
+            stored_len: h.stored_len,
+            raw_len: h.raw_len,
+            kind: h.kind,
+            codec: h.codec,
+        });
+        let l = Loc {
+            pack: PackRef::Open(op.generation),
+            offset,
+            stored_len: h.stored_len,
+            raw_len: h.raw_len,
+            kind: h.kind,
+        };
+        insert_loc(&mut *self.inner.index.write().map_err(poisoned)?, h.hash, l);
+        self.maybe_seal(&mut w)
+    }
+
+    /// Name of the sealed pack `hash` is currently served from (`None` if it
+    /// comes from this handle's open pack, or isn't present).
+    pub fn serving_pack(&self, hash: &Hash) -> Result<Option<String>> {
+        let idx = self.inner.index.read().map_err(poisoned)?;
+        Ok(idx.map.get(hash).and_then(|l| match l.pack {
+            PackRef::Sealed(pid) => Some(idx.sealed[pid as usize].clone()),
+            PackRef::Open(_) => None,
+        }))
+    }
+
     /// Every hash addressable through `get` (objects and chunks), sorted.
     pub fn hashes(&self) -> Result<Vec<Hash>> {
         let mut v: Vec<Hash> = self.inner.index.read().map_err(poisoned)?.map.keys().copied().collect();
@@ -602,7 +831,7 @@ impl ObjectStore for PackStore {
             return self.put_chunks(cdc.map(|c| Ok(data[c.offset..c.offset + c.length].to_vec())));
         }
         let hash = Hash::of(data);
-        if self.lookup_local(&hash)?.is_some() {
+        if self.dedup_hit(&hash)? {
             return Ok(hash);
         }
         let mut w = self.inner.writer.lock().map_err(poisoned)?;
@@ -690,6 +919,17 @@ impl Drop for Inner {
             let _ = self.seal_file(&op.path, &op.file, op.len, op.entries);
         }
     }
+}
+
+/// Reads a newline-separated list of names (a GC record).
+pub fn read_name_list(b: &dyn Backend, key: &str) -> Result<Vec<String>> {
+    let mut buf = String::new();
+    b.open(key)?.read_to_string(&mut buf)?;
+    let v: Vec<String> = buf.lines().filter(|l| !l.is_empty()).map(|l| l.to_string()).collect();
+    if v.iter().any(|n| n.len() != 64 || !n.bytes().all(|c| c.is_ascii_hexdigit())) {
+        return Err(Error::Corrupt(format!("bad GC record {key}")));
+    }
+    Ok(v)
 }
 
 /// Converts the `io::Error` wrapping of a core error back into it.

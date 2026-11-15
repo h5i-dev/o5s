@@ -1,7 +1,8 @@
 //! `pico2peta` command-line tool.
 //!
 //! Exit codes: 0 success, 1 error, 2 not found / absent, 3 replace conflict,
-//! 4 forbidden by namespace rule.
+//! 4 forbidden by namespace rule, 5 unauthorized.
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use clap::{Parser, Subcommand};
 use pico2peta_core::{Error, Hash, Name, Observed, ReplaceOutcome, Repository, Rule};
@@ -78,6 +79,21 @@ enum Cmd {
     Flush,
     /// Repository statistics.
     Stat,
+    /// Run whichever garbage-collection phases are due (plan → sweep → delete).
+    /// Safe with concurrent writers. Run it periodically (e.g. from cron).
+    /// Roots are the current refs; objects are treated as opaque.
+    Gc {
+        /// Minimum time between phases (e.g. 30m, 1h, 2d). Must be at least
+        /// 10m unless --unsafe-short-grace is given.
+        #[arg(long, default_value = "1h")]
+        grace: String,
+        /// Allow a grace period under 10 minutes. Only safe with no active writers.
+        #[arg(long)]
+        unsafe_short_grace: bool,
+        /// Report what would happen without changing anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -97,6 +113,20 @@ fn parse_observed(s: &str) -> Result<Observed, Error> {
         .filter(|v| *v > 0)
         .map(Observed::Version)
         .ok_or_else(|| Error::Parse(format!("expected `absent` or a version >= 1, got {s:?}")))
+}
+
+fn parse_duration(s: &str) -> Result<std::time::Duration, Error> {
+    let bad = || Error::Parse(format!("duration must look like 90s, 30m, 1h or 2d, got {s:?}"));
+    let (num, mult) = match s.char_indices().last() {
+        Some((i, 's')) => (&s[..i], 1),
+        Some((i, 'm')) => (&s[..i], 60),
+        Some((i, 'h')) => (&s[..i], 3600),
+        Some((i, 'd')) => (&s[..i], 86400),
+        _ if s == "0" => ("0", 1),
+        _ => return Err(bad()),
+    };
+    let n: u64 = num.parse().map_err(|_| bad())?;
+    Ok(std::time::Duration::from_secs(n.checked_mul(mult).ok_or_else(bad)?))
 }
 
 fn parse_range(s: &str) -> Result<std::ops::Range<u64>, Error> {
@@ -201,6 +231,26 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             }
         }
         Cmd::Flush => r.flush()?,
+        Cmd::Gc { grace, unsafe_short_grace, dry_run } => {
+            let opts = pico2peta_repo::GcOptions {
+                grace: parse_duration(&grace)?,
+                allow_short_grace: unsafe_short_grace,
+                dry_run,
+                ..Default::default()
+            };
+            let rep = repo.gc(&opts, &pico2peta_repo::OpaqueObjects)?;
+            if let Some(p) = &rep.planned {
+                writeln!(out, "planned        {p}")?;
+            }
+            writeln!(out, "swept_plans    {}", rep.swept.len())?;
+            writeln!(out, "condemned      {} packs", rep.condemned_packs)?;
+            writeln!(out, "copied         {} records ({} rescued)", rep.copied_records, rep.rescued_records)?;
+            writeln!(out, "deleted        {} packs, {} bytes", rep.deleted_packs, rep.deleted_bytes)?;
+            writeln!(out, "live           {} hashes", rep.live_hashes)?;
+            for d in &rep.dangling_refs {
+                writeln!(out, "DANGLING REF   {d}")?;
+            }
+        }
         Cmd::Stat => {
             let s = repo.pack_stats()?;
             writeln!(out, "backend        {}", repo.backend().describe())?;
@@ -208,6 +258,9 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             writeln!(out, "objects        {} ({} blobs, {} manifests)", s.objects, s.blobs, s.manifests)?;
             writeln!(out, "logical_bytes  {}", s.logical_blob_bytes)?;
             writeln!(out, "refs           {}", r.list_refs("")?.len())?;
+            let g = pico2peta_repo::gc::gc_state(&repo)?;
+            writeln!(out, "gc_plans       {}", g.get("plans").copied().unwrap_or(0))?;
+            writeln!(out, "gc_condemned   {}", g.get("condemned").copied().unwrap_or(0))?;
         }
     }
     out.flush()?;
@@ -238,6 +291,7 @@ fn main() -> ExitCode {
             match e {
                 Error::NotFound(_) | Error::KeyNotFound(_) => ExitCode::from(2),
                 Error::Forbidden { .. } => ExitCode::from(4),
+                Error::Unauthorized(_) => ExitCode::from(5),
                 _ => ExitCode::from(1),
             }
         }

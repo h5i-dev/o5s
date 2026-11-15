@@ -1,0 +1,15 @@
+[package]
+name = "pico2peta-exp1"
+description = "Experiment 1: similarity-grouped zstd vs git gc --aggressive (see docs/PLAN.md §4)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "exp1"
+path = "src/main.rs"
+
+[dependencies]
+zstd.workspace = true
+sha1_smol = "1"
