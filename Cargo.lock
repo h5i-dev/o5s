@@ -1108,6 +1108,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pico2peta-chunk"
+version = "0.1.0"
+dependencies = [
+ "fastcdc",
+ "proptest",
+]
+
+[[package]]
 name = "pico2peta-cli"
 version = "0.1.0"
 dependencies = [
@@ -1146,6 +1154,14 @@ dependencies = [
 
 [[package]]
 name = "pico2peta-exp1"
+version = "0.1.0"
+dependencies = [
+ "sha1_smol",
+ "zstd",
+]
+
+[[package]]
+name = "pico2peta-exp1c"
 version = "0.1.0"
 dependencies = [
  "sha1_smol",
@@ -1256,8 +1272,10 @@ version = "0.1.0"
 dependencies = [
  "pico2peta-core",
  "pico2peta-repo",
+ "proptest",
  "serde_json",
  "tempfile",
+ "zstd",
 ]
 
 [[package]]
