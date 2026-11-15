@@ -11,6 +11,7 @@ This mirrors `crates/server/src/auth.rs` (`Authorizer::allows`) and the guards i
 * `replace n rs _` needs write on `n` **and** read on every name in `rs` (a read set
   is information about those names);
 * `deleteRef n rs` needs the same as `replace`;
+* `updateMany ups rs` needs write on every listed name and read on the read set;
 * `setRule p _` needs admin on `p`.
 
 Theorems: an unauthorized principal can't move a name (`unauthorized_cannot_move`,
@@ -62,6 +63,10 @@ noncomputable def authStep (hashOf : B → H) (pol : List Grant) (p : Principal)
     if allows pol p n .write && rs.all (fun x => allows pol p x.1 .read) then
       some (step hashOf s (.deleteRef n rs))
     else none
+  | .updateMany ups rs =>
+    if ups.all (fun x => allows pol p x.1 .write) && rs.all (fun x => allows pol p x.1 .read) then
+      some (step hashOf s (.updateMany ups rs))
+    else none
   | .setRule q r => if allows pol p q .admin then some (step hashOf s (.setRule q r)) else none
 
 /-- What `resolve` returns to a principal: `none` means denied. -/
@@ -109,6 +114,19 @@ theorem unauthorized_cannot_move (hashOf : B → H) (pol : List Grant) (p : Prin
     simp only [authStep] at hr
     split at hr
     · simp only [Option.some.injEq] at hr; subst hr; simp [step, setRule_refs]
+    · cases hr
+  | updateMany ups rs =>
+    simp only [authStep] at hr
+    split at hr
+    · rename_i hall
+      simp only [Option.some.injEq] at hr
+      subst hr
+      have hn : ∀ u, (n, u) ∉ ups := by
+        intro u hu
+        have := (Bool.and_eq_true _ _ ▸ hall).1
+        have := List.all_eq_true.mp this (n, u) hu
+        simp [hw] at this
+      simp [step, updateMany_other s ups rs n hn]
     · cases hr
   | deleteRef m rs =>
     simp only [authStep] at hr

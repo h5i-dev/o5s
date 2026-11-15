@@ -14,6 +14,7 @@ Hashes and data are both strings (`hashOf := id`).
 P <hash>                                   put
 R <target> <new> <name> <obs> [<name> <obs>]...   replace; obs = "-" (absent) or version
 D <target> <name> <obs> [<name> <obs>]...         delete
+U <k> (<name> <hash|->){k} <name> <obs> ...       update_many (`-` deletes)
 S <prefix> <m|i|h>                         set rule (mutable/immutable/head-release)
 ```
 Outputs: `ok <v>`, `conflict`, or `err <code>`, using the Rust `Error::code()` strings.
@@ -57,9 +58,11 @@ def errCode : Err → String
   | .missingObject => "missing_object"
   | .forbidden => "forbidden"
   | .ruleChangeOnNonEmpty => "rule_change_on_non_empty"
+  | .invalid => "parse"
 
 def showOutcome : Outcome → String
   | .ok v => s!"ok {v}"
+  | .okMany vs => "ok " ++ ",".intercalate (vs.map toString)
   | .conflict => "conflict"
   | .err e => s!"err {errCode e}"
 
@@ -92,6 +95,21 @@ def execLine (st : ExecState) (line : String) : ExecState × String :=
     | some rs =>
       let (o, s') := deleteRef st.s (parseName t) rs
       ({ st with s := s' }, showOutcome o)
+  | "U" :: k :: rest =>
+    match k.toNat? with
+    | none => (st, "parse_error")
+    | some k =>
+      let entries := (rest.take (2 * k))
+      let rec pairs : List String → List (Name × Option String)
+        | n :: v :: tl => (parseName n, if v == "-" then none else some v) :: pairs tl
+        | _ => []
+      match parseReadSet (rest.drop (2 * k)) with
+      | none => (st, "parse_error")
+      | some rs =>
+        let ups := pairs entries
+        let (o, s') := updateMany st.s ups rs
+        let keys := if o.isOk then ups.map Prod.fst ++ st.keys else st.keys
+        ({ s := s', keys := keys }, showOutcome o)
   | ["S", p, r] =>
     let rule := if r == "i" then Rule.immutable else if r == "h" then Rule.headRelease else Rule.mutable
     let (o, s') := setRuleC st.s st.keys (parseName p) rule

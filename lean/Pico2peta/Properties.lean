@@ -58,12 +58,53 @@ theorem setRule_objects (s : State H B) p r : (setRule s p r).2.objects = s.obje
   · rfl
   · split <;> rfl
 
+theorem applyEff_objects (s : State H B) (e : Eff H) : (applyEff s e).objects = s.objects := by
+  cases e <;> rfl
+
+theorem applyEff_rules (s : State H B) (e : Eff H) : (applyEff s e).rules = s.rules := by
+  cases e <;> rfl
+
+theorem foldl_objects (s : State H B) (es : List (Eff H)) : (es.foldl applyEff s).objects = s.objects := by
+  induction es generalizing s with
+  | nil => rfl
+  | cons e es ih => simp only [List.foldl_cons]; rw [ih, applyEff_objects]
+
+theorem foldl_rules (s : State H B) (es : List (Eff H)) : (es.foldl applyEff s).rules = s.rules := by
+  induction es generalizing s with
+  | nil => rfl
+  | cons e es ih => simp only [List.foldl_cons]; rw [ih, applyEff_rules]
+
+theorem updateMany_objects (s : State H B) ups rs : (updateMany s ups rs).2.objects = s.objects := by
+  unfold updateMany
+  split
+  · rfl
+  split
+  · rfl
+  split
+  · rfl
+  split
+  · rfl
+  · exact foldl_objects s _
+
+theorem updateMany_rules (s : State H B) ups rs : (updateMany s ups rs).2.rules = s.rules := by
+  unfold updateMany
+  split
+  · rfl
+  split
+  · rfl
+  split
+  · rfl
+  split
+  · rfl
+  · exact foldl_rules s _
+
 theorem objects_stable (hashOf : B → H) (s : State H B) (op : Op H B) (h : H) (x : B)
     (hx : s.objects h = some x) : (step hashOf s op).2.objects h = some x := by
   cases op with
   | put d => exact put_objects_stable hashOf s d h x hx
   | replace n rs new => simp only [step, replace_objects]; exact hx
   | deleteRef n rs => simp only [step, deleteRef_objects]; exact hx
+  | updateMany ups rs => simp only [step, updateMany_objects]; exact hx
   | setRule p r => simp only [step, setRule_objects]; exact hx
 
 theorem objects_stable_run (hashOf : B → H) (s : State H B) (ops : List (Op H B)) (h : H) (x : B)
@@ -89,6 +130,7 @@ theorem wf_step (hashOf : B → H) (s : State H B) (op : Op H B) (hw : WF hashOf
       · exact hw h x hx
   | replace n rs new => simp only [step, replace_objects] at hx; exact hw h x hx
   | deleteRef n rs => simp only [step, deleteRef_objects] at hx; exact hw h x hx
+  | updateMany ups rs => simp only [step, updateMany_objects] at hx; exact hw h x hx
   | setRule p r => simp only [step, setRule_objects] at hx; exact hw h x hx
 
 theorem wf_run (hashOf : B → H) (s : State H B) (ops : List (Op H B)) (hw : WF hashOf s) :
@@ -212,6 +254,115 @@ theorem deleteRef_frozen (s : State H B) n rs v (hv : s.refs n = some v)
   simp only
   rcases hm with hm | hm <;> rw [hm] <;> exact hv
 
+/-- The name an effect writes, if any. -/
+def Eff.target {H : Type} : Eff H → Option Name
+  | .set n _ => some n
+  | .del n _ => some n
+  | .skip => none
+
+theorem decideOne_target (s : State H B) n u e (h : decideOne s n u = .ok e) : e.target = none ∨ e.target = some n := by
+  unfold decideOne at h
+  cases u with
+  | some x =>
+    simp only at h
+    split at h <;> (try cases h) <;> simp [Eff.target]
+  | none =>
+    simp only at h
+    split at h
+    · cases h; simp [Eff.target]
+    · split at h <;> (try cases h) <;> simp [Eff.target]
+
+theorem decideOne_frozen (s : State H B) n v u (hv : s.refs n = some v)
+    (hm : mobilityOf s.rules n = .createOnce ∨ mobilityOf s.rules n = .forbidden) :
+    ∀ e, decideOne s n u ≠ .ok e := by
+  intro e h
+  unfold decideOne at h
+  cases u with
+  | some x =>
+    simp only at h
+    rcases hm with hm | hm <;> rw [hm, hv] at h <;> cases h
+  | none =>
+    simp only [hv] at h
+    rcases hm with hm | hm <;> rw [hm] at h <;> cases h
+
+theorem decideAll_targets (s : State H B) (ups : List (Name × Option H)) es (h : decideAll s ups = .ok es) :
+    ∀ e ∈ es, ∀ t, e.target = some t → ∃ u, (t, u) ∈ ups ∧ decideOne s t u = .ok e := by
+  induction ups generalizing es with
+  | nil => simp [decideAll] at h; subst h; simp
+  | cons hd rest ih =>
+    obtain ⟨n, u⟩ := hd
+    simp only [decideAll] at h
+    split at h
+    · cases h
+    rename_i e0 he0
+    split at h
+    · cases h
+    rename_i es' hes
+    cases h
+    intro e he t ht
+    rcases List.mem_cons.mp he with rfl | hin
+    · rcases decideOne_target s n u e he0 with h0 | h0
+      · rw [h0] at ht; cases ht
+      · rw [h0] at ht; cases ht; exact ⟨u, List.mem_cons_self, he0⟩
+    · obtain ⟨u', hm, hd⟩ := ih es' hes e hin t ht
+      exact ⟨u', List.mem_cons_of_mem _ hm, hd⟩
+
+theorem foldl_untouched (s : State H B) (es : List (Eff H)) n (h : ∀ e ∈ es, e.target ≠ some n) :
+    (es.foldl applyEff s).refs n = s.refs n := by
+  induction es generalizing s with
+  | nil => rfl
+  | cons e es ih =>
+    simp only [List.foldl_cons]
+    rw [ih (applyEff s e) (fun x hx => h x (List.mem_cons_of_mem _ hx))]
+    have he := h e List.mem_cons_self
+    cases e with
+    | set m v =>
+      simp only [Eff.target] at he
+      have hnm : n ≠ m := fun e => he (by rw [e])
+      simp [applyEff, update, hnm]
+    | del m v =>
+      simp only [Eff.target] at he
+      have hnm : n ≠ m := fun e => he (by rw [e])
+      simp [applyEff, update, hnm]
+    | skip => rfl
+
+theorem updateMany_frozen (s : State H B) ups rs n v (hv : s.refs n = some v)
+    (hm : mobilityOf s.rules n = .createOnce ∨ mobilityOf s.rules n = .forbidden) :
+    (updateMany s ups rs).2.refs n = some v := by
+  unfold updateMany
+  split
+  · exact hv
+  split
+  · exact hv
+  split
+  · exact hv
+  split
+  · exact hv
+  · rename_i es hes
+    rw [foldl_untouched s es n]
+    · exact hv
+    · intro e he ht
+      obtain ⟨u, _, hu⟩ := decideAll_targets s ups es hes e he n ht
+      exact decideOne_frozen s n v u hv hm e hu
+
+/-- A transaction never changes a name it doesn't list. -/
+theorem updateMany_other (s : State H B) ups rs n (hn : ∀ u, (n, u) ∉ ups) :
+    (updateMany s ups rs).2.refs n = s.refs n := by
+  unfold updateMany
+  split
+  · rfl
+  split
+  · rfl
+  split
+  · rfl
+  split
+  · rfl
+  · rename_i es hes
+    apply foldl_untouched
+    intro e he ht
+    obtain ⟨u, hm, _⟩ := decideAll_targets s ups es hes e he n ht
+    exact hn u hm
+
 theorem frozen_step (hashOf : B → H) (s : State H B) (op : Op H B) n v
     (hf : Frozen s n v) : Frozen (step hashOf s op).2 n v := by
   obtain ⟨hv, hm⟩ := hf
@@ -234,6 +385,9 @@ theorem frozen_step (hashOf : B → H) (s : State H B) (op : Op H B) n v
       simp only
       rw [mobility_setRule s.rules p n r hp]
       exact hm
+  | updateMany ups rs =>
+    simp only [step]
+    exact ⟨updateMany_frozen s ups rs n v hv hm, by rw [updateMany_rules]; exact hm⟩
   | deleteRef m rs =>
     simp only [step]
     refine ⟨?_, by rw [deleteRef_rules]; exact hm⟩
