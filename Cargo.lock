@@ -1153,6 +1153,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pico2peta-exp1c"
+version = "0.1.0"
+dependencies = [
+ "sha1_smol",
+ "zstd",
+]
+
+[[package]]
 name = "pico2peta-micro"
 version = "0.1.0"
 dependencies = [
