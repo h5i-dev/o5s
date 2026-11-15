@@ -41,6 +41,13 @@ pub enum PatchFormat {
     /// Byte-wise XOR against the (aligned) base; uncovered bytes are XORed
     /// with zero. Good for same-layout numeric data (model checkpoints).
     Xor,
+    /// XOR with the alignment discovered while streaming (API v1.16): the new
+    /// content is cut into content-defined chunks, a chunk also present in the
+    /// base anchors the alignment at its base offset, and other chunks keep the
+    /// last anchor's shift. It handles scattered in-place edits (shift 0) and
+    /// insertions/deletions (re-anchored right after) alike, domain-agnostic.
+    /// `segments` must be empty.
+    XorAnchored,
 }
 
 impl Encoding {

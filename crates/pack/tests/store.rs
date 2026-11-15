@@ -1000,3 +1000,73 @@ fn frame_prefix_decoding_reads_exact_and_verified() {
     assert!(s.get(&h2[47], None).is_err(), "corruption is detected");
     assert!(s.get(&h2[0], None).is_err(), "the record CRC covers every member");
 }
+
+/// Chunk-anchored XOR deltas: scattered in-place edits, an insertion and a
+/// deletion all read back exactly (whole and ranged, after reopen), and cost
+/// a small fraction of a full copy; a small object falls back cleanly.
+#[test]
+fn anchored_xor_deltas_handle_edits_and_shifts() {
+    use pico2peta_core::{Derive, Encoding, PatchFormat};
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { chunk_threshold: 1 << 20, pack_cap: 1 << 30, ..PackConfig::default() };
+    let base = pseudo(8 << 20, 41);
+    let mut scattered = base.clone();
+    for i in (0..scattered.len()).step_by(997) {
+        scattered[i] = scattered[i].wrapping_add(1);
+    }
+    let mut inserted = base.clone();
+    inserted.splice(3_000_000..3_000_000, pseudo(1 << 20, 42));
+    let mut deleted = base.clone();
+    deleted.drain(5_000_000..5_500_000);
+    let small = b"tiny new version".to_vec();
+    let enc = |b: &Hash| Encoding {
+        derive: Some(Derive { base: *b, patch: PatchFormat::XorAnchored, segments: Vec::new() }),
+        ..Default::default()
+    };
+    let mut cost = Vec::new();
+    let hashes: Vec<(Hash, &Vec<u8>)>;
+    {
+        let s = open(d.path(), cfg.clone());
+        let hb = s.put_stream(&mut &base[..]).unwrap();
+        s.flush().unwrap();
+        let mut hs = Vec::new();
+        for v in [&scattered, &inserted, &deleted, &small] {
+            let before = dir_bytes(&d.path().join("objects"));
+            let h = s.put_encoded(&mut &v[..], &enc(&hb)).unwrap();
+            s.flush().unwrap();
+            cost.push(dir_bytes(&d.path().join("objects")) - before);
+            assert_eq!(h, Hash::of(v));
+            hs.push((h, v));
+        }
+        hashes = hs;
+    }
+    let s = open(d.path(), cfg);
+    for (h, v) in &hashes {
+        assert_eq!(&&s.get(h, None).unwrap(), v);
+        if v.len() > 4_000_000 {
+            assert_eq!(s.get(h, Some(2_999_000..3_001_000)).unwrap(), v[2_999_000..3_001_000]);
+            assert_eq!(s.get(h, Some(4_000_000..6_000_000)).unwrap(), v[4_000_000..6_000_000]);
+        }
+    }
+    // 8 MiB incompressible base: the deltas cost far less than a copy.
+    assert!(cost[0] < 200_000, "scattered edits: {cost:?}"); // 0.1 % edits, offset-aligned
+    assert!(cost[1] < (1 << 20) + 300_000, "insertion: {cost:?}"); // ~ the inserted MiB
+    assert!(cost[2] < 300_000, "deletion: {cost:?}");
+    // A chain: each version derived from the previous (a derived base has no
+    // stored chunks; anchors come from chunking its content).
+    let d2 = tempfile::tempdir().unwrap();
+    let s2 = open(d2.path(), PackConfig { chunk_threshold: 1 << 20, pack_cap: 1 << 30, ..PackConfig::default() });
+    let mut cur = base.clone();
+    let mut prev = s2.put_stream(&mut &cur[..]).unwrap();
+    s2.flush().unwrap();
+    let one = dir_bytes(&d2.path().join("objects"));
+    for v in 0..5u64 {
+        let at = (1_000_000 + v * 1_234_567) as usize;
+        cur.splice(at..at, pseudo(1 << 18, 60 + v));
+        prev = s2.put_encoded(&mut &cur[..], &enc(&prev)).unwrap();
+        assert_eq!(s2.get(&prev, None).unwrap(), cur);
+    }
+    s2.flush().unwrap();
+    let chain = dir_bytes(&d2.path().join("objects")) - one;
+    assert!(chain < 5 * (1 << 18) + 1_500_000, "5 insertions of 256 KiB along a chain cost {chain}");
+}
