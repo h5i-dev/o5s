@@ -217,12 +217,12 @@ The contended run checks that no update is lost: the final version equals the nu
     - `git` claims `git/`: Git repos, the HF repos, and the `git/_oidmap`, `git/_lfs*` and `git/_xet` maps.
     - `oci` claims `oci/`.
     - `safetensors` is registered too, so repos configured by the CLI open in the server.
-  - Each front's `gc_tracer` takes a snapshot per GC run (`GitTracer`, `OciTracer`). `GitFront::group` is `GitGrouper`; it stays until the core's similarity-orderer hint API lands (docs/ORDERING.md).
+  - Each front's `gc_tracer` takes a snapshot per GC run (`GitTracer`, `OciTracer`). `GitFront::group` is `GitGrouper`, which since API v1.15 (merged) is a hint provider: the core's similarity orderer decides the layout, and Git's kind, path and time keys only break ties (docs/ORDERING.md). New fronts supply no hints.
   - GitState, OciState and HfState write through owned front handles. The fronts hold `Weak` references to them (no Arc cycle through the registry).
   - Server GC is `gc_with_fronts`, with provenance as the extra tracer.
   - Claims are now enforced by the core and not just by the `/v1` check: the plain repository refuses `git/` and `oci/` names. Global admins (`/v1` replace, delete, multi-update) and namespace admins (`set_rule`, e.g. immutable git tags) act through the owning front's handle. A multi-update spanning two fronts is refused.
   - Tests: `tests/fronts.rs`. The HF GC tests now use the real server GC path.
-  - Not done: `segmap` is not yet a re-export of `pico2peta_repo::idmap` (same format; the async wrappers stay here). That is a mechanical swap, left for later.
+  - `segmap` is now a re-export of `pico2peta_repo::idmap` (same on-disk format); the server keeps only an `AsyncMap` extension trait for its async handlers.
 - **PyPI front: DONE** (`crates/server/src/pypi.rs`, `tests/pypi.rs`).
   - Tested with real twine 6.1, pip 26 and uv 0.13:
     - upload; reader 403; identical re-upload OK; replacement 409;
@@ -256,12 +256,18 @@ The contended run checks that no update is lost: the final version equals the nu
   - devpi-server 6.14.0, verdaccio 6.1.6, reposilite 3.5.19 and Maven 3.9.9.
 
   Every binary was checksum- or signature-verified, and all of them live under `/mnt/scratch/pico2peta/tools`.
-  - The batch is running (results go to `/mnt/scratch/pico2peta/bench-fronts-results.jsonl`, the report to `bench-fronts-report.md`); see "Phase 3 results" once it finishes.
+  - **Batch status (2026-11-15): paused at the human's request** (implementation first; no batch until the human asks).
+    - Git front: ripgrep and jq ran completely. **redis: not run (stopped by the human; rerun in the final batch).** Its partial raw rows are in `/mnt/scratch/pico2peta/bench-fronts-results.jsonl` and are not a result.
+    - OCI, HF, PyPI, npm, Maven: not run (rerun in the final batch).
+    - Two findings from the partial redis rows, recorded as leads, not results:
+      - repeat pushes slow down (see "Requests for core");
+      - pico2peta's redis clone took ~370 s, against ~13 s for git daemon. The git front deltifies every served pack on the fly, in one thread; the clone path needs work on our side (a served-pack cache and/or parallel encoding).
   - Smoke runs (one run each, not the measurement): the package proxies are at about parity, while throughput-bound transfers (Git push and clone, OCI, HF) are 1.7–2.6× the specialist. That matches the store's put/get pipeline throughput and is relayed to the core.
   - Deviations from the §6.5 wording:
     - PyPI timing uses pip (uv is covered functionally in `tests/pypi.rs`).
     - Maven's "per file" is per artifact (`dependency:get -Dtransitive=false` fetches the jar, its pom and parent poms), and its one-fetch check is "hot requests cause no upstream fetch".
-- Next: switch segmap to a re-export of `pico2peta_repo::idmap`, after the batch (it needs builds, which would disturb the timings).
+- Segmap → idmap swap: DONE (see the Front API port above). The Git front no longer re-puts pushed objects whose oid is already mapped (it checks `ensure_live` first).
+- Next: the Git front's clone path (served-pack cache and/or parallel encoding; redis clone ~28× git daemon), then the OCI conformance re-run on the merged tree.
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 

@@ -1886,7 +1886,10 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
 // Grouped repack hints
 // ---------------------------------------------------------------------------
 
-/// `pico2peta_repo::Grouper` for git content (the Experiment 1 V2 layout):
+/// Ordering **hints** for git content (`pico2peta_repo::Grouper`; docs/ORDERING.md). Since API
+/// v1.15 the core orders every small live object by content similarity itself; these keys only
+/// break ties between equally similar objects, and objects without a key are ordered too.
+/// The keys are the Experiment 1 V2 layout:
 /// * blobs: group `blob:<ext>` (or `blob:<basename>` without an extension),
 ///   ordered by path, then the time of the oldest commit that contains them;
 /// * trees: group `tree`, ordered by directory path, then time;
