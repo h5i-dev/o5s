@@ -37,6 +37,11 @@ pub struct PlanCtx<'a> {
 }
 
 /// A domain front. Implementations live outside the core crates.
+///
+/// A front that keeps its own [`crate::FrontHandle`] must hold it weakly (or
+/// outside the front): the repository holds the registry, the registry holds
+/// the front, and a strong handle inside the front would hold the repository,
+/// an `Arc` cycle that leaks the `LocalRepo`.
 pub trait Front: Send + Sync {
     /// Stable id, used in config (`front = "<id>"`) and for handles.
     fn id(&self) -> &str;

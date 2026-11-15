@@ -1911,8 +1911,16 @@ impl ObjectStore for PackStore {
         if self.dedup_hit(&hash)? {
             return Ok(hash);
         }
+        // Compress and encode (CRC included) before taking the writer lock,
+        // so concurrent writers only serialize on the append itself.
+        let compressed = compress_with_probe(self.inner.cfg.zstd_level, self.inner.cfg.compress_probe, data);
+        let (codec, payload): (Codec, &[u8]) = match &compressed {
+            Some(c) => (Codec::Zstd, c),
+            None => (Codec::Raw, data),
+        };
+        let rec = encode_record(Kind::Blob, codec, &hash, data.len() as u64, payload);
         let mut w = self.inner.writer.lock().map_err(poisoned)?;
-        self.append(&mut w, Kind::Blob, hash, data.len() as u64, data)?;
+        self.append_record(&mut w, Kind::Blob, hash, data.len() as u64, codec, &rec)?;
         self.maybe_seal(&mut w)?;
         Ok(hash)
     }
@@ -2138,6 +2146,39 @@ struct Encoded {
 }
 
 /// zstd-compresses `raw` at `level`, or returns `None` when that doesn't help (or level 0).
+/// Order-0 entropy check for records too small to sample: at least 7.5
+/// bits/byte (uniform random 1 KiB measures ~7.8; source code ~4.5-5.5) means
+/// zstd won't help. Cheap next to a zstd attempt on small records.
+fn looks_random(raw: &[u8]) -> bool {
+    if raw.len() < 256 || raw.len() > PROBE_MIN {
+        return false; // too few bytes to judge (let zstd try); larger records use the probe
+    }
+    // Four interleaved histograms avoid the store-to-load dependency of one.
+    let mut c = [[0u32; 256]; 4];
+    let (quads, rest) = raw.as_chunks::<4>();
+    for q in quads {
+        c[0][q[0] as usize] += 1;
+        c[1][q[1] as usize] += 1;
+        c[2][q[2] as usize] += 1;
+        c[3][q[3] as usize] += 1;
+    }
+    for &b in rest {
+        c[0][b as usize] += 1;
+    }
+    // H = log2(n) - sum(c log2 c) / n, with c log2 c from a table.
+    let table = CLOGC
+        .get_or_init(|| (0..=PROBE_MIN).map(|c| if c == 0 { 0.0 } else { c as f32 * (c as f32).log2() }).collect());
+    let mut sum = 0f32;
+    for i in 0..256 {
+        sum += table[(c[0][i] + c[1][i] + c[2][i] + c[3][i]) as usize];
+    }
+    let n = raw.len() as f32;
+    n.log2() - sum / n >= 7.5
+}
+
+/// `c * log2(c)` for `c` in `0..=PROBE_MIN` (see [`looks_random`]).
+static CLOGC: std::sync::OnceLock<Vec<f32>> = std::sync::OnceLock::new();
+
 /// Minimum record size at which the compressibility probe runs.
 const PROBE_MIN: usize = 8 << 10;
 /// Probe sample size.
@@ -2148,6 +2189,9 @@ const PROBE_SAMPLE: usize = 4 << 10;
 /// under zstd-1 are stored raw without running the full compression.
 fn compress_with_probe(level: i32, probe: bool, raw: &[u8]) -> Option<Vec<u8>> {
     if level == 0 || raw.len() < 64 {
+        return None;
+    }
+    if probe && raw.len() < PROBE_MIN && looks_random(raw) {
         return None;
     }
     if probe && raw.len() >= PROBE_MIN {

@@ -870,3 +870,31 @@ fn readahead_reads_detect_corruption_and_stay_ordered() {
     // A range over the corrupt middle fails.
     assert!(s.get(&h, Some(4_000_000..8_000_000)).is_err());
 }
+
+/// Small records: the entropy check stores random bytes raw (no zstd attempt)
+/// but still compresses text; with the probe off, both go through zstd. Reads
+/// are exact either way, also through the cached pack handles after reopen.
+#[test]
+fn small_record_entropy_check() {
+    let text: Vec<u8> = b"fn main() { println!(\"hello\"); }\n".iter().copied().cycle().take(4000).collect();
+    let rand = pseudo(4000, 77);
+    for probe in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let cfg = PackConfig { compress_probe: probe, pack_cap: 1 << 30, ..PackConfig::default() };
+        let (ht, hr) = {
+            let s = open(d.path(), cfg.clone());
+            let ht = s.put(&text).unwrap();
+            let hr = s.put(&rand).unwrap();
+            s.flush().unwrap();
+            (ht, hr)
+        };
+        let s = open(d.path(), cfg);
+        for _ in 0..3 {
+            assert_eq!(s.get(&ht, None).unwrap(), text);
+            assert_eq!(s.get(&hr, None).unwrap(), rand);
+        }
+        // Text compresses (pack much smaller than 8000 raw bytes + overhead).
+        let packs = dir_bytes(&d.path().join("objects/packs"));
+        assert!(packs < 4000 + 2000 + 1000, "{packs}");
+    }
+}
