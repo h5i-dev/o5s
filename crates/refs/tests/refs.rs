@@ -14,6 +14,29 @@ fn yes(_: &Hash) -> Result<bool> {
     Ok(true)
 }
 
+/// Runs `f` on its own thread and fails the test if it takes longer than
+/// `secs`, so a deadlock (e.g. a leaked journal flock) fails fast instead of
+/// hanging the test run.
+fn deadline(secs: u64, f: impl FnOnce() + Send + 'static) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let t = std::thread::spawn(move || {
+        f();
+        let _ = tx.send(());
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(secs)) {
+        Ok(()) => t.join().unwrap(),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            // The body panicked: re-raise its panic.
+            if let Err(p) = t.join() {
+                std::panic::resume_unwind(p);
+            }
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            panic!("test body did not finish within {secs} s (deadlock?)")
+        }
+    }
+}
+
 #[test]
 fn basic_occ() {
     let d = tempfile::tempdir().unwrap();
@@ -104,75 +127,79 @@ fn two_handles_see_each_other() {
 /// no lost updates. Successes == final version, values form one chain.
 #[test]
 fn contention_no_lost_updates() {
-    let d = tempfile::tempdir().unwrap();
-    let c = n("counter");
-    let per = 40u64;
-    let threads = 6u64;
-    let wins: u64 = std::thread::scope(|sc| {
-        (0..threads)
-            .map(|t| {
-                let dir = d.path().to_path_buf();
-                let c = c.clone();
-                sc.spawn(move || {
-                    let r = RefStore::open(&dir).unwrap();
-                    let mut wins = 0;
-                    let mut i = 0;
-                    while i < per {
-                        let obs = RefValue::observed(r.resolve(&c).unwrap());
-                        match r.replace(&c, &[(c.clone(), obs)], h(t * 1000 + i), &yes).unwrap() {
-                            ReplaceOutcome::Ok { .. } => {
-                                wins += 1;
-                                i += 1;
+    deadline(120, || {
+        let d = tempfile::tempdir().unwrap();
+        let c = n("counter");
+        let per = 40u64;
+        let threads = 6u64;
+        let wins: u64 = std::thread::scope(|sc| {
+            (0..threads)
+                .map(|t| {
+                    let dir = d.path().to_path_buf();
+                    let c = c.clone();
+                    sc.spawn(move || {
+                        let r = RefStore::open(&dir).unwrap();
+                        let mut wins = 0;
+                        let mut i = 0;
+                        while i < per {
+                            let obs = RefValue::observed(r.resolve(&c).unwrap());
+                            match r.replace(&c, &[(c.clone(), obs)], h(t * 1000 + i), &yes).unwrap() {
+                                ReplaceOutcome::Ok { .. } => {
+                                    wins += 1;
+                                    i += 1;
+                                }
+                                ReplaceOutcome::Conflict { .. } => {}
                             }
-                            ReplaceOutcome::Conflict { .. } => {}
                         }
-                    }
-                    wins
+                        wins
+                    })
                 })
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|j| j.join().unwrap())
-            .sum()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|j| j.join().unwrap())
+                .sum()
+        });
+        let r = RefStore::open(d.path()).unwrap();
+        assert_eq!(wins, threads * per);
+        assert_eq!(r.resolve(&c).unwrap().unwrap().version, wins);
     });
-    let r = RefStore::open(d.path()).unwrap();
-    assert_eq!(wins, threads * per);
-    assert_eq!(r.resolve(&c).unwrap().unwrap().version, wins);
 }
 
 #[test]
 fn crash_at_every_fault_point() {
-    let names: Vec<Name> = (0..5).map(|i| n(&format!("r/{i}"))).collect();
-    for budget in 0..12u64 {
-        let d = tempfile::tempdir().unwrap();
-        let mut committed: BTreeMap<Name, RefValue> = BTreeMap::new();
-        {
-            let r = RefStore::open_with_faults(d.path(), Faults::crash_after(budget)).unwrap();
-            for (i, nm) in names.iter().enumerate() {
-                match r.replace(nm, &[(nm.clone(), Observed::Absent)], h(i as u64), &yes) {
-                    Ok(ReplaceOutcome::Ok { version }) => {
-                        committed.insert(nm.clone(), RefValue { hash: h(i as u64), version });
+    deadline(120, || {
+        let names: Vec<Name> = (0..5).map(|i| n(&format!("r/{i}"))).collect();
+        for budget in 0..12u64 {
+            let d = tempfile::tempdir().unwrap();
+            let mut committed: BTreeMap<Name, RefValue> = BTreeMap::new();
+            {
+                let r = RefStore::open_with_faults(d.path(), Faults::crash_after(budget)).unwrap();
+                for (i, nm) in names.iter().enumerate() {
+                    match r.replace(nm, &[(nm.clone(), Observed::Absent)], h(i as u64), &yes) {
+                        Ok(ReplaceOutcome::Ok { version }) => {
+                            committed.insert(nm.clone(), RefValue { hash: h(i as u64), version });
+                        }
+                        Ok(c) => panic!("unexpected {c:?}"),
+                        Err(_) => break,
                     }
-                    Ok(c) => panic!("unexpected {c:?}"),
-                    Err(_) => break,
                 }
             }
+            let r = RefStore::open(d.path()).unwrap();
+            let got: BTreeMap<Name, RefValue> = r.list("").unwrap().into_iter().collect();
+            // Every acknowledged commit survives; at most one unacknowledged one
+            // (written, crash before fsync returned) may appear.
+            for (k, v) in &committed {
+                assert_eq!(got.get(k), Some(v), "budget {budget}");
+            }
+            assert!(got.len() <= committed.len() + 1, "budget {budget}");
+            // Still writable after recovery (also truncates any torn tail).
+            let z = n("z");
+            r.replace(&z, &[(z.clone(), Observed::Absent)], h(99), &yes).unwrap();
+            drop(r);
+            let r = RefStore::open(d.path()).unwrap();
+            assert_eq!(r.resolve(&z).unwrap().unwrap().hash, h(99), "budget {budget}");
         }
-        let r = RefStore::open(d.path()).unwrap();
-        let got: BTreeMap<Name, RefValue> = r.list("").unwrap().into_iter().collect();
-        // Every acknowledged commit survives; at most one unacknowledged one
-        // (written, crash before fsync returned) may appear.
-        for (k, v) in &committed {
-            assert_eq!(got.get(k), Some(v), "budget {budget}");
-        }
-        assert!(got.len() <= committed.len() + 1, "budget {budget}");
-        // Still writable after recovery (also truncates any torn tail).
-        let z = n("z");
-        r.replace(&z, &[(z.clone(), Observed::Absent)], h(99), &yes).unwrap();
-        drop(r);
-        let r = RefStore::open(d.path()).unwrap();
-        assert_eq!(r.resolve(&z).unwrap().unwrap().hash, h(99), "budget {budget}");
-    }
+    });
 }
 
 #[test]
@@ -453,72 +480,76 @@ fn compaction_preserves_state_and_bounds_files() {
 
 #[test]
 fn contention_across_rotations() {
-    let d = tempfile::tempdir().unwrap();
-    let c = n("counter");
-    let wins: u64 = std::thread::scope(|sc| {
-        (0..4u64)
-            .map(|t| {
-                let dir = d.path().to_path_buf();
-                let c = c.clone();
-                sc.spawn(move || {
-                    let r = RefStore::open(&dir).unwrap();
-                    r.set_compact_threshold(500);
-                    let mut wins = 0;
-                    while wins < 50 {
-                        let obs = RefValue::observed(r.resolve(&c).unwrap());
-                        if let ReplaceOutcome::Ok { .. } =
-                            r.replace(&c, &[(c.clone(), obs)], h(t * 1000 + wins), &yes).unwrap()
-                        {
-                            wins += 1;
+    deadline(120, || {
+        let d = tempfile::tempdir().unwrap();
+        let c = n("counter");
+        let wins: u64 = std::thread::scope(|sc| {
+            (0..4u64)
+                .map(|t| {
+                    let dir = d.path().to_path_buf();
+                    let c = c.clone();
+                    sc.spawn(move || {
+                        let r = RefStore::open(&dir).unwrap();
+                        r.set_compact_threshold(500);
+                        let mut wins = 0;
+                        while wins < 50 {
+                            let obs = RefValue::observed(r.resolve(&c).unwrap());
+                            if let ReplaceOutcome::Ok { .. } =
+                                r.replace(&c, &[(c.clone(), obs)], h(t * 1000 + wins), &yes).unwrap()
+                            {
+                                wins += 1;
+                            }
                         }
-                    }
-                    wins
+                        wins
+                    })
                 })
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|j| j.join().unwrap())
-            .sum()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|j| j.join().unwrap())
+                .sum()
+        });
+        let r = RefStore::open(d.path()).unwrap();
+        assert_eq!(r.resolve(&c).unwrap().unwrap().version, wins);
+        assert!(r.generation().unwrap() > 3);
     });
-    let r = RefStore::open(d.path()).unwrap();
-    assert_eq!(r.resolve(&c).unwrap().unwrap().version, wins);
-    assert!(r.generation().unwrap() > 3);
 }
 
 #[test]
 fn crash_during_compaction_at_every_point() {
-    for budget in 0..40u64 {
-        let d = tempfile::tempdir().unwrap();
-        let mut committed: BTreeMap<Name, RefValue> = BTreeMap::new();
-        {
-            let r = RefStore::open_with_faults(d.path(), Faults::crash_after(budget)).unwrap();
-            r.set_compact_threshold(200);
-            for i in 0..12u64 {
-                let nm = n(&format!("r/{}", i % 4));
-                let obs = match committed.get(&nm) {
-                    Some(v) => Observed::Version(v.version),
-                    None => Observed::Absent,
-                };
-                match r.replace(&nm, &[(nm.clone(), obs)], h(i), &yes) {
-                    Ok(ReplaceOutcome::Ok { version }) => {
-                        committed.insert(nm, RefValue { hash: h(i), version });
+    deadline(120, || {
+        for budget in 0..40u64 {
+            let d = tempfile::tempdir().unwrap();
+            let mut committed: BTreeMap<Name, RefValue> = BTreeMap::new();
+            {
+                let r = RefStore::open_with_faults(d.path(), Faults::crash_after(budget)).unwrap();
+                r.set_compact_threshold(200);
+                for i in 0..12u64 {
+                    let nm = n(&format!("r/{}", i % 4));
+                    let obs = match committed.get(&nm) {
+                        Some(v) => Observed::Version(v.version),
+                        None => Observed::Absent,
+                    };
+                    match r.replace(&nm, &[(nm.clone(), obs)], h(i), &yes) {
+                        Ok(ReplaceOutcome::Ok { version }) => {
+                            committed.insert(nm, RefValue { hash: h(i), version });
+                        }
+                        Ok(c) => panic!("budget {budget}: unexpected {c:?}"),
+                        Err(_) => break,
                     }
-                    Ok(c) => panic!("budget {budget}: unexpected {c:?}"),
-                    Err(_) => break,
                 }
             }
+            let r = RefStore::open(d.path()).unwrap_or_else(|e| panic!("budget {budget}: reopen failed: {e}"));
+            let got: BTreeMap<Name, RefValue> = r.list("").unwrap().into_iter().collect();
+            for (k, v) in &committed {
+                let g = got.get(k).unwrap_or_else(|| panic!("budget {budget}: lost {k}"));
+                // At most one unacknowledged later commit may have landed.
+                assert!(g.version == v.version || g.version == v.version + 1, "budget {budget}: {k} {g:?} vs {v:?}");
+            }
+            let z = n("z");
+            r.replace(&z, &[(z.clone(), Observed::Absent)], h(99), &yes).unwrap();
+            assert_eq!(RefStore::open(d.path()).unwrap().resolve(&z).unwrap().unwrap().hash, h(99), "budget {budget}");
         }
-        let r = RefStore::open(d.path()).unwrap_or_else(|e| panic!("budget {budget}: reopen failed: {e}"));
-        let got: BTreeMap<Name, RefValue> = r.list("").unwrap().into_iter().collect();
-        for (k, v) in &committed {
-            let g = got.get(k).unwrap_or_else(|| panic!("budget {budget}: lost {k}"));
-            // At most one unacknowledged later commit may have landed.
-            assert!(g.version == v.version || g.version == v.version + 1, "budget {budget}: {k} {g:?} vs {v:?}");
-        }
-        let z = n("z");
-        r.replace(&z, &[(z.clone(), Observed::Absent)], h(99), &yes).unwrap();
-        assert_eq!(RefStore::open(d.path()).unwrap().resolve(&z).unwrap().unwrap().hash, h(99), "budget {budget}");
-    }
+    });
 }
 
 #[test]
@@ -678,4 +709,89 @@ fn mid_journal_corruption_is_an_error_not_a_truncation() {
     std::fs::write(&p, &j2).unwrap();
     let r = RefStore::open(d.path()).unwrap();
     assert_eq!(r.list("").unwrap().len(), 5);
+}
+
+/// Group commit: many threads on ONE handle (so commits batch into shared
+/// fsyncs). Every acknowledged commit is durable (visible after reopen), the
+/// shared OCC counter loses no update, and per-thread names end at their last value.
+#[test]
+fn group_commit_one_handle_many_threads() {
+    deadline(120, || {
+        let d = tempfile::tempdir().unwrap();
+        let r = RefStore::open(d.path()).unwrap();
+        let c = n("counter");
+        let (threads, per) = (8u64, 60u64);
+        std::thread::scope(|sc| {
+            for t in 0..threads {
+                let (r, c) = (&r, c.clone());
+                sc.spawn(move || {
+                    let mine = n(&format!("t/{t}"));
+                    for i in 0..per {
+                        // A distinct name: never conflicts.
+                        let obs = RefValue::observed(r.resolve(&mine).unwrap());
+                        assert!(matches!(
+                            r.replace(&mine, &[(mine.clone(), obs)], h(t * 1000 + i), &yes).unwrap(),
+                            ReplaceOutcome::Ok { .. }
+                        ));
+                        // The shared counter: retried until it wins.
+                        loop {
+                            let obs = RefValue::observed(r.resolve(&c).unwrap());
+                            if let ReplaceOutcome::Ok { .. } = r.replace(&c, &[(c.clone(), obs)], h(t), &yes).unwrap() {
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        drop(r);
+        let r = RefStore::open(d.path()).unwrap();
+        assert_eq!(r.resolve(&c).unwrap().unwrap().version, threads * per, "no lost update");
+        for t in 0..threads {
+            let v = r.resolve(&n(&format!("t/{t}"))).unwrap().unwrap();
+            assert_eq!((v.hash, v.version), (h(t * 1000 + per - 1), per));
+        }
+    });
+}
+
+/// Group commit with an fsync failure in the middle: commits that returned Ok
+/// are durable; commits of the failed batch got an error; the store keeps working.
+#[test]
+fn group_commit_fsync_failure_fails_the_batch_only() {
+    deadline(120, || {
+        let d = tempfile::tempdir().unwrap();
+        // Hit 25 is an append or an fsync, depending on batching; either way an error surfaces.
+        let f = Faults::fail_once_at(25);
+        let r = RefStore::open_with_faults(d.path(), f).unwrap();
+        let acked: std::sync::Mutex<Vec<(Name, Hash)>> = Default::default();
+        let failed = std::sync::atomic::AtomicUsize::new(0);
+        std::thread::scope(|sc| {
+            for t in 0..6u64 {
+                let (r, acked, failed) = (&r, &acked, &failed);
+                sc.spawn(move || {
+                    for i in 0..20u64 {
+                        let name = n(&format!("x/{t}/{i}"));
+                        match r.replace(&name, &[(name.clone(), Observed::Absent)], h(t * 100 + i), &yes) {
+                            Ok(ReplaceOutcome::Ok { .. }) => acked.lock().unwrap().push((name, h(t * 100 + i))),
+                            Ok(other) => panic!("{other:?}"),
+                            Err(_) => {
+                                failed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        assert!(failed.load(std::sync::atomic::Ordering::Relaxed) >= 1, "the injected failure surfaced");
+        drop(r);
+        let r = RefStore::open(d.path()).unwrap();
+        for (name, hash) in acked.into_inner().unwrap() {
+            assert_eq!(r.resolve(&name).unwrap().map(|v| v.hash), Some(hash), "acknowledged commit lost: {name}");
+        }
+        let z = n("after");
+        assert!(matches!(
+            r.replace(&z, &[(z.clone(), Observed::Absent)], h(1), &yes).unwrap(),
+            ReplaceOutcome::Ok { .. }
+        ));
+    });
 }

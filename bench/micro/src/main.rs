@@ -512,7 +512,41 @@ fn small(dir: &str, n: usize) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// `p2p-bench commits <dir> [n]`: durable `replace` throughput on one repository
+/// handle, with 1, 4 and 8 threads committing to distinct names (group commit
+/// batches concurrent commits of one process into shared fsyncs).
+fn commits(dir: &str, n: usize) -> Result<(), Box<dyn std::error::Error>> {
+    println!("| threads (one handle, distinct names) | commits/s |");
+    println!("|---|---|");
+    for threads in [1usize, 4, 8] {
+        let root = std::path::Path::new(dir).join(format!("commits-{}-{threads}", std::process::id()));
+        let repo = LocalRepo::init(&root, &PackConfig::default())?;
+        let h = repo.put(b"target")?;
+        let t = Instant::now();
+        std::thread::scope(|sc| {
+            for k in 0..threads {
+                let repo = &repo;
+                sc.spawn(move || {
+                    for i in 0..n / threads {
+                        let name = Name::new(format!("b/{k}/{i}")).unwrap_or_else(|_| unreachable!());
+                        let _ = repo.replace(&name, &[(name.clone(), Observed::Absent)], h);
+                    }
+                });
+            }
+        });
+        let rate = n as f64 / t.elapsed().as_secs_f64();
+        println!("| {threads} | {rate:.0} |");
+        std::fs::remove_dir_all(&root)?;
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("commits") {
+        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench commits <dir> [n]")?;
+        let n = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(20_000);
+        return commits(&dir, n);
+    }
     if std::env::args().nth(1).as_deref() == Some("small") {
         let dir = std::env::args().nth(2).ok_or("usage: p2p-bench small <dir> [n]")?;
         let n = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(100_000);

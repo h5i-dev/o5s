@@ -29,7 +29,7 @@ use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 
 const MAGIC: &[u8; 8] = b"P2PREFJ1";
 const MAX_RECORD: u32 = 16 << 20;
@@ -469,6 +469,16 @@ struct Inner {
     state: RefState,
     /// Journal offset up to which `state` is applied.
     applied: u64,
+    /// Group commit: while a batch is open, this process holds the exclusive
+    /// flock (here), and `state` may include records not yet fsynced.
+    batch: Option<FlockGuard>,
+    /// Journal offset known to be fsynced in the current batch.
+    durable: u64,
+    /// Batch counter (bumped when a batch opens).
+    epoch: u64,
+    /// Recent batches whose fsync failed: `(epoch, message)`. Their waiters get
+    /// an error (bounded; a waiter checks right after its batch ends).
+    failed: Vec<(u64, String)>,
 }
 
 /// A handle on a ref store directory. Thread-safe. Any number of handles,
@@ -486,6 +496,8 @@ struct Journal {
     faults: FaultHandle,
     compact_threshold: std::sync::atomic::AtomicU64,
     inner: Mutex<Inner>,
+    /// Signals the end of a group-commit fsync or batch.
+    synced: Condvar,
 }
 
 fn poisoned<T>(_: T) -> Error {
@@ -593,6 +605,7 @@ impl Journal {
                         faults,
                         compact_threshold: std::sync::atomic::AtomicU64::new(DEFAULT_COMPACT_THRESHOLD),
                         inner: Mutex::new(inner),
+                        synced: Condvar::new(),
                     };
                     s.with_shared(|_| ())?;
                     return Ok(s);
@@ -641,7 +654,16 @@ impl Journal {
                 return Err(Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "generation 0 superseded")));
             }
         }
-        Ok(Inner { file, generation: g, state, applied: MAGIC.len() as u64 })
+        Ok(Inner {
+            file,
+            generation: g,
+            state,
+            applied: MAGIC.len() as u64,
+            batch: None,
+            durable: 0,
+            epoch: 0,
+            failed: Vec::new(),
+        })
     }
 
     /// Switches `g` to generation `next` after reading a tombstone. Falls back
@@ -694,8 +716,18 @@ impl Journal {
         Ok(false)
     }
 
+    /// Waits until no group-commit batch is open (its records may not be
+    /// durable yet, and its exclusive flock must not be downgraded by a shared
+    /// lock on the same open file).
+    fn idle<'a>(&self, mut g: std::sync::MutexGuard<'a, Inner>) -> Result<std::sync::MutexGuard<'a, Inner>> {
+        while g.batch.is_some() {
+            g = self.synced.wait(g).map_err(poisoned)?;
+        }
+        Ok(g)
+    }
+
     fn with_shared<T>(&self, f: impl FnOnce(&RefState) -> T) -> Result<T> {
-        let mut g = self.inner.lock().map_err(poisoned)?;
+        let mut g = self.idle(self.inner.lock().map_err(poisoned)?)?;
         loop {
             let _l = FlockGuard::shared(&g.file)?;
             if !self.catch_up(&mut g, false)? {
@@ -705,33 +737,111 @@ impl Journal {
     }
 
     /// Runs `decide` under the exclusive lock and commits its mutation durably.
+    ///
+    /// **Group commit.** The first committer opens a batch: it takes the
+    /// exclusive flock, catches up, decides, appends, and fsyncs, with the
+    /// in-process mutex released during the fsync. Committers of this process
+    /// that arrive meanwhile join the batch: they decide against the state that
+    /// includes the batch's earlier records, append, and wait. The leader
+    /// repeats the fsync until it covers every appended record, and only then
+    /// releases the flock. Nobody returns before an fsync covers its record, and
+    /// no other process (and no reader here) sees a record before it is durable:
+    /// the flock is held, and readers wait for the batch to close. On an fsync
+    /// error, every member of the batch gets the error (the outcome is
+    /// ambiguous, as for a single commit), and the state is reloaded from disk.
     fn commit<T>(&self, decide: impl FnOnce(&RefState) -> Result<(Option<Mutation>, T)>) -> Result<T> {
         let mut g = self.inner.lock().map_err(poisoned)?;
-        let _l = loop {
-            let l = FlockGuard::exclusive(&g.file)?;
-            if !self.catch_up(&mut g, true)? {
-                break l;
+        let leader = g.batch.is_none();
+        if leader {
+            let l = loop {
+                let l = FlockGuard::exclusive(&g.file)?;
+                if !self.catch_up(&mut g, true)? {
+                    break l;
+                }
+            };
+            g.batch = Some(l);
+            g.epoch += 1;
+            g.durable = g.applied;
+        }
+        let epoch = g.epoch;
+        // Decide and append (no fsync yet).
+        let mine: Result<(u64, T)> = (|| {
+            let (m, out) = decide(&g.state)?;
+            if let Some(m) = m {
+                let rec = encode_checked(&m)?;
+                if let Err(e) = self.faults.hit("refs.append") {
+                    // Simulated torn write.
+                    let _ = g.file.write_all_at(&rec[..rec.len() / 2], g.applied);
+                    return Err(e.into());
+                }
+                g.file.write_all_at(&rec, g.applied)?;
+                g.applied += rec.len() as u64;
+                g.state.apply(m);
             }
-        };
-        let (m, out) = decide(&g.state)?;
-        if let Some(m) = m {
-            let rec = encode_checked(&m)?;
-            if let Err(e) = self.faults.hit("refs.append") {
-                // Simulated torn write.
-                let _ = g.file.write_all_at(&rec[..rec.len() / 2], g.applied);
-                return Err(e.into());
-            }
-            g.file.write_all_at(&rec, g.applied)?;
-            self.faults.hit("refs.fsync")?;
-            g.file.sync_data()?;
-            g.applied += rec.len() as u64;
-            g.state.apply(m);
-            if g.applied > self.compact_threshold.load(std::sync::atomic::Ordering::Relaxed) {
-                // The commit itself is done. A failed compaction is retried on a later commit.
-                let _ = self.rotate_locked(&mut g);
+            Ok((g.applied, out))
+        })();
+        if !leader {
+            let (end, out) = mine?;
+            // Wait for an fsync covering `end` (or this batch's failure).
+            loop {
+                if let Some((_, msg)) = g.failed.iter().find(|(e, _)| *e == epoch) {
+                    return Err(Error::Io(std::io::Error::other(format!("group commit fsync failed: {msg}"))));
+                }
+                if g.epoch != epoch || g.durable >= end {
+                    return Ok(out);
+                }
+                g = self.synced.wait(g).map_err(poisoned)?;
             }
         }
-        Ok(out)
+        // Leader: fsync until everything appended to this batch is covered.
+        let synced: Result<()> = loop {
+            let target = g.applied;
+            if g.durable >= target {
+                break Ok(());
+            }
+            let file = match g.file.try_clone() {
+                Ok(f) => f,
+                Err(e) => break Err(e.into()),
+            };
+            drop(g);
+            let r = self.faults.hit("refs.fsync").map_err(Error::from).and_then(|_| Ok(file.sync_data()?));
+            g = self.inner.lock().map_err(poisoned)?;
+            if let Err(e) = r {
+                break Err(e);
+            }
+            g.durable = target;
+            self.synced.notify_all();
+        };
+        match synced {
+            Ok(()) => {
+                if mine.is_ok() && g.applied > self.compact_threshold.load(std::sync::atomic::Ordering::Relaxed) {
+                    // The commits are done. A failed compaction is retried on a later commit.
+                    let _ = self.rotate_locked(&mut g);
+                }
+            }
+            Err(e) => {
+                if g.failed.len() >= 64 {
+                    g.failed.remove(0);
+                }
+                g.failed.push((epoch, e.to_string()));
+                // Release the batch's flock first: `load_generation` takes its own
+                // exclusive flock on a new open file description, which would wait
+                // forever on ours (flock locks belong to open file descriptions).
+                g.batch = None;
+                // `state` may be ahead of the disk: reload what is actually there.
+                if let Ok(fresh) = Self::load_generation(&self.dir, g.generation) {
+                    let ep = g.epoch;
+                    let failed = std::mem::take(&mut g.failed);
+                    *g = Inner { epoch: ep, failed, ..fresh };
+                }
+                g.batch = None;
+                self.synced.notify_all();
+                return Err(e);
+            }
+        }
+        g.batch = None;
+        self.synced.notify_all();
+        mine.map(|(_, out)| out)
     }
 
     /// Compacts while holding the exclusive lock on `g.file`.
@@ -751,7 +861,9 @@ impl Journal {
         // Committed. From here on, every handle (including this one) moves to `next`.
         let old = g.generation;
         let fresh = Self::load_generation(&self.dir, next)?;
-        *g = Inner { state: std::mem::take(&mut g.state), ..fresh };
+        // The batch (and its flock on the old journal) ends with this rotation.
+        let failed = std::mem::take(&mut g.failed);
+        *g = Inner { state: std::mem::take(&mut g.state), epoch: g.epoch, failed, ..fresh };
         self.faults.hit("refs.rotate.current")?;
         write_atomic(&self.dir, "CURRENT", format!("{next}\n").as_bytes())?;
         // Old generations are only needed by handles that haven't caught up.
@@ -773,7 +885,7 @@ impl Journal {
 
     /// Forces a compaction now.
     pub fn compact(&self) -> Result<()> {
-        let mut g = self.inner.lock().map_err(poisoned)?;
+        let mut g = self.idle(self.inner.lock().map_err(poisoned)?)?;
         let _l = loop {
             let l = FlockGuard::exclusive(&g.file)?;
             if !self.catch_up(&mut g, true)? {
