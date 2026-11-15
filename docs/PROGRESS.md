@@ -20,6 +20,7 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
 |---|---|
 | P1 Front API (core) | **done**: API v1.14–v1.16. Profiles, fronts, nested prefix claims, front handles, the idmap, `put_named`, per-GC tracer snapshots. Net ported Git, OCI, HF (incl. Xet), PyPI, npm and Maven onto it. |
 | Ordering building block (ORDERING.md, replaces step 3) | **built and evaluated.** Experiment 3 (§6.6, official run 2026-11-15) is a pre-registered **FAIL on jq's build time only** (re-timed 1.179 > 1.0). Size is a **STRONG PASS**: V\* = A3 geomean 0.842, max 0.947, and Git storage parity holds on every repo including the held-out redis (0.947) and git.git (0.796). Reads, RSS, and builds on the other three repos pass. A4 (no hints) is within 0.4 % of A3. Generalization: packages yes (0.806×), weights no (0.999×; that's the XOR-delta path's job). It ships as the repack layout (it beats A0 everywhere). Details: `docs/EXP1.md`. |
+| Exp3 consequence (human decision, 2026-11-15) | The recorded verdict stays FAIL (jq build time). **The human overrode the consequence:** A3's similarity layout is the default repack layout for every domain (on by default, can be disabled). Future build-time conditions: geomean ≤ 1.0× and every repo ≤ 1.25× (PLAN general amendment). |
 | Generic front (§6.4) | **harness written** (`p2p-bench generic`), not yet run at the pre-registered 1 GiB. The 64 MiB smoke run suggests storage passes (1.06× / 1.16× one copy), while the verified-read ratio may fail (see Questions). |
 | Perf pass (a)–(e) | (a) put is CPU-bound by host contention (schedstat), no change; (b) verified read 870 → 1,880 MB/s; (c) 1 KiB put 75k → 129k/s, get 97k → 286k/s; (d) group commit 1.76× at 4 threads, 2.04× at 8; (e) net (clone wire bytes 0.98× git-daemon in their smoke run). Plus: frame prefix decoding and a per-thread zstd decompression context (net's profile). |
 | Chunk-anchored XOR deltas | **done** (v1.16): generic derived objects for edits and insertions. |
@@ -29,7 +30,9 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
   - **retention** (`keep_versions` / `only_if_regenerable` per profile, `pico2peta_prov::retention::apply`, rules respected, dry run exact);
   - **cross-domain dedup** test: the same 16 MiB stored raw, as a Git blob and inside a tar layer costs **+1.26 %** for the two extra framings (`crates/repo/tests/dedup.rs`; compressed containers aren't claimed).
 
-  Next: a provenance API for fronts (names and external ids on subjects), and CLI/server wiring (net). |
+  - **cross-domain provenance by name** (`lineage_named` / `impact_named`, tested on a git → pypi → oci → hf chain) and the CLI commands `search`, `lineage`, `impact` and `retention [--dry-run]` (`init --profile ...,keep_versions:N`).
+
+  **Item 3 is done on the core side.** Server endpoints for promote, attest and search are net's ROADMAP item 3. |
 
 **Speed-up work (`docs/RESEARCH_SPEEDUP.md`, from the human; split with net on 2026-11-15)**
 - **§1 (core): done.** Streaming put pipeline, compressibility probe, incremental pack hash. On tmpfs (CPU-bound), incompressible `put_stream` went from 331 to **739 MB/s** (2.2×; median of 5 interleaved reps on a loaded host, load 2.9–5.2), text from 228 to 328 MB/s, dedup re-put from ~630 to ~900 MB/s. On NVMe, incompressible stays at the device's ~200 MB/s fsync ceiling. **§1a's ≥ 800 MB/s target was not met** (best run 791 MB/s); text is compression-bound in the workers. The probe gave no measurable gain (zstd already bails out fast on random data). Details, profiles and the ablation: `docs/BENCH.md`.
@@ -73,7 +76,7 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
 | milestone | state | where |
 |---|---|---|
 | M0 Plan | done; Exp1 thresholds frozen | `docs/PLAN.md` |
-| M1 Core API | done; v1.17 now, all additive since v1 (see API changes) | `crates/core` |
+| M1 Core API | done; v1.18 now, all additive since v1 (see API changes) | `crates/core` |
 | M2 Pack store | done | `crates/pack` |
 | M3 Ref store | done: local journal engine plus a multi-host log engine on any Backend | `crates/refs` |
 | M4 Local repo + CLI | done; local and `--remote` | `crates/repo`, `crates/cli` |
@@ -156,6 +159,7 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
   - **`GcOptions::frame_cap` default:** 4 → 6 MiB.
 - **v1.16 (2026-11-15), additive:** `PatchFormat::XorAnchored` and `PackStore::put_delta_anchored(base, src, opts)`, a derived object whose XOR alignment is discovered while streaming. FastCDC chunks of the new content that also occur in the base anchor the alignment at their base offset; other chunks keep the last anchor's shift. When the base has no stored chunks (a delta, a frame member), its content is chunked first. It handles in-place edits and insertions or deletions alike, without knowing the format, and is stored as an ordinary `Delta` record with explicit segments (the read path is unchanged). **Behaviour change:** a profile with `derive = "previous"` now uses it (before: offset-aligned XOR); the `safetensors` front still passes explicit tensor segments. The `ObjectStore` default falls back to `put_delta`.
 - **v1.17 (2026-11-15), additive:** `ReadVerify { Strict (default), Eof }` and `ObjectStore::open_verified(hash, range, mode)` (default: `open`); repo `[read] verify` / `allow_eof` (`ReadSection`), `LocalRepo::read_policy()`; `LocalRepo::open` follows `[read] verify`. `RepoConfig` gained a `read` field; it now implements `Default`, so prefer `RepoConfig { .., ..Default::default() }` to full literals. **For net:** the server can pass a per-request mode with `open_verified`. `LocalRepo` already refuses `eof` unless the repository enables it, so a server default of strict needs no extra logic.
+- **v1.18 (2026-11-15), additive:** new crate `pico2peta-attest` (Statement, Envelope, Signer/Verifier, Ed25519, `attest`, `attestations`, `promote` with `Policy`/`PromoteOutcome`); `pico2peta_prov::search` (`SearchIndex`, `attach_meta`, `lineage_named`, `impact_named`) and `pico2peta_prov::retention` (`apply`, `version_cmp`); `Profile::{keep_versions, only_if_regenerable}`; `LocalRepo::namespace_profiles`; `RefState::rules_allow_delete`. CLI: `search`, `lineage`, `impact`, `retention`.
 
 ## Production gaps
 - **Index scale (largely addressed).** Large pack indexes (≥ 4 MiB, ~95k entries) are memory-mapped from a verified local cache (`idx-cache/*.idx3`) and binary-searched. Small packs and the open pack stay in a HashMap. Per-object heap cost is now zero for big packs; the page cache holds the 44 B/entry. A **multi-pack index** (`P2PMIDX1`) is built locally, by a k-way merge with O(#packs) memory and outside the index lock, once ≥ 8 large packs exist and > 10% are uncovered. Lookups are then one binary search plus the few uncovered packs. That answers the brief's open question with "files alongside packs"; PostgreSQL isn't needed for lookups. Remaining: MIDX rebuilds are O(n) and triggered by the coverage rule; a production deployment at 10^9+ objects would want them scheduled with GC.

@@ -4,6 +4,9 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 
 ## [Unreleased]
 
+### Changed (breaking before v0.1)
+- **GC lays out repacked objects by content similarity by default, for every domain** (`[gc] similarity_repack`, default `true`; `gc --no-similarity-repack`). The human's decision after Experiment 3, whose pre-registered verdict, FAIL on jq's build time, is unchanged in EXP1.md. Before, grouping needed a `Grouper` and was opt-in.
+
 ### Added
 - Streaming `put_stream` pipeline (chunker → parallel hash/dedup/compress/encode → in-order committer, with the whole-object hash on its own thread and bounded memory): about 2.3× faster on CPU-bound storage. Compressibility probe (`pack.compress_probe`, default on). Incremental pack hashing, so sealing no longer re-reads the pack.
 - Byte-grouped record codec (codec 2) for model weights: `put` of safetensors and `put --delta-from-ref` group bf16/fp16/fp32 bytes into planes before zstd (fine-tune deltas −10.6%, base −6.0% on SmolLM2-135M at the default `pack.grouped_zstd_level = 6`; `init --grouped-zstd-level`). `--no-byte-group` opts out. Older readers reject codec 2 rather than misread it.

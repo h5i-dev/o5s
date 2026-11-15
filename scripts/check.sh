@@ -6,10 +6,10 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$(dirname "$0")/.."
 cargo fmt --all -- --check
-cargo clippy -q -j2 --workspace --all-targets -- -D warnings
+cargo clippy -q -j"${P2P_JOBS:-2}" --workspace --all-targets -- -D warnings
 log="$TMPDIR/check-test.log"
 set +e
-cargo test -q -j2 --workspace --no-fail-fast >"$log" 2>&1
+cargo test -q -j"${P2P_JOBS:-2}" --workspace --no-fail-fast >"$log" 2>&1
 status=$?
 set -e
 grep -E "^test result|FAILED|panicked" "$log" | grep -vE "^test result: ok" || true

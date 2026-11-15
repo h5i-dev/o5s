@@ -121,12 +121,14 @@ impl RefState {
         if updates.is_empty() || updates.len() > MAX_BATCH {
             return Err(Error::Parse(format!("update_many takes 1..={MAX_BATCH} updates")));
         }
-        let mut seen = std::collections::BTreeSet::new();
+        // Linear in the batch (an index of the read set, built once).
+        let in_read_set: std::collections::HashSet<&Name> = read_set.iter().map(|(r, _)| r).collect();
+        let mut seen = std::collections::HashSet::with_capacity(updates.len());
         for (n, _) in updates {
             if !seen.insert(n) {
                 return Err(Error::Parse(format!("duplicate target {n} in update_many")));
             }
-            if !read_set.iter().any(|(r, _)| r == n) {
+            if !in_read_set.contains(n) {
                 return Err(Error::TargetNotInReadSet(n.clone()));
             }
         }
@@ -140,15 +142,17 @@ impl RefState {
         let mut ms = Vec::with_capacity(updates.len());
         let mut versions = Vec::with_capacity(updates.len());
         for (name, new) in updates {
+            // The whole read set was validated above; decide this target alone.
+            let own = [(name.clone(), self.observe(name))];
             match new {
-                Some(h) => match self.decide_replace(name, read_set, *h)? {
+                Some(h) => match self.decide_replace(name, &own, *h)? {
                     Ok(Mutation::Set(n, v)) => {
                         versions.push(v.version);
                         ms.push(Mutation::Set(n, v));
                     }
                     _ => return Err(Error::Corrupt("unexpected decision in update_many".into())),
                 },
-                None => match self.decide_delete(name, read_set)? {
+                None => match self.decide_delete(name, &own)? {
                     Ok(Some(Mutation::Delete(n, v))) => {
                         versions.push(v);
                         ms.push(Mutation::Delete(n, v));
@@ -249,12 +253,14 @@ impl RefState {
         if updates.is_empty() || updates.len() > MAX_BATCH {
             return Err(Error::Parse(format!("replace_many takes 1..={MAX_BATCH} updates")));
         }
-        let mut seen = std::collections::BTreeSet::new();
+        // Linear in the batch (an index of the read set, built once).
+        let in_read_set: std::collections::HashSet<&Name> = read_set.iter().map(|(r, _)| r).collect();
+        let mut seen = std::collections::HashSet::with_capacity(updates.len());
         for (n, _) in updates {
             if !seen.insert(n) {
                 return Err(Error::Parse(format!("duplicate target {n} in replace_many")));
             }
-            if !read_set.iter().any(|(r, _)| r == n) {
+            if !in_read_set.contains(n) {
                 return Err(Error::TargetNotInReadSet(n.clone()));
             }
         }
@@ -267,7 +273,9 @@ impl RefState {
         }
         let mut sets = Vec::with_capacity(updates.len());
         for (name, new) in updates {
-            match self.decide_replace(name, read_set, *new)? {
+            // The whole read set was validated above; decide this target alone.
+            let own = [(name.clone(), self.observe(name))];
+            match self.decide_replace(name, &own, *new)? {
                 Ok(Mutation::Set(n, v)) => sets.push((n, v)),
                 Ok(_) => return Err(Error::Corrupt("unexpected mutation".into())),
                 Err(_) => return Err(Error::Corrupt("read set changed during decision".into())),

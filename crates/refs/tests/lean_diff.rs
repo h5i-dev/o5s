@@ -21,6 +21,8 @@ enum Op {
     Delete(usize, Option<u8>, bool),
     Replace(usize, u8, Vec<(usize, Option<u8>)>),
     Rule(usize, u8),
+    /// promote(src, dst): `crates/attest::promote` without its policy.
+    Promote(usize, usize),
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -31,6 +33,7 @@ fn op() -> impl Strategy<Value = Op> {
         2 => (0..PREFIXES.len(), 0u8..3).prop_map(|(p, r)| Op::Rule(p, r)),
         2 => (0..NAMES.len(), proptest::option::of(0u8..4), any::<bool>()).prop_map(|(t, o, f)| Op::Delete(t, o, f)),
         3 => (proptest::collection::vec((0..NAMES.len(), proptest::option::of(0u8..5)), 0..4), any::<bool>()).prop_map(|(e, f)| Op::Txn(e, f)),
+        2 => (0..NAMES.len(), 0..NAMES.len()).prop_map(|(a, b)| Op::Promote(a, b)),
     ]
 }
 
@@ -145,6 +148,28 @@ proptest! {
                         Ok(ReplaceOutcome::Ok { version }) => format!("ok {version}"),
                         Ok(ReplaceOutcome::Conflict { .. }) => "conflict".into(),
                         Err(e) => format!("err {}", e.code()),
+                    });
+                }
+                Op::Promote(a, b) => {
+                    let (src, dst) = (Name::new(NAMES[*a]).unwrap(), Name::new(NAMES[*b]).unwrap());
+                    script.push_str(&format!("M {} {}\n", NAMES[*a], NAMES[*b]));
+                    rust_out.push(match r.resolve(&src).unwrap() {
+                        None => "err parse".into(), // the model: promoting an absent src is invalid
+                        Some(sv) => {
+                            let rs = vec![
+                                (src.clone(), Observed::Version(sv.version)),
+                                (dst.clone(), pico2peta_core::RefValue::observed(r.resolve(&dst).unwrap())),
+                            ];
+                            let objs = &objects;
+                            match r.update_many(&[(dst.clone(), Some(sv.hash))], &rs, &|x| Ok(objs.contains(x))) {
+                                Ok(pico2peta_core::ReplaceManyOutcome::Ok { versions }) => format!(
+                                    "ok {}",
+                                    versions.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",")
+                                ),
+                                Ok(pico2peta_core::ReplaceManyOutcome::Conflict { .. }) => "conflict".into(),
+                                Err(e) => format!("err {}", e.code()),
+                            }
+                        }
                     });
                 }
                 Op::Rule(p, rc) => {

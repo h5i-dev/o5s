@@ -515,3 +515,38 @@ fn grouped_repack_uses_similarity_order_without_hints() {
     assert!(with_ref > 0, "some members are in frames with a reference");
     assert!(!r.contains(&garbage).unwrap());
 }
+
+/// Similarity repack is the default (no grouper needed) and can be disabled:
+/// with `similarity_repack = false` a full repack writes no frames; by
+/// default the same repository ends up with framed members.
+#[test]
+fn similarity_repack_is_default_and_can_be_disabled() {
+    let framed = |r: &LocalRepo| -> usize {
+        let mut n = 0;
+        for p in r.packs().live_packs().unwrap() {
+            n += r.packs().pack_entries(&p).unwrap().iter().filter(|e| e.frame.is_some()).count();
+        }
+        n
+    };
+    for (similarity, expect_frames) in [(false, false), (true, true)] {
+        let d = tempfile::tempdir().unwrap();
+        let r = LocalRepo::init(d.path(), &PackConfig::default()).unwrap();
+        assert!(r.gc_options().similarity_repack, "on by default");
+        for i in 0..40u32 {
+            let mut b = blob(7, 20_000);
+            b[(i as usize * 101) % 20_000] ^= 1;
+            let h = r.put(&b).unwrap();
+            set(&r, &format!("v/{i}"), h);
+        }
+        r.flush().unwrap();
+        let opts = GcOptions { repack_all: true, similarity_repack: similarity, ..opts() };
+        for _ in 0..4 {
+            r.gc(&opts, &OpaqueObjects).unwrap();
+        }
+        let r = LocalRepo::open(d.path()).unwrap();
+        assert_eq!(framed(&r) > 0, expect_frames, "similarity_repack = {similarity}");
+        for i in 0..40u32 {
+            assert!(r.resolve(&Name::new(format!("v/{i}")).unwrap()).unwrap().is_some());
+        }
+    }
+}

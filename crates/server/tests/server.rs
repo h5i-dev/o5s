@@ -691,6 +691,7 @@ fn put_for_name_uses_namespace_chunker() {
             profiles: Default::default(),
             namespaces: Default::default(),
             read: Default::default(),
+            gc: Default::default(),
         };
         pico2peta_repo::LocalRepo::init_config(&c.repo.path, &rc).unwrap();
     });

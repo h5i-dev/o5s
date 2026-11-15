@@ -23,7 +23,7 @@ pub mod idmap;
 pub use front::{DerivePolicy, Front, FrontRegistry, PlanCtx, Profile};
 
 pub use fsck::FsckReport;
-pub use gc::{GcOptions, GcReport, GroupKey, Grouper, OpaqueObjects, Tracer};
+pub use gc::{GcOptions, GcReport, GroupKey, Grouper, NoHints, OpaqueObjects, Tracer};
 use pico2peta_core::backend::{Backend, LocalDisk};
 use pico2peta_core::{Error, Hash, Name, ObjectStore, Observed, RefValue, ReplaceOutcome, Repository, Result, Rule};
 pub use pico2peta_pack::{ChunkerKind, PutOpts};
@@ -63,6 +63,35 @@ pub struct RepoConfig {
     /// Read verification policy (`[read]`, optional; default strict only).
     #[serde(default, skip_serializing_if = "ReadSection::is_default")]
     pub read: ReadSection,
+    /// GC defaults (`[gc]`, optional).
+    #[serde(default, skip_serializing_if = "GcSection::is_default")]
+    pub gc: GcSection,
+}
+
+/// `[gc]` section: repository-wide GC defaults.
+///
+/// ```toml
+/// [gc]
+/// similarity_repack = true   # default: lay out repacked objects by content similarity
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GcSection {
+    /// See [`gc::GcOptions::similarity_repack`] (default `true`).
+    #[serde(default = "default_true")]
+    pub similarity_repack: bool,
+}
+
+impl Default for GcSection {
+    fn default() -> Self {
+        GcSection { similarity_repack: true }
+    }
+}
+
+impl GcSection {
+    fn is_default(&self) -> bool {
+        *self == GcSection::default()
+    }
 }
 
 /// `[read]` section: how reads verify content (see [`pico2peta_core::ReadVerify`]).
@@ -188,6 +217,7 @@ impl RepoConfig {
             profiles: Default::default(),
             namespaces: Default::default(),
             read: ReadSection::default(),
+            gc: GcSection::default(),
         }
     }
 }
@@ -293,6 +323,7 @@ pub struct LocalRepo {
     profiles: Arc<std::collections::BTreeMap<String, Profile>>,
     namespaces: Arc<std::collections::BTreeMap<String, String>>,
     read: ReadSection,
+    gc_defaults: GcSection,
     fronts: Arc<FrontRegistry>,
     packs: PackStore,
     refs: Arc<RefStore>,
@@ -319,6 +350,7 @@ impl LocalRepo {
                 profiles: Default::default(),
                 namespaces: Default::default(),
                 read: ReadSection::default(),
+                gc: GcSection::default(),
             },
         )
     }
@@ -387,6 +419,7 @@ impl LocalRepo {
             profiles: Arc::new(cfg.profiles),
             namespaces: Arc::new(cfg.namespaces),
             read: cfg.read,
+            gc_defaults: cfg.gc,
             fronts: Arc::new(FrontRegistry::new()),
             packs,
             refs,
@@ -454,6 +487,11 @@ impl LocalRepo {
             .iter()
             .filter_map(|(prefix, p)| self.profiles.get(p).map(|prof| (prefix.clone(), p.clone(), prof.clone())))
             .collect()
+    }
+
+    /// [`GcOptions`] defaults for this repository (from `[gc]`).
+    pub fn gc_options(&self) -> GcOptions {
+        GcOptions { similarity_repack: self.gc_defaults.similarity_repack, ..GcOptions::default() }
     }
 
     /// The `[read]` verification policy in effect.
@@ -1008,6 +1046,7 @@ mod config_compat {
             profiles: Default::default(),
             namespaces: Default::default(),
             read: ReadSection::default(),
+            gc: GcSection::default(),
         };
         let d = tempfile::tempdir().unwrap();
         let r = LocalRepo::init_config(d.path(), &cfg(&PackConfig::default(), &chunking)).unwrap();
