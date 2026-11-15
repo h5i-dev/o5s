@@ -444,6 +444,7 @@ mod tests {
             chunking: Default::default(),
             profiles: [("weights".to_string(), p)].into_iter().collect(),
             namespaces: [("models/".to_string(), "weights".to_string())].into_iter().collect(),
+            read: Default::default(),
         };
         let r2 = LocalRepo::init_config(d2.path(), &cfg)
             .unwrap()

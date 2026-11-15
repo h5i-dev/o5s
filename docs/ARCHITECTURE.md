@@ -188,4 +188,21 @@ by fault injection at every write/fsync point plus real SIGKILLs.
   after the refs copy are just unreferenced. Pause GC for the duration, because GC is what deletes packs.
 - **Restore:** put both directories back and run `pico2peta fsck`.
 - **Integrity:** `pico2peta fsck` reads and verifies every object and ref. Every normal read also verifies
-  checksums and content hashes, so corruption is reported, never returned as data.
+  checksums and content hashes, so corruption is always reported. Whether it can be *returned as data first*
+  depends on the read verification mode, described next.
+
+### Read verification modes (`[read]` in config.toml, `ReadVerify` in the API, `get --read-verify`)
+
+| mode | checks | guarantee |
+|---|---|---|
+| `strict` (**default**) | every record's CRC32; every chunk's BLAKE3 **before** any of its bytes are returned; for whole reads, the whole-object BLAKE3 at EOF | A reader never receives a byte that doesn't match its content hash. On corruption, the read fails before the first bad byte. |
+| `eof` (opt-in) | every record's CRC32; on **whole** reads of chunked objects, the per-chunk BLAKE3 is skipped and the whole-object BLAKE3 is checked at EOF; ranged reads stay strict | Accidental corruption (bit rot, torn writes) is still stopped by the CRC32 before its bytes are returned. **CRC-valid crafted bytes can reach the caller before the error at EOF.** The read always ends in an error, so a caller that discards the data on error never keeps it. Use it for throughput when the backend is trusted. |
+
+- **Policy.** `[read] verify` sets the mode of reads that don't choose one (`strict` unless configured).
+  `[read] allow_eof = true` lets a single request ask for `eof`; `verify = "eof"` implies it. A request for `eof` on
+  a repository that doesn't allow it is refused (`Unsupported`), never silently downgraded. That is how the server
+  stays strict by default.
+- **Scope.** Modes apply per repository and per request. Reads are addressed by content hash, not by name, so there
+  is no per-namespace setting.
+- **Objects stored whole** (a blob, a frame member) are verified by one hash in both modes, so `eof` changes
+  nothing for them.

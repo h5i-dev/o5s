@@ -690,6 +690,7 @@ fn put_for_name_uses_namespace_chunker() {
             chunking: pico2peta_repo::ChunkingSection { default: pico2peta_repo::ChunkerChoice::Fastcdc, prefixes },
             profiles: Default::default(),
             namespaces: Default::default(),
+            read: Default::default(),
         };
         pico2peta_repo::LocalRepo::init_config(&c.repo.path, &rc).unwrap();
     });
