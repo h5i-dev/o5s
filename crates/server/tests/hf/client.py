@@ -3,8 +3,10 @@
 Run by tests/hf.rs with HF_ENDPOINT/HF_TOKEN pointing at a test server. Exits non-zero on
 any mismatch.
 """
+import atexit
 import hashlib
 import os
+import shutil
 import sys
 import tempfile
 
@@ -13,6 +15,8 @@ from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 api = HfApi()
 repo = os.environ.get("HF_TEST_REPO", "alice/tiny-model")
 work = tempfile.mkdtemp()
+# Always remove the download caches (~9 MB per run), also on assertion failure.
+atexit.register(shutil.rmtree, work, ignore_errors=True)
 rng = __import__("random").Random(7)
 
 small = b'{"architectures": ["Tiny"], "hidden_size": 8}\n'
