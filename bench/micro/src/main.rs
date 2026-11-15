@@ -731,6 +731,19 @@ fn vm_rss_mb() -> f64 {
         / 1024.0
 }
 
+/// `RssAnon` (heap) and `RssFile` (touched pages of mapped files, reclaimable) in MiB.
+fn rss_split_mb() -> (f64, f64) {
+    let st = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let get = |k: &str| {
+        st.lines()
+            .find(|l| l.starts_with(k))
+            .and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok())
+            .unwrap_or(0.0)
+            / 1024.0
+    };
+    (get("RssAnon:"), get("RssFile:"))
+}
+
 fn pct(v: &mut [f64], p: f64) -> f64 {
     v.sort_by(|a, b| a.total_cmp(b));
     v.get(((v.len() as f64 - 1.0) * p).round() as usize).copied().unwrap_or(f64::NAN)
@@ -799,8 +812,10 @@ fn scale(dir: &str, part: &str, count: u64) -> Result<(), Box<dyn std::error::Er
                 assert_eq!(d, scale_obj(i));
             }
             let rss = vm_rss_mb();
+            let (anon, file) = rss_split_mb();
             println!(
-                "{{\"part\":\"objects\",\"n\":{count},\"put_rate_first_1e6\":{first_rate:.0},\"put_rate\":{put_rate:.0},\"open_s\":{open_s:.2},\"get_p50_ms\":{:.4},\"get_p99_ms\":{:.4},\"rss_mb\":{rss:.0},\"rss_open_mb\":{rss_before:.0},\"rss_bytes_per_object\":{:.1},\"disk_bytes\":{},\"load\":\"{}\"}}",
+                "{{\"anon_mb\":{anon:.0},\"file_mb\":{file:.0},\"anon_bytes_per_object\":{:.1},\"part\":\"objects\",\"n\":{count},\"put_rate_first_1e6\":{first_rate:.0},\"put_rate\":{put_rate:.0},\"open_s\":{open_s:.2},\"get_p50_ms\":{:.4},\"get_p99_ms\":{:.4},\"rss_mb\":{rss:.0},\"rss_open_mb\":{rss_before:.0},\"rss_bytes_per_object\":{:.1},\"disk_bytes\":{},\"load\":\"{}\"}}",
+                anon * 1048576.0 / count as f64,
                 pct(&mut lat.clone(), 0.5),
                 pct(&mut lat, 0.99),
                 rss * 1048576.0 / count as f64,

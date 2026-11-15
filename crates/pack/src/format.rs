@@ -14,6 +14,7 @@
 //! ```
 
 use pico2peta_core::{Error, Hash, Result};
+use std::io::Read as _;
 
 /// Pack format v1: magic, then records.
 pub const PACK_MAGIC_V1: &[u8; 8] = b"P2PPACK1";
@@ -258,13 +259,33 @@ fn zstd_decompress(c: &[u8], capacity: usize) -> std::io::Result<Vec<u8>> {
     })
 }
 
+/// Largest decoded manifest: `n u32` plus 2^20 entries of 40 bytes (the fanout cap).
+pub const MAX_MANIFEST_BYTES: usize = 4 + (1 << 20) * 40;
+/// Largest decoded delta record: base, xor, `n u32` and `MAX_DELTA_SEGS` segments.
+pub const MAX_DELTA_BYTES: usize = 64 + 4 + MAX_DELTA_SEGS * 24;
+
+/// zstd-decodes at most `limit` bytes; more is corruption (never allocated).
+fn decode_bounded(payload: &[u8], limit: usize) -> Result<Vec<u8>> {
+    let zerr = |e: std::io::Error| Error::Corrupt(format!("zstd: {e}"));
+    let dec = zstd::stream::Decoder::new(payload).map_err(zerr)?;
+    let mut out = Vec::new();
+    let n = dec.take(limit as u64 + 1).read_to_end(&mut out).map_err(zerr)?;
+    if n > limit {
+        return Err(Error::Corrupt(format!("record decodes past its format's {limit}-byte limit")));
+    }
+    Ok(out)
+}
+
 /// Decompresses a payload according to its codec.
 pub fn unpack_payload(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
     let zerr = |e: std::io::Error| Error::Corrupt(format!("zstd: {e}"));
     let out = match (h.codec, h.kind) {
         (Codec::Raw, _) => payload.to_vec(),
         (Codec::Zstd, Kind::Blob) => zstd_decompress(payload, h.raw_len as usize).map_err(zerr)?,
-        (Codec::Zstd, Kind::Manifest | Kind::Delta) => zstd::stream::decode_all(payload).map_err(zerr)?,
+        // Bounded: a crafted, CRC-valid record must not decompress without limit
+        // (a "zip bomb"). These formats have hard maximum sizes.
+        (Codec::Zstd, Kind::Manifest) => decode_bounded(payload, MAX_MANIFEST_BYTES)?,
+        (Codec::Zstd, Kind::Delta) => decode_bounded(payload, MAX_DELTA_BYTES)?,
         (Codec::Zstd, Kind::Frame | Kind::Frame2 | Kind::Frame3) => {
             return Err(Error::Corrupt("use decode_frame_bodies for frame records".into()));
         }

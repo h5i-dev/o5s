@@ -296,6 +296,15 @@ pub fn attest(repo: &dyn Repository, log_ref: &Name, envelope: &Envelope) -> Res
     Ok(eh)
 }
 
+/// Reads an envelope object, refusing anything larger than [`MAX_ENVELOPE`]
+/// before loading it (an attacker-chosen object must not be read into memory whole).
+fn load_envelope(repo: &dyn Repository, h: &Hash) -> Result<Envelope> {
+    if repo.size(h)? > MAX_ENVELOPE as u64 {
+        return Err(Error::Parse(format!("attestation envelope {h} is larger than {MAX_ENVELOPE} bytes")));
+    }
+    Envelope::from_json(&repo.get(h, None)?)
+}
+
 /// Every stored attestation envelope about `subject`.
 pub fn attestations(repo: &dyn Repository, log_ref: &Name, subject: &Hash) -> Result<Vec<Envelope>> {
     let p = Provenance::load(repo, log_ref)?;
@@ -305,7 +314,7 @@ pub fn attestations(repo: &dyn Repository, log_ref: &Name, subject: &Hash) -> Re
             continue;
         }
         if let Some(eh) = r.params {
-            out.push(Envelope::from_json(&repo.get(&eh, None)?)?);
+            out.push(load_envelope(repo, &eh)?);
         }
     }
     Ok(out)
@@ -368,7 +377,7 @@ pub fn promote(
             continue;
         }
         let Some(eh) = r.params else { continue };
-        let env = Envelope::from_json(&repo.get(&eh, None)?)?;
+        let Ok(env) = load_envelope(repo, &eh) else { continue };
         let Ok(st) = env.statement() else { continue };
         if !st.subjects.iter().any(|s| s.hash == obj) {
             continue;

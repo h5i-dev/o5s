@@ -169,6 +169,15 @@ dangling ref.
 Crash consistency (fsync honesty, atomic rename, create-only puts) is assumed by the proofs and tested
 by fault injection at every write/fsync point plus real SIGKILLs.
 
+## Measured limits (PLAN §6.7, single host, 2026-11-15)
+
+| dimension | measured | how it scales |
+|---|---|---|
+| objects | 10⁷ × 64 B: put 188k/s, cold open 6 s, get p99 14 µs; GC full cycle 111 s at 2.1 GB peak | Indexes over 4 MiB are memory-mapped, plus a multi-pack index. Resident memory is ≈ 110 B/object, mostly reclaimable mapped-file pages (BENCH.md). |
+| names | 10⁷: replace 7.5k/s, resolve p99 7.6 µs, open 6.4 s | The whole ref state is in memory: ≈ 208 B per name (2.1 GB at 10⁷). For more names, use idmaps (sorted segments behind one ref) for name-like tables, as the Git and OCI fronts do. |
+| provenance | 10⁶ records: load 0.35 s (checkpointed index) | Records are objects; the index grows with records since the last checkpoint. |
+| batch name updates | `update_many` linear in the batch (≤ 2²⁰ entries) | |
+
 ## Deployment topology and limits
 
 - **Ref store choice** (`[refs] store` in config.toml, or `pico2peta init --refs-on-backend`):

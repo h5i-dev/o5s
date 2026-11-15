@@ -14,6 +14,33 @@ Other modes: `p2p-bench stream <dir> [MiB]` (put_stream only; `P2P_BENCH_NO_PROB
 
 Comparisons against Git storage size are in `docs/EXP1.md` (Experiment 1).
 
+## 2026-11-15: scale tests (PLAN §6.7), window 1
+
+`p2p-bench scale`, local NVMe, under the bench lock, load 1.9–2.5, 64-byte distinct objects, `flush` every 10⁵.
+
+| test | result | target | |
+|---|---|---|---|
+| put, N = 10⁶ | 196k obj/s | | |
+| put, N = 10⁷ | 188k obj/s overall (201k for the first 10⁶) | ≥ 50 % of the first 10⁶ | met (94 %) |
+| cold open, N = 10⁷ | 5.97 s | ≤ 30 s | met |
+| warm random get p50 / p99, N = 10⁷ | 4.5 µs / 14.2 µs | p99 ≤ 1 ms | met |
+| RSS after open + 10⁵ gets | 144 B/object at 10⁶, 110 B/object at 10⁷ (1.05 GB) | ≤ 64 B/object | **missed** |
+| GC full cycle, N = 10⁷, all live | 110.7 s, peak RSS 2.1 GB, every live object kept | ≤ 30 min, ≤ 6 GB | met |
+| names, M = 10⁶: replace / resolve p99 / open | 6.8k/s / 5.7 µs / 0.57 s | ≥ 1k/s / ≤ 1 ms / ≤ 10 s | met |
+| names, M = 10⁷: replace / resolve p99 / open | 7.5k/s / 7.6 µs / 6.4 s (RSS 2.1 GB, ≈ 208 B per name) | | met |
+| provenance load, R = 10⁶ | 0.35 s (recording took 31 s) | ≤ 10 s | met |
+
+- **Bottlenecks found and fixed on the way:**
+  - `replace_many` / `update_many` decisions were quadratic in the batch (10⁵ names: 250 s → 2.1 s).
+  - The idmap's large-segment lookups decoded a whole chunk per probe (fixed by net with a page cache and a
+    merge-join `get_many`).
+- **The RSS miss is mostly mapped files.** Pack indexes over 4 MiB, and the multi-pack index, are memory-mapped, and
+  `VmRSS` counts their touched pages: ≈ 440 MB of pack indexes plus ≈ 400 MB of MIDX at 10⁷ objects, all
+  file-backed and reclaimable. The harness now also reports `RssAnon` (heap) and `RssFile` separately; the next
+  window measures the split. As pre-registered, the plain-RSS target counts as missed.
+- **Names live in memory:** ≈ 208 B per name, i.e. 2.1 GB at 10⁷ names. That is the ref store's design (the whole
+  state in memory, journal on disk) and is recorded as a limit.
+
 ## 2026-11-15: performance pass (Phase 3, items a–e)
 
 Short runs under `bench.lock`, on `/dev/shm` unless stated. The host is shared (load 1.3–2.9).
