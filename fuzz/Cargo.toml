@@ -110,3 +110,10 @@ path = "fuzz_targets/http_range.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "midx"
+path = "fuzz_targets/midx.rs"
+test = false
+doc = false
+bench = false

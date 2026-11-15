@@ -143,3 +143,48 @@ fn index_v3_is_compact_for_frames() {
     back.sort_by_key(|e| e.hash);
     assert_eq!(back, es);
 }
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 2000, ..ProptestConfig::default() })]
+    #[test]
+    fn midx_and_idx3_views_total(raw in proptest::collection::vec(any::<u8>(), 0..400), as_midx in any::<bool>()) {
+        let mut b = if as_midx { MIDX_MAGIC.to_vec() } else { IDX_MAGIC_V3.to_vec() };
+        b.extend_from_slice(&raw);
+        if let Ok(v) = MidxView::new(b.clone()) {
+            let _ = v.find_all(&Hash::of(b"x"));
+        }
+        if let Ok(v) = IdxV3View::new(b) {
+            let _ = v.find(&Hash::of(b"x"));
+        }
+    }
+}
+
+#[test]
+fn midx_roundtrip_merges_sorted_packs() {
+    let mk = |seed: u8, n: u8| {
+        let mut es: Vec<IdxEntry> = (0..n)
+            .map(|i| IdxEntry {
+                hash: Hash::of(&[seed, i]),
+                offset: 24 + i as u64 * 100,
+                stored_len: 10,
+                raw_len: 10,
+                kind: Kind::Blob,
+                codec: Codec::Raw,
+                frame: None,
+            })
+            .collect();
+        IdxV3View::new(encode_index(&mut es)).unwrap()
+    };
+    let (a, b) = (mk(1, 50), mk(2, 30));
+    let na = "a".repeat(64);
+    let nb = "b".repeat(64);
+    let mut out = Vec::new();
+    write_midx(&[(na.as_str(), &a), (nb.as_str(), &b)], &mut out).unwrap();
+    let m = MidxView::new(out).unwrap();
+    for i in 0..50u8 {
+        let hits = m.find_all(&Hash::of(&[1, i]));
+        assert_eq!(hits.len(), 1);
+        assert_eq!(a.entry(hits[0].1 as usize).unwrap().hash, Hash::of(&[1, i]));
+    }
+    assert!(m.find_all(&Hash::of(b"absent")).is_empty());
+}
