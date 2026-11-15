@@ -178,3 +178,55 @@ fn backend_without_atomic_create_is_refused_for_refs() {
     let b: Arc<dyn Backend> = Arc::new(NonAtomic(LocalDisk::new(d.path()).unwrap()));
     assert!(RefStore::open_backend(b, "r/").is_err());
 }
+
+/// A conditional create whose response was lost: the retry reports AlreadyExists
+/// although *our* record is stored. The commit must be reported Ok, not Conflict,
+/// and must not be applied twice.
+#[test]
+fn lost_create_response_is_recognized_as_our_commit() {
+    struct LoseFirstLogCreate {
+        inner: LocalDisk,
+        lost: std::sync::atomic::AtomicBool,
+    }
+    impl Backend for LoseFirstLogCreate {
+        fn put_if_absent(
+            &self,
+            k: &str,
+            s: pico2peta_core::backend::PutSource<'_>,
+        ) -> Result<pico2peta_core::backend::PutOutcome> {
+            let r = self.inner.put_if_absent(k, s)?;
+            if k.contains("log/") && !self.lost.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                // The write landed, but the client only learns "AlreadyExists" on retry.
+                return Ok(pico2peta_core::backend::PutOutcome::AlreadyExists);
+            }
+            Ok(r)
+        }
+        fn get_range(&self, k: &str, r: std::ops::Range<u64>) -> Result<Vec<u8>> {
+            self.inner.get_range(k, r)
+        }
+        fn open(&self, k: &str) -> Result<Box<dyn std::io::Read + Send>> {
+            self.inner.open(k)
+        }
+        fn head(&self, k: &str) -> Result<Option<pico2peta_core::backend::BlobMeta>> {
+            self.inner.head(k)
+        }
+        fn list(&self, p: &str) -> Result<Vec<pico2peta_core::backend::BlobMeta>> {
+            self.inner.list(p)
+        }
+        fn delete(&self, k: &str) -> Result<()> {
+            self.inner.delete(k)
+        }
+        fn describe(&self) -> String {
+            "lossy".into()
+        }
+    }
+    let d = tempfile::tempdir().unwrap();
+    let b: Arc<dyn Backend> =
+        Arc::new(LoseFirstLogCreate { inner: LocalDisk::new(d.path()).unwrap(), lost: Default::default() });
+    let r = RefStore::open_backend(b.clone(), "l/").unwrap();
+    let x = n("x");
+    assert_eq!(r.replace(&x, &[(x.clone(), Observed::Absent)], h(1), &yes).unwrap(), ReplaceOutcome::Ok { version: 1 });
+    assert_eq!(r.resolve(&x).unwrap().unwrap().version, 1, "applied exactly once");
+    let r2 = RefStore::open_backend(b, "l/").unwrap();
+    assert_eq!(r2.resolve(&x).unwrap().unwrap(), RefValue { hash: h(1), version: 1 });
+}

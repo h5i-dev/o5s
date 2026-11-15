@@ -272,7 +272,28 @@ impl crate::Engine for LogEngine {
                     let _ = self.maybe_snapshot(&mut g);
                     return Ok(());
                 }
-                PutOutcome::AlreadyExists => continue, // lost the race: catch up, re-decide
+                PutOutcome::AlreadyExists => {
+                    // Either another writer won this slot, or *our* earlier attempt landed
+                    // and only its response was lost (the backend's retry then sees 412).
+                    // Records are deterministic, so if the stored entry is byte-identical to
+                    // ours, the commit is ours (or an identical one): apply it and report Ok.
+                    // Otherwise catch up and re-decide.
+                    let mut stored = Vec::new();
+                    match self.backend.open(&self.log_key(g.next)) {
+                        Ok(mut r) => {
+                            r.read_to_end(&mut stored)?;
+                        }
+                        Err(Error::KeyNotFound(_)) => continue, // trimmed meanwhile: re-check from scratch
+                        Err(e) => return Err(e),
+                    }
+                    if stored == rec {
+                        g.state.apply(m);
+                        g.next += 1;
+                        let _ = self.maybe_snapshot(&mut g);
+                        return Ok(());
+                    }
+                    continue;
+                }
             }
         }
         Err(Error::Backend { transient: true, msg: "ref log: too much contention".into() })
