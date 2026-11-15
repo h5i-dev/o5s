@@ -147,8 +147,8 @@ async fn error_from(resp: reqwest::Response, ctx: &Ctx<'_>) -> Error {
         "parse" | wire::codes::BAD_REQUEST | wire::codes::HASH_MISMATCH => Error::Parse(msg),
         "unsupported" => Error::Unsupported("operation not supported by the server"),
         "locked" => Error::Locked,
-        wire::codes::UNAUTHENTICATED => Error::Backend { transient: false, msg: format!("unauthenticated: {msg}") },
-        wire::codes::PERMISSION_DENIED => Error::Backend { transient: false, msg: format!("permission denied: {msg}") },
+        wire::codes::UNAUTHENTICATED => Error::Unauthorized(format!("unauthenticated: {msg}")),
+        wire::codes::PERMISSION_DENIED | "unauthorized" => Error::Unauthorized(format!("permission denied: {msg}")),
         wire::codes::TOO_LARGE => Error::Backend { transient: false, msg: format!("payload too large: {msg}") },
         _ => Error::Backend { transient: status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS, msg },
     }

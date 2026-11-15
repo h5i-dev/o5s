@@ -103,7 +103,7 @@ fn authentication() {
     let body: wire::ErrorBody = r.json().unwrap();
     assert_eq!(body.error.code, wire::codes::UNAUTHENTICATED);
     assert_eq!(s.client(ALICE).whoami().unwrap(), wire::WhoAmI { principal: "alice".into(), authenticated: true });
-    assert!(RemoteRepo::connect(&s.url(), Some("wrong".into())).is_err());
+    assert!(matches!(RemoteRepo::connect(&s.url(), Some("wrong".into())), Err(Error::Unauthorized(_))));
     // Ops endpoints need no credentials.
     assert_eq!(http().get(format!("{}/healthz", s.url())).send().unwrap().status(), 200);
     assert_eq!(http().get(format!("{}/readyz", s.url())).send().unwrap().status(), 200);
@@ -138,7 +138,7 @@ fn authorization_per_namespace() {
     admin.replace(&n("shared/c"), &[(n("shared/c"), Observed::Absent)], h).unwrap();
     admin.replace(&n("secret/d"), &[(n("secret/d"), Observed::Absent)], h).unwrap();
 
-    let denied = |r: pico2peta_core::Result<_>| matches!(r, Err(Error::Backend { transient: false, msg }) if msg.starts_with("permission denied"));
+    let denied = |r: pico2peta_core::Result<_>| matches!(r, Err(Error::Unauthorized(msg)) if msg.starts_with("permission denied"));
     // Readers cannot write anything, not even objects.
     assert!(denied(reader.put(b"y").map(|_| ())));
     assert!(denied(reader.replace(&n("shared/c"), &[(n("shared/c"), Observed::Version(1))], h).map(|_| ())));
