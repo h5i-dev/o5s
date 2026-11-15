@@ -72,6 +72,9 @@ const CACHE_ENTRIES: u64 = 1 << 20;
 const PAGE: u64 = 64 << 10;
 /// Bytes of large-segment pages kept (shared by all maps).
 const PAGE_CACHE_BYTES: u64 = 64 << 20;
+/// Sequential reads of large segments (`get_many` scans) use aligned windows of this size;
+/// they bypass the page cache.
+const SCAN_WINDOW: u64 = 4 << 20;
 
 /// A map key (external ids are hashed or padded to 32 bytes by the front).
 pub type Key = [u8; 32];
@@ -271,20 +274,7 @@ impl SegMap {
 
     fn segment_lookup(&self, seg: &Hash, count: u64, key: &Key) -> Result<Option<Value>> {
         if count <= CACHE_WHOLE {
-            let entries = match self.cache.get(seg) {
-                Some(e) => e,
-                None => {
-                    let e = Arc::new(decode_segment(&self.repo.get(seg, None)?)?);
-                    if e.len() as u64 != count {
-                        return Err(Error::Corrupt(format!(
-                            "segment {seg} has {} entries, root says {count}",
-                            e.len()
-                        )));
-                    }
-                    self.cache.put(*seg, e.clone());
-                    e
-                }
-            };
+            let entries = self.small_segment(seg, count)?;
             return Ok(entries.binary_search_by(|(k, _)| k.cmp(key)).ok().map(|i| entries[i].1));
         }
         // Binary search over cached pages of the segment.
@@ -335,10 +325,87 @@ impl SegMap {
         Ok(out)
     }
 
-    /// Looks up many keys against one root (e.g. every object of a push). Lookups share the
-    /// segment and page caches, so a batch costs about one decode per touched page.
+    /// Looks up many keys against one root (e.g. every object of a push or one wave of a git
+    /// walk). Same results as one [`Self::get_in`] per key, in input order.
+    ///
+    /// A sorted merge-join: the keys are sorted and deduplicated once, then each segment, newest
+    /// first, is matched against the keys not found yet. A large segment is split recursively
+    /// around probe entries until a sub-range holds about one key per page or fits one window;
+    /// such a range is then read sequentially in aligned windows and merged with its keys. So a
+    /// dense batch scans the segment once, and a sparse one reads only the pages its keys can be
+    /// in (its probes share the page cache).
     pub fn get_many(&self, root: &Root, keys: &[Key]) -> Result<Vec<Option<Value>>> {
-        keys.iter().map(|k| self.lookup_in(root, k)).collect()
+        let mut uniq: Vec<Key> = keys.to_vec();
+        uniq.sort_unstable();
+        uniq.dedup();
+        let mut found: Vec<Option<Value>> = vec![None; uniq.len()];
+        // Indices (into `uniq`, ascending) still missing.
+        let mut pending: Vec<usize> = (0..uniq.len()).collect();
+        for (seg, count) in root.segments.iter().rev() {
+            if pending.is_empty() {
+                break;
+            }
+            let want: Vec<(Key, usize)> = pending.iter().map(|&i| (uniq[i], i)).collect();
+            self.segment_many(seg, *count, &want, &mut found)?;
+            pending.retain(|&i| found[i].is_none());
+        }
+        Ok(keys.iter().map(|k| uniq.binary_search(k).ok().and_then(|i| found[i])).collect())
+    }
+
+    /// Matches sorted `keys` (`(key, slot)`) against one segment, filling `found[slot]`.
+    fn segment_many(&self, seg: &Hash, count: u64, keys: &[(Key, usize)], found: &mut [Option<Value>]) -> Result<()> {
+        if count <= CACHE_WHOLE {
+            let entries = self.small_segment(seg, count)?;
+            merge_join(entries.iter().map(|e| Ok((e.0, e.1))), keys, found)?;
+            return Ok(());
+        }
+        self.range_many(seg, count, 0, count, keys, found)
+    }
+
+    /// Entries `lo..hi` of a large segment against the sorted keys that can only be there.
+    fn range_many(
+        &self,
+        seg: &Hash,
+        count: u64,
+        lo: u64,
+        hi: u64,
+        keys: &[(Key, usize)],
+        found: &mut [Option<Value>],
+    ) -> Result<()> {
+        if keys.is_empty() || lo >= hi {
+            return Ok(());
+        }
+        let span = (hi - lo) * ENTRY;
+        if span <= SCAN_WINDOW || (keys.len() as u64).saturating_mul(PAGE) >= span {
+            let it = SpanReader::new(&*self.repo, seg, lo, hi);
+            return merge_join(it, keys, found);
+        }
+        let mid = lo + (hi - lo) / 2;
+        let (k, v) = decode_entry(&self.entry_bytes(seg, count, mid)?);
+        let split = keys.partition_point(|(x, _)| *x < k);
+        let (left, rest) = keys.split_at(split);
+        let right = match rest.first() {
+            Some((x, slot)) if *x == k => {
+                found[*slot] = Some(v);
+                &rest[1..]
+            }
+            _ => rest,
+        };
+        self.range_many(seg, count, lo, mid, left, found)?;
+        self.range_many(seg, count, mid + 1, hi, right, found)
+    }
+
+    /// A small segment, decoded whole through the segment cache.
+    fn small_segment(&self, seg: &Hash, count: u64) -> Result<Segment> {
+        if let Some(e) = self.cache.get(seg) {
+            return Ok(e);
+        }
+        let e = Arc::new(decode_segment(&self.repo.get(seg, None)?)?);
+        if e.len() as u64 != count {
+            return Err(Error::Corrupt(format!("segment {seg} has {} entries, root says {count}", e.len())));
+        }
+        self.cache.put(*seg, e.clone());
+        Ok(e)
     }
 
     fn lookup_in(&self, root: &Root, key: &Key) -> Result<Option<Value>> {
@@ -446,6 +513,95 @@ impl SegMap {
 }
 
 /// Sequential entry reader over a segment object.
+/// Merges sorted segment entries with sorted, unique keys, filling `found[slot]` for each match.
+fn merge_join(
+    entries: impl Iterator<Item = Result<(Key, Value)>>,
+    keys: &[(Key, usize)],
+    found: &mut [Option<Value>],
+) -> Result<()> {
+    let mut ki = 0;
+    for e in entries {
+        if ki == keys.len() {
+            break;
+        }
+        let (k, v) = e?;
+        while ki < keys.len() && keys[ki].0 < k {
+            ki += 1;
+        }
+        if ki < keys.len() && keys[ki].0 == k {
+            found[keys[ki].1] = Some(v);
+            ki += 1;
+        }
+    }
+    Ok(())
+}
+
+/// Entries `lo..hi` of a segment, read with ranged reads in [`SCAN_WINDOW`]-aligned windows.
+struct SpanReader<'a> {
+    store: &'a dyn Repository,
+    seg: Hash,
+    /// Next byte offset to fetch; end offset.
+    at: u64,
+    end: u64,
+    buf: Vec<u8>,
+    pos: usize,
+    failed: bool,
+}
+
+impl<'a> SpanReader<'a> {
+    fn new(store: &'a dyn Repository, seg: &Hash, lo: u64, hi: u64) -> Self {
+        SpanReader {
+            store,
+            seg: *seg,
+            at: SEG_HEADER + lo * ENTRY,
+            end: SEG_HEADER + hi * ENTRY,
+            buf: Vec::new(),
+            pos: 0,
+            failed: false,
+        }
+    }
+}
+
+impl Iterator for SpanReader<'_> {
+    type Item = Result<(Key, Value)>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed {
+            return None;
+        }
+        while self.buf.len() - self.pos < ENTRY as usize {
+            if self.at >= self.end {
+                if self.buf.len() != self.pos {
+                    self.failed = true;
+                    return Some(Err(Error::Corrupt(format!("short segment read in {}", self.seg))));
+                }
+                return None;
+            }
+            // Up to the next window boundary (absolute offsets, so windows stay aligned).
+            let stop = ((self.at / SCAN_WINDOW + 1) * SCAN_WINDOW).min(self.end);
+            let r = self.at..stop;
+            match self.store.get(&self.seg, Some(r)) {
+                Ok(b) if b.len() as u64 == stop - self.at => {
+                    self.buf.drain(..self.pos);
+                    self.pos = 0;
+                    self.buf.extend_from_slice(&b);
+                    self.at = stop;
+                }
+                Ok(_) => {
+                    self.failed = true;
+                    return Some(Err(Error::Corrupt(format!("short segment read in {}", self.seg))));
+                }
+                Err(e) => {
+                    self.failed = true;
+                    return Some(Err(e));
+                }
+            }
+        }
+        let e = decode_entry(&self.buf[self.pos..self.pos + ENTRY as usize]);
+        self.pos += ENTRY as usize;
+        Some(Ok(e))
+    }
+}
+
 struct SegReader {
     r: std::io::BufReader<Box<dyn Read + Send>>,
     left: u64,
@@ -667,6 +823,73 @@ mod tests {
         }
         let misses: Vec<Key> = (0..200).map(|i| key(i * 2 + 1)).collect();
         assert!(m.get_many(&root, &misses).unwrap().iter().all(Option::is_none));
+    }
+
+    /// Builds a root directly from segments (oldest first), so newer segments can override keys
+    /// (which `insert_blocking` refuses) and sizes straddle `CACHE_WHOLE`.
+    fn root_of(repo: &Arc<dyn Repository>, segs: &[Vec<(Key, Value)>]) -> Root {
+        Root {
+            segments: segs
+                .iter()
+                .map(|e| {
+                    let mut e = e.clone();
+                    e.sort_by_key(|x| x.0);
+                    e.dedup_by_key(|x| x.0);
+                    (repo.put(&encode_segment(&e)).unwrap(), e.len() as u64)
+                })
+                .collect(),
+        }
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig { cases: 24, ..Default::default() })]
+        /// `get_many` = one `get_in` per key: several segments (small and large), keys
+        /// overridden by newer segments, misses, duplicates and arbitrary order.
+        #[test]
+        fn get_many_matches_per_key_lookups(
+            seed in proptest::prelude::any::<u64>(),
+            sizes in proptest::collection::vec(
+                proptest::prop_oneof![0u64..200, 1000u64..5000, (CACHE_WHOLE + 1)..(CACHE_WHOLE * 3)], 1..5),
+            nq in 0usize..3000,
+            dense in proptest::prelude::any::<bool>(),
+        ) {
+            let (_d, repo) = repo();
+            let mut rng = seed | 1;
+            let mut next = || { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; rng };
+            let universe = sizes.iter().sum::<u64>() * 2 + 10;
+            let segs: Vec<Vec<(Key, Value)>> = sizes
+                .iter()
+                .enumerate()
+                .map(|(si, &n)| (0..n).map(|_| { let i = next() % universe; (key(i), Value { hash: Hash::of(&i.to_le_bytes()), aux: si as u64 * 1_000_000 + i }) }).collect())
+                .collect();
+            let root = root_of(&repo, &segs);
+            let m = SegMap::new(repo, Name::new("t/prop").unwrap(), Arc::default());
+            // Dense batches take the scan path; sparse ones the probe path.
+            let nq = if dense { nq * 20 } else { nq };
+            let qs: Vec<Key> = (0..nq).map(|_| key(next() % universe)).collect();
+            let want: Vec<Option<Value>> = qs.iter().map(|k| m.get_in(&root, k).unwrap()).collect();
+            proptest::prop_assert_eq!(m.get_many(&root, &qs).unwrap(), want);
+        }
+    }
+
+    #[test]
+    fn get_many_overrides_and_edges() {
+        let (_d, repo) = repo();
+        let big = CACHE_WHOLE + 5000;
+        let old: Vec<_> = (0..big).map(|i| (key(i * 2), val(i))).collect();
+        let new: Vec<_> = (0..big).step_by(3).map(|i| (key(i * 2), Value { hash: Hash::of(b"new"), aux: i })).collect();
+        let root = root_of(&repo, &[old, new, vec![(key(1), val(1))]]);
+        let m = SegMap::new(repo, Name::new("t/edges").unwrap(), Arc::default());
+        let mut qs: Vec<Key> =
+            vec![key(0), key(2 * (big - 1)), key(1), key(1), key(2 * big + 1), [0u8; 32], [0xff; 32]];
+        qs.extend((0..big).step_by(997).map(|i| key(i * 2)));
+        let want: Vec<_> = qs.iter().map(|k| m.get_in(&root, k).unwrap()).collect();
+        assert_eq!(m.get_many(&root, &qs).unwrap(), want);
+        assert_eq!(want[0].unwrap().hash, Hash::of(b"new"));
+        assert_eq!(want[2], Some(val(1)));
+        assert_eq!(want[4], None);
+        assert!(m.get_many(&root, &[]).unwrap().is_empty());
+        assert!(m.get_many(&Root::default(), &qs).unwrap().iter().all(Option::is_none));
     }
 
     #[test]

@@ -26,6 +26,7 @@
 use crate::hf::{HfState, RepoId};
 use pico2peta_core::{Error, Hash, Result};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::io::Read;
 
 pub type MerkleHash = [u8; 32];
@@ -312,10 +313,25 @@ pub(crate) fn put_xorb(hf: &HfState, repo: &RepoId, url_hash: &MerkleHash, body:
     Ok(n > 0)
 }
 
-fn load_record(hf: &HfState, xorb: &MerkleHash) -> Result<Option<XorbRecord>> {
-    let Some(v) = hf.xet.get_live_blocking(xorb)? else { return Ok(None) };
-    let b = hf.git_repo().get(&v.hash, None)?;
-    XorbRecord::decode(&b).map(Some).ok_or_else(|| Error::Corrupt(format!("bad xorb record {}", v.hash)))
+/// The records of many xorbs, with one batched map lookup (missing or collected ones absent).
+fn load_records(hf: &HfState, xorbs: &[MerkleHash]) -> Result<HashMap<MerkleHash, XorbRecord>> {
+    let mut keys: Vec<MerkleHash> = xorbs.to_vec();
+    keys.sort_unstable();
+    keys.dedup();
+    let (_, root) = hf.xet.root_blocking()?;
+    let vals = hf.xet.get_many(&root, &keys)?;
+    let mut out = HashMap::with_capacity(keys.len());
+    for (k, v) in keys.into_iter().zip(vals) {
+        // As get_live_blocking: a collected record is a miss; a hit is made safe to use.
+        let Some(v) = v else { continue };
+        if !hf.git_repo().ensure_live(&v.hash)? {
+            continue;
+        }
+        let b = hf.git_repo().get(&v.hash, None)?;
+        let rec = XorbRecord::decode(&b).ok_or_else(|| Error::Corrupt(format!("bad xorb record {}", v.hash)))?;
+        out.insert(k, rec);
+    }
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------
@@ -392,6 +408,8 @@ fn parse_shard(b: &[u8]) -> Result<Vec<ShardFile>> {
 /// Registers the files of an uploaded shard. Returns how many files were registered.
 pub(crate) fn put_shard(hf: &HfState, repo: &RepoId, body: &[u8]) -> Result<usize> {
     let files = parse_shard(body)?;
+    let xorbs: Vec<MerkleHash> = files.iter().flat_map(|f| f.segments.iter().map(|s| s.xorb)).collect();
+    let records = load_records(hf, &xorbs)?;
     for f in &files {
         let Some(sha) = f.sha256 else { return Err(bad("shard file without sha256 metadata")) };
         if f.verification.len() != f.segments.len() {
@@ -402,7 +420,8 @@ pub(crate) fn put_shard(hf: &HfState, repo: &RepoId, body: &[u8]) -> Result<usiz
         let mut chunk_list: Vec<(MerkleHash, u64)> = Vec::new();
         let mut total = 0u64;
         for (s, v) in f.segments.iter().zip(&f.verification) {
-            let rec = load_record(hf, &s.xorb)?
+            let rec = records
+                .get(&s.xorb)
                 .ok_or_else(|| bad(format!("xorb {} is not stored here; upload it first", to_hex(&s.xorb))))?;
             let (a, z) = (s.start as usize, s.end as usize);
             if a >= z || z > rec.chunks.len() {
