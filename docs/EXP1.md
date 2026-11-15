@@ -3,7 +3,7 @@
 **Question (PLAN.md §4):** on real source repositories, how close does *similarity-grouped zstd
 compression of whole objects* (no explicit deltas) get to Git's most compact packing?
 
-The protocol and pass thresholds were pre-registered in `docs/PLAN.md` §4 (commit `2f6679d`; `1c26989` before the 2026-11-15 history rewrite that removed attribution trailers, same tree)
+The protocol and pass thresholds were pre-registered in `docs/PLAN.md` §4 (the commit "Add pre-registered plan (milestones, crate layout, Exp1 thresholds) and env script", `0451262` at the time of writing; branch history was rewritten on 2026-11-15 with identical trees, so find it by subject with `git log --format="%h %s" -- docs/PLAN.md` if the SHA has changed)
 before any experiment code existed. They haven't changed since. Results are judged by
 `scripts/exp1-report.py`, which applies §4.5 mechanically to the raw measurements.
 
