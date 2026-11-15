@@ -1,0 +1,17 @@
+[package]
+name = "pico2peta-exp3"
+description = "Experiment 3: generic similarity ordering and framing (docs/PLAN.md §6.6, docs/ORDERING.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "exp3"
+path = "src/main.rs"
+
+[dependencies]
+pico2peta-order.workspace = true
+pico2peta-weights.workspace = true
+zstd.workspace = true
+sha1_smol = "1"

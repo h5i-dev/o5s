@@ -898,3 +898,57 @@ fn small_record_entropy_check() {
         assert!(packs < 4000 + 2000 + 1000, "{packs}");
     }
 }
+
+/// Frame3 (frame with a reference prefix): members read back exactly; the
+/// reference is reported as their child; a staging file holding both the
+/// reference (as an earlier record) and the frame is recovered after a crash,
+/// resolving the reference from the same file; bad references are refused;
+/// and the reference really helps compression.
+#[test]
+fn frame3_reference_prefix_roundtrip_recovery_and_gc_child() {
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { pack_cap: 1 << 30, chunk_threshold: 1 << 20, ..PackConfig::default() };
+    let base = pseudo(200_000, 3);
+    let members: Vec<Vec<u8>> = (0..5)
+        .map(|k| {
+            let mut m = base.clone();
+            m[k * 1000] ^= 1;
+            m
+        })
+        .collect();
+    let refs: Vec<&[u8]> = members.iter().map(|m| m.as_slice()).collect();
+    let (href, hashes);
+    {
+        // Crash after: open.create, the reference's append, the frame write.
+        let f = Faults::crash_after(3);
+        let s = PackStore::open_with_faults(d.path().join("staging"), backend(d.path()), cfg.clone(), f).unwrap();
+        href = s.put(&base).unwrap();
+        hashes = s.put_frame_ref(&refs, 19, Some(&href)).unwrap();
+        for (h, m) in hashes.iter().zip(&members) {
+            assert_eq!(&s.get(h, None).unwrap(), m);
+            assert_eq!(s.chunks(h).unwrap(), Some(vec![href]), "the reference is a child");
+        }
+        assert!(s.put(b"next write crashes").is_err());
+    }
+    let s = open(d.path(), cfg.clone());
+    for (h, m) in hashes.iter().zip(&members) {
+        assert_eq!(&s.get(h, None).unwrap(), m, "recovered from the orphaned staging file");
+        assert_eq!(s.get(h, Some(150_000..150_010)).unwrap(), m[150_000..150_010]);
+        assert!(s.ensure_live(h).unwrap());
+    }
+    // Bad references are refused: missing, and too large / not a leaf.
+    let missing = Hash::of(b"never stored");
+    assert!(s.put_frame_ref(&refs, 3, Some(&missing)).is_err());
+    let big = s.put(&pseudo(3 << 20, 9)).unwrap(); // chunked: a manifest
+    assert!(s.put_frame_ref(&refs, 3, Some(&big)).is_err());
+    // Compression: with the reference, five near-copies of `base` cost little.
+    let d2 = tempfile::tempdir().unwrap();
+    let s2 = open(d2.path(), cfg);
+    let r2 = s2.put(&base).unwrap();
+    s2.flush().unwrap();
+    let before = dir_bytes(&d2.path().join("objects"));
+    s2.put_frame_ref(&refs[..1], 19, Some(&r2)).unwrap();
+    s2.flush().unwrap();
+    let with_ref = dir_bytes(&d2.path().join("objects")) - before;
+    assert!(with_ref < 20_000, "one near-copy against its reference: {with_ref} bytes");
+}

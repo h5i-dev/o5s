@@ -436,3 +436,82 @@ fn gc_never_deletes_children_of_surviving_records() {
     fresh.flush().unwrap();
     assert_eq!(fresh.get(&h, None).unwrap(), big);
 }
+
+/// A frame with a reference prefix keeps its reference alive: the reference
+/// object is unreferenced by any name, yet GC must not delete it while a
+/// framed member that needs it is live.
+#[test]
+fn gc_keeps_frame_references_alive() {
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { chunk_threshold: 1 << 20, ..PackConfig::default() };
+    let r = LocalRepo::init(d.path(), &cfg).unwrap();
+    let base: Vec<u8> = (0..100_000u32).map(|i| (i.wrapping_mul(2654435761) >> 21) as u8).collect();
+    let mut m = base.clone();
+    m[500] ^= 1;
+    let href = r.put(&base).unwrap();
+    let hs = r.packs().put_frame_ref(&[&m[..]], 19, Some(&href)).unwrap();
+    set(&r, "keep", hs[0]);
+    r.flush().unwrap();
+    for _ in 0..4 {
+        r.gc(&GcOptions { repack_all: true, ..opts() }, &OpaqueObjects).unwrap();
+    }
+    let r = LocalRepo::open(d.path()).unwrap();
+    assert_eq!(r.get(&hs[0], None).unwrap(), m, "the framed member still reads");
+    assert!(r.contains(&href).unwrap(), "its reference survived");
+    assert!(r.ensure_live(&hs[0]).unwrap());
+}
+
+/// Grouped repack through the content-similarity orderer: with no grouper
+/// hints at all, every object reads back after repeated full GC cycles, and
+/// near-duplicate versions end up in frames with reference prefixes.
+#[test]
+fn grouped_repack_uses_similarity_order_without_hints() {
+    struct NoHints;
+    impl pico2peta_repo::gc::Grouper for NoHints {
+        fn assign(
+            &self,
+            _: &dyn pico2peta_core::Repository,
+            _: &std::collections::HashSet<Hash>,
+        ) -> pico2peta_core::Result<std::collections::HashMap<Hash, pico2peta_repo::gc::GroupKey>> {
+            Ok(Default::default())
+        }
+    }
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { chunk_threshold: 1 << 20, ..PackConfig::default() };
+    let r = LocalRepo::init(d.path(), &cfg).unwrap();
+    let mut x = 7u64;
+    let mut objs = Vec::new();
+    for fam in 0..4u64 {
+        let base: Vec<u8> = (0..60_000)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                (x >> (fam * 8)) as u8
+            })
+            .collect();
+        for v in 0..30 {
+            let mut b = base.clone();
+            let l = b.len();
+            b[(v * 997) % l] ^= 0x5a;
+            objs.push(b);
+        }
+    }
+    let hashes: Vec<Hash> = objs.iter().map(|o| r.put(o).unwrap()).collect();
+    for (i, h) in hashes.iter().enumerate() {
+        set(&r, &format!("o/{i}"), *h);
+    }
+    let garbage = r.put(b"unreferenced garbage object, collected").unwrap();
+    r.flush().unwrap();
+    let small = GcOptions { repack_all: true, frame_cap: 1 << 20, ..opts() };
+    for _ in 0..4 {
+        r.gc_with(&small, &OpaqueObjects, Some(&NoHints)).unwrap();
+    }
+    let r = LocalRepo::open(d.path()).unwrap();
+    for (h, o) in hashes.iter().zip(&objs) {
+        assert_eq!(&r.get(h, None).unwrap(), o);
+    }
+    let with_ref = hashes.iter().filter(|h| r.packs().chunks(h).unwrap().is_some()).count();
+    assert!(with_ref > 0, "some members are in frames with a reference");
+    assert!(!r.contains(&garbage).unwrap());
+}

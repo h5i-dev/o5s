@@ -108,12 +108,18 @@ pub enum Kind {
     /// object holding the byte-wise XOR of the object with `base`. Bytes past
     /// the end of `base` are XORed with zero. `raw_len` is the object length.
     Delta = 4,
+    /// Frame with a reference prefix (docs/ORDERING.md): payload
+    /// `ref hash[32] | n u32 | len u32* | bodies`, where the bodies are
+    /// zstd-compressed with the bytes of object `ref` as reference prefix (codec
+    /// Zstd), or stored raw. The reference is a GC child of every member. In the
+    /// index, members carry kind `Frame3` (Frame2 members carry `Blob`).
+    Frame3 = 5,
 }
 
 impl Kind {
-    /// True for both frame formats.
+    /// True for every frame format.
     pub fn is_frame(self) -> bool {
-        matches!(self, Kind::Frame | Kind::Frame2)
+        matches!(self, Kind::Frame | Kind::Frame2 | Kind::Frame3)
     }
 }
 
@@ -140,6 +146,7 @@ impl Kind {
             2 => Ok(Kind::Frame),
             3 => Ok(Kind::Frame2),
             4 => Ok(Kind::Delta),
+            5 => Ok(Kind::Frame3),
             _ => Err(Error::Corrupt(format!("bad record kind {b}"))),
         }
     }
@@ -235,7 +242,7 @@ pub fn unpack_payload(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
         (Codec::Raw, _) => payload.to_vec(),
         (Codec::Zstd, Kind::Blob) => zstd::bulk::decompress(payload, h.raw_len as usize).map_err(zerr)?,
         (Codec::Zstd, Kind::Manifest | Kind::Delta) => zstd::stream::decode_all(payload).map_err(zerr)?,
-        (Codec::Zstd, Kind::Frame | Kind::Frame2) => {
+        (Codec::Zstd, Kind::Frame | Kind::Frame2 | Kind::Frame3) => {
             return Err(Error::Corrupt("use decode_frame_bodies for frame records".into()));
         }
         (Codec::GroupedZstd, Kind::Blob) => {
@@ -387,6 +394,72 @@ pub fn encode_frame(members: &[&[u8]], level: i32) -> Result<(Codec, Vec<u8>, Ha
     Ok((codec, dir, fh, raw_len))
 }
 
+/// Encodes a [`Kind::Frame3`] payload: like [`encode_frame`], with the bodies
+/// compressed against `reference` (the bytes of object `ref_hash`) as zstd
+/// reference prefix. Returns `(codec, payload, frame hash, raw length)`.
+pub fn encode_frame_ref(
+    members: &[&[u8]],
+    level: i32,
+    ref_hash: &Hash,
+    reference: &[u8],
+) -> Result<(Codec, Vec<u8>, Hash, u64)> {
+    if members.is_empty() || members.len() > MAX_FRAME_MEMBERS {
+        return Err(Error::Parse("frame needs 1..=2^20 members".into()));
+    }
+    let mut dir = Vec::with_capacity(36 + members.len() * 4);
+    dir.extend_from_slice(ref_hash.as_bytes());
+    dir.extend_from_slice(&(members.len() as u32).to_le_bytes());
+    let mut bodies = Vec::new();
+    for b in members {
+        dir.extend_from_slice(&(b.len() as u32).to_le_bytes());
+        bodies.extend_from_slice(b);
+    }
+    let raw_len = bodies.len() as u64;
+    if raw_len > MAX_FRAME {
+        return Err(Error::Parse("frame too large".into()));
+    }
+    let fh = Hash::of(&bodies);
+    let (codec, body) = match zstd_compress_ref(reference, &bodies, level) {
+        Ok(c) if level != 0 && c.len() < bodies.len() => (Codec::Zstd, c),
+        _ => (Codec::Raw, bodies),
+    };
+    dir.extend_from_slice(&body);
+    Ok((codec, dir, fh, raw_len))
+}
+
+fn window_log(n: usize) -> u32 {
+    let n = n.max(2) as u64;
+    (64 - (n - 1).leading_zeros()).clamp(20, 27)
+}
+
+fn zstd_compress_ref(reference: &[u8], data: &[u8], level: i32) -> Result<Vec<u8>> {
+    use zstd::zstd_safe::{CCtx, CParameter, ResetDirective};
+    let zerr = |c: usize| Error::Parse(format!("zstd: {}", zstd::zstd_safe::get_error_name(c)));
+    let mut cctx = CCtx::create();
+    cctx.reset(ResetDirective::SessionAndParameters).map_err(zerr)?;
+    cctx.set_parameter(CParameter::CompressionLevel(level)).map_err(zerr)?;
+    cctx.set_parameter(CParameter::WindowLog(window_log(reference.len() + data.len()))).map_err(zerr)?;
+    cctx.set_pledged_src_size(Some(data.len() as u64)).map_err(zerr)?;
+    cctx.ref_prefix(reference).map_err(zerr)?;
+    let mut out: Vec<u8> = Vec::with_capacity(zstd::zstd_safe::compress_bound(data.len()));
+    cctx.compress2(&mut out, data).map_err(zerr)?;
+    Ok(out)
+}
+
+fn zstd_decompress_ref(reference: &[u8], c: &[u8], raw: usize) -> Result<Vec<u8>> {
+    use zstd::zstd_safe::{DCtx, DParameter};
+    let zerr = |e: usize| Error::Corrupt(format!("zstd: {}", zstd::zstd_safe::get_error_name(e)));
+    let mut d = DCtx::create();
+    d.set_parameter(DParameter::WindowLogMax(27)).map_err(zerr)?;
+    d.ref_prefix(reference).map_err(zerr)?;
+    let mut out: Vec<u8> = Vec::with_capacity(raw);
+    d.decompress(&mut out, c).map_err(zerr)?;
+    if out.len() != raw {
+        return Err(Error::Corrupt("frame3 length mismatch".into()));
+    }
+    Ok(out)
+}
+
 /// A frame member: `(hash, offset in the decompressed frame, length)`.
 pub type FrameMember = (Hash, u32, u32);
 
@@ -395,14 +468,20 @@ pub type FrameMember = (Hash, u32, u32);
 type DirEntry = (Option<Hash>, u32, u32);
 
 fn frame_dir(kind: Kind, payload: &[u8]) -> Result<(Vec<DirEntry>, usize)> {
-    let width = match kind {
-        Kind::Frame => 36,
-        Kind::Frame2 => 4,
+    let (width, skip) = match kind {
+        Kind::Frame => (36, 0),
+        Kind::Frame2 => (4, 0),
+        Kind::Frame3 => (4, 32),
         _ => return Err(Error::Corrupt("not a frame record".into())),
     };
-    if payload.len() < 4 {
+    if payload.len() < skip + 4 {
         return Err(Error::Corrupt("short frame".into()));
     }
+    let (dir_end, out) = frame_dir_at(width, &payload[skip..])?;
+    Ok((out, dir_end + skip))
+}
+
+fn frame_dir_at(width: usize, payload: &[u8]) -> Result<(usize, Vec<DirEntry>)> {
     let n = rd_u32(&payload[0..4]) as usize;
     let dir_end = n
         .checked_mul(width)
@@ -420,23 +499,36 @@ fn frame_dir(kind: Kind, payload: &[u8]) -> Result<(Vec<DirEntry>, usize)> {
         out.push((h, off as u32, len));
         off += len as u64;
     }
-    Ok((out, dir_end))
+    Ok((dir_end, out))
+}
+
+/// The reference object of a [`Kind::Frame3`] record (`None` for other kinds).
+pub fn frame_ref(h: &RecHeader, payload: &[u8]) -> Result<Option<Hash>> {
+    if h.kind != Kind::Frame3 {
+        return Ok(None);
+    }
+    payload.get(..32).map(|b| Some(rd_hash(b))).ok_or_else(|| Error::Corrupt("short frame3".into()))
 }
 
 /// Decompresses a frame's bodies and checks them against the record header.
-pub fn decode_frame_bodies(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
+/// [`Kind::Frame3`] needs its reference's bytes (`reference`); other kinds ignore it.
+pub fn decode_frame_bodies(h: &RecHeader, payload: &[u8], reference: Option<&[u8]>) -> Result<Vec<u8>> {
     let (members, start) = frame_dir(h.kind, payload)?;
     let total: u64 = members.iter().map(|m| m.2 as u64).sum();
     if total != h.raw_len {
         return Err(Error::Corrupt("frame directory length mismatch".into()));
     }
     let body = &payload[start..];
-    let out = match h.codec {
-        Codec::Raw => body.to_vec(),
-        Codec::Zstd => {
+    let out = match (h.codec, h.kind) {
+        (Codec::Raw, _) => body.to_vec(),
+        (Codec::Zstd, Kind::Frame3) => {
+            let r = reference.ok_or_else(|| Error::Corrupt("frame3 decoded without its reference".into()))?;
+            zstd_decompress_ref(r, body, h.raw_len as usize)?
+        }
+        (Codec::Zstd, _) => {
             zstd::bulk::decompress(body, h.raw_len as usize).map_err(|e| Error::Corrupt(format!("zstd: {e}")))?
         }
-        Codec::GroupedZstd => return Err(Error::Corrupt("grouped codec on a frame".into())),
+        (Codec::GroupedZstd, _) => return Err(Error::Corrupt("grouped codec on a frame".into())),
     };
     if out.len() as u64 != h.raw_len || Hash::of(&out) != h.hash {
         return Err(Error::Corrupt("frame body mismatch".into()));
@@ -444,14 +536,23 @@ pub fn decode_frame_bodies(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// Members of a frame record with their content hashes. For v2 frames the
-/// hashes are recomputed from the decompressed bodies (used by recovery).
-pub fn frame_members(h: &RecHeader, payload: &[u8]) -> Result<Vec<FrameMember>> {
+/// Members of a frame record with their content hashes. For v2/v3 frames the
+/// hashes are recomputed from the decompressed bodies (used by recovery);
+/// `resolve` supplies a [`Kind::Frame3`] reference's bytes.
+pub fn frame_members(
+    h: &RecHeader,
+    payload: &[u8],
+    resolve: &dyn Fn(&Hash) -> Result<Vec<u8>>,
+) -> Result<Vec<FrameMember>> {
     let (dir, _) = frame_dir(h.kind, payload)?;
     if dir.iter().all(|d| d.0.is_some()) {
         return Ok(dir.into_iter().filter_map(|(h, o, l)| h.map(|h| (h, o, l))).collect());
     }
-    let bodies = decode_frame_bodies(h, payload)?;
+    let reference = match frame_ref(h, payload)? {
+        Some(r) => Some(resolve(&r)?),
+        None => None,
+    };
+    let bodies = decode_frame_bodies(h, payload, reference.as_deref())?;
     Ok(dir.into_iter().map(|(_, o, l)| (Hash::of(&bodies[o as usize..o as usize + l as usize]), o, l)).collect())
 }
 
@@ -489,7 +590,12 @@ pub fn encode_index(entries: &mut [IdxEntry]) -> Vec<u8> {
     let mut ents: Vec<(Hash, u32, u32, u32)> = Vec::with_capacity(entries.len());
     for e in entries.iter() {
         let (kind, raw, inner, len) = match e.frame {
-            Some((inner, flen)) => (Kind::Frame2 as u8, flen as u64, inner, e.raw_len as u32),
+            // The record kind is kept: Frame3 members must stay Frame3 (their
+            // reference is a GC child); other frame members are written as Frame2.
+            Some((inner, flen)) => {
+                let k = if e.kind == Kind::Frame3 { Kind::Frame3 } else { Kind::Frame2 };
+                (k as u8, flen as u64, inner, e.raw_len as u32)
+            }
             None => (e.kind as u8, e.raw_len, 0, 0),
         };
         let id = *rec_of.entry(e.offset).or_insert_with(|| {
@@ -742,7 +848,8 @@ fn decode_v3_entry(recs: &[u8], e: &[u8], nr: usize) -> Result<IdxEntry> {
             offset,
             stored_len,
             raw_len: len as u64,
-            kind: Kind::Blob,
+            // Frame3 members keep their kind (see `encode_index`).
+            kind: if kind == Kind::Frame3 { Kind::Frame3 } else { Kind::Blob },
             codec,
             frame: Some((inner, raw as u32)),
         })

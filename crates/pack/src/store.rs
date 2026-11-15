@@ -878,6 +878,41 @@ impl PackStore {
         Ok(())
     }
 
+    /// Reads object `hash` during recovery: from an entry already recovered
+    /// from `f` (the staging file being scanned), else from the store.
+    fn read_from_file(&self, f: &File, entries: &[IdxEntry], hash: &Hash, depth: u32) -> Result<Vec<u8>> {
+        if depth >= MAX_REF_DEPTH {
+            return Err(Error::Corrupt(format!("frame reference chain too deep at {hash}")));
+        }
+        let Some(e) = entries.iter().rev().find(|e| e.hash == *hash) else {
+            return self.get(hash, None);
+        };
+        let mut hdr = vec![0u8; REC_HEADER];
+        f.read_exact_at(&mut hdr, e.offset)?;
+        let h = parse_header(&hdr)?;
+        let mut rec = vec![0u8; h.total_len() as usize];
+        f.read_exact_at(&mut rec, e.offset)?;
+        let (h, payload) = decode_record(&rec)?;
+        let data = match e.frame {
+            Some((inner, _)) => {
+                let reference = match frame_ref(&h, payload)? {
+                    Some(r) => Some(self.read_from_file(f, entries, &r, depth + 1)?),
+                    None => None,
+                };
+                let bodies = decode_frame_bodies(&h, payload, reference.as_deref())?;
+                bodies
+                    .get(inner as usize..inner as usize + e.raw_len as usize)
+                    .ok_or_else(|| Error::Corrupt("frame member out of range".into()))?
+                    .to_vec()
+            }
+            None => unpack_payload(&h, payload)?,
+        };
+        if Hash::of(&data) != *hash {
+            return Err(Error::Corrupt(format!("content hash mismatch for {hash} during recovery")));
+        }
+        Ok(data)
+    }
+
     /// Scans a staging file, truncates it after the last valid record and
     /// returns the index entries of the valid records.
     fn truncate_torn_tail(&self, f: &File) -> Result<Vec<IdxEntry>> {
@@ -902,14 +937,17 @@ impl PackStore {
                 let Ok((_, payload)) = decode_record(&rec) else { break };
                 if h.kind.is_frame() {
                     // A CRC-valid frame with a bad directory is corruption, not a torn tail.
-                    let members = frame_members(&h, payload)?;
+                    // A Frame3 reference may be an earlier record of this same file.
+                    let resolve = |r: &Hash| self.read_from_file(f, &entries, r, 0);
+                    let members = frame_members(&h, payload, &resolve)?;
+                    let member_kind = if h.kind == Kind::Frame3 { Kind::Frame3 } else { Kind::Blob };
                     for (mh, inner, mlen) in members {
                         entries.push(IdxEntry {
                             hash: mh,
                             offset: good,
                             stored_len: h.stored_len,
                             raw_len: mlen as u64,
-                            kind: Kind::Blob,
+                            kind: member_kind,
                             codec: h.codec,
                             frame: Some((inner, h.raw_len as u32)),
                         });
@@ -1195,6 +1233,29 @@ impl PackStore {
         Ok((h, unpack_payload(&h, payload)?))
     }
 
+    /// The bytes of a frame's reference object, with a recursion guard (a
+    /// reference may itself live in a frame with a reference; writers bound
+    /// that depth, and this catches corrupt cycles).
+    fn get_reference(&self, r: &Hash) -> Result<Vec<u8>> {
+        struct Depth;
+        impl Drop for Depth {
+            fn drop(&mut self) {
+                REF_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+            }
+        }
+        if REF_DEPTH.with(|d| d.get()) >= MAX_REF_DEPTH {
+            return Err(Error::Corrupt(format!("frame reference chain too deep at {r}")));
+        }
+        REF_DEPTH.with(|d| d.set(d.get() + 1));
+        let _g = Depth;
+        if self.lookup(r)?.is_none() {
+            return Err(Error::Corrupt(format!("missing frame reference {r}")));
+        }
+        let mut out = Vec::new();
+        self.open_depth(r, None, 0)?.read_to_end(&mut out).map_err(unwrap_io)?;
+        Ok(out)
+    }
+
     /// Decompressed frame bodies, through a small cache (recently used
     /// frames). Sequential reads of grouped objects then decompress each frame once.
     fn frame_bodies(&self, h: &RecHeader, payload: &[u8], loc: &Loc) -> Result<Arc<Vec<u8>>> {
@@ -1205,7 +1266,11 @@ impl PackStore {
                 return Ok(v.clone());
             }
         }
-        let v = Arc::new(decode_frame_bodies(h, payload)?);
+        let reference = match frame_ref(h, payload)? {
+            Some(r) => Some(self.get_reference(&r)?),
+            None => None,
+        };
+        let v = Arc::new(decode_frame_bodies(h, payload, reference.as_deref())?);
         let mut c = self.inner.frame_cache.lock().map_err(poisoned)?;
         if c.len() >= FRAME_CACHE {
             c.remove(0);
@@ -1535,7 +1600,8 @@ impl PackStore {
         };
         let mut count = |kind: Kind, raw: u64| match kind {
             Kind::Frame | Kind::Frame2 => {}
-            Kind::Blob => {
+            // Frame3 members are objects (indexed with their record's kind).
+            Kind::Blob | Kind::Frame3 => {
                 s.blobs += 1;
                 s.logical_blob_bytes += raw;
             }
@@ -1611,8 +1677,21 @@ impl PackStore {
                 let (b, x, _) = self.read_delta(hash, loc)?;
                 Ok(Some(vec![b, x]))
             }
+            Kind::Frame3 => {
+                // A member of a frame with a reference prefix: the reference is a child.
+                let (h, raw, _) = self.read_raw(hash, loc)?;
+                let (_, payload) = decode_record(&raw)?;
+                Ok(Some(frame_ref(&h, payload)?.into_iter().collect()))
+            }
             Kind::Frame | Kind::Frame2 => Err(Error::Corrupt("frame record indexed as an object".into())),
         }
+    }
+
+    /// True for objects stored as plain data (a blob, or a frame member), as
+    /// opposed to manifests and deltas.
+    pub fn is_leaf(&self, hash: &Hash) -> Result<bool> {
+        let loc = self.lookup(hash)?.ok_or(Error::NotFound(*hash))?;
+        Ok(matches!(loc.kind, Kind::Blob | Kind::Frame3))
     }
 
     fn read_delta(&self, hash: &Hash, loc: Loc) -> Result<(Hash, Hash, Option<Vec<DeltaSeg>>)> {
@@ -1758,12 +1837,30 @@ impl PackStore {
     /// related objects in a meaningful order. Members are always written, even
     /// if a copy already exists elsewhere (repack relies on this). Durable on flush.
     pub fn put_frame(&self, members: &[&[u8]], level: i32) -> Result<Vec<Hash>> {
+        self.put_frame_ref(members, level, None)
+    }
+
+    /// [`PackStore::put_frame`] with an optional reference object: the frame's
+    /// bodies are compressed against its bytes as zstd reference prefix (record
+    /// kind `Frame3`). The reference must be a stored leaf object (blob or frame
+    /// member) below the chunk threshold, and it stays a GC child of every member.
+    pub fn put_frame_ref(&self, members: &[&[u8]], level: i32, reference: Option<&Hash>) -> Result<Vec<Hash>> {
         if members.iter().any(|m| m.len() >= self.inner.cfg.chunk_threshold) {
             return Err(Error::Parse("frame members must be smaller than the chunk threshold".into()));
         }
         let hashes: Vec<Hash> = members.iter().map(|m| Hash::of(m)).collect();
-        let (codec, payload, fh, raw_len) = encode_frame(members, level)?;
-        let rec = encode_record(Kind::Frame2, codec, &fh, raw_len, &payload);
+        let (kind, (codec, payload, fh, raw_len)) = match reference {
+            None => (Kind::Frame2, encode_frame(members, level)?),
+            Some(r) => {
+                if !self.is_leaf(r)? || self.size(r)? >= self.inner.cfg.chunk_threshold as u64 {
+                    return Err(Error::Parse(format!("frame reference {r} must be a small stored leaf object")));
+                }
+                let bytes = self.get(r, None)?;
+                (Kind::Frame3, encode_frame_ref(members, level, r, &bytes)?)
+            }
+        };
+        let member_kind = if kind == Kind::Frame3 { Kind::Frame3 } else { Kind::Blob };
+        let rec = encode_record(kind, codec, &fh, raw_len, &payload);
         let mut w = self.inner.writer.lock().map_err(poisoned)?;
         if w.is_none() {
             *w = Some(self.new_open_pack()?);
@@ -1792,7 +1889,7 @@ impl PackStore {
                 offset,
                 stored_len,
                 raw_len: mlen as u64,
-                kind: Kind::Blob,
+                kind: member_kind,
                 codec,
                 frame,
             });
@@ -1801,7 +1898,7 @@ impl PackStore {
                 offset,
                 stored_len,
                 raw_len: mlen as u64,
-                kind: Kind::Blob,
+                kind: member_kind,
                 frame,
             };
             insert_loc(&mut idx, mh, l);
@@ -1829,6 +1926,14 @@ impl PackStore {
         if loc.kind == Kind::Delta {
             let (b, x, _) = self.read_delta(hash, loc)?;
             for child in [b, x] {
+                if !self.ensure_live_impl(&child)? {
+                    return Ok(false);
+                }
+            }
+        }
+        if loc.kind == Kind::Frame3 {
+            // A member of a frame with a reference prefix can't be read without it.
+            for child in self.chunks(hash)?.unwrap_or_default() {
                 if !self.ensure_live_impl(&child)? {
                     return Ok(false);
                 }
@@ -2017,7 +2122,7 @@ impl PackStore {
                 }))
             }
             Kind::Frame | Kind::Frame2 => Err(Error::Corrupt("frame record indexed as an object".into())),
-            Kind::Blob => {
+            Kind::Blob | Kind::Frame3 => {
                 let d = self.read_blob(hash, loc)?;
                 let slice = d
                     .get(r.start as usize..r.end as usize)
@@ -2336,6 +2441,13 @@ impl Read for XorReader {
     }
 }
 
+/// Maximum nesting of frame references followed by one read.
+const MAX_REF_DEPTH: u32 = 16;
+
+thread_local! {
+    static REF_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
 /// Chunks the `put_chunks` pipeline may hold in flight, per worker.
 const PIPELINE_CREDITS_PER_WORKER: usize = 8;
 
@@ -2471,6 +2583,7 @@ impl ChunkReader {
                 Kind::Frame | Kind::Frame2 | Kind::Delta => {
                     return Err(Error::Corrupt("unexpected record kind inside a manifest".into()));
                 }
+                Kind::Frame3 => return Ok(Some((h, loc, a, b))),
                 Kind::Manifest => {
                     if self.stack.len() >= self.depth_limit {
                         return Err(Error::Corrupt("manifest tree too deep".into()));

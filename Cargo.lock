@@ -1216,6 +1216,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pico2peta-exp3"
+version = "0.1.0"
+dependencies = [
+ "pico2peta-order",
+ "pico2peta-weights",
+ "sha1_smol",
+ "zstd",
+]
+
+[[package]]
 name = "pico2peta-micro"
 version = "0.1.0"
 dependencies = [
@@ -1225,6 +1235,13 @@ dependencies = [
  "pico2peta-repo",
  "pico2peta-weights",
  "zstd",
+]
+
+[[package]]
+name = "pico2peta-order"
+version = "0.1.0"
+dependencies = [
+ "proptest",
 ]
 
 [[package]]
@@ -1269,6 +1286,7 @@ version = "0.1.0"
 dependencies = [
  "pico2peta-chunk",
  "pico2peta-core",
+ "pico2peta-order",
  "pico2peta-pack",
  "pico2peta-refs",
  "serde",

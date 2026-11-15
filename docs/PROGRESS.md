@@ -56,7 +56,7 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
 | milestone | state | where |
 |---|---|---|
 | M0 Plan | done; Exp1 thresholds frozen | `docs/PLAN.md` |
-| M1 Core API | done; v1.14 now, all additive since v1 (see API changes) | `crates/core` |
+| M1 Core API | done; v1.15 now, all additive since v1 (see API changes) | `crates/core` |
 | M2 Pack store | done | `crates/pack` |
 | M3 Ref store | done: local journal engine plus a multi-host log engine on any Backend | `crates/refs` |
 | M4 Local repo + CLI | done; local and `--remote` | `crates/repo`, `crates/cli` |
@@ -131,6 +131,12 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
   - **pack:** `bytegroup` moved here from weights (it is on-disk format); `pico2peta_weights::bytegroup` re-exports it. `ChunkerKind::from_id`/`id`.
   - **Follow-up (net's requests):** `FrontHandle` owns a `LocalRepo` clone (no lifetime, so it fits in `Arc<dyn Repository>`). `Front::gc_tracer(repo)` is built once per GC run (e.g. over id-index roots snapshotted at GC start) and replaces `children` for that front. `FrontRegistry::tracer(repo)` now returns `Result`.
   - **weights:** the `safetensors` front (`SafetensorsFront`, `SAFETENSORS_FRONT`) and `plan_weights`. `put_checkpoint` and `put_weights` are now thin wrappers over the same plan.
+- **v1.15 (2026-11-15): similarity ordering in the core (Phase 3, docs/ORDERING.md), additive except where noted.**
+  - **New crate `pico2peta-order`:** `features`, `order(items, use_hints)` and `frames(items, order, cfg, boundary)`.
+  - **pack:** `PackStore::put_frame_ref(members, level, Option<&Hash>)` and `is_leaf`. `chunks()` returns a Frame3 member's reference.
+  - **On-disk:** record kind 5 `Frame3` and index rec kind 5 (older readers reject both).
+  - **repo GC, behaviour change:** a grouped repack (`gc_with(.., Some(grouper))` / `gc_with_fronts(.., grouped = true)`) reorders **every** small live object by content similarity and writes Frame2/Frame3 frames. The `Grouper`'s `GroupKey`s are now tie-breaking hints only, and objects without a key are reordered too, where before they were copied verbatim.
+  - **`GcOptions::frame_cap` default:** 4 → 6 MiB.
 
 ## Production gaps
 - **Index scale (largely addressed).** Large pack indexes (≥ 4 MiB, ~95k entries) are memory-mapped from a verified local cache (`idx-cache/*.idx3`) and binary-searched. Small packs and the open pack stay in a HashMap. Per-object heap cost is now zero for big packs; the page cache holds the 44 B/entry. A **multi-pack index** (`P2PMIDX1`) is built locally, by a k-way merge with O(#packs) memory and outside the index lock, once ≥ 8 large packs exist and > 10% are uncovered. Lookups are then one binary search plus the few uncovered packs. That answers the brief's open question with "files alongside packs"; PostgreSQL isn't needed for lookups. Remaining: MIDX rebuilds are O(n) and triggered by the coverage rule; a production deployment at 10^9+ objects would want them scheduled with GC.
