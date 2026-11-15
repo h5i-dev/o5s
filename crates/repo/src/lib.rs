@@ -15,8 +15,12 @@
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod front;
 pub mod fsck;
 pub mod gc;
+pub mod idmap;
+
+pub use front::{DerivePolicy, Front, FrontRegistry, PlanCtx, Profile};
 
 pub use fsck::FsckReport;
 pub use gc::{GcOptions, GcReport, GroupKey, Grouper, OpaqueObjects, Tracer};
@@ -49,6 +53,13 @@ pub struct RepoConfig {
     /// FastCDC everywhere).
     #[serde(default, skip_serializing_if = "ChunkingSection::is_default")]
     pub chunking: ChunkingSection,
+    /// Domain profiles (`[profiles.<name>]`, optional): see [`front`].
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub profiles: std::collections::BTreeMap<String, Profile>,
+    /// Name prefix → profile name (`[namespaces]`, optional). Longest prefix
+    /// wins; a profile named `default` applies to everything else.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub namespaces: std::collections::BTreeMap<String, String>,
 }
 
 /// `[chunking]` section: the content-defined chunker per namespace.
@@ -107,6 +118,21 @@ impl From<ChunkerChoice> for ChunkerKind {
         match c {
             ChunkerChoice::Fastcdc => ChunkerKind::FastCdc,
             ChunkerChoice::Xet => ChunkerKind::Xet,
+        }
+    }
+}
+
+impl RepoConfig {
+    /// A config with these pack settings and defaults everywhere else. Prefer
+    /// this plus field updates over a struct literal: sections get added.
+    pub fn new(pack: &PackConfig) -> Self {
+        RepoConfig {
+            format: FORMAT_VERSION,
+            pack: pack.into(),
+            refs: RefsSection::default(),
+            chunking: ChunkingSection::default(),
+            profiles: Default::default(),
+            namespaces: Default::default(),
         }
     }
 }
@@ -209,6 +235,9 @@ impl From<&PackSection> for PackConfig {
 pub struct LocalRepo {
     root: PathBuf,
     chunking: ChunkingSection,
+    profiles: Arc<std::collections::BTreeMap<String, Profile>>,
+    namespaces: Arc<std::collections::BTreeMap<String, String>>,
+    fronts: Arc<FrontRegistry>,
     packs: PackStore,
     refs: Arc<RefStore>,
     backend: Arc<dyn Backend>,
@@ -231,6 +260,8 @@ impl LocalRepo {
                 pack: pack.into(),
                 refs: RefsSection { store: refs },
                 chunking: ChunkingSection::default(),
+                profiles: Default::default(),
+                namespaces: Default::default(),
             },
         )
     }
@@ -240,6 +271,7 @@ impl LocalRepo {
         let pack = PackConfig::from(&cfg.pack);
         pack.validate()?;
         Self::validate_chunking(&cfg.chunking, &pack)?;
+        Self::validate_profiles(cfg, &pack)?;
         let root = root.as_ref();
         std::fs::create_dir_all(root)?;
         let text = toml::to_string(cfg).map_err(|e| Error::Parse(e.to_string()))?;
@@ -292,7 +324,17 @@ impl LocalRepo {
             RefsStore::Local => RefStore::open_with_faults(root.join("refs"), faults.clone())?,
             RefsStore::Backend => RefStore::open_backend_with_faults(backend.clone(), "refs/", faults.clone())?,
         });
-        Ok(LocalRepo { root, chunking: cfg.chunking, packs, refs, backend, faults })
+        Ok(LocalRepo {
+            root,
+            chunking: cfg.chunking,
+            profiles: Arc::new(cfg.profiles),
+            namespaces: Arc::new(cfg.namespaces),
+            fronts: Arc::new(FrontRegistry::new()),
+            packs,
+            refs,
+            backend,
+            faults,
+        })
     }
 
     /// Reads and validates `config.toml`.
@@ -312,7 +354,27 @@ impl LocalRepo {
         let pack = PackConfig::from(&cfg.pack);
         pack.validate()?;
         Self::validate_chunking(&cfg.chunking, &pack)?;
+        Self::validate_profiles(&cfg, &pack)?;
         Ok(cfg)
+    }
+
+    fn validate_profiles(cfg: &RepoConfig, pack: &PackConfig) -> Result<()> {
+        for (prefix, p) in &cfg.namespaces {
+            if !cfg.profiles.contains_key(p) {
+                return Err(Error::Parse(format!("[namespaces] {prefix:?} = {p:?}: no profile {p:?}")));
+            }
+        }
+        for (n, p) in &cfg.profiles {
+            let kind = pico2peta_pack::ChunkerKind::from_id(p.chunker.as_deref())
+                .map_err(|e| Error::Parse(format!("[profiles.{n}]: {e}")))?;
+            if kind == pico2peta_pack::ChunkerKind::Xet && pack.chunk_threshold <= pico2peta_pack::XET_MAX {
+                return Err(Error::Parse(format!(
+                    "[profiles.{n}] uses xet, which needs pack.chunk_threshold > {}",
+                    pico2peta_pack::XET_MAX
+                )));
+            }
+        }
+        Ok(())
     }
 
     fn validate_chunking(c: &ChunkingSection, pack: &PackConfig) -> Result<()> {
@@ -332,18 +394,195 @@ impl LocalRepo {
         &self.chunking
     }
 
-    /// `put_stream` with the chunker configured for `name`'s namespace (see
-    /// [`ChunkingSection`]). Doesn't create the name; it only decides how the
-    /// object's chunks are cut.
+    /// Same as [`LocalRepo::put_named`] (kept for API v1.11 callers).
     pub fn put_stream_for(&self, name: &Name, src: &mut dyn Read) -> Result<Hash> {
-        self.put_stream_for_grouped(name, src, None)
+        self.put_named(name, src)
     }
 
-    /// [`LocalRepo::put_stream_for`] with an optional byte-grouping hint (see
-    /// [`ObjectStore::put_stream_grouped`]).
+    /// [`LocalRepo::put_named`], adding a byte-grouping width hint when the
+    /// front doesn't choose one itself.
     pub fn put_stream_for_grouped(&self, name: &Name, src: &mut dyn Read, width: Option<u8>) -> Result<Hash> {
-        let chunker = self.chunking.for_name(name.as_str()).into();
-        self.packs.put_stream_opts(PutOpts { chunker, group_width: width }, src)
+        self.put_named_hint(name, src, width)
+    }
+
+    /// Opens the repository with these fronts (see [`front`]). Profiles that
+    /// name a front need it registered here; prefixes the fronts claim become
+    /// writable only through [`LocalRepo::front`].
+    pub fn with_fronts(mut self, fronts: FrontRegistry) -> Result<Self> {
+        for (n, p) in self.profiles.iter() {
+            if let Some(f) = &p.front
+                && fronts.get(f).is_none()
+            {
+                return Err(Error::Parse(format!("[profiles.{n}] front {f:?} is not registered")));
+            }
+        }
+        self.fronts = Arc::new(fronts);
+        Ok(self)
+    }
+
+    /// The registered fronts.
+    pub fn fronts(&self) -> &FrontRegistry {
+        &self.fronts
+    }
+
+    /// The profile for `name`: the longest `[namespaces]` prefix, else the
+    /// legacy `[chunking]` prefixes, else the `default` profile, else plain.
+    pub fn profile_for(&self, name: &str) -> Profile {
+        let ns = self
+            .namespaces
+            .iter()
+            .filter(|(p, _)| name.starts_with(p.as_str()))
+            .max_by_key(|(p, _)| p.len())
+            .and_then(|(_, prof)| self.profiles.get(prof));
+        if let Some(p) = ns {
+            return p.clone();
+        }
+        let legacy = self.chunking.for_name(name);
+        if legacy != ChunkerChoice::Fastcdc || self.chunking.prefixes.keys().any(|p| name.starts_with(p.as_str())) {
+            return Profile { chunker: Some(ChunkerKind::from(legacy).id().into()), ..Default::default() };
+        }
+        self.profiles.get("default").cloned().unwrap_or_default()
+    }
+
+    /// Stores `src` as the next object for `name` (doesn't move the name):
+    /// the name's profile and front choose the encoding (chunker, grouping,
+    /// derived from the previous version). Identity is the content hash
+    /// regardless.
+    pub fn put_named(&self, name: &Name, src: &mut dyn Read) -> Result<Hash> {
+        self.put_named_hint(name, src, None)
+    }
+
+    /// [`LocalRepo::put_named`] with a byte-grouping width used when the
+    /// name's front doesn't choose one itself.
+    pub fn put_named_hinted(&self, name: &Name, src: &mut dyn Read, width: Option<u8>) -> Result<Hash> {
+        self.put_named_hint(name, src, width)
+    }
+
+    fn put_named_hint(&self, name: &Name, src: &mut dyn Read, width: Option<u8>) -> Result<Hash> {
+        let profile = self.profile_for(name.as_str());
+        let previous = match profile.derive {
+            DerivePolicy::Previous => self.refs.resolve(name)?.map(|v| v.hash),
+            DerivePolicy::None => None,
+        };
+        let default = profile.encoding(previous);
+        let (head, mut enc) = match profile.front.as_deref() {
+            Some(id) => {
+                let f = self
+                    .fronts
+                    .get(id)
+                    .ok_or_else(|| Error::Parse(format!("front {id:?} is not registered with this repository")))?
+                    .clone();
+                let ctx = PlanCtx { name: Some(name), previous, default, store: self };
+                f.plan(&ctx, src)?
+            }
+            None => (Vec::new(), default),
+        };
+        if enc.group_width.is_none() {
+            enc.group_width = width;
+        }
+        let mut rest = std::io::Cursor::new(head).chain(src);
+        self.put_encoded(&mut rest, &enc)
+    }
+
+    /// A handle that may move names under the prefixes front `id` owns (and
+    /// any unowned name). The plain [`Repository`] impl may move unowned
+    /// names only.
+    pub fn front(&self, id: &str) -> Result<FrontHandle<'_>> {
+        if self.fronts.get(id).is_none() {
+            return Err(Error::Parse(format!("front {id:?} is not registered")));
+        }
+        Ok(FrontHandle { repo: self, id: id.to_string() })
+    }
+
+    /// Refuses a write to `name` unless `who` owns it (or nobody does).
+    fn guard(&self, name: &str, who: Option<&str>) -> Result<()> {
+        match self.fronts.owner(name) {
+            Some(owner) if Some(owner) != who => Err(Error::Unauthorized(format!(
+                "{name:?} belongs to the {owner:?} front; write it through that front"
+            ))),
+            _ => Ok(()),
+        }
+    }
+
+    /// Like [`LocalRepo::guard`] for a rule prefix: also refuses rules that
+    /// would cover another front's claimed prefix.
+    fn guard_prefix(&self, prefix: &str, who: Option<&str>) -> Result<()> {
+        self.guard(prefix, who)?;
+        for f in self.fronts.fronts() {
+            for p in f.prefixes() {
+                if p.starts_with(prefix) && Some(f.id()) != who && self.fronts.owner(&p) == Some(f.id()) {
+                    return Err(Error::Unauthorized(format!(
+                        "rule prefix {prefix:?} covers the {:?} front's {p:?}",
+                        f.id()
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn replace_as(
+        &self,
+        who: Option<&str>,
+        name: &Name,
+        read_set: &[(Name, Observed)],
+        new: Hash,
+    ) -> Result<ReplaceOutcome> {
+        self.guard(name.as_str(), who)?;
+        // Make sure the target is in live (non-condemned) storage, then publish
+        // our objects, so a ref never points at an object other handles can't
+        // see or that GC is about to delete.
+        let live = self.packs.ensure_live(&new)?;
+        self.packs.flush()?;
+        self.refs.replace(name, read_set, new, &|_| Ok(live))
+    }
+
+    fn replace_many_as(
+        &self,
+        who: Option<&str>,
+        updates: &[(Name, Hash)],
+        read_set: &[(Name, Observed)],
+    ) -> Result<pico2peta_core::ReplaceManyOutcome> {
+        for (n, _) in updates {
+            self.guard(n.as_str(), who)?;
+        }
+        let mut missing = None;
+        for (_, h) in updates {
+            if !self.packs.ensure_live(h)? {
+                missing = Some(*h);
+            }
+        }
+        self.packs.flush()?;
+        self.refs.replace_many(updates, read_set, &|h| Ok(missing != Some(*h)))
+    }
+
+    fn update_many_as(
+        &self,
+        who: Option<&str>,
+        updates: &[(Name, Option<Hash>)],
+        read_set: &[(Name, Observed)],
+    ) -> Result<pico2peta_core::ReplaceManyOutcome> {
+        for (n, _) in updates {
+            self.guard(n.as_str(), who)?;
+        }
+        let mut missing = Vec::new();
+        for h in updates.iter().filter_map(|(_, h)| h.as_ref()) {
+            if !self.packs.ensure_live(h)? {
+                missing.push(*h);
+            }
+        }
+        self.packs.flush()?;
+        self.refs.update_many(updates, read_set, &|h| Ok(!missing.contains(h)))
+    }
+
+    fn delete_ref_as(&self, who: Option<&str>, name: &Name, read_set: &[(Name, Observed)]) -> Result<ReplaceOutcome> {
+        self.guard(name.as_str(), who)?;
+        self.refs.delete(name, read_set)
+    }
+
+    fn set_rule_as(&self, who: Option<&str>, prefix: &str, rule: Rule) -> Result<()> {
+        self.guard_prefix(prefix, who)?;
+        self.refs.set_rule(prefix, rule)
     }
 
     /// Repository root.
@@ -398,6 +637,13 @@ impl ObjectStore for LocalRepo {
     ) -> Result<Hash> {
         self.packs.put_delta_mapped_grouped(base, segments, src, width)
     }
+    fn put_encoded(&self, src: &mut dyn Read, enc: &pico2peta_core::Encoding) -> Result<Hash> {
+        let mut enc = enc.clone();
+        if enc.chunker.is_none() {
+            enc.chunker = Some(ChunkerKind::from(self.chunking.default).id().into());
+        }
+        self.packs.put_encoded(src, &enc)
+    }
     fn get(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Vec<u8>> {
         self.packs.get(hash, range)
     }
@@ -424,12 +670,7 @@ impl Repository for LocalRepo {
     }
 
     fn replace(&self, name: &Name, read_set: &[(Name, Observed)], new: Hash) -> Result<ReplaceOutcome> {
-        // Make sure the target is in live (non-condemned) storage, then publish
-        // our objects, so a ref never points at an object other handles can't
-        // see or that GC is about to delete.
-        let live = self.packs.ensure_live(&new)?;
-        self.packs.flush()?;
-        self.refs.replace(name, read_set, new, &|_| Ok(live))
+        self.replace_as(None, name, read_set, new)
     }
 
     fn replace_many(
@@ -437,14 +678,7 @@ impl Repository for LocalRepo {
         updates: &[(Name, Hash)],
         read_set: &[(Name, Observed)],
     ) -> Result<pico2peta_core::ReplaceManyOutcome> {
-        let mut missing = None;
-        for (_, h) in updates {
-            if !self.packs.ensure_live(h)? {
-                missing = Some(*h);
-            }
-        }
-        self.packs.flush()?;
-        self.refs.replace_many(updates, read_set, &|h| Ok(missing != Some(*h)))
+        self.replace_many_as(None, updates, read_set)
     }
 
     fn update_many(
@@ -452,18 +686,11 @@ impl Repository for LocalRepo {
         updates: &[(Name, Option<Hash>)],
         read_set: &[(Name, Observed)],
     ) -> Result<pico2peta_core::ReplaceManyOutcome> {
-        let mut missing = Vec::new();
-        for h in updates.iter().filter_map(|(_, h)| h.as_ref()) {
-            if !self.packs.ensure_live(h)? {
-                missing.push(*h);
-            }
-        }
-        self.packs.flush()?;
-        self.refs.update_many(updates, read_set, &|h| Ok(!missing.contains(h)))
+        self.update_many_as(None, updates, read_set)
     }
 
     fn delete_ref(&self, name: &Name, read_set: &[(Name, Observed)]) -> Result<ReplaceOutcome> {
-        self.refs.delete(name, read_set)
+        self.delete_ref_as(None, name, read_set)
     }
 
     fn list_refs(&self, prefix: &str) -> Result<Vec<(Name, RefValue)>> {
@@ -471,11 +698,114 @@ impl Repository for LocalRepo {
     }
 
     fn set_rule(&self, prefix: &str, rule: Rule) -> Result<()> {
-        self.refs.set_rule(prefix, rule)
+        self.set_rule_as(None, prefix, rule)
     }
 
     fn rules(&self) -> Result<Vec<(String, Rule)>> {
         self.refs.rules()
+    }
+}
+
+/// A [`LocalRepo`] acting as one front: it may also move names under that
+/// front's claimed prefixes (see [`LocalRepo::front`]).
+#[derive(Clone)]
+pub struct FrontHandle<'a> {
+    repo: &'a LocalRepo,
+    id: String,
+}
+
+impl FrontHandle<'_> {
+    /// The front this handle acts as.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// The repository.
+    pub fn repo(&self) -> &LocalRepo {
+        self.repo
+    }
+}
+
+impl ObjectStore for FrontHandle<'_> {
+    fn put(&self, data: &[u8]) -> Result<Hash> {
+        self.repo.put(data)
+    }
+    fn put_stream(&self, src: &mut dyn Read) -> Result<Hash> {
+        self.repo.put_stream(src)
+    }
+    fn put_delta(&self, base: &Hash, src: &mut dyn Read) -> Result<Hash> {
+        self.repo.put_delta(base, src)
+    }
+    fn put_delta_mapped(&self, base: &Hash, segments: &[(u64, u64, u64)], src: &mut dyn Read) -> Result<Hash> {
+        self.repo.put_delta_mapped(base, segments, src)
+    }
+    fn put_stream_grouped(&self, src: &mut dyn Read, width: u8) -> Result<Hash> {
+        self.repo.put_stream_grouped(src, width)
+    }
+    fn put_delta_mapped_grouped(
+        &self,
+        base: &Hash,
+        segments: &[(u64, u64, u64)],
+        src: &mut dyn Read,
+        width: u8,
+    ) -> Result<Hash> {
+        self.repo.put_delta_mapped_grouped(base, segments, src, width)
+    }
+    fn put_encoded(&self, src: &mut dyn Read, enc: &pico2peta_core::Encoding) -> Result<Hash> {
+        self.repo.put_encoded(src, enc)
+    }
+    fn get(&self, hash: &Hash, range: Option<std::ops::Range<u64>>) -> Result<Vec<u8>> {
+        self.repo.get(hash, range)
+    }
+    fn open(&self, hash: &Hash, range: Option<std::ops::Range<u64>>) -> Result<Box<dyn Read + Send>> {
+        self.repo.open(hash, range)
+    }
+    fn size(&self, hash: &Hash) -> Result<u64> {
+        self.repo.size(hash)
+    }
+    fn contains(&self, hash: &Hash) -> Result<bool> {
+        self.repo.contains(hash)
+    }
+    fn ensure_live(&self, hash: &Hash) -> Result<bool> {
+        self.repo.ensure_live(hash)
+    }
+    fn flush(&self) -> Result<()> {
+        self.repo.flush()
+    }
+}
+
+impl Repository for FrontHandle<'_> {
+    fn resolve(&self, name: &Name) -> Result<Option<RefValue>> {
+        self.repo.resolve(name)
+    }
+    fn replace(&self, name: &Name, read_set: &[(Name, Observed)], new: Hash) -> Result<ReplaceOutcome> {
+        self.repo.replace_as(Some(&self.id), name, read_set, new)
+    }
+    fn replace_many(
+        &self,
+        updates: &[(Name, Hash)],
+        read_set: &[(Name, Observed)],
+    ) -> Result<pico2peta_core::ReplaceManyOutcome> {
+        self.repo.replace_many_as(Some(&self.id), updates, read_set)
+    }
+    fn update_many(
+        &self,
+        updates: &[(Name, Option<Hash>)],
+        read_set: &[(Name, Observed)],
+    ) -> Result<pico2peta_core::ReplaceManyOutcome> {
+        self.repo.update_many_as(Some(&self.id), updates, read_set)
+    }
+    fn delete_ref(&self, name: &Name, read_set: &[(Name, Observed)]) -> Result<ReplaceOutcome> {
+        self.repo.delete_ref_as(Some(&self.id), name, read_set)
+    }
+    fn list_refs(&self, prefix: &str) -> Result<Vec<(Name, RefValue)>> {
+        self.repo.list_refs(prefix)
+    }
+    fn set_rule(&self, prefix: &str, rule: Rule) -> Result<()> {
+        self.repo.set_rule_as(Some(&self.id), prefix, rule)
+    }
+    fn rules(&self) -> Result<Vec<(String, Rule)>> {
+        self.repo.rules()
     }
 }
 
@@ -580,6 +910,8 @@ mod config_compat {
             pack: pack.into(),
             refs: RefsSection::default(),
             chunking: chunking.clone(),
+            profiles: Default::default(),
+            namespaces: Default::default(),
         };
         let d = tempfile::tempdir().unwrap();
         let r = LocalRepo::init_config(d.path(), &cfg(&PackConfig::default(), &chunking)).unwrap();

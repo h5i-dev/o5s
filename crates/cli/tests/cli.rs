@@ -197,3 +197,46 @@ fn per_namespace_chunker_via_cli() {
         assert!(!r2.join("config.toml").exists(), "{bad:?}");
     }
 }
+
+/// Profiles through the CLI: `init --profile/--namespace`, then `put
+/// --for-name` uses the profile's front (safetensors: derive from the
+/// previous version). Bad profile specs fail at init.
+#[test]
+fn profiles_via_cli() {
+    let d = tempfile::tempdir().unwrap();
+    let repo = d.path().join("r");
+    ok(&repo, &["init", "--profile", "weights=front:safetensors,derive:previous", "--namespace", "models/=weights"]);
+    let cfg = std::fs::read_to_string(repo.join("config.toml")).unwrap();
+    assert!(cfg.contains("[profiles.weights]") && cfg.contains("front = \"safetensors\""), "{cfg}");
+    let f = d.path().join("v.bin");
+    let mut data: Vec<u8> = (0..2_000_000u32).map(|i| (i.wrapping_mul(2654435761) >> 13) as u8).collect();
+    for round in 0..2 {
+        if round == 1 {
+            for i in (0..data.len()).step_by(1000) {
+                data[i] ^= 0x55;
+            }
+        }
+        std::fs::write(&f, &data).unwrap();
+        let h = ok(&repo, &["put", "--for-name", "models/m", f.to_str().unwrap()]).trim().to_string();
+        let expect = if round == 0 { "absent".to_string() } else { "1".to_string() };
+        ok(&repo, &["replace", "models/m", &h, "--expect", &expect]);
+        let out = d.path().join("o.bin");
+        ok(&repo, &["get", &h, "-o", out.to_str().unwrap()]);
+        assert_eq!(std::fs::read(&out).unwrap(), data);
+    }
+    ok(&repo, &["fsck"]);
+    for (i, bad) in [
+        &["init", "--profile", "w=front:nope"][..],
+        &["init", "--profile", "w=derive:sometimes"],
+        &["init", "--profile", "w=colour:blue"],
+        &["init", "--profile", "noequals"],
+        &["init", "--namespace", "m/=missing"],
+    ]
+    .iter()
+    .enumerate()
+    {
+        let r2 = d.path().join(format!("bad{i}"));
+        assert!(!run(&r2, bad).status.success(), "{bad:?}");
+        assert!(!r2.join("config.toml").exists(), "{bad:?}");
+    }
+}

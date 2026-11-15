@@ -1190,7 +1190,6 @@ dependencies = [
  "memmap2",
  "pico2peta-chunk",
  "pico2peta-core",
- "pico2peta-weights",
  "proptest",
  "tempfile",
  "zstd",
@@ -1277,6 +1276,7 @@ name = "pico2peta-weights"
 version = "0.1.0"
 dependencies = [
  "pico2peta-core",
+ "pico2peta-pack",
  "pico2peta-repo",
  "proptest",
  "serde_json",

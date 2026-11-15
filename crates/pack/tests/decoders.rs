@@ -191,11 +191,11 @@ fn midx_roundtrip_merges_sorted_packs() {
 
 /// Golden vectors for record codec 2 (`GroupedZstd`): the byte-grouping
 /// transform is part of the on-disk format, so its exact output is pinned
-/// here (a change to `pico2peta_weights::bytegroup` that alters bytes must
+/// here (a change to `pico2peta_pack::bytegroup` that alters bytes must
 /// fail this test, not silently break stored packs).
 #[test]
 fn grouped_codec_golden_and_malformed() {
-    use pico2peta_weights::bytegroup::group;
+    use pico2peta_pack::bytegroup::group;
     assert_eq!(group(&[0, 1, 2, 3, 4, 5, 6], 2).unwrap(), [0, 2, 4, 1, 3, 5, 6]);
     assert_eq!(group(&[0, 1, 2, 3, 4, 5, 6, 7, 8], 4).unwrap(), [0, 4, 1, 5, 2, 6, 3, 7, 8]);
     assert_eq!(group(&[9, 8, 7], 1).unwrap(), [9, 8, 7]);

@@ -57,6 +57,15 @@ enum Cmd {
         /// Chunker for everything else (default fastcdc).
         #[arg(long, value_name = "CHUNKER")]
         chunk_default: Option<String>,
+        /// A domain profile, as NAME=key:value,... with keys front, chunker and
+        /// derive (none|previous). Example:
+        /// `--profile weights=front:safetensors,derive:previous`. Repeatable.
+        #[arg(long = "profile", value_name = "NAME=SPEC")]
+        profile: Vec<String>,
+        /// Assign a profile to a name prefix, as PREFIX=PROFILE (e.g.
+        /// `--namespace models/=weights`). Repeatable; longest prefix wins.
+        #[arg(long = "namespace", value_name = "PREFIX=PROFILE")]
+        namespace: Vec<String>,
     },
     /// Store a file (or stdin with `-`), print its hash.
     Put {
@@ -226,6 +235,8 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
         refs_on_backend,
         chunk,
         chunk_default,
+        profile,
+        namespace,
     } = &cli.cmd
     {
         if cli.remote.is_some() {
@@ -253,6 +264,45 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 .ok_or_else(|| Error::Parse(format!("--chunk {spec:?}: expected PREFIX=CHUNKER")))?;
             chunking.prefixes.insert(prefix.to_string(), parse(c)?);
         }
+        let mut profiles = std::collections::BTreeMap::new();
+        for spec in profile {
+            let (name, kv) = spec
+                .split_once('=')
+                .ok_or_else(|| Error::Parse(format!("--profile {spec:?}: expected NAME=key:value,...")))?;
+            let mut p = pico2peta_repo::Profile::default();
+            for item in kv.split(',').filter(|i| !i.is_empty()) {
+                let (k, v) = item
+                    .split_once(':')
+                    .ok_or_else(|| Error::Parse(format!("--profile {spec:?}: bad item {item:?}")))?;
+                match k {
+                    "front" => p.front = Some(v.to_string()),
+                    "chunker" => p.chunker = Some(v.to_string()),
+                    "derive" => {
+                        p.derive = match v {
+                            "none" => pico2peta_repo::DerivePolicy::None,
+                            "previous" => pico2peta_repo::DerivePolicy::Previous,
+                            _ => return Err(Error::Parse(format!("--profile {spec:?}: derive is none or previous"))),
+                        }
+                    }
+                    _ => return Err(Error::Parse(format!("--profile {spec:?}: unknown key {k:?}"))),
+                }
+            }
+            profiles.insert(name.to_string(), p);
+        }
+        let mut namespaces = std::collections::BTreeMap::new();
+        for spec in namespace {
+            let (prefix, p) = spec
+                .split_once('=')
+                .ok_or_else(|| Error::Parse(format!("--namespace {spec:?}: expected PREFIX=PROFILE")))?;
+            namespaces.insert(prefix.to_string(), p.to_string());
+        }
+        for (n, p) in &profiles {
+            if let Some(f) = &p.front
+                && builtin_fronts()?.get(f).is_none()
+            {
+                return Err(Error::Parse(format!("--profile {n}: unknown front {f:?}")));
+            }
+        }
         LocalRepo::init_config(
             &cli.repo,
             &pico2peta_repo::RepoConfig {
@@ -260,6 +310,8 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 pack: (&cfg).into(),
                 refs: pico2peta_repo::RefsSection { store },
                 chunking,
+                profiles,
+                namespaces,
             },
         )?;
         println!("initialized {}", cli.repo.display());
@@ -269,7 +321,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
         Some(url) => Some(pico2peta_client::RemoteRepo::connect(url, cli.token.clone())?),
         None => None,
     };
-    let local = if remote.is_none() { Some(LocalRepo::open(&cli.repo)?) } else { None };
+    let local = if remote.is_none() { Some(LocalRepo::open(&cli.repo)?.with_fronts(builtin_fronts()?)?) } else { None };
     let r: &dyn Repository = match (&remote, &local) {
         (Some(rr), _) => rr,
         (None, Some(l)) => l,
@@ -299,7 +351,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                     let width = if no_byte_group { None } else { width };
                     let mut src = std::io::Cursor::new(head).chain(src);
                     match (&for_name, &local, width) {
-                        (Some(n), Some(l), w) => l.put_stream_for_grouped(n, &mut src, w)?,
+                        (Some(n), Some(l), w) => l.put_named_hinted(n, &mut src, w)?,
                         (Some(_), None, _) => {
                             return Err(Error::Unsupported("put --for-name is only available for local repositories"));
                         }
@@ -523,4 +575,9 @@ fn main() -> ExitCode {
             }
         }
     }
+}
+
+/// The fronts the CLI opens repositories with.
+fn builtin_fronts() -> pico2peta_core::Result<pico2peta_repo::FrontRegistry> {
+    pico2peta_repo::FrontRegistry::new().with(std::sync::Arc::new(pico2peta_weights::SafetensorsFront))
 }

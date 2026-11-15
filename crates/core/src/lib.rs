@@ -5,7 +5,10 @@
 
 use std::collections::HashMap;
 pub mod backend;
+pub mod encoding;
 pub mod fault;
+
+pub use encoding::{Derive, Encoding, PatchFormat};
 
 use std::fmt;
 use std::io::Read;
@@ -241,6 +244,25 @@ pub trait ObjectStore: Send + Sync {
     ) -> Result<Hash> {
         let _ = width;
         self.put_delta_mapped(base, segments, src)
+    }
+    /// Stores `src` with an explicit [`Encoding`] (API v1.14; the Front API's
+    /// entry point). Identity is unaffected by the encoding. The default maps
+    /// onto the methods above and ignores the chunker choice; stores that
+    /// support more override it.
+    fn put_encoded(&self, src: &mut dyn Read, enc: &Encoding) -> Result<Hash> {
+        match (&enc.derive, enc.group_width) {
+            // Empty segments = offset-aligned (`put_delta`); the default drops
+            // the width hint there.
+            (Some(d), w) => match d.patch {
+                PatchFormat::Xor if d.segments.is_empty() => self.put_delta(&d.base, src),
+                PatchFormat::Xor => match w {
+                    Some(w) => self.put_delta_mapped_grouped(&d.base, &d.segments, src, w),
+                    None => self.put_delta_mapped(&d.base, &d.segments, src),
+                },
+            },
+            (None, Some(w)) => self.put_stream_grouped(src, w),
+            (None, None) => self.put_stream(src),
+        }
     }
     /// Returns the bytes of `hash` in `range` (whole object if `None`).
     /// Buffers the result, so use [`ObjectStore::open`] for large objects.

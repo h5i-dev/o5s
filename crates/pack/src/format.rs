@@ -127,7 +127,7 @@ pub enum Codec {
     /// Byte-grouped, then zstd-compressed (blobs only): payload is
     /// `width u8 | zstd(group(raw, width))`, where `group` lays out byte `k`
     /// of every `width`-byte element as plane `k`, followed by the
-    /// `len % width` tail unchanged (`pico2peta_weights::bytegroup`). For
+    /// `len % width` tail unchanged (`crate::bytegroup`). For
     /// fixed-width numeric data such as bf16/fp32 model weights.
     GroupedZstd = 2,
 }
@@ -241,7 +241,7 @@ pub fn unpack_payload(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
         (Codec::GroupedZstd, Kind::Blob) => {
             let (&w, z) = payload.split_first().ok_or_else(|| Error::Corrupt("empty grouped payload".into()))?;
             let g = zstd::bulk::decompress(z, h.raw_len as usize).map_err(zerr)?;
-            pico2peta_weights::bytegroup::ungroup(&g, w as usize).map_err(|e| Error::Corrupt(format!("{e}")))?
+            crate::bytegroup::ungroup(&g, w as usize).map_err(|e| Error::Corrupt(format!("{e}")))?
         }
         (Codec::GroupedZstd, _) => return Err(Error::Corrupt("grouped codec on a non-blob record".into())),
     };

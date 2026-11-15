@@ -7,10 +7,11 @@ license.workspace = true
 
 [dependencies]
 pico2peta-core.workspace = true
+pico2peta-pack.workspace = true
+pico2peta-repo.workspace = true
 serde_json = "1"
 
 [dev-dependencies]
 zstd.workspace = true
 proptest.workspace = true
-pico2peta-repo.workspace = true
 tempfile.workspace = true
