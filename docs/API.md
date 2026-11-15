@@ -150,7 +150,7 @@ twine upload --repository-url https://p2p.example.com/pypi/team/ -u token -p "$T
 pip install --index-url "https://token:$TOKEN@p2p.example.com/pypi/team/simple/" mypkg
 uv pip install --index-url "https://token:$TOKEN@p2p.example.com/pypi/team/simple/" mypkg
 ```
-- Simple API (PEP 503 HTML and PEP 691 JSON, with sha256 and `requires-python`). Uploads use the legacy API that twine and `uv publish` speak. Authorization is on `pypi/<index>`.
+- Simple API (PEP 503 HTML and PEP 691 JSON, with sha256, `requires-python` and PEP 658/714 core metadata: `<wheel>.metadata`). Uploads use the legacy API that twine and `uv publish` speak. Authorization is on `pypi/<index>`.
 - Files are create-once: an identical re-upload is a no-op, while different bytes under the same filename get 409.
 - Proxy-cache: `[pypi.upstream.<index>] url = "https://pypi.org/simple"` (optional `token`, `ttl_secs`). Project pages merge local uploads with upstream files. An upstream file is fetched and sha256-checked on first download, then served from the store, including while the upstream is down.
 

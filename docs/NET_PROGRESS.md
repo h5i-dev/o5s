@@ -230,7 +230,12 @@ The contended run checks that no update is lost: the final version equals the nu
     - uv install.
   - Proxy-cache, tested with a second server proxying the first: local uploads and upstream files are merged on one index. The cached file installs after the upstream is stopped and a zero-grace GC is run; a never-fetched file fails (502).
   - Storage: `pypi/<i>/<p>/<file>` → `P2PPYPI1` record → content. The `pypi` front claims `pypi/` and its GC follows record → content.
-  - Not done: PEP 658 metadata files, yanking via the API, and the `/pypi/<i>/simple/` root listing of upstream projects (only local projects are listed).
+  - PEP 658/714 core metadata: DONE.
+    - On wheel upload, `*.dist-info/METADATA` is read with range reads of the stored wheel (EOCD, central directory, one entry; no full load) and stored create-once as `<file>.metadata`.
+    - Pages advertise `core-metadata` and `data-dist-info-metadata` (JSON and HTML).
+    - Proxies pass the upstream's metadata through and cache it on first use (sha256-checked, with the upstream token on the upstream host).
+    - Tested: sha256 equality, and a proxy pass-through used by pip, including offline.
+  - Not done: yanking via the API, and the `/pypi/<i>/simple/` root listing of upstream projects (only local projects are listed).
 - Fix: early-rejected uploads (LFS capability, PyPI authz) now send `Connection: close`. Before, a client's pooled connection could be reset mid-body, which made one HF test flaky.
 - Disk hygiene (2026-11-15, asked by the human): `tests/hf/client.py` leaked a 3–9 MB `tmp*` dir per run into `$TMPDIR`. It now removes it at exit, and the HF and PyPI tests give their subprocesses a TMPDIR inside the test's own directory. A whole-workspace test run now leaves nothing in `$TMPDIR`. Pruned the cargo target dir from 8 GB to under 4 GB.
 - **npm front: DONE** (`crates/server/src/npm.rs`, `tests/npm.rs`).

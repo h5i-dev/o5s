@@ -196,3 +196,59 @@ pub(crate) fn create_once(
     }
     Err(Error::Corrupt(format!("{name}: create-once did not settle")))
 }
+
+/// `<dist>.dist-info/METADATA` of a stored wheel, read with range reads (end-of-central-directory,
+/// central directory, one entry), so a multi-gigabyte wheel is never loaded. `None` when the
+/// wheel has no such file, or uses zip64 / an unsupported method, or it is over 16 MiB.
+pub(crate) fn wheel_metadata(store: &dyn Repository, h: &Hash, size: u64) -> Result<Option<Vec<u8>>> {
+    use std::io::Read as _;
+    let u16_at = |b: &[u8], o: usize| u16::from_le_bytes([b[o], b[o + 1]]) as usize;
+    let u32_at = |b: &[u8], o: usize| u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]) as u64;
+    let tail_len = size.min(22 + 65_535);
+    if tail_len < 22 {
+        return Ok(None);
+    }
+    let tail = store.get(h, Some(size - tail_len..size))?;
+    let Some(e) = (0..=tail.len() - 22).rev().find(|&i| tail[i..i + 4] == [0x50, 0x4b, 0x05, 0x06]) else {
+        return Ok(None);
+    };
+    let (cd_size, cd_off) = (u32_at(&tail, e + 12), u32_at(&tail, e + 16));
+    if cd_size == 0xffff_ffff || cd_off == 0xffff_ffff || cd_off + cd_size > size || cd_size > 64 << 20 {
+        return Ok(None);
+    }
+    let cd = store.get(h, Some(cd_off..cd_off + cd_size))?;
+    let mut i = 0;
+    while i + 46 <= cd.len() && cd[i..i + 4] == [0x50, 0x4b, 0x01, 0x02] {
+        let (method, csize, usize_) = (u16_at(&cd, i + 10), u32_at(&cd, i + 20), u32_at(&cd, i + 24));
+        let (nlen, xlen, clen) = (u16_at(&cd, i + 28), u16_at(&cd, i + 30), u16_at(&cd, i + 32));
+        let local = u32_at(&cd, i + 42);
+        let name = cd.get(i + 46..i + 46 + nlen).unwrap_or_default();
+        i += 46 + nlen + xlen + clen;
+        let is_meta = name.ends_with(b".dist-info/METADATA") && name.iter().filter(|&&c| c == b'/').count() == 1;
+        if !is_meta {
+            continue;
+        }
+        if usize_ > 16 << 20 || csize > 16 << 20 || local + 30 > size {
+            return Ok(None);
+        }
+        let lh = store.get(h, Some(local..local + 30))?;
+        if lh[..4] != [0x50, 0x4b, 0x03, 0x04] {
+            return Ok(None);
+        }
+        let start = local + 30 + u16_at(&lh, 26) as u64 + u16_at(&lh, 28) as u64;
+        if start + csize > size {
+            return Ok(None);
+        }
+        let data = store.get(h, Some(start..start + csize))?;
+        return Ok(match method {
+            0 => Some(data),
+            8 => {
+                let mut out = Vec::with_capacity(usize_ as usize);
+                flate2::read::DeflateDecoder::new(&data[..]).take(16 << 20).read_to_end(&mut out)?;
+                (out.len() as u64 == usize_).then_some(out)
+            }
+            _ => None,
+        });
+    }
+    Ok(None)
+}
