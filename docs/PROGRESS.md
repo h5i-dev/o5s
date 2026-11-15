@@ -17,7 +17,7 @@
 - **M7 Hardening: in progress.**
   - Done: decoder bounds checks; `deny(unwrap_used, expect_used, panic)` in the core crates; never-panic proptests; `fuzz/` targets for every decoder and for recovery; README and CHANGELOG.
   - Done: **ref journal compaction**, i.e. snapshot + generation rotation with a tombstone commit point. Lagging handles in other processes follow it. Tested with a crash sweep and contention across rotations.
-  - Pending: running the fuzzers (nightly toolchain installing on scratch), and recording micro-benchmark numbers (`bench/micro`), which waits for Exp1 to finish so its timings stay clean.
+  - Pending: micro-benchmark numbers (`bench/micro`), which wait for Exp1 to finish so its timings stay clean.
 
 - **M8 Verification: done.** There's a **Lean↔Rust differential test** (`crates/refs/tests/lean_diff.rs` against the `p2p-model` Lean executable), and it's sanity-checked to fail against a wrong model. Fuzzers ran 60 s per target (~24M executions total) with no crashes. `lean/` has a pure model plus machine-checked proofs, with no `sorry` and only standard axioms. Covered: P1 content immutability, P2 no undetected overwrite, P3 frozen names, P4 authorization, P5 GC safety. Rust already has model-based proptests for refs and packs.
 - **M9 Later layers: provenance done (core side).** `crates/prov`: canonical content-addressed `Record`s (`P2PPROV1`), an OCC-appended log under `_prov/log`, and the queries `producers`/`consumers`/`lineage`/`impact`/`regenerable`. `ProvTracer` keeps inputs and params alive but not outputs, which gives regeneration-aware GC. The CLI has `prov record|why|impact`, and its `gc` uses `ProvTracer`. Git/OCI adapters are net's goal 6; the hash-mapping design is agreed (see NET_PROGRESS.md).
@@ -41,11 +41,13 @@
 - **No ref deletion.** `Repository` has no `delete(name)` yet, so the only way to drop a root is to move a ref.
 - **Small packs.** `replace` and `flush` seal the writer's open pack, so chatty writers make many small packs. Repack (M6) is the planned fix.
 - **Ambiguous outcome on I/O error.** If an fsync fails during `replace`, the record may still be durable. The caller must re-`resolve` to find out (documented, as in most databases).
-- **Remote mode.** The CLI is local-only until `crates/client` lands from net.
-- **Fuzz targets** for the pack record, index, manifest and journal decoders aren't written yet (M7).
 
 ## Environment notes
 - `source scripts/env.sh` puts the cargo target, `CARGO_HOME`, TMPDIR and bench data on `/mnt/scratch/pico2peta`, and adds the shared Lean 4.31 to PATH.
 
+## Blockers
+- (resolved 2026-11-15) `/mnt/scratch` hit 100%, and Exp1 died with ENOSPC at redis V0. I freed my own regenerable caches (`cargo-target/debug` 7.7 GB, `cargo-target-fuzz`) and made debug builds leaner in `scripts/env.sh` (no incremental cache, line-tables-only debug info). Exp1 was restarted for redis and git (`exp1-run2.log`).
+
 ## Questions for human
-- (none yet)
+- **Disk budget:** `/mnt/scratch` has much less headroom than the ~31 GB in AGENT_TASK.md (24 GB → 13 GB → 0 during this session, partly from other directories). Could you free or extend space, or say which of these may be deleted: the Exp1 mirrors and spill (`bench-data`, ~1.5 GB), the fuzz build cache, the nightly toolchain (`rustup-nightly`)?
+- **Disk headroom** is still tight: about 11 GB free after cleanup, and the net session's `cargo-target-net` alone is 13 GB.
