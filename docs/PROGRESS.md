@@ -61,6 +61,7 @@
 - **v1.7 (2026-11-15), additive:** `ObjectStore::put_delta(base, src)` stores an object as `base XOR delta` (record kind `Delta`), keeping content-hash identity. Reads, ranges, GC (base kept alive) and `ensure_live` cover it. The default impl is a plain `put_stream`. The CLI has `put --delta-base HASH`.
 - **v1.8 (2026-11-15), additive:** `ObjectStore::put_delta_mapped(base, segments, src)` is an XOR delta with an explicit `(dst, src, len)` alignment. The default delegates to `put_delta`. The new crate `pico2peta-weights` (`put_checkpoint`) plans the alignment for safetensors.
 - **Refs on a backend (2026-11-15):** `RefStore::open_backend(backend, prefix)` and `LocalRepo` config `[refs] store = "backend"`, plus `pico2peta init --refs-on-backend`. The API is unchanged; this is a new engine.
+- **v1.9 (2026-11-15), additive:** `Backend::atomic_create() -> bool` (default `true`). Backends that emulate create-only with check-then-put (S3 without conditional writes) must return `false`. The ref log engine refuses them.
 - **Hierarchical manifests:** `PackConfig::manifest_fanout` (default 4096; repo config key `pack.manifest_fanout`, optional). Every interior node is keyed by the content hash of its byte range, and reads expand the tree lazily.
 
 ## Production gaps

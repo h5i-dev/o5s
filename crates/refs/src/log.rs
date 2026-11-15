@@ -41,6 +41,8 @@ struct LogState {
     snap: u64,
     /// When the snapshot list was last checked for a trimmed gap.
     last_list: Option<Instant>,
+    /// Key of the snapshot the state is based on (probed to detect trimming).
+    snap_key: Option<String>,
 }
 
 /// A handle checks for trimmed gaps at most this often. Trimming only happens
@@ -53,6 +55,8 @@ pub(crate) struct LogEngine {
     prefix: String,
     faults: FaultHandle,
     threshold: AtomicU64,
+    /// Trim grace in seconds (TRIM_GRACE; tests shorten it).
+    grace_secs: AtomicU64,
     inner: Mutex<LogState>,
 }
 
@@ -66,12 +70,24 @@ fn now_secs() -> u64 {
 
 impl LogEngine {
     pub(crate) fn open(backend: Arc<dyn Backend>, prefix: &str, faults: FaultHandle) -> Result<Self> {
+        if !backend.atomic_create() {
+            return Err(Error::Unsupported(
+                "refs on this backend need atomic conditional create (S3: enable conditional writes)",
+            ));
+        }
         let e = LogEngine {
             backend,
             prefix: prefix.to_string(),
             faults,
             threshold: AtomicU64::new(DEFAULT_SNAPSHOT_EVERY),
-            inner: Mutex::new(LogState { state: RefState::default(), next: 0, snap: 0, last_list: None }),
+            grace_secs: AtomicU64::new(TRIM_GRACE.as_secs()),
+            inner: Mutex::new(LogState {
+                state: RefState::default(),
+                next: 0,
+                snap: 0,
+                last_list: None,
+                snap_key: None,
+            }),
         };
         {
             let mut g = e.inner.lock().map_err(poisoned)?;
@@ -101,25 +117,41 @@ impl LogEngine {
 
     /// Loads the newest snapshot with seq > `min` (if any) into `g`.
     fn rebase_on_latest_snapshot(&self, g: &mut LogState, min: u64) -> Result<bool> {
-        let snaps = self.snapshots()?;
-        let Some((seq, _, key)) = snaps.into_iter().rev().find(|s| s.0 > min || (min == 0 && s.0 == 0)) else {
-            return Ok(false);
-        };
-        if seq <= g.next && min != 0 {
-            return Ok(false);
-        }
-        let mut b = Vec::new();
-        match self.backend.open(&key) {
-            Ok(mut r) => {
-                r.read_to_end(&mut b)?;
+        for _ in 0..8 {
+            let snaps = self.snapshots()?;
+            let Some((seq, _, key)) = snaps.into_iter().rev().find(|s| s.0 > min || (min == 0 && s.0 == 0)) else {
+                return Ok(false);
+            };
+            if seq <= g.next && min != 0 {
+                return Ok(false);
             }
-            Err(Error::KeyNotFound(_)) => return Ok(false), // trimmed concurrently; a newer one exists
-            Err(e) => return Err(e),
+            let mut b = Vec::new();
+            match self.backend.open(&key) {
+                Ok(mut r) => {
+                    r.read_to_end(&mut b)?;
+                }
+                Err(Error::KeyNotFound(_)) => continue, // trimmed concurrently: a newer one exists; list again
+                Err(e) => return Err(e),
+            }
+            g.state = decode_snapshot(&b)?;
+            g.next = seq;
+            g.snap = seq;
+            g.snap_key = Some(key);
+            return Ok(true);
         }
-        g.state = decode_snapshot(&b)?;
-        g.next = seq;
-        g.snap = seq;
-        Ok(true)
+        Err(Error::Backend { transient: true, msg: "ref log: snapshots keep disappearing; retry".into() })
+    }
+
+    /// True if the entry (or snapshot) our position was derived from has been
+    /// trimmed, which means `g.next` may sit inside a trimmed region.
+    fn base_trimmed(&self, g: &LogState) -> Result<bool> {
+        if g.next > g.snap && g.next > 0 {
+            return Ok(self.backend.head(&self.log_key(g.next - 1))?.is_none());
+        }
+        match &g.snap_key {
+            Some(k) => Ok(self.backend.head(k)?.is_none()),
+            None => Ok(false), // empty log, never snapshotted: nothing can be trimmed
+        }
     }
 
     /// Applies log entries from `next` until the first missing one. If entries
@@ -133,10 +165,17 @@ impl LogEngine {
                 }
                 Err(Error::KeyNotFound(_)) => {
                     // The end of the log, or (rarely) a trimmed gap behind a newer snapshot.
-                    if g.last_list.is_none_or(|t| t.elapsed() > LIST_INTERVAL) {
+                    // One HEAD tells them apart: if what we read last is gone, we were trimmed.
+                    let trimmed = self.base_trimmed(g)?;
+                    if trimmed || g.last_list.is_none_or(|t| t.elapsed() > LIST_INTERVAL) {
                         g.last_list = Some(Instant::now());
                         if self.rebase_on_latest_snapshot(g, g.next)? {
                             continue;
+                        }
+                        if trimmed {
+                            return Err(Error::Corrupt(
+                                "ref log trimmed past this handle with no newer snapshot".into(),
+                            ));
                         }
                     }
                     return Ok(());
@@ -165,11 +204,14 @@ impl LogEngine {
         self.faults.hit("refs.log.snapshot")?;
         self.backend.put_if_absent(&key, PutSource::Bytes(&encode_snapshot(&g.state)))?;
         g.snap = g.next;
+        g.snap_key = Some(key.clone());
         // Trim: behind the newest snapshot that is older than the grace period,
         // delete older snapshots and log entries below it.
         let snaps = self.snapshots()?;
-        let cutoff = now_secs().saturating_sub(TRIM_GRACE.as_secs());
-        if let Some(&(keep, _, _)) = snaps.iter().rev().find(|s| s.1 <= cutoff) {
+        let cutoff = now_secs().saturating_sub(self.grace_secs.load(Ordering::Relaxed));
+        // Keep at least the two newest snapshots whatever their age (margin against clock skew).
+        let candidates = &snaps[..snaps.len().saturating_sub(2)];
+        if let Some(&(keep, _, _)) = candidates.iter().rev().find(|s| s.1 <= cutoff) {
             for (seq, _, k) in &snaps {
                 if *seq < keep {
                     let _ = self.backend.delete(k);
@@ -204,6 +246,16 @@ impl crate::Engine for LogEngine {
             self.faults.hit("refs.log.put")?;
             match self.backend.put_if_absent(&self.log_key(g.next), PutSource::Bytes(&rec))? {
                 PutOutcome::Created => {
+                    // Did our slot fall into a trimmed region (a long pause, or clock skew)?
+                    // If what we based this commit on is gone and a snapshot past our slot
+                    // exists, nobody will read our entry: fail instead of acknowledging.
+                    if self.base_trimmed(&g)? && self.snapshots()?.iter().any(|s| s.0 > g.next) {
+                        let _ = self.backend.delete(&self.log_key(g.next));
+                        return Err(Error::Backend {
+                            transient: true,
+                            msg: "ref commit landed in a compacted region; retry".into(),
+                        });
+                    }
                     if caught_up.elapsed() > SLOW_COMMIT {
                         // Could our key have been trimmed and re-created? If a snapshot past
                         // it exists, nobody will ever read our entry: fail, don't acknowledge.
@@ -241,5 +293,9 @@ impl crate::Engine for LogEngine {
 
     fn set_compact_threshold(&self, n: u64) {
         self.threshold.store(n.max(1), Ordering::Relaxed);
+    }
+
+    fn set_trim_grace(&self, d: Duration) {
+        self.grace_secs.store(d.as_secs(), Ordering::Relaxed);
     }
 }

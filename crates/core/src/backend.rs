@@ -110,6 +110,14 @@ pub trait Backend: Send + Sync {
 
     /// Human-readable description for logs (`file:///...`, `s3://bucket/prefix`).
     fn describe(&self) -> String;
+
+    /// Whether `put_if_absent` is atomic against *concurrent* creators, so that
+    /// exactly one wins (API v1.9). Content-named packs don't need it, but the
+    /// ref log does: it's the commit point. Backends that emulate create-only
+    /// with check-then-put (e.g. S3 without conditional writes) must return false.
+    fn atomic_create(&self) -> bool {
+        true
+    }
 }
 
 /// Validates a backend key (see the module docs).

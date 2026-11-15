@@ -108,3 +108,73 @@ fn log_store_crash_sweep() {
         r.replace(&z, &[(z.clone(), Observed::Absent)], h(77), &yes).unwrap();
     }
 }
+
+/// Review finding 5: a stale handle whose position was trimmed away (forced
+/// here with zero grace) must never acknowledge a commit that others can't see.
+#[test]
+fn stale_handle_after_trimming_never_loses_acknowledged_commits() {
+    let d = tempfile::tempdir().unwrap();
+    let b: Arc<dyn Backend> = Arc::new(LocalDisk::new(d.path()).unwrap());
+    let stale = RefStore::open_backend(b.clone(), "t/").unwrap();
+    let busy = RefStore::open_backend(b.clone(), "t/").unwrap();
+    busy.set_compact_threshold(3);
+    busy.set_trim_grace(std::time::Duration::ZERO);
+    let x = n("x");
+    stale.replace(&x, &[(x.clone(), Observed::Absent)], h(1), &yes).unwrap();
+    // The busy handle commits a lot and trims aggressively behind its snapshots.
+    for i in 0..40u64 {
+        let k = n(&format!("busy/{i}"));
+        busy.replace(&k, &[(k.clone(), Observed::Absent)], h(i), &yes).unwrap();
+    }
+    // The stale handle now commits against what it believes is the end of the log.
+    let y = n("y");
+    match stale.replace(&y, &[(y.clone(), Observed::Absent)], h(7), &yes) {
+        Ok(ReplaceOutcome::Ok { .. }) => {
+            let fresh = RefStore::open_backend(b.clone(), "t/").unwrap();
+            assert_eq!(fresh.resolve(&y).unwrap().map(|v| v.hash), Some(h(7)), "acknowledged commit must be visible");
+        }
+        Ok(o) => panic!("{o:?}"),
+        Err(_) => {} // refusing is fine; acknowledging an invisible write is not
+    }
+    let fresh = RefStore::open_backend(b, "t/").unwrap();
+    assert_eq!(fresh.list("busy").unwrap().len(), 40);
+    assert_eq!(fresh.resolve(&x).unwrap().map(|v| v.hash), Some(h(1)));
+}
+
+#[test]
+fn backend_without_atomic_create_is_refused_for_refs() {
+    struct NonAtomic(LocalDisk);
+    impl Backend for NonAtomic {
+        fn put_if_absent(
+            &self,
+            k: &str,
+            s: pico2peta_core::backend::PutSource<'_>,
+        ) -> Result<pico2peta_core::backend::PutOutcome> {
+            self.0.put_if_absent(k, s)
+        }
+        fn get_range(&self, k: &str, r: std::ops::Range<u64>) -> Result<Vec<u8>> {
+            self.0.get_range(k, r)
+        }
+        fn open(&self, k: &str) -> Result<Box<dyn std::io::Read + Send>> {
+            self.0.open(k)
+        }
+        fn head(&self, k: &str) -> Result<Option<pico2peta_core::backend::BlobMeta>> {
+            self.0.head(k)
+        }
+        fn list(&self, p: &str) -> Result<Vec<pico2peta_core::backend::BlobMeta>> {
+            self.0.list(p)
+        }
+        fn delete(&self, k: &str) -> Result<()> {
+            self.0.delete(k)
+        }
+        fn describe(&self) -> String {
+            "non-atomic".into()
+        }
+        fn atomic_create(&self) -> bool {
+            false
+        }
+    }
+    let d = tempfile::tempdir().unwrap();
+    let b: Arc<dyn Backend> = Arc::new(NonAtomic(LocalDisk::new(d.path()).unwrap()));
+    assert!(RefStore::open_backend(b, "r/").is_err());
+}

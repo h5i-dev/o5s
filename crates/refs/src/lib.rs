@@ -798,6 +798,7 @@ trait Engine: Send + Sync {
     fn compact(&self) -> Result<()>;
     fn generation(&self) -> Result<u64>;
     fn set_compact_threshold(&self, bytes: u64);
+    fn set_trim_grace(&self, _d: std::time::Duration) {}
 }
 
 impl Engine for Journal {
@@ -883,6 +884,12 @@ impl RefStore {
     /// Forces a compaction now.
     pub fn compact(&self) -> Result<()> {
         self.engine.compact()
+    }
+
+    /// Log engine only: how old a snapshot must be before log entries behind it
+    /// are trimmed (default `log::TRIM_GRACE`, 1 h). For tests.
+    pub fn set_trim_grace(&self, d: std::time::Duration) {
+        self.engine.set_trim_grace(d)
     }
 
     /// Current journal generation, or log snapshot sequence (diagnostics).
