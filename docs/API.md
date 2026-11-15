@@ -143,5 +143,15 @@ git clone https://any:$TOKEN@p2p.example.com/git/hf/models/team/tiny.git   # the
 - Not yet: Xet downloads (`resolve` serves plain HTTP), global Xet dedup queries, pull requests, tags/branches via the HF API (use `git push`), and the repo settings and delete APIs.
 - Disable it with `[hf] enabled = false`. It requires `[git]`.
 
+## PyPI (`/pypi/<index>`)
+```sh
+twine upload --repository-url https://p2p.example.com/pypi/team/ -u token -p "$TOKEN" dist/*
+pip install --index-url "https://token:$TOKEN@p2p.example.com/pypi/team/simple/" mypkg
+uv pip install --index-url "https://token:$TOKEN@p2p.example.com/pypi/team/simple/" mypkg
+```
+- Simple API (PEP 503 HTML and PEP 691 JSON, with sha256 and `requires-python`). Uploads use the legacy API that twine and `uv publish` speak. Authorization is on `pypi/<index>`.
+- Files are create-once: an identical re-upload is a no-op, while different bytes under the same filename get 409.
+- Proxy-cache: `[pypi.upstream.<index>] url = "https://pypi.org/simple"` (optional `token`, `ttl_secs`). Project pages merge local uploads with upstream files. An upstream file is fetched and sha256-checked on first download, then served from the store, including while the upstream is down.
+
 ## Operations
 See `deploy/README.md` for install, TLS, reload (SIGHUP), S3 credentials and lifecycle rules, metrics, audit verification (`pico2peta-server verify-audit`) and capacity notes.

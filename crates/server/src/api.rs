@@ -66,6 +66,7 @@ pub struct AppState {
     pub oci: Option<Arc<crate::oci::OciState>>,
     pub git: Option<Arc<crate::git::GitState>>,
     pub hf: Option<Arc<crate::hf::HfState>>,
+    pub pypi: Option<Arc<crate::pypi::PypiState>>,
     /// The domain fronts and their write handles (`None` only in tests that build state by hand).
     pub fronts: Option<Arc<crate::fronts::Fronts>>,
 }
@@ -150,6 +151,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v2/{*rest}", axum::routing::any(crate::oci::dispatch))
         .route("/git/{*rest}", axum::routing::any(crate::git::dispatch))
         .route("/api/{*rest}", axum::routing::any(crate::hf::api))
+        // Uploads stream to the store, which enforces server.max_upload_bytes.
+        .route(
+            "/pypi/{*rest}",
+            axum::routing::any(crate::pypi::dispatch).layer(axum::extract::DefaultBodyLimit::disable()),
+        )
         .fallback(crate::hf::root)
         .layer(middleware::from_fn_with_state(state.clone(), authenticate))
         .layer(middleware::from_fn_with_state(state.clone(), shed_load));
@@ -346,7 +352,7 @@ impl RateLimiter {
 
 /// Namespaces owned by protocol adapters (OCI, Git) and the provenance log.
 pub fn is_reserved(name: &str) -> bool {
-    ["oci", "git", "_prov"].iter().any(|p| pico2peta_core::is_under(name, p))
+    ["oci", "git", "pypi", "_prov"].iter().any(|p| pico2peta_core::is_under(name, p))
 }
 
 /// Runs a repository call on the blocking pool.

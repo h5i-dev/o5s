@@ -85,6 +85,42 @@ pub struct Config {
     pub git: GitSection,
     #[serde(default)]
     pub hf: HfSection,
+    #[serde(default)]
+    pub pypi: PypiSection,
+}
+
+/// An upstream registry that a package index proxies and caches.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Upstream {
+    /// Base URL (for PyPI, the simple API root, e.g. `https://pypi.org/simple`).
+    pub url: String,
+    /// Bearer token sent to the upstream, if it needs one.
+    #[serde(default)]
+    pub token: Option<String>,
+    /// How long a fetched upstream listing is reused before asking again.
+    #[serde(default = "default_upstream_ttl")]
+    pub ttl_secs: u64,
+}
+
+fn default_upstream_ttl() -> u64 {
+    600
+}
+
+/// PyPI-compatible indexes (`/pypi/<index>/simple/`, upload at `/pypi/<index>/`).
+/// Every index accepts uploads; an index with an upstream also proxies and caches it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct PypiSection {
+    pub enabled: bool,
+    /// `[pypi.upstream.<index>]`
+    pub upstream: std::collections::BTreeMap<String, Upstream>,
+}
+
+impl Default for PypiSection {
+    fn default() -> Self {
+        PypiSection { enabled: true, upstream: Default::default() }
+    }
 }
 
 /// Hugging Face Hub-compatible endpoints (`/api/...`, `/<repo>/resolve/...`). Needs `[git]`.

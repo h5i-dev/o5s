@@ -4,6 +4,7 @@
 //! |---|---|---|---|
 //! | `git` | `git/` (Git repos, the HF front's repos, `git/_oidmap`, `git/_lfs*`, `git/_xet`) | [`GitTracer`] | [`GitGrouper`] |
 //! | `oci` | `oci/` (OCI repos, `oci/_digest`) | [`OciTracer`] (also every segment map) | none |
+//! | `pypi` | `pypi/` (index files) | record → content | none |
 //! | `safetensors` | none (built-in, `crates/weights`) | none | none |
 //!
 //! The HF front writes through the `git` front: an HF repo *is* a Git repo, so it has no
@@ -86,6 +87,22 @@ impl Front for OciFront {
     }
 }
 
+/// PyPI index files under `pypi/`: record → content.
+#[derive(Default)]
+pub struct PypiFront;
+
+impl Front for PypiFront {
+    fn id(&self) -> &str {
+        "pypi"
+    }
+    fn prefixes(&self) -> Vec<String> {
+        vec!["pypi/".into()]
+    }
+    fn children(&self, h: &Hash, store: &dyn ObjectStore) -> Result<Vec<Hash>> {
+        Ok(crate::pypi::record_child(h, store)?.into_iter().collect())
+    }
+}
+
 /// Provenance records are a core concept (`_prov/`), not a front; GC passes them as the
 /// extra tracer. Everything it doesn't recognize is a leaf.
 pub struct Leaves;
@@ -108,6 +125,7 @@ impl Fronts {
         let reg = FrontRegistry::new()
             .with(git.clone())?
             .with(oci.clone())?
+            .with(Arc::new(PypiFront))?
             .with(Arc::new(pico2peta_weights::SafetensorsFront))?;
         let repo = repo.with_fronts(reg)?;
         let mut handles: HashMap<String, Arc<dyn Repository>> = HashMap::new();
@@ -116,6 +134,7 @@ impl Fronts {
             let _ = slot.set(Arc::downgrade(&h));
             handles.insert(id.to_string(), h);
         }
+        handles.insert("pypi".into(), Arc::new(repo.front("pypi")?));
         Ok(Fronts { repo, handles })
     }
 

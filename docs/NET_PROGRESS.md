@@ -223,7 +223,17 @@ The contended run checks that no update is lost: the final version equals the nu
   - Claims are now enforced by the core and not just by the `/v1` check: the plain repository refuses `git/` and `oci/` names. Global admins (`/v1` replace, delete, multi-update) and namespace admins (`set_rule`, e.g. immutable git tags) act through the owning front's handle. A multi-update spanning two fronts is refused.
   - Tests: `tests/fronts.rs`. The HF GC tests now use the real server GC path.
   - Not done: `segmap` is not yet a re-export of `pico2peta_repo::idmap` (same format; the async wrappers stay here). That is a mechanical swap, left for later.
-- Next: PyPI (simple API + upload + upstream proxy-cache), npm, Maven.
+- **PyPI front: DONE** (`crates/server/src/pypi.rs`, `tests/pypi.rs`).
+  - Tested with real twine 6.1, pip 26 and uv 0.13:
+    - upload; reader 403; identical re-upload OK; replacement 409;
+    - pip install latest, pinned, and with a non-normalized name; anonymous gets a 401 Basic challenge;
+    - uv install.
+  - Proxy-cache, tested with a second server proxying the first: local uploads and upstream files are merged on one index. The cached file installs after the upstream is stopped and a zero-grace GC is run; a never-fetched file fails (502).
+  - Storage: `pypi/<i>/<p>/<file>` → `P2PPYPI1` record → content. The `pypi` front claims `pypi/` and its GC follows record → content.
+  - Not done: PEP 658 metadata files, yanking via the API, and the `/pypi/<i>/simple/` root listing of upstream projects (only local projects are listed).
+- Fix: early-rejected uploads (LFS capability, PyPI authz) now send `Connection: close`. Before, a client's pooled connection could be reset mid-body, which made one HF test flaky.
+- Disk hygiene (2026-11-15, asked by the human): `tests/hf/client.py` leaked a 3–9 MB `tmp*` dir per run into `$TMPDIR`. It now removes it at exit, and the HF and PyPI tests give their subprocesses a TMPDIR inside the test's own directory. A whole-workspace test run now leaves nothing in `$TMPDIR`. Pruned the cargo target dir from 8 GB to under 4 GB.
+- Next: npm (registry API + publish + upstream proxy-cache), then Maven.
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
