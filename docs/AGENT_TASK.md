@@ -20,6 +20,24 @@ The human may be disconnected for long periods — keep making progress without 
   - `/mnt/scratch/ec2-user/env.sh` shows the full toolchain env used elsewhere (don't source it wholesale — it redirects CARGO_TARGET_DIR).
 - 4 cores, 15 GB RAM.
 
+## Quality bar — PRODUCTION GRADE, not a demo (from the human)
+The goal is a production-grade storage system that teams can run for real data, **not a demo or research prototype**. Concretely:
+- **Durability & crash consistency:** explicit fsync discipline (file + directory), atomic rename for index/ref updates, versioned on-disk formats with magic + checksums, recovery paths that are *tested* with fault injection (kill at every write/fsync point), not just argued.
+- **Concurrency:** multiple processes/threads writing the same repo safely (locking or lock-free OCC with a single commit point); `replace` contention behaves well under load.
+- **Real backends:** the S3 backend must be real (conditional writes / If-None-Match, multipart, retries with backoff), tested against MinIO or a local S3-compatible server — not a stub.
+- **Server:** a network service (HTTP/gRPC) with authn/authz, audit log, metrics (Prometheus), structured logs/tracing, graceful shutdown, config file. The CLI talks to either a local repo or the server.
+- **GC, retention, repack** that are safe against concurrent writers (mark/sweep with grace periods or epochs), with tests.
+- **Engineering hygiene:** `cargo clippy -- -D warnings`, `cargo fmt`, no `unwrap()`/`expect()` on non-invariant paths, no panics on bad input, fuzz targets for every parser/decoder, documented public APIs, `CHANGELOG`, CI config (GitHub Actions), reproducible benchmarks.
+- **Performance is a requirement:** streaming I/O (never load whole large objects into memory), bounded memory, parallelism where it pays, benchmarks with recorded numbers vs Git/OCI/Xet baselines.
+- No shortcuts that would need a rewrite to productionize. If you must defer something, record it in `docs/PROGRESS.md` under "Production gaps" with what is missing.
+- Branch name `demo` is historical; treat the code as the real product.
+
+## Team (two Claude sessions)
+- **You (session `pico2peta`, worktree `/home/ec2-user/Dev/pico2peta`, branch `demo`) = implementation lead.** You own everything except the paths below.
+- **Session `pico2peta-verify` (worktree `/home/ec2-user/Dev/pico2peta-verify`, branch `verify`) = verification & hardening.** It owns `lean/`, `crates/model/`, `crates/difftest/`, `fuzz/`, and fault-injection / crash-consistency test suites under `tests/`. It also reviews your commits and files findings in `docs/REVIEW.md` on its branch.
+- Protocol: at the end of every milestone (and at least every ~2 hours), run `git merge verify` into `demo`, address every open item in `docs/REVIEW.md` (fix, or reply inline why not), and commit. Do not edit the verify-owned paths except to resolve merge conflicts; ask for changes via a "Requests for verify" section in `docs/PROGRESS.md`. Keep public trait/API changes noted in `docs/PROGRESS.md` so the verifier can track them.
+- M5 (reference model + differential tests) and M7 (Lean) are now owned by the verifier — drop them from your plan, but keep the code testable through public traits.
+
 ## Goals (in order)
 1. **Plan:** Write `docs/PLAN.md` — milestones, crate layout (Cargo workspace), and the *pre-registered* numeric pass thresholds for experiment 1, before running it.
 2. **Core (Rust workspace):**
