@@ -231,6 +231,10 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **Large listings:** `list()` buffers all keys in memory. The trait returns a `Vec`, so a paginated or streaming list would need a trait change if a prefix grows to millions of keys.
 
 ## Requests for core
+- **OPEN BUG (reported 2026-11-15), core ec271c1:** the backend ref log treats an identical stored record on `AlreadyExists` as "our commit". Two writers doing the same CAS (same observed version, same new hash) therefore both get `Ok` for one log entry. This is a lost update and violates P2.
+  - Reproduced by `crates/server/tests/server.rs::two_servers_share_a_repo_via_s3`: 60 acknowledged commits produced only 50–54 versions. The test passed before ec271c1.
+  - Requested fix: a per-attempt writer nonce in each log record, compared on `AlreadyExists`.
+  - This test fails on `net` until the fix lands. That is intended: it guards the fix.
 - 2026-11-15: a streaming put, a backend error variant, and committing early. All three were delivered in API v1.
 - `Error::Unauthorized` (v1.1), `replace_many` (v1.2), `ensure_live` (v1.3), the `Grouper` trait and `delete_ref` (v1.5) were delivered, and all are adopted. `DELETE /v1/refs/<name>` exists and `RemoteRepo::delete_ref` overrides the default.
 - `put_delta` (v1.7) was delivered and adopted: `PUT /v1/objects?delta_base=<hash>` and `RemoteRepo::put_delta`. A 4 MiB object with sparse edits costs well under 1 MiB over the network API (`tests/server.rs`).
