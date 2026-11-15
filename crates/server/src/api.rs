@@ -76,6 +76,10 @@ pub struct AppState {
     pub promotion: Vec<crate::config::PromotionRule>,
     /// The domain fronts and their write handles (`None` only in tests that build state by hand).
     pub fronts: Option<Arc<crate::fronts::Fronts>>,
+    /// `[[limits]]` (per-namespace rate and quota); `None` without rules.
+    pub ns_limits: Option<Arc<crate::limits::NamespaceLimits>>,
+    /// Quota re-measurement period.
+    pub limits_scan: Duration,
 }
 
 impl AppState {
@@ -368,6 +372,42 @@ impl AppState {
         Err(ApiError::denied(format!("{} may not {action} {target}", p.name)))
     }
 
+    /// Applies the `[[limits]]` rule for `name` (after authorization). `write`: the request may
+    /// add data, so the quota applies (except for global admins, who must be able to clean up).
+    pub(crate) fn admit(&self, p: &Principal, name: &str, write: bool) -> ApiResult<()> {
+        let Some(l) = &self.ns_limits else { return Ok(()) };
+        let admin = self.authz.allows(p, "", Access::Admin);
+        match l.admit(name, write, admin) {
+            Ok(()) => Ok(()),
+            Err(crate::limits::Refusal::Rate { prefix, wait }) => {
+                self.metrics
+                    .namespace_limited
+                    .get_or_create(&crate::metrics::OutcomeLabels { outcome: "rate".into() })
+                    .inc();
+                let mut e = ApiError::new(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    codes::OVERLOADED,
+                    format!("rate limit of namespace {prefix} exceeded"),
+                );
+                e.retry_after = Some(wait.as_secs().max(1));
+                Err(e)
+            }
+            Err(crate::limits::Refusal::Quota { prefix, used, max }) => {
+                self.metrics
+                    .namespace_limited
+                    .get_or_create(&crate::metrics::OutcomeLabels { outcome: "quota".into() })
+                    .inc();
+                let mut e = ApiError::new(
+                    StatusCode::INSUFFICIENT_STORAGE,
+                    "quota_exceeded",
+                    format!("namespace {prefix} uses {used} bytes of its {max}-byte quota"),
+                );
+                e.subject = Some(prefix);
+                Err(e)
+            }
+        }
+    }
+
     /// Mutations are refused once the audit log has failed.
     pub(crate) fn require_audit_healthy(&self) -> ApiResult<()> {
         if self.audit.is_healthy() {
@@ -541,6 +581,7 @@ async fn put_object(
         Some(n) => {
             let n = parse_name(n)?;
             st.require(st.authz.allows(&p, n.as_str(), Access::Write), &p, &c, "put", n.as_str())?;
+            st.admit(&p, n.as_str(), true)?;
             Some(n)
         }
         None => {
@@ -838,6 +879,7 @@ async fn resolve(
 ) -> ApiResult<Json<wire::RefJson>> {
     let name = parse_name(&name)?;
     st.require(st.authz.allows(&p, name.as_str(), Access::Read), &p, &c, "resolve", name.as_str())?;
+    st.admit(&p, name.as_str(), false)?;
     let repo = st.repo.clone();
     let n = name.clone();
     match blocking(move || repo.resolve(&n)).await? {
@@ -881,6 +923,7 @@ async fn replace(
         serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("bad replace request: {e}")))?;
     let (name, read_set, new) = req.to_core().map_err(ApiError::from)?;
     st.require(st.authz.allows(&p, name.as_str(), Access::Write), &p, &c, "replace", name.as_str())?;
+    st.admit(&p, name.as_str(), true)?;
     // Adapter-managed namespaces keep invariants (digest ↔ content) that raw
     // replaces could break; only global admins may touch them through /v1.
     if is_reserved(name.as_str()) {
@@ -931,6 +974,8 @@ async fn delete_ref(
     let read_set =
         req.read_set.iter().map(wire::ReadSetEntry::to_core).collect::<Result<Vec<_>, _>>().map_err(ApiError::from)?;
     st.require(st.authz.allows(&p, name.as_str(), Access::Write), &p, &c, "delete_ref", name.as_str())?;
+    // Deletes free space: the rate applies, the quota doesn't.
+    st.admit(&p, name.as_str(), false)?;
     if is_reserved(name.as_str()) {
         st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "delete_reserved", name.as_str())?;
     }
@@ -999,8 +1044,9 @@ async fn multi_update(
     if updates.is_empty() {
         return Err(ApiError::bad_request("at least one update is required"));
     }
-    for (n, _) in &updates {
+    for (n, h) in &updates {
         st.require(st.authz.allows(p, n.as_str(), Access::Write), p, c, "replace", n.as_str())?;
+        st.admit(p, n.as_str(), h.is_some())?;
         if is_reserved(n.as_str()) {
             st.require(st.authz.allows(p, "", Access::Admin), p, c, "replace_reserved", n.as_str())?;
         }

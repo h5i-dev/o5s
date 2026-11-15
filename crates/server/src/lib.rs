@@ -13,6 +13,7 @@ pub mod error;
 pub mod fronts;
 pub mod git;
 pub mod hf;
+pub mod limits;
 pub mod maven;
 pub mod metrics;
 pub mod npm;
@@ -209,6 +210,8 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         maven,
         search: Default::default(),
         promotion: cfg.promotion.clone(),
+        ns_limits: (!cfg.limits.is_empty()).then(|| Arc::new(limits::NamespaceLimits::new(cfg.limits.clone()))),
+        limits_scan: Duration::from_secs(cfg.server.limits_scan_secs.max(1)),
         fronts: Some(fronts),
     }))
 }
@@ -335,6 +338,8 @@ where
 {
     let app = app(state.clone(), request_timeout);
     let gc_task = (state.gc.interval_secs > 0).then(|| tokio::spawn(gc_loop(state.clone())));
+    let quota_task =
+        state.ns_limits.as_ref().is_some_and(|l| l.has_quotas()).then(|| tokio::spawn(quota_loop(state.clone())));
     let reaper = state.oci.clone().map(|o| {
         tokio::spawn(async move {
             loop {
@@ -360,6 +365,9 @@ where
         }
     }
     if let Some(t) = gc_task {
+        t.abort();
+    }
+    if let Some(t) = quota_task {
         t.abort();
     }
     if let Some(t) = reaper {
@@ -406,6 +414,30 @@ pub async fn reload(
     });
     info!(tokens = cfg.auth.tokens.len(), policies = cfg.policy.len(), "configuration reloaded");
     Ok(())
+}
+
+/// Measures `[[limits]]` quotas at start and then every `server.limits_scan_secs`.
+async fn quota_loop(state: Arc<AppState>) {
+    loop {
+        if state.shutting_down.load(Ordering::Acquire) {
+            return;
+        }
+        if let (Some(l), Some(local)) = (state.ns_limits.clone(), state.local.clone()) {
+            let t = std::time::Instant::now();
+            let r = tokio::task::spawn_blocking(move || {
+                let tracer = local.fronts().tracer(&local)?;
+                l.scan(&local, &tracer)?;
+                Ok::<_, pico2peta_core::Error>(l.usage())
+            })
+            .await;
+            match r {
+                Ok(Ok(u)) => info!(usage = ?u, secs = t.elapsed().as_secs_f64(), "namespace quota scan"),
+                Ok(Err(e)) => warn!(error = %e, "namespace quota scan failed"),
+                Err(e) => warn!(error = %e, "namespace quota scan panicked"),
+            }
+        }
+        tokio::time::sleep(state.limits_scan).await;
+    }
 }
 
 /// Runs GC every `gc.interval_secs` (with jitter) until the server stops.

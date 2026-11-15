@@ -133,5 +133,9 @@ With `gc.interval_secs > 0`, the server advances the GC protocol on that schedul
 ## Capacity notes
 - Each transfer buffers at most about 2 MiB, whatever the object size. Measured: 19 MiB peak RSS growth while streaming 512 MiB up and back down (`crates/server/tests/memory.rs`).
 - `server.rate_limit = { per_sec, burst }` gives each principal (anonymous callers: each client IP) a token bucket. Excess requests get 429 with `Retry-After`.
+- `[[limits]]` rules set limits per namespace (the longest `prefix` applies). Every front honours them (git, OCI, HF, PyPI, npm, Maven), and so do the `/v1` name operations.
+  - `rate = { per_sec, burst }` is one token bucket shared by all callers of the namespace. Excess requests get 429 with `Retry-After`.
+  - `max_stored_bytes` is a quota on the logical bytes reachable from the namespace's names, following the fronts' references (commits → trees → blobs, manifests → layers). Content shared with other namespaces counts in full in each one. A background scan measures usage every `server.limits_scan_secs` (default 3600; the scan reads every reachable object's size, so size the interval to the data). Writes into a namespace measured at or over its quota get 507 `quota_exceeded`. Not blocked: reads, `/v1` ref deletes, OCI manifest deletes, and global admins (for cleanup through any front). Other front-level deletes count as writes (e.g. a git push that only deletes refs). A namespace can overshoot by what it writes within one scan interval.
+  - Refusals are counted in `p2p_namespace_limited_total{outcome="rate"|"quota"}`, and each scan logs the usage it measured.
 - `max_concurrent_requests` bounds concurrent requests, including those still streaming bodies. Beyond it, the server answers 503 with `Retry-After: 1`.
 - A client that stalls for 60 s in the middle of a transfer is disconnected.

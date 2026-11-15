@@ -343,7 +343,12 @@ The contended run checks that no update is lost: the final version equals the nu
   - `deploy/grafana-dashboard.json`: 12 panels over every exported metric.
   - `deploy/prometheus-alerts.yml`: 9 rules, validated YAML.
   - `deploy/k8s/`: `local.yaml` (1-replica StatefulSet + PV) and `s3.yaml` (N replicas on S3 with backend refs, IRSA ServiceAccount, GC CronJob). Both embedded configs pass `pico2peta-server check-config`.
-  - Remaining: per-namespace quotas (code) and a Helm chart (not planned: plain manifests cover it).
+  - Per-namespace rate limits and storage quotas: DONE (`[[limits]]`, `crates/server/src/limits.rs`; deploy/README "Capacity notes").
+    - Rate: one token bucket per rule, shared by all callers, applied after authorization in every front and in the `/v1` name operations.
+    - Quota: a background scan every `server.limits_scan_secs` sums the logical bytes reachable from the namespace's names, through the fronts' GC tracers. Writes at or over the quota get 507 `quota_exceeded`. Reads, `/v1` ref deletes, OCI manifest deletes and global admins are exempt.
+    - Metric `p2p_namespace_limited_total{outcome}`. Tests: unit `longest_prefix_rate_and_quota`, end-to-end `namespace_rate_and_quota`.
+    - Limits: usage is as fresh as the last scan, and shared content is charged to every namespace that references it.
+  - Remaining: a Helm chart (not planned: plain manifests cover it).
 - **ROADMAP Net 3 (P5, front side): DONE** (`crates/server/src/prov_api.rs`, `tests/p5.rs`).
   - Every front records its publishes as provenance through the core API, with the front's ids in `meta`, which makes them searchable.
   - External-id resolver: `git:`, `pypi:`, `npm:`, `maven:`, `oci:`, `name:` and `blake3:`, with authz per front namespace.
@@ -368,6 +373,25 @@ The contended run checks that no update is lost: the final version equals the nu
 - **read_verify, server side: DONE** (as agreed with the core: one policy source, the repo's `[read]` config, and no server setting).
   - `GET /v1/objects/<h>?verify=strict|eof` calls `open_verified`. `eof` gets 403 unless the repo allows it, and a bad value gets 400. With no parameter, the plain `open` follows `[read] verify`, so strict is the default by construction.
   - `RemoteRepo::open_verified` sends the parameter. Test `read_verify_parameter_follows_repo_policy`.
+- **idmap batching (human's request): DONE.** `get_many` is now a merge-join (see "Small fixes made to core crates").
+  - Git push: one `get_many` for every pack object plus every outside object the pack references. Canonical bytes are kept up to 256 MiB; beyond that, new objects are re-resolved. REF_DELTA bases are found by an oid map instead of a linear scan.
+  - Clone and fetch: the walk looks objects up in batched BFS waves (commit/tag generations, then trees level by level, then all blobs) and no longer reads blob bodies (they used to be read twice). History is still *emitted* depth-first from the tips, first parent first, like git.
+    - A first version emitted breadth-first generations. Across redis's many tips that interleaves versions of each path from different eras, which ruins "previous version at this path" delta bases: clone went 22.5 s → 30.5 s, with `encode_delta` and deflate time up, in an A/B on one repo. Keeping the DFS emit order fixed it.
+  - OCI and git GC tracers, the HF LFS batch API, HF commits (LFS checks) and Xet shard registration use `get_many` too.
+  - **Dev check** (not a §6.5 result; `bench/fronts/idmap_check.py`, redis heads+tags, under the bench lock, load 2.2–4.6 on 4 cores). Cold = a fresh server process after `drop_caches`; warm = the same operation again. Seconds:
+
+    | | before | after | git daemon |
+    |---|---|---|---|
+    | re-push, cold | 13.78 | 12.72 | 11.25–12.60 |
+    | re-push, warm | 12.51 | 12.02 | 10.90–11.87 |
+    | clone v2, cold | 25.25 | 22.51 | 11.08–12.02 |
+    | clone v2, warm | 21.03 | 21.78 | 11.05–12.21 |
+    | first push into an empty store | 30.50 | 33.03 | 10.93–12.06 |
+
+    A same-repo A/B of four clones per binary gives 22.2–22.8 s before and 21.7–22.2 s after.
+    - Re-push is now within ~1.03–1.06× of git daemon. Lookups are no longer the cost: what remains is pack resolution, which git's index-pack does too.
+    - Clone is still ~1.8×. That time is compute: the store read path (zstd), delta encoding and deflate. Lookups are gone from the profile; `SegMap::range_many` is ~2%.
+  - **Finding (bench design):** the §6.5 `push_s` pushes runs 2–3 into the *same* server, so they are re-pushes and the median hides the first push. Into an empty store, a first push is ~30–33 s vs ~11–12 s for git daemon (~2.7×), dominated by the put path. The final batch should report first-push separately (a fresh server per run). The next push lever is the put path, not lookups.
 - Core lead asks (CLI v0.1, `--remote`): DONE.
   - Server GC options now start from the repository's `LocalRepo::gc_options()`, so `[gc] similarity_repack` (default true) decides grouped repacks, with front hints. The server's `[gc] grouped` is now an optional, deprecated override; the deploy configs no longer set it.
   - Client: `RemoteRepo::attest`, `attestations` (with each envelope's hash: the GET response gains `hash`), `promote` (policy refusal → `Ok(Refused)`, missing access or no rule → `Err`), `provenance`, `lineage`, `impact`, and `search` (`&str` text, or `Search::Prefix`/`Exact`). Test `remote_repo_attest_promote_lineage_search`.

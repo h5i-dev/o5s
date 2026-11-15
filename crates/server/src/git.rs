@@ -1361,7 +1361,9 @@ fn walk_paths_with(
     };
     let mut trees: Vec<(Oid, String)> = Vec::new();
     let mut blobs: Vec<(Oid, String)> = Vec::new();
-    // 1. Commits and tags, generation by generation.
+    // History found by the waves: object -> (its entry, root tree if a commit, next objects).
+    let mut hist: HashMap<Oid, (Walked, Option<Oid>, Vec<Oid>)> = HashMap::new();
+    // 1. Commits and tags, generation by generation (batched lookups and loads).
     let mut wave: Vec<(Oid, String)> = tips.iter().map(|o| (*o, String::new())).collect();
     while !wave.is_empty() {
         let items = take(std::mem::take(&mut wave), &mut seen)?;
@@ -1378,22 +1380,36 @@ fn walk_paths_with(
         let bodies = load_all(&history)?;
         for ((o, p, k, h, len), body) in history.into_iter().zip(bodies) {
             let refs = view.refs(k, &body)?;
-            match k {
-                Kind::Commit => {
-                    if let Some(t) = refs.first() {
-                        trees.push((*t, String::new()));
-                    }
-                    for par in refs.iter().skip(1) {
-                        if commits.is_none_or(|c| c.contains(par)) {
-                            wave.push((*par, String::new()));
-                        }
-                    }
-                }
-                _ => wave.extend(refs.into_iter().map(|r| (r, String::new()))),
-            }
-            out.push(Walked { oid: o, kind: k, path: p, hash: h, len });
+            let (tree, next): (Option<Oid>, Vec<Oid>) = match k {
+                Kind::Commit => (
+                    refs.first().copied(),
+                    refs.iter().skip(1).filter(|par| commits.is_none_or(|c| c.contains(*par))).copied().collect(),
+                ),
+                _ => (None, refs),
+            };
+            wave.extend(next.iter().map(|r| (*r, String::new())));
+            hist.insert(o, (Walked { oid: o, kind: k, path: p, hash: h, len }, tree, next));
         }
     }
+    // Emit history in depth-first order from the tips (first parent first), as git does: each
+    // path's versions then follow one line of history, which keeps "previous version at this
+    // path" a good delta base. (Breadth-first generations across many tips interleave eras.)
+    let mut stack: Vec<Oid> = tips.iter().rev().copied().collect();
+    let mut done: HashSet<Oid> = HashSet::new();
+    let mut root_trees: Vec<(Oid, String)> = Vec::new();
+    while let Some(o) = stack.pop() {
+        if !done.insert(o) {
+            continue;
+        }
+        let Some((w, tree, next)) = hist.remove(&o) else { continue };
+        if let Some(t) = tree {
+            root_trees.push((t, String::new()));
+        }
+        stack.extend(next.iter().rev().copied());
+        out.push(w);
+    }
+    // Trees named directly (tips, tag targets) first, then commits' root trees in that order.
+    trees.extend(root_trees);
     // 2. Trees, level by level.
     let mut level = trees;
     while !level.is_empty() {
@@ -1543,6 +1559,9 @@ pub async fn dispatch(
             remote: c.remote.clone(),
         });
         return git_error(StatusCode::FORBIDDEN, format!("{} may not access {repo}", p.name));
+    }
+    if let Err(e) = st.admit(&p, &ns(&repo), need == Access::Write) {
+        return e.into_response();
     }
     match (method, action) {
         (Method::GET, "refs") => {

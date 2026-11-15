@@ -210,9 +210,12 @@ impl From<Error> for OciError {
             StatusCode::BAD_REQUEST => "NAME_INVALID",
             StatusCode::FORBIDDEN => "DENIED",
             StatusCode::RANGE_NOT_SATISFIABLE => "RANGE_INVALID",
+            StatusCode::TOO_MANY_REQUESTS => "TOOMANYREQUESTS",
+            StatusCode::INSUFFICIENT_STORAGE => "DENIED",
             _ => "UNKNOWN",
         };
-        OciError { status: api.status, code, message: api.message, extra: Vec::new() }
+        let extra = api.retry_after.map(|s| (header::RETRY_AFTER, HeaderValue::from(s))).into_iter().collect();
+        OciError { status: api.status, code, message: api.message, extra }
     }
 }
 
@@ -523,6 +526,8 @@ async fn dispatch_inner(
     if need == Access::Write && !st.audit.is_healthy() {
         return Err(oe(StatusCode::SERVICE_UNAVAILABLE, "UNAVAILABLE", "audit log unavailable; refusing pushes"));
     }
+    // Per-namespace limits; deleting a manifest is not blocked by the quota.
+    st.admit(p, &space, need == Access::Write && method != Method::DELETE)?;
     match (method.clone(), r) {
         (Method::GET | Method::HEAD, Route::Blob(n, d)) => {
             get_blob(st, &oci, &n, &d, headers, method == Method::HEAD).await

@@ -200,7 +200,7 @@ fn version_key(v: &str) -> (Vec<u64>, bool, String) {
 fn check(st: &AppState, p: &Principal, c: &Caller, reg: &str, need: Access) -> std::result::Result<(), Response> {
     let ns = format!("npm/{reg}");
     if st.authz.allows(p, &ns, need) {
-        return Ok(());
+        return st.admit(p, &ns, need >= Access::Write).map_err(IntoResponse::into_response);
     }
     st.metrics.denied.inc();
     st.audit.record_nowait(Event {
