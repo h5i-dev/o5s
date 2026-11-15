@@ -635,6 +635,7 @@ async fn fetch_upstream(
     if !resp.status().is_success() {
         return Err(err(StatusCode::BAD_GATEWAY, format!("upstream {}: {}", f.url, resp.status())));
     }
+    st.metrics.upstream_fetches.get_or_create(&crate::metrics::FrontLabels { front: "pypi".into() }).inc();
     let ns = Name::new(format!("pypi/{index}/{project}")).map_err(core_err)?;
     let x = py.store.put_stream(ns, Box::pin(resp.bytes_stream()), st.max_upload_bytes).await?;
     let (h, sha, size) = (x.hash, x.sha256_hex(), x.size);

@@ -663,6 +663,7 @@ async fn fetch_upstream(
             return Err(npm_err(StatusCode::BAD_GATEWAY, format!("upstream: {e}")));
         }
     };
+    st.metrics.upstream_fetches.get_or_create(&crate::metrics::FrontLabels { front: "npm".into() }).inc();
     let ns = Name::new(format!("npm/{reg}/{}", pkg.seg())).map_err(core_err)?;
     let x = npm.store.put_stream(ns, Box::pin(resp.bytes_stream()), st.max_upload_bytes).await?;
     verify_integrity(&x, man["dist"]["integrity"].as_str(), man["dist"]["shasum"].as_str())

@@ -267,6 +267,7 @@ async fn fetch_upstream(
     if !resp.status().is_success() {
         return Err(format!("upstream {url}: {}", resp.status()));
     }
+    st.metrics.upstream_fetches.get_or_create(&crate::metrics::FrontLabels { front: "maven".into() }).inc();
     let ns = Name::new(format!("maven/{}", n.as_str().split('/').nth(1).unwrap_or("_"))).map_err(|e| e.to_string())?;
     let x = mvn
         .store

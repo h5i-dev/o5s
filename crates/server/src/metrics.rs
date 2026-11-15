@@ -27,6 +27,11 @@ pub struct OutcomeLabels {
     pub outcome: String,
 }
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct FrontLabels {
+    pub front: String,
+}
+
 pub struct Metrics {
     registry: Registry,
     pub http_requests: Family<HttpLabels, Counter>,
@@ -41,6 +46,8 @@ pub struct Metrics {
     pub gc_runs: Family<OutcomeLabels, Counter>,
     pub gc_deleted_bytes: Counter,
     pub rate_limited: Counter,
+    /// Files fetched from an upstream by a proxy-cache front (each should be fetched once).
+    pub upstream_fetches: Family<FrontLabels, Counter>,
     s3: Option<Arc<dyn Fn() -> pico2peta_backend_s3::S3StatsSnapshot + Send + Sync>>,
 }
 
@@ -77,8 +84,15 @@ impl Metrics {
         registry.register("gc_deleted_bytes", "bytes deleted by GC", gc_deleted_bytes.clone());
         let rate_limited = Counter::default();
         registry.register("rate_limited", "requests rejected by the per-principal rate limit", rate_limited.clone());
+        let upstream_fetches = Family::<FrontLabels, Counter>::default();
+        registry.register(
+            "upstream_fetches",
+            "files fetched from an upstream by a proxy-cache front",
+            upstream_fetches.clone(),
+        );
         Metrics {
             registry,
+            upstream_fetches,
             rate_limited,
             gc_runs,
             gc_deleted_bytes,
