@@ -44,6 +44,12 @@ fn put_get_replace_roundtrip() {
     assert_eq!(run(&repo, &["replace", "pkg/a", &h, "--expect", "1"]).status.code(), Some(4));
     assert!(ok(&repo, &["refs"]).contains("pkg/a"));
     assert!(ok(&repo, &["stat"]).contains("sealed_packs"));
+    // GC: three invocations with zero grace run a full cycle; live data survives.
+    assert!(!run(&repo, &["gc", "--grace", "0s"]).status.success(), "short grace needs the unsafe flag");
+    for _ in 0..3 {
+        ok(&repo, &["gc", "--grace", "0s", "--unsafe-short-grace"]);
+    }
+    assert_eq!(run(&repo, &["get", &h, "--range", "10..20"]).stdout, &data[10..20]);
     // Bad input never panics.
     for args in [&["get", "zz"][..], &["replace", "a//b", &h, "--expect", "absent"], &["get", &h, "--range", "5"]] {
         let o = run(&repo, args);

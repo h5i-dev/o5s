@@ -6,4 +6,5 @@
 pub mod format;
 pub mod store;
 
-pub use store::{PackConfig, PackStats, PackStore};
+pub use format::IdxEntry;
+pub use store::{GC_PREFIX, PackConfig, PackStats, PackStore, read_name_list};
