@@ -11,6 +11,7 @@ blake3.workspace = true
 fastcdc.workspace = true
 zstd.workspace = true
 crc32fast.workspace = true
+memmap2.workspace = true
 
 [dev-dependencies]
 crc32fast.workspace = true
