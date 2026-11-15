@@ -65,6 +65,7 @@ pub struct AppState {
     pub token_admin: Option<TokenAdmin>,
     pub oci: Option<Arc<crate::oci::OciState>>,
     pub git: Option<Arc<crate::git::GitState>>,
+    pub hf: Option<Arc<crate::hf::HfState>>,
 }
 
 type St = State<Arc<AppState>>;
@@ -129,12 +130,16 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v2", get(crate::oci::base))
         .route("/v2/{*rest}", axum::routing::any(crate::oci::dispatch))
         .route("/git/{*rest}", axum::routing::any(crate::git::dispatch))
+        .route("/api/{*rest}", axum::routing::any(crate::hf::api))
+        .fallback(crate::hf::root)
         .layer(middleware::from_fn_with_state(state.clone(), authenticate))
         .layer(middleware::from_fn_with_state(state.clone(), shed_load));
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .route("/readyz", get(readyz))
         .route("/metrics", get(metrics_main))
+        // Capability URLs (HMAC-signed by the HF front): the LFS client sends no credentials.
+        .route("/api/_lfs/{op}/{token}", axum::routing::any(crate::hf::lfs_capability))
         .merge(api)
         .layer(middleware::from_fn_with_state(state.clone(), observe))
         .with_state(state)

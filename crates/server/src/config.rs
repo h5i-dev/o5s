@@ -83,6 +83,21 @@ pub struct Config {
     pub oci: OciSection,
     #[serde(default)]
     pub git: GitSection,
+    #[serde(default)]
+    pub hf: HfSection,
+}
+
+/// Hugging Face Hub-compatible endpoints (`/api/...`, `/<repo>/resolve/...`). Needs `[git]`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct HfSection {
+    pub enabled: bool,
+}
+
+impl Default for HfSection {
+    fn default() -> Self {
+        HfSection { enabled: true }
+    }
 }
 
 /// Git smart HTTP endpoint (`/git/<repo>.git/...`).
