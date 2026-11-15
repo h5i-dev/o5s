@@ -171,6 +171,31 @@ What follows from each result (also decided in advance):
   this is fair, but it would differ if pico2peta stored its own tree format.
 - Read latency is measured on the experimental reader, not the M2 pack reader.
 
+### 4.8 Experiment 1b: pre-registered 2026-11-15, before any 1b code
+
+**Trigger.** §4.5's rule applied: Experiment 1 FAILS. On redis, V2 has R = 1.336 > 1.30 (the per-repo
+PASS limit), and its build ratio is 1.30 > 1.0. git.git hadn't finished at that point, but it can't change the verdict.
+
+Everything in §4.1–§4.3 and §4.5 (corpus, object set, baseline, metrics, **thresholds**, V\* rule) applies
+unchanged. The only changes are the candidate variants and their index model:
+
+- **V4: delta, max chain depth 50.** Partitions and order are exactly as §4.4. An object's
+  *predecessor* is the object immediately before it in partition order, if that one has the same path
+  (blobs, trees). For commits and tags, which have no path, it's simply the previous object in the
+  partition. If there's a predecessor and the predecessor's chain depth is < 50, the object is compressed
+  at zstd level 19 with the predecessor's canonical bytes as a zstd reference prefix ("patch-from";
+  `window_log = clamp(ceil(log2(prefix + object)), 23, 27)`). Otherwise it's compressed alone at level 19
+  (depth 0). Every object is an individually addressable compressed record.
+- **V5: delta, max chain depth 10.** The same, with depth limit 10 (cheaper reads).
+- **Size model:** payload + 52 B/object (§4.4's 48 B plus a 4-byte predecessor reference).
+- **Read latency** (§4.5 secondary): one random read decodes the whole chain from its depth-0 root up to
+  the object. Same p50/p99 thresholds, warm cache.
+- **V\*** = whichever of V4, V5 has the lower geometric-mean R. The verdict follows §4.5's table.
+- **Consequences:** PASS → delta-then-zstd becomes the repack strategy for the source-code kind
+  (with frames for objects without predecessors). FAIL → report honestly and keep Git-compatible
+  storage as the recommended configuration for source code (net's Git adapter plus grouped repack, opt-in).
+  Don't add further variants after seeing 1b results.
+
 ## 5. Lean 4 properties (M8, done; see lean/README.md)
 
 Pure model, structurally mirroring `pico2peta-model`:
