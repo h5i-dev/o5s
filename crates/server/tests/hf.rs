@@ -212,6 +212,77 @@ fn huggingface_hub_round_trip_over_xet() {
     let out = run_phase(&py, &srv, ALICE, "alice/xet-model", true, "verify");
     let (so, se) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     assert!(out.status.success() && so.contains("OK"), "after GC\nstdout:\n{so}\nstderr:\n{se}");
+    // The client downloaded through Xet (reconstructions and xorb ranges), not plain HTTP.
+    let m = reqwest::blocking::Client::new()
+        .get(format!("{}/metrics", srv.url()))
+        .bearer_auth(ADMIN)
+        .send()
+        .unwrap()
+        .text()
+        .unwrap();
+    let xet_gets: f64 = m
+        .lines()
+        .filter(|l| {
+            l.starts_with("p2p_http_requests") && l.contains("method=\"GET\"") && l.contains("route=\"/xet/{*rest}\"")
+        })
+        .filter_map(|l| l.rsplit(' ').next()?.parse::<f64>().ok())
+        .sum();
+    assert!(xet_gets > 0.0, "no Xet download requests:\n{m}");
+    xet_download_by_hand(&srv, "alice/xet-model", "model.safetensors");
+}
+
+/// Downloads a Xet-uploaded file through the Xet read protocol without hf_xet:
+/// `resolve` → X-Xet-Hash → read token → v1 reconstruction → virtual-xorb ranges.
+fn xet_download_by_hand(srv: &TestServer, repo: &str, path: &str) {
+    let http = reqwest::blocking::Client::new();
+    let tree: serde_json::Value = http
+        .get(format!("{}/api/models/{repo}/tree/main", srv.url()))
+        .bearer_auth(ALICE)
+        .send()
+        .unwrap()
+        .json()
+        .unwrap();
+    let want = tree.as_array().unwrap().iter().find(|e| e["path"] == path).unwrap()["lfs"]["oid"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let r = http.head(format!("{}/{repo}/resolve/main/{path}", srv.url())).bearer_auth(ALICE).send().unwrap();
+    let file_id = r.headers()["x-xet-hash"].to_str().unwrap().to_string();
+    let refresh = r.headers()["x-xet-refresh-route"].to_str().unwrap().to_string();
+    let tok = http.get(&refresh).bearer_auth(ALICE).send().unwrap();
+    assert!(tok.headers().contains_key("x-xet-access-token"), "token in headers too");
+    let tok: serde_json::Value = tok.json().unwrap();
+    let (cas, at) = (tok["casUrl"].as_str().unwrap(), tok["accessToken"].as_str().unwrap());
+    assert_eq!(http.get(format!("{cas}/v2/reconstructions/{file_id}")).bearer_auth(at).send().unwrap().status(), 404);
+    let rec: serde_json::Value =
+        http.get(format!("{cas}/v1/reconstructions/{file_id}")).bearer_auth(at).send().unwrap().json().unwrap();
+    let mut out = Vec::new();
+    for term in rec["terms"].as_array().unwrap() {
+        let h = term["hash"].as_str().unwrap();
+        let fi = &rec["fetch_info"][h][0];
+        let (a, b) = (fi["url_range"]["start"].as_u64().unwrap(), fi["url_range"]["end"].as_u64().unwrap());
+        // The xorb URL is a capability: no credentials.
+        let bytes = http.get(fi["url"].as_str().unwrap()).header("range", format!("bytes={a}-{b}")).send().unwrap();
+        assert_eq!(bytes.status(), 206);
+        let bytes = bytes.bytes().unwrap();
+        let mut i = 0;
+        let mut term_bytes = Vec::new();
+        while i < bytes.len() {
+            let h = &bytes[i..i + 8];
+            assert_eq!((h[0], h[4]), (0, 0), "version 0, uncompressed");
+            let n = u32::from_le_bytes([h[1], h[2], h[3], 0]) as usize;
+            term_bytes.extend_from_slice(&bytes[i + 8..i + 8 + n]);
+            i += 8 + n;
+        }
+        assert_eq!(term_bytes.len() as u64, term["unpacked_length"].as_u64().unwrap());
+        out.extend(term_bytes);
+    }
+    let out = &out[rec["offset_into_first_range"].as_u64().unwrap() as usize..];
+    assert_eq!(sha256_hex(out), want, "reconstructed bytes");
+    // A forged xorb URL is refused.
+    let fi = &rec["fetch_info"][rec["terms"][0]["hash"].as_str().unwrap()][0];
+    let forged = format!("{}x", &fi["url"].as_str().unwrap()[..fi["url"].as_str().unwrap().len() - 1]);
+    assert_eq!(http.get(forged).send().unwrap().status(), 403);
 }
 
 /// Knowing a sha256 is not a capability: another repo can't commit (and then read) an LFS

@@ -65,6 +65,9 @@ pub struct HfState {
     acl: Arc<SegMap>,
     /// Xet xorb hash → xorb record (see `xet.rs`).
     pub(crate) xet: Arc<SegMap>,
+    /// Xet file hash → file record, and sha256 → the same record (Xet downloads).
+    pub(crate) xetfile: Arc<SegMap>,
+    pub(crate) xetsha: Arc<SegMap>,
     secret: [u8; 32],
 }
 
@@ -75,9 +78,10 @@ impl HfState {
             Ok(Arc::new(SegMap::new(git.repo.clone(), n, Arc::new(SegCache::default()))))
         };
         let (lfs, acl, xet) = (map("git/_lfs")?, map("git/_lfsacl")?, map("git/_xet")?);
+        let (xetfile, xetsha) = (map("git/_xetfile")?, map("git/_xetsha")?);
         let mut secret = [0u8; 32];
         getrandom::fill(&mut secret).map_err(|e| format!("no system randomness: {e}"))?;
-        Ok(HfState { git, local, lfs, acl, xet, secret })
+        Ok(HfState { git, local, lfs, acl, xet, xetfile, xetsha, secret })
     }
 
     pub(crate) fn git_repo(&self) -> &dyn pico2peta_core::Repository {
@@ -728,10 +732,111 @@ fn xet_token(
         return r;
     }
     let tok = sign_token(hf, if write { "xet-w" } else { "xet-r" }, repo, "-", 0);
-    axum::Json(serde_json::json!({
-        "casUrl": format!("{}/xet", base_url(headers)), "accessToken": tok, "exp": now_secs() + TOKEN_TTL_SECS,
-    }))
-    .into_response()
+    let (cas, exp) = (format!("{}/xet", base_url(headers)), now_secs() + TOKEN_TTL_SECS);
+    // hf_xet reads the JSON body; huggingface_hub's Python side reads the headers.
+    let mut r = axum::Json(serde_json::json!({ "casUrl": cas, "accessToken": tok, "exp": exp })).into_response();
+    for (k, v) in [("x-xet-cas-url", cas), ("x-xet-access-token", tok), ("x-xet-token-expiration", exp.to_string())] {
+        if let Ok(v) = HeaderValue::from_str(&v) {
+            r.headers_mut().insert(k, v);
+        }
+    }
+    r
+}
+
+/// The Xet file record for LFS object `sha` if `repo` may read it.
+fn xet_file_for(hf: &HfState, repo: &RepoId, sha: &str) -> Result<Option<crate::xet::FileRecord>> {
+    let Some(key) = sha_key(sha) else { return Ok(None) };
+    if hf.lfs_for(repo, sha)?.is_none() {
+        return Ok(None);
+    }
+    let Some(v) = hf.xetsha.get_live_blocking(&key)? else { return Ok(None) };
+    Ok(crate::xet::FileRecord::decode(&hf.git_repo().get(&v.hash, None)?))
+}
+
+/// `GET <cas>/v1/reconstructions/<file>`: how to rebuild a Xet-uploaded file from its virtual xorbs.
+async fn xet_reconstruction(hf: &Arc<HfState>, repo: RepoId, file: &str, headers: &HeaderMap) -> Response {
+    let Some(fh) = crate::xet::from_hex(file) else { return hf_err(StatusCode::BAD_REQUEST, None, "bad file id") };
+    let (hf2, r2) = (hf.clone(), repo.clone());
+    let rec = blocking(move || {
+        let Some(v) = hf2.xetfile.get_live_blocking(&fh)? else { return Ok(None) };
+        let Some(rec) = crate::xet::FileRecord::decode(&hf2.git_repo().get(&v.hash, None)?) else { return Ok(None) };
+        // The token's repo must be allowed to read this content.
+        Ok(hf2.lfs_for(&r2, &hex(&rec.sha256))?.map(|_| rec))
+    })
+    .await;
+    let rec = match rec {
+        Ok(Some(r)) => r,
+        Ok(None) => return hf_err(StatusCode::NOT_FOUND, None, "file not found"),
+        Err(r) => return r,
+    };
+    let size = rec.chunks.last().map_or(0, |c| c.1);
+    let (from, to) =
+        match headers.get(header::RANGE).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("bytes=")) {
+            Some(r) => {
+                let (a, b) = r.split_once('-').unwrap_or((r, ""));
+                let a: u64 = a.parse().unwrap_or(0);
+                let b: u64 = b.parse::<u64>().map_or(size, |e| (e + 1).min(size));
+                if a >= size {
+                    return hf_err(StatusCode::RANGE_NOT_SATISFIABLE, None, "range starts past the end");
+                }
+                (a, b)
+            }
+            None => (0, size),
+        };
+    let base = base_url(headers);
+    let url = |gi: usize| format!("{base}/xet/xorb/{}", sign_token(hf, "xorb", &repo, file, gi as u64));
+    axum::Json(rec.reconstruction(from, to, &url)).into_response()
+}
+
+/// `GET <cas>/xorb/<token>` with `Range`: bytes of a virtual xorb (the token is the capability).
+async fn xet_xorb(hf: &Arc<HfState>, token: &str, headers: &HeaderMap) -> Response {
+    let Some((repo, file, gi)) = verify_token(hf, "xorb", token) else {
+        return hf_err(StatusCode::FORBIDDEN, None, "invalid or expired xorb URL");
+    };
+    let Some(fh) = crate::xet::from_hex(&file) else { return hf_err(StatusCode::BAD_REQUEST, None, "bad file id") };
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("bytes="))
+        .map(str::to_string);
+    let (hf2, partial) = (hf.clone(), range.is_some());
+    let res = blocking(move || {
+        let Some(v) = hf2.xetfile.get_live_blocking(&fh)? else { return Ok(None) };
+        let Some(rec) = crate::xet::FileRecord::decode(&hf2.git_repo().get(&v.hash, None)?) else { return Ok(None) };
+        if hf2.lfs_for(&repo, &hex(&rec.sha256))?.is_none() {
+            return Ok(None);
+        }
+        let groups = rec.groups();
+        let Some(g) = groups.get(gi as usize) else { return Ok(None) };
+        let total: u64 = g.clone().map(|i| 8 + rec.chunks[i].1 - if i == 0 { 0 } else { rec.chunks[i - 1].1 }).sum();
+        let (bs, be) = match &range {
+            Some(r) => {
+                let (a, b) = r.split_once('-').unwrap_or((r, ""));
+                (a.parse::<u64>().unwrap_or(0), b.parse::<u64>().map_or(total, |e| (e + 1).min(total)))
+            }
+            None => (0, total),
+        };
+        if bs >= be {
+            return Ok(Some((Vec::new(), bs, be, total)));
+        }
+        Ok(Some((rec.serialize_range(hf2.git_repo(), gi as usize, bs, be)?, bs, be, total)))
+    })
+    .await;
+    match res {
+        Ok(Some((data, bs, be, total))) => {
+            let mut r = Response::new(Body::from(data));
+            if partial {
+                *r.status_mut() = StatusCode::PARTIAL_CONTENT;
+                if let Ok(v) = HeaderValue::from_str(&format!("bytes {bs}-{}/{total}", be.saturating_sub(1))) {
+                    r.headers_mut().insert(header::CONTENT_RANGE, v);
+                }
+            }
+            r.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
+            r
+        }
+        Ok(None) => hf_err(StatusCode::NOT_FOUND, None, "xorb not found"),
+        Err(r) => r,
+    }
 }
 
 /// `/xet/{*rest}`: the Xet CAS API, authorized by the bearer capability from [`xet_token`].
@@ -743,6 +848,12 @@ pub async fn xet_cas(
     body: Body,
 ) -> Response {
     let Some(hf) = st.hf.clone() else { return hf_err(StatusCode::NOT_FOUND, None, "HF front disabled") };
+    // Xorb fetch URLs are capabilities (like presigned URLs): no bearer token.
+    if method == Method::GET
+        && let Some(token) = rest.strip_prefix("xorb/")
+    {
+        return xet_xorb(&hf, token, &headers).await;
+    }
     let bearer = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -791,6 +902,9 @@ pub async fn xet_cas(
             }
         }
         // No global dedup index: "not tracked" makes the client upload what it lacks locally.
+        (Method::GET, ["v1", "reconstructions", file]) => xet_reconstruction(&hf, repo, file, &headers).await,
+        // V2 (multi-range URLs) is optional: 404 makes clients use V1.
+        (Method::GET, ["v2", "reconstructions", _]) => hf_err(StatusCode::NOT_FOUND, None, "use v1"),
         (Method::GET, ["v1", "chunks", ..]) => StatusCode::NOT_FOUND.into_response(),
         (Method::POST, ["v1", "telemetry"]) => StatusCode::OK.into_response(),
         (m, _) => {
@@ -1379,7 +1493,8 @@ async fn resolve(
             Some((sha, size)) => {
                 // Only objects uploaded to this repo: a pushed pointer can't expose others' files.
                 let Some(v) = hf2.lfs_for(&r2, &sha)? else { return Ok(Err("EntryNotFound")) };
-                Some((sha, size, v.hash))
+                let xet = xet_file_for(&hf2, &r2, &sha)?.map(|f| crate::xet::to_hex(&f.file_hash));
+                Some((sha, size, v.hash, xet))
             }
             None => None,
         };
@@ -1392,9 +1507,17 @@ async fn resolve(
         Err(r) => return r,
     };
     let commit_hex = hex(&commit);
+    let refresh = format!("{}/api/{}s/{}/xet-read-token/{commit_hex}", base_url(headers), repo.kind, repo.id());
     match lfs {
-        Some((sha, size, h)) => {
+        Some((sha, size, h, xet)) => {
             serve_object(st, h, headers, head, |hm| {
+                // Uploaded through Xet: clients may download it through Xet too.
+                if let Some(x) = xet
+                    && let (Ok(a), Ok(b)) = (HeaderValue::from_str(&x), HeaderValue::from_str(&refresh))
+                {
+                    hm.insert("x-xet-hash", a);
+                    hm.insert("x-xet-refresh-route", b);
+                }
                 if let Ok(v) = HeaderValue::from_str(&commit_hex) {
                     hm.insert("x-repo-commit", v);
                 }

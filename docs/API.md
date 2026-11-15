@@ -140,7 +140,8 @@ git clone https://any:$TOKEN@p2p.example.com/git/hf/models/team/tiny.git   # the
 - Supported: repo create, info (`siblings`, `files_metadata`), tree listing, preupload, the LFS batch API with signed one-hour upload and download URLs, NDJSON commits (add, LFS add, delete file, delete folder; `parentCommit` is checked), and `resolve` with `Range`, `ETag`, `X-Repo-Commit` and `X-Linked-*` headers. Any commit id or branch works as a revision.
 - Xet uploads (the default with `hf_xet` installed) are served at `/xet` (`casUrl` from `xet-write-token`). Xorbs are checked against their Merkle hash, and shard segments against their verification hashes. Each file is rebuilt and checked against its Xet file hash and sha256, then stored like an LFS upload.
 - LFS objects are scoped to a repo: a commit, `resolve` or download can only reference an object uploaded to that repo, so knowing another repo's sha256 is not enough.
-- Not yet: Xet downloads (`resolve` serves plain HTTP), global Xet dedup queries, pull requests, tags/branches via the HF API (use `git push`), and the repo settings and delete APIs.
+- Files uploaded through Xet also download through Xet: `resolve` advertises `X-Xet-Hash`, and reconstructions use signed xorb URLs. Files uploaded over LFS download over plain HTTP.
+- Not yet: global Xet dedup queries, pull requests, tags/branches via the HF API (use `git push`), and the repo settings and delete APIs.
 - Disable it with `[hf] enabled = false`. It requires `[git]`.
 
 ## PyPI (`/pypi/<index>`)
@@ -163,7 +164,8 @@ npm install left-pad
 ```
 - Packuments, tarballs, and publish (the JSON body that npm sends). On publish, the tarball's sha512 and sha1 are checked against `dist.integrity` and `dist.shasum`. Versions are create-once (409 on republish with other bytes). Dist-tags come from the publish. Authorization is on `npm/<registry>`.
 - Proxy-cache: `[npm.upstream.<registry>] url = "https://registry.npmjs.org"`. Upstream versions are merged in, and tarballs are fetched and integrity-checked on first install, then served from the store. When the upstream is unreachable, packuments list only cached versions, and `latest` falls back to the newest cached one.
-- Not yet: unpublish, deprecate, `npm dist-tag`, and search.
+- `npm dist-tag ls|add|rm` work (for versions in that registry; `latest` can't be removed).
+- Not yet: unpublish, deprecate, and search.
 
 ## Maven (`/maven/<repo>`)
 ```xml
