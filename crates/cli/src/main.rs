@@ -41,6 +41,10 @@ enum Cmd {
         /// zstd level for pack records (0 = off).
         #[arg(long)]
         zstd_level: Option<i32>,
+        /// Store refs as a create-only log on the object backend instead of a
+        /// local journal (lets several hosts write one repository on shared storage).
+        #[arg(long)]
+        refs_on_backend: bool,
     },
     /// Store a file (or stdin with `-`), print its hash.
     Put {
@@ -193,13 +197,15 @@ enum Outcome {
 }
 
 fn run(cli: Cli) -> Result<Outcome, Error> {
-    if let Cmd::Init { chunk_threshold, pack_cap, zstd_level } = &cli.cmd {
+    if let Cmd::Init { chunk_threshold, pack_cap, zstd_level, refs_on_backend } = &cli.cmd {
         if cli.remote.is_some() {
             return Err(Error::Unsupported("init is only available for local repositories"));
         }
         let mut cfg = pico2peta_repo::PackConfig::default();
         cfg.apply_overrides(*chunk_threshold, *pack_cap, *zstd_level);
-        LocalRepo::init(&cli.repo, &cfg)?;
+        let store =
+            if *refs_on_backend { pico2peta_repo::RefsStore::Backend } else { pico2peta_repo::RefsStore::Local };
+        LocalRepo::init_with(&cli.repo, &cfg, store)?;
         println!("initialized {}", cli.repo.display());
         return Ok(Outcome::Ok);
     }

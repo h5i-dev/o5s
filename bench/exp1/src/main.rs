@@ -423,14 +423,23 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
                                         Some(pv) if same && prev_depth < maxd => {
                                             let need = (pv.len() + b.len()).max(2) as u64;
                                             let wl = (64 - (need - 1).leading_zeros()).clamp(23, 27);
-                                            let mut enc = zstd::stream::write::Encoder::with_ref_prefix(Vec::new(), LEVEL, pv)?;
+                                            let mut enc =
+                                                zstd::stream::write::Encoder::with_ref_prefix(Vec::new(), LEVEL, pv)?;
                                             enc.window_log(wl)?;
                                             enc.write_all(b)?;
                                             (enc.finish()?, prev_depth + 1, Some((i - 1) as u32))
                                         }
                                         _ => (c.compress(b)?, 0, None),
                                     };
-                                    ls[i] = Loc { off: buf.len() as u64, clen: z.len() as u64, inner: 0, len: b.len() as u64, part: pi as u32, depth, pred };
+                                    ls[i] = Loc {
+                                        off: buf.len() as u64,
+                                        clen: z.len() as u64,
+                                        inner: 0,
+                                        len: b.len() as u64,
+                                        part: pi as u32,
+                                        depth,
+                                        pred,
+                                    };
                                     buf.extend_from_slice(&z);
                                     pending.push(i);
                                     prev = Some(b.to_vec());
@@ -601,7 +610,8 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
     let _ = std::fs::remove_file(&out_path);
     let depths: Vec<u32> = locs.iter().flatten().map(|l| l.depth).collect();
     let max_depth = depths.iter().copied().max().unwrap_or(0);
-    let mean_depth = if depths.is_empty() { 0.0 } else { depths.iter().map(|d| *d as f64).sum::<f64>() / depths.len() as f64 };
+    let mean_depth =
+        if depths.is_empty() { 0.0 } else { depths.iter().map(|d| *d as f64).sum::<f64>() / depths.len() as f64 };
     let big: Vec<String> = {
         let mut v: Vec<&Part> = parts.iter().collect();
         v.sort_by_key(|p| std::cmp::Reverse(p.raw));

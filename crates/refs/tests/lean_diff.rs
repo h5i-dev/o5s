@@ -52,7 +52,7 @@ fn obs_str(o: Option<u8>) -> String {
 proptest! {
     #![proptest_config(ProptestConfig { cases: 300, ..ProptestConfig::default() })]
     #[test]
-    fn rust_matches_lean_model(ops in proptest::collection::vec(op(), 1..50)) {
+    fn rust_matches_lean_model(ops in proptest::collection::vec(op(), 1..50), use_log in any::<bool>()) {
         let Some(bin) = model_bin() else {
             eprintln!("lean_diff: skipped (build lean/ with `lake build p2p-model`)");
             return Ok(());
@@ -60,8 +60,18 @@ proptest! {
         // Bias read sets toward truth: the true observation of the target is
         // usually included (otherwise nearly everything is a conflict).
         let d = tempfile::tempdir().unwrap();
-        let r = RefStore::open(d.path()).unwrap();
-        r.set_compact_threshold(400);
+        // Both ref engines are checked against the Lean model.
+        let r = if use_log {
+            let b: std::sync::Arc<dyn pico2peta_core::backend::Backend> =
+                std::sync::Arc::new(pico2peta_core::backend::LocalDisk::new(d.path()).unwrap());
+            let r = RefStore::open_backend(b, "refs/").unwrap();
+            r.set_compact_threshold(5);
+            r
+        } else {
+            let r = RefStore::open(d.path()).unwrap();
+            r.set_compact_threshold(400);
+            r
+        };
         let mut objects: HashSet<Hash> = HashSet::new();
         let tok = |i: u8| Hash::of(format!("h{i}").as_bytes());
         let mut script = String::new();

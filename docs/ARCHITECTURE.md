@@ -126,3 +126,28 @@ dangling ref.
 
 Crash consistency (fsync honesty, atomic rename, create-only puts) is assumed by the proofs and tested
 by fault injection at every write/fsync point plus real SIGKILLs.
+
+## Deployment topology and limits
+
+- **Ref store choice** (`[refs] store` in config.toml, or `pico2peta init --refs-on-backend`):
+  - `local` (default): a journal with an `flock` commit point. All writers must be on one host, but any
+    number of processes on that host may share it.
+  - `backend`: a create-only log under `refs/` on the pack backend (`refs/log/<seq>`, plus
+    `refs/snap/<seq>-<ts>` snapshots). Commits are linearized by atomic conditional create (S3 `If-None-Match`),
+    so **several hosts may write one repository** when packs and refs are on shared storage. Log entries
+    are trimmed only behind snapshots older than 1 h. A writer that paused longer than 60 s between
+    catching up and committing re-checks, and fails rather than acknowledging a trimmed slot.
+- **Packs can live on S3** (`open_with_backend`). Pack and index blobs are create-only and
+  content-named, so they're safe even if several hosts write the same bucket. But only one host may own
+  the refs (see above), and staging stays local to each writer.
+- Both ref engines share the pure decision logic (`RefState::decide_*`). Both are checked against the
+  model proptest and the Lean↔Rust difftest.
+
+## Backup, restore and integrity
+
+- **Consistent backup:** copy `refs/` first, then `objects/`. Objects are immutable and the refs only point at
+  flushed objects, so a backup taken in this order is consistent even while writers run. Objects written
+  after the refs copy are just unreferenced. Pause GC for the duration, because GC is what deletes packs.
+- **Restore:** put both directories back and run `pico2peta fsck`.
+- **Integrity:** `pico2peta fsck` reads and verifies every object and ref. Every normal read also verifies
+  checksums and content hashes, so corruption is reported, never returned as data.

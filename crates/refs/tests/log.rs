@@ -1,0 +1,110 @@
+//! The backend-log ref store: same semantics as the journal store, plus
+//! multi-host safety via create-only commits.
+use pico2peta_core::backend::{Backend, LocalDisk};
+use pico2peta_core::fault::Faults;
+use pico2peta_core::{Hash, Name, Observed, RefValue, ReplaceOutcome, Result, Rule};
+use pico2peta_refs::RefStore;
+use std::sync::Arc;
+
+fn n(s: &str) -> Name {
+    Name::new(s).unwrap()
+}
+fn h(i: u64) -> Hash {
+    Hash::of(&i.to_le_bytes())
+}
+fn yes(_: &Hash) -> Result<bool> {
+    Ok(true)
+}
+
+#[test]
+fn log_store_semantics_and_snapshots() {
+    let d = tempfile::tempdir().unwrap();
+    let b: Arc<dyn Backend> = Arc::new(LocalDisk::new(d.path()).unwrap());
+    let r = RefStore::open_backend(b.clone(), "repo1/refs/").unwrap();
+    r.set_compact_threshold(5);
+    r.set_rule("pkg", Rule::ImmutableAfterPublish).unwrap();
+    let a = n("a");
+    for i in 0..23u64 {
+        let obs = RefValue::observed(r.resolve(&a).unwrap());
+        assert!(matches!(r.replace(&a, &[(a.clone(), obs)], h(i), &yes).unwrap(), ReplaceOutcome::Ok { .. }));
+    }
+    let p = n("pkg/x");
+    r.replace(&p, &[(p.clone(), Observed::Absent)], h(1), &yes).unwrap();
+    assert!(r.replace(&p, &[(p.clone(), Observed::Version(1))], h(2), &yes).is_err());
+    assert!(r.generation().unwrap() >= 20, "snapshots taken");
+    // A fresh handle starts from the newest snapshot and replays the tail.
+    let r2 = RefStore::open_backend(b.clone(), "repo1/refs/").unwrap();
+    assert_eq!(r2.snapshot().unwrap(), r.snapshot().unwrap());
+    assert_eq!(r2.resolve(&a).unwrap().unwrap().version, 23);
+    // Stale writers conflict across handles.
+    assert!(matches!(
+        r2.replace(&a, &[(a.clone(), Observed::Version(22))], h(99), &yes).unwrap(),
+        ReplaceOutcome::Conflict { .. }
+    ));
+    // Another prefix is an independent store.
+    let other = RefStore::open_backend(b, "repo2/refs/").unwrap();
+    assert_eq!(other.resolve(&a).unwrap(), None);
+}
+
+/// Many handles (standing in for hosts) contend on one counter: no lost updates.
+#[test]
+fn log_store_multi_handle_contention() {
+    let d = tempfile::tempdir().unwrap();
+    let b: Arc<dyn Backend> = Arc::new(LocalDisk::new(d.path()).unwrap());
+    let c = n("counter");
+    let wins: u64 = std::thread::scope(|sc| {
+        (0..6u64)
+            .map(|t| {
+                let b = b.clone();
+                let c = c.clone();
+                sc.spawn(move || {
+                    let r = RefStore::open_backend(b, "x/").unwrap();
+                    r.set_compact_threshold(17);
+                    let mut w = 0;
+                    while w < 30 {
+                        let obs = RefValue::observed(r.resolve(&c).unwrap());
+                        if let ReplaceOutcome::Ok { .. } =
+                            r.replace(&c, &[(c.clone(), obs)], h(t * 100 + w), &yes).unwrap()
+                        {
+                            w += 1;
+                        }
+                    }
+                    w
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|j| j.join().unwrap())
+            .sum()
+    });
+    let r = RefStore::open_backend(b, "x/").unwrap();
+    assert_eq!(r.resolve(&c).unwrap().unwrap().version, wins);
+}
+
+/// Crash at every fault point: acknowledged commits survive; the store recovers.
+#[test]
+fn log_store_crash_sweep() {
+    for budget in 0..30u64 {
+        let d = tempfile::tempdir().unwrap();
+        let b: Arc<dyn Backend> = Arc::new(LocalDisk::new(d.path()).unwrap());
+        let mut acked = Vec::new();
+        {
+            let r = RefStore::open_backend_with_faults(b.clone(), "p/", Faults::crash_after(budget)).unwrap();
+            r.set_compact_threshold(3);
+            for i in 0..10u64 {
+                let nm = n(&format!("k/{i}"));
+                match r.replace(&nm, &[(nm.clone(), Observed::Absent)], h(i), &yes) {
+                    Ok(ReplaceOutcome::Ok { .. }) => acked.push((nm, h(i))),
+                    Ok(o) => panic!("{o:?}"),
+                    Err(_) => break,
+                }
+            }
+        }
+        let r = RefStore::open_backend(b, "p/").unwrap();
+        for (nm, hh) in &acked {
+            assert_eq!(r.resolve(nm).unwrap().map(|v| v.hash), Some(*hh), "budget {budget}");
+        }
+        let z = n("z");
+        r.replace(&z, &[(z.clone(), Observed::Absent)], h(77), &yes).unwrap();
+    }
+}

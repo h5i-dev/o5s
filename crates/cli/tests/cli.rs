@@ -86,13 +86,22 @@ fn put_get_replace_roundtrip() {
     }
 }
 
-/// Separate OS processes race on one counter ref with OCC. Every
-/// acknowledged success must be reflected in the final version.
+#[test]
+fn multi_process_contention_with_refs_on_backend() {
+    contention(&["init", "--refs-on-backend"]);
+}
+
 #[test]
 fn multi_process_contention() {
+    contention(&["init"]);
+}
+
+/// Separate OS processes race on one counter ref with OCC. Every
+/// acknowledged success must be reflected in the final version.
+fn contention(init: &[&str]) {
     let d = tempfile::tempdir().unwrap();
     let repo = d.path().join("r");
-    ok(&repo, &["init"]);
+    ok(&repo, init);
     let procs = 4;
     let per = 8;
     let wins: usize = std::thread::scope(|sc| {
