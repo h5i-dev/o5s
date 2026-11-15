@@ -5,9 +5,15 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 ## [Unreleased]
 
 ### Changed (breaking before v0.1)
+- **CLI cleanup (plumbing over a domain-agnostic core).**
+  - `put`: removed `--delta-base`, `--delta-from-ref` and `--no-byte-group`, and the automatic safetensors detection. Storage choices come from namespace profiles: `put --for-name NAME` applies NAME's profile, also with `--remote` (`PUT /v1/objects?for_name=`). The low-level override is the generic `--encoding KEY=VALUE` (`chunker`, `group-width`, `derive-from`, `patch=xor|xor-anchored`).
+  - Provenance is one group: `prov record | lineage | impact | why`, each taking a HASH or a NAME. The top-level `lineage` and `impact` are removed, and `prov why/impact` now also accept names.
+  - New: `update` (atomic multi-name OCC), `attest keygen | create | list | verify`, and `promote SRC DST` (local policy flags; with `--remote` the server's `[[promotion]]` policy applies). With `--remote`, `attest create|list|verify`, `prov lineage|impact` and `search` are answered by the server's endpoints (no full provenance-log download).
+  - The reference is generated in `docs/CLI.md` (`scripts/gen-cli-doc.sh`).
 - **GC lays out repacked objects by content similarity by default, for every domain** (`[gc] similarity_repack`, default `true`; `gc --no-similarity-repack`). The human's decision after Experiment 3, whose pre-registered verdict, FAIL on jq's build time, is unchanged in EXP1.md. Before, grouping needed a `Grouper` and was opt-in.
 
 ### Added
+- `ObjectStore::put_many` (API v1.19): batched small-object puts. Items are hashed, dedup-checked and compressed on up to 4 threads, then appended in one writer-lock pass; duplicates in a batch are stored once, and items over the chunking threshold go through `put`. 2.0× over per-object `put` on 1 GiB of real redis git objects (131 → 260 MB/s). `gc --repack-all` in the CLI (the server already had it): it recompresses records written at a fast ingest level (`init --zstd-level 1`) into similarity frames.
 - Streaming `put_stream` pipeline (chunker → parallel hash/dedup/compress/encode → in-order committer, with the whole-object hash on its own thread and bounded memory): about 2.3× faster on CPU-bound storage. Compressibility probe (`pack.compress_probe`, default on). Incremental pack hashing, so sealing no longer re-reads the pack.
 - Byte-grouped record codec (codec 2) for model weights: `put` of safetensors and `put --delta-from-ref` group bf16/fp16/fp32 bytes into planes before zstd (fine-tune deltas −10.6%, base −6.0% on SmolLM2-135M at the default `pack.grouped_zstd_level = 6`; `init --grouped-zstd-level`). `--no-byte-group` opts out. Older readers reject codec 2 rather than misread it.
 - Per-namespace chunking: `[chunking]` in config.toml (`init --chunk PREFIX=xet|fastcdc`, `put --for-name`), with a byte-exact Hugging Face Xet chunker (from `crates/chunk`). FastCDC remains the default; reads are unaffected.

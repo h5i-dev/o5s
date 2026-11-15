@@ -830,6 +830,71 @@ impl PackStore {
         Ok(idx.get(hash).is_some_and(|l| rank(&idx, &l) < 2))
     }
 
+    /// [`ObjectStore::put_many`]: small items are hashed, dedup-checked and
+    /// compressed on up to 4 threads (off the writer lock), then appended in
+    /// order in one writer-lock pass. Items at or above the chunking threshold
+    /// go through [`ObjectStore::put`] (its own parallel pipeline). Duplicates
+    /// within the batch are stored once.
+    pub fn put_many_impl(&self, items: &[&[u8]]) -> Result<Vec<Hash>> {
+        let cfg = &self.inner.cfg;
+        let small: Vec<usize> = (0..items.len()).filter(|&i| items[i].len() < cfg.chunk_threshold).collect();
+        let total: usize = small.iter().map(|&i| items[i].len()).sum();
+        // One encoded record (codec, bytes) per small item that must be written.
+        let encode = |i: usize, hash: Hash| -> (Codec, Vec<u8>) {
+            let data = items[i];
+            let compressed = compress_with_probe(cfg.zstd_level, cfg.compress_probe, data);
+            let (codec, payload): (Codec, &[u8]) = match &compressed {
+                Some(c) => (Codec::Zstd, c),
+                None => (Codec::Raw, data),
+            };
+            (codec, encode_record(Kind::Blob, codec, &hash, data.len() as u64, payload))
+        };
+        // Dedup first (one staleness check, one read lock), so known objects
+        // are neither compressed nor appended.
+        let hashes_known: Vec<(Hash, bool)> = {
+            let hs: Vec<Hash> = if total >= PUT_MANY_PARALLEL_BYTES {
+                par_map(&small, |&i| Hash::of(items[i]))?
+            } else {
+                small.iter().map(|&i| Hash::of(items[i])).collect()
+            };
+            if !hs.is_empty() {
+                let _ = self.dedup_hit(&hs[0])?; // refreshes the index if stale
+            }
+            let idx = self.inner.index.read().map_err(poisoned)?;
+            hs.into_iter().map(|h| (h, idx.get(&h).is_some_and(|l| rank(&idx, &l) < 2))).collect()
+        };
+        let mut seen: HashSet<Hash> = HashSet::with_capacity(small.len());
+        let todo: Vec<(usize, usize)> = small
+            .iter()
+            .enumerate()
+            .filter(|(k, _)| !hashes_known[*k].1 && seen.insert(hashes_known[*k].0))
+            .map(|(k, &i)| (k, i))
+            .collect();
+        let todo_bytes: usize = todo.iter().map(|&(_, i)| items[i].len()).sum();
+        let encoded: Vec<(Codec, Vec<u8>)> = if todo_bytes >= PUT_MANY_PARALLEL_BYTES {
+            par_map(&todo, |&(k, i)| encode(i, hashes_known[k].0))?
+        } else {
+            todo.iter().map(|&(k, i)| encode(i, hashes_known[k].0)).collect()
+        };
+        {
+            let mut w = self.inner.writer.lock().map_err(poisoned)?;
+            for ((k, i), (codec, rec)) in todo.iter().zip(encoded) {
+                self.append_record(&mut w, Kind::Blob, hashes_known[*k].0, items[*i].len() as u64, codec, &rec)?;
+                self.maybe_seal(&mut w)?;
+            }
+        }
+        let mut out = vec![Hash([0; 32]); items.len()];
+        for (k, &i) in small.iter().enumerate() {
+            out[i] = hashes_known[k].0;
+        }
+        for i in 0..items.len() {
+            if items[i].len() >= cfg.chunk_threshold {
+                out[i] = self.put(items[i])?;
+            }
+        }
+        Ok(out)
+    }
+
     /// Seals every staging file whose owner is gone.
     fn recover_orphans(&self) -> Result<()> {
         let mut paths: Vec<PathBuf> = fs::read_dir(&self.inner.staging_dir)?
@@ -2174,6 +2239,10 @@ impl ObjectStore for PackStore {
         Ok(hash)
     }
 
+    fn put_many(&self, items: &[&[u8]]) -> Result<Vec<Hash>> {
+        self.put_many_impl(items)
+    }
+
     fn put_stream(&self, src: &mut dyn Read) -> Result<Hash> {
         self.put_stream_with(ChunkerKind::FastCdc, src)
     }
@@ -2518,6 +2587,43 @@ fn zstd_compress(raw: &[u8], level: i32) -> Option<Vec<u8>> {
         };
         ctxs[i].1.compress(raw).ok()
     })
+}
+
+/// Below this many bytes a `put_many` batch is hashed and compressed on the
+/// calling thread (thread start-up would cost more than it saves).
+const PUT_MANY_PARALLEL_BYTES: usize = 256 << 10;
+
+/// `items.map(f)` on up to 4 scoped threads, results in order. Workers take
+/// items from a shared counter, so uneven item sizes still balance.
+fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Result<Vec<R>> {
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 4).min(items.len());
+    if workers <= 1 {
+        return Ok(items.iter().map(&f).collect());
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut out: Vec<(usize, R)> = std::thread::scope(|s| {
+        let hs: Vec<_> = (0..workers)
+            .map(|_| {
+                s.spawn(|| {
+                    let mut v = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        if i >= items.len() {
+                            break v;
+                        }
+                        v.push((i, f(&items[i])));
+                    }
+                })
+            })
+            .collect();
+        let mut all = Vec::with_capacity(items.len());
+        for h in hs {
+            all.extend(h.join().map_err(|_| Error::Corrupt("put_many worker panicked".into()))?);
+        }
+        Ok::<_, Error>(all)
+    })?;
+    out.sort_unstable_by_key(|(i, _)| *i);
+    Ok(out.into_iter().map(|(_, r)| r).collect())
 }
 
 /// Maximum length of a delta chain followed on reads.

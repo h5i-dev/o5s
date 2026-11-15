@@ -203,6 +203,13 @@ pub fn check_range(range: Option<Range<u64>>, len: u64) -> Result<Range<u64>> {
 pub trait ObjectStore: Send + Sync {
     /// Stores `data` (idempotently) and returns its content hash.
     fn put(&self, data: &[u8]) -> Result<Hash>;
+    /// Stores many objects (API v1.19): same result as calling [`put`](Self::put)
+    /// on each, in order, but implementations may hash and compress them in
+    /// parallel and append them in one pass (the fronts' small-object ingest,
+    /// e.g. the objects of a git push). Default: one `put` per item.
+    fn put_many(&self, items: &[&[u8]]) -> Result<Vec<Hash>> {
+        items.iter().map(|d| self.put(d)).collect()
+    }
     /// Streams an object of unknown length in with bounded memory.
     fn put_stream(&self, src: &mut dyn Read) -> Result<Hash>;
     /// Streams an object in, stored as a byte-wise XOR delta against `base`

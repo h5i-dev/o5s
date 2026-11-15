@@ -731,6 +731,19 @@ fn vm_rss_mb() -> f64 {
         / 1024.0
 }
 
+/// `RssAnon` (heap) and `RssFile` (touched pages of mapped files, reclaimable) in MiB.
+fn rss_split_mb() -> (f64, f64) {
+    let st = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let get = |k: &str| {
+        st.lines()
+            .find(|l| l.starts_with(k))
+            .and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok())
+            .unwrap_or(0.0)
+            / 1024.0
+    };
+    (get("RssAnon:"), get("RssFile:"))
+}
+
 fn pct(v: &mut [f64], p: f64) -> f64 {
     v.sort_by(|a, b| a.total_cmp(b));
     v.get(((v.len() as f64 - 1.0) * p).round() as usize).copied().unwrap_or(f64::NAN)
@@ -799,8 +812,10 @@ fn scale(dir: &str, part: &str, count: u64) -> Result<(), Box<dyn std::error::Er
                 assert_eq!(d, scale_obj(i));
             }
             let rss = vm_rss_mb();
+            let (anon, file) = rss_split_mb();
             println!(
-                "{{\"part\":\"objects\",\"n\":{count},\"put_rate_first_1e6\":{first_rate:.0},\"put_rate\":{put_rate:.0},\"open_s\":{open_s:.2},\"get_p50_ms\":{:.4},\"get_p99_ms\":{:.4},\"rss_mb\":{rss:.0},\"rss_open_mb\":{rss_before:.0},\"rss_bytes_per_object\":{:.1},\"disk_bytes\":{},\"load\":\"{}\"}}",
+                "{{\"anon_mb\":{anon:.0},\"file_mb\":{file:.0},\"anon_bytes_per_object\":{:.1},\"part\":\"objects\",\"n\":{count},\"put_rate_first_1e6\":{first_rate:.0},\"put_rate\":{put_rate:.0},\"open_s\":{open_s:.2},\"get_p50_ms\":{:.4},\"get_p99_ms\":{:.4},\"rss_mb\":{rss:.0},\"rss_open_mb\":{rss_before:.0},\"rss_bytes_per_object\":{:.1},\"disk_bytes\":{},\"load\":\"{}\"}}",
+                anon * 1048576.0 / count as f64,
                 pct(&mut lat.clone(), 0.5),
                 pct(&mut lat, 0.99),
                 rss * 1048576.0 / count as f64,
@@ -936,7 +951,149 @@ fn scale(dir: &str, part: &str, count: u64) -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
+/// Objects from a `git cat-file --batch` dump (`<oid> <type> <size>\n<body>\n`), up to `max` bytes.
+fn catfile_objects(path: &str, max: usize) -> Result<Vec<Vec<u8>>, Box<dyn std::error::Error>> {
+    let b = std::fs::read(path)?;
+    let (mut o, mut out, mut total) = (0usize, Vec::new(), 0usize);
+    while o < b.len() && total < max {
+        let nl = o + b[o..].iter().position(|&c| c == b'\n').ok_or("bad dump")?;
+        let hdr = std::str::from_utf8(&b[o..nl])?;
+        let size: usize = hdr.rsplit(' ').next().ok_or("bad header")?.parse()?;
+        if nl + 1 + size > b.len() {
+            break; // truncated dump
+        }
+        out.push(b[nl + 1..nl + 1 + size].to_vec());
+        total += size;
+        o = nl + 1 + size + 1;
+    }
+    Ok(out)
+}
+
+/// `p2p-bench ingest <catfile dump> <dir> [MiB]`: small-object ingest of real
+/// objects. Per zstd level: single-thread compress MB/s and stored ratio; then
+/// `put` one at a time vs `put_many` (64 MiB batches) into fresh repositories.
+fn ingest(dump: &str, dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
+    let objs = catfile_objects(dump, mib << 20)?;
+    let raw: usize = objs.iter().map(|o| o.len()).sum();
+    for level in [-1, 1, 2, 3] {
+        let mut c = zstd::bulk::Compressor::new(level)?;
+        let t = Instant::now();
+        let mut stored = 0usize;
+        for o in &objs {
+            stored += if o.len() < 64 { o.len() } else { c.compress(o)?.len().min(o.len()) };
+        }
+        let secs = t.elapsed().as_secs_f64();
+        println!(
+            "{{\"mode\":\"ingest-level\",\"level\":{level},\"objects\":{},\"raw_mb\":{:.1},\"ratio\":{:.4},\"mb_s\":{:.0}}}",
+            objs.len(),
+            raw as f64 / 1e6,
+            stored as f64 / raw as f64,
+            raw as f64 / 1e6 / secs
+        );
+    }
+    if std::env::args().nth(5).as_deref() == Some("repack") {
+        // Stored bytes after ingest at level L, and after a full similarity repack
+        // (`repack_all`, zero grace): what a fast ingest level costs before and after GC.
+        struct All(Hash, Vec<Hash>);
+        impl pico2peta_repo::Tracer for All {
+            fn children(&self, h: &Hash, _: &dyn ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+                Ok(if *h == self.0 { self.1.clone() } else { Vec::new() })
+            }
+        }
+        let stored = |repo: &LocalRepo| -> Result<u64, Box<dyn std::error::Error>> {
+            let mut b = 0;
+            for p in repo.packs().live_packs()? {
+                b += repo.packs().pack_bytes(&p)?;
+            }
+            Ok(b)
+        };
+        for level in [1, 3] {
+            let root = std::path::Path::new(dir).join(format!("ingest-l{level}"));
+            let _ = std::fs::remove_dir_all(&root);
+            let repo = LocalRepo::init(&root, &PackConfig { zstd_level: level, ..PackConfig::default() })?;
+            let t = Instant::now();
+            let mut hs = Vec::with_capacity(objs.len());
+            for c in objs.chunks(4096) {
+                let refs: Vec<&[u8]> = c.iter().map(|o| o.as_slice()).collect();
+                hs.extend(repo.put_many(&refs)?);
+            }
+            repo.flush()?;
+            let put_s = t.elapsed().as_secs_f64();
+            let before = stored(&repo)?;
+            let rootobj = repo.put(b"ingest root")?;
+            let rn = Name::new("ingest/root")?;
+            repo.replace(&rn, &[(rn.clone(), Observed::Absent)], rootobj)?;
+            repo.flush()?;
+            let opts = pico2peta_repo::GcOptions {
+                grace: std::time::Duration::ZERO,
+                allow_short_grace: true,
+                repack_all: true,
+                ..pico2peta_repo::GcOptions::default()
+            };
+            let t = Instant::now();
+            let tracer = All(rootobj, hs);
+            for _ in 0..3 {
+                repo.gc(&opts, &tracer)?;
+            }
+            let gc_s = t.elapsed().as_secs_f64();
+            let after = stored(&repo)?;
+            println!(
+                "{{\"mode\":\"ingest-repack\",\"level\":{level},\"raw_mb\":{:.1},\"put_s\":{put_s:.2},\"stored_mb\":{:.1},\"gc_s\":{gc_s:.1},\"after_gc_mb\":{:.1},\"load\":\"{}\"}}",
+                raw as f64 / 1e6,
+                before as f64 / 1e6,
+                after as f64 / 1e6,
+                std::fs::read_to_string("/proc/loadavg").unwrap_or_default().split(' ').next().unwrap_or("")
+            );
+            drop(repo);
+            let _ = std::fs::remove_dir_all(&root);
+        }
+        return Ok(());
+    }
+    for (name, many) in [("put", false), ("put_many", true)] {
+        let root = std::path::Path::new(dir).join(format!("ingest-{name}"));
+        let _ = std::fs::remove_dir_all(&root);
+        let repo = LocalRepo::init(&root, &PackConfig::default())?;
+        let t = Instant::now();
+        if many {
+            let mut i = 0;
+            while i < objs.len() {
+                let (mut j, mut bytes) = (i, 0usize);
+                while j < objs.len() && bytes < 64 << 20 {
+                    bytes += objs[j].len();
+                    j += 1;
+                }
+                let refs: Vec<&[u8]> = objs[i..j].iter().map(|o| o.as_slice()).collect();
+                repo.put_many(&refs)?;
+                i = j;
+            }
+        } else {
+            for o in &objs {
+                repo.put(o)?;
+            }
+        }
+        repo.flush()?;
+        let secs = t.elapsed().as_secs_f64();
+        println!(
+            "{{\"mode\":\"ingest\",\"api\":\"{name}\",\"objects\":{},\"raw_mb\":{:.1},\"secs\":{secs:.2},\"mb_s\":{:.0},\"obj_s\":{:.0},\"load\":\"{}\"}}",
+            objs.len(),
+            raw as f64 / 1e6,
+            raw as f64 / 1e6 / secs,
+            objs.len() as f64 / secs,
+            std::fs::read_to_string("/proc/loadavg").unwrap_or_default().split(' ').next().unwrap_or("")
+        );
+        drop(repo);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("ingest") {
+        let dump = std::env::args().nth(2).ok_or("usage: p2p-bench ingest <catfile dump> <dir> [MiB]")?;
+        let dir = std::env::args().nth(3).ok_or("dir")?;
+        let mib = std::env::args().nth(4).and_then(|s| s.parse().ok()).unwrap_or(1024);
+        return ingest(&dump, &dir, mib);
+    }
     if std::env::args().nth(1).as_deref() == Some("scale") {
         let dir = std::env::args().nth(2).ok_or("usage: p2p-bench scale <dir> <objects|names|prov|gc> <count>")?;
         let part = std::env::args().nth(3).ok_or("part")?;

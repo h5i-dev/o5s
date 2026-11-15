@@ -17,6 +17,7 @@ pico2peta-prov = { path = "crates/prov" }
 pico2peta-weights = { path = "crates/weights" }
 pico2peta-chunk = { path = "crates/chunk" }
 pico2peta-order = { path = "crates/order" }
+pico2peta-attest = { path = "crates/attest" }
 blake3 = "1"
 memmap2 = "0.9"
 fastcdc = "3"

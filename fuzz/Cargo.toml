@@ -17,6 +17,9 @@ pico2peta-pack = { path = "../crates/pack" }
 pico2peta-refs = { path = "../crates/refs" }
 pico2peta-server = { path = "../crates/server" }
 pico2peta-backend-s3 = { path = "../crates/backend-s3" }
+pico2peta-attest = { path = "../crates/attest" }
+pico2peta-prov = { path = "../crates/prov" }
+pico2peta-repo = { path = "../crates/repo" }
 tempfile = "3"
 
 [[bin]]
@@ -121,6 +124,41 @@ bench = false
 [[bin]]
 name = "pkg_parsers"
 path = "fuzz_targets/pkg_parsers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frames"
+path = "fuzz_targets/frames.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "attestations"
+path = "fuzz_targets/attestations.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "provenance"
+path = "fuzz_targets/provenance.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "delta_config"
+path = "fuzz_targets/delta_config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "search_index"
+path = "fuzz_targets/search_index.rs"
 test = false
 doc = false
 bench = false

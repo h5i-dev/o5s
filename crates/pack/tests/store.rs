@@ -1162,3 +1162,53 @@ fn read_verify_strict_vs_eof() {
         assert_eq!(read_all(&s, mode), (data.clone(), false));
     }
 }
+
+#[test]
+fn put_many_matches_put_with_duplicates_known_and_large_items() {
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { pack_cap: 1 << 20, ..PackConfig::default() };
+    let s = open(d.path(), cfg.clone());
+    let known = pseudo(5_000, 99);
+    let hk = s.put(&known).unwrap();
+    // Enough bytes for the parallel path (≥ 256 KiB), mixed sizes, compressible and not,
+    // a duplicate inside the batch, an already-stored item, an empty item, and two items
+    // over the chunking threshold.
+    let mut items: Vec<Vec<u8>> = (0..400u64)
+        .map(|i| {
+            if i % 3 == 0 {
+                vec![b'a' + (i % 26) as u8; 100 + i as usize * 37]
+            } else {
+                pseudo(64 + (i as usize * 997) % 20_000, i)
+            }
+        })
+        .collect();
+    items.push(items[7].clone());
+    items.push(known.clone());
+    items.push(Vec::new());
+    items.push(pseudo(cfg.chunk_threshold + 12_345, 7));
+    items.push(pseudo(cfg.chunk_threshold, 8));
+    let refs: Vec<&[u8]> = items.iter().map(|v| v.as_slice()).collect();
+    let before = s.stats().unwrap().objects;
+    let hs = s.put_many(&refs).unwrap();
+    assert_eq!(hs.len(), items.len());
+    for (h, v) in hs.iter().zip(&items) {
+        assert_eq!(*h, Hash::of(v));
+        assert_eq!(s.get(h, None).unwrap(), *v);
+    }
+    assert_eq!(hs[items.len() - 4], hk);
+    let distinct: std::collections::HashSet<Hash> = hs.iter().copied().collect();
+    let added = s.stats().unwrap().objects - before;
+    // Large items add chunks and manifest nodes too, so count only what is certain:
+    // every distinct small hash appears once, the known one is not added again.
+    assert!(added >= distinct.len() - 1, "added {added}, distinct {}", distinct.len());
+    let again = s.stats().unwrap().objects;
+    assert_eq!(s.put_many(&refs).unwrap(), hs, "a second put_many is pure dedup");
+    assert_eq!(s.stats().unwrap().objects, again);
+    s.flush().unwrap();
+    drop(s);
+    let s = open(d.path(), cfg);
+    for (h, v) in hs.iter().zip(&items) {
+        assert_eq!(s.get(h, None).unwrap(), *v, "after reopen");
+    }
+    assert!(s.put_many(&[]).unwrap().is_empty());
+}

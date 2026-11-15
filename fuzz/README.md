@@ -18,6 +18,11 @@ Every on-disk decoder and every input parser has a target:
 | `audit_log` | audit log tail recovery and chain verification on arbitrary bytes |
 | `s3_xml` | S3 XML responses (ListObjectsV2, errors, multipart) |
 | `http_range` | `Range` header parsing (result must lie inside the object) |
+| `frames` | Frame2/Frame3 bodies, prefix decoding and member enumeration with an attacker reference |
+| `attestations` | DSSE envelopes and in-toto statements |
+| `provenance` | provenance records and log nodes |
+| `delta_config` | delta records (bounded decode) and repository config |
+| `search_index` | search index build, text/prefix queries and lineage/impact over attacker records and checkpoint index |
 
 Run (needs nightly; on this host it lives on scratch):
 
