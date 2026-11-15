@@ -74,7 +74,9 @@ The log is append-only JSON lines at `audit.path`, fsync'd before each mutating 
 ```sh
 pico2peta-server verify-audit /var/log/pico2peta/audit.jsonl
 ```
-If an audit write fails (for example, the disk is full), the server refuses all further mutations, returns 503 from `/readyz`, and increments `p2p_audit_write_failures_total`. Rotation is not built in. To rotate, stop the server, move the file away, and start it again: a new chain starts in the new file. Archive the old file together with the last `prev` hash it ended on.
+If an audit write fails (for example, the disk is full), the server refuses all further mutations, returns 503 from `/readyz`, and increments `p2p_audit_write_failures_total`.
+
+Rotation: set `audit.rotate_bytes`. A full file is renamed to `audit.jsonl.<last seq>` (fsync'd), and the next file continues the same chain. You may archive or move the oldest rotated files away, and `verify-audit` then reports the sequence number the remaining chain starts at. Deleting a file from the middle is detected.
 
 ## Garbage collection
 With `gc.interval_secs > 0`, the server advances the GC protocol on that schedule: plan, then sweep and repack, then delete, with each phase at least `gc.grace_secs` after the previous one. Admins can also trigger it with `POST /v1/admin/gc` (`?dry_run=true` for a report only). GC is safe with concurrent writers, but it relies on the **put→replace lease**: a client must make a ref point at a newly put object within `grace_secs`. Results show up in `p2p_gc_runs_total`, `p2p_gc_deleted_bytes_total`, the logs, and the audit log (`action = "gc"`). Any `dangling_refs` in a report means the repository is corrupt, so investigate it before the next run.

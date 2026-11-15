@@ -104,7 +104,8 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         None
     };
     let tokens = Arc::new(auth::TokenAuthenticator::new(&cfg.auth.tokens, cfg.auth.allow_anonymous));
-    let audit = audit::AuditLog::open(&cfg.audit.path).map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
+    let audit = audit::AuditLog::open_with(&cfg.audit.path, cfg.audit.rotate_bytes)
+        .map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
     Ok(Arc::new(AppState {
         repo,
         authn: match &cfg.auth.oidc {

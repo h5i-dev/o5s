@@ -74,6 +74,13 @@ const MAX_DETAIL: usize = 2048;
 impl AuditLog {
     /// Opens (or creates) the log, recovers its tail and starts the writer thread.
     pub fn open(path: &Path) -> std::io::Result<AuditLog> {
+        Self::open_with(path, None)
+    }
+
+    /// Like [`AuditLog::open`], rotating the file once it reaches `max_bytes`:
+    /// the full file is renamed to `<name>.<last seq, 12 digits>` (fsync'd) and a
+    /// new file continues the same hash chain.
+    pub fn open_with(path: &Path, max_bytes: Option<u64>) -> std::io::Result<AuditLog> {
         if let Some(dir) = path.parent()
             && !dir.as_os_str().is_empty()
         {
@@ -87,11 +94,19 @@ impl AuditLog {
                 File::open(dir)?.sync_all()?;
             }
         }
-        let (seq, prev) = recover_tail(&mut f, path)?;
+        let (mut seq, mut prev) = recover_tail(&mut f, path)?;
+        if seq == 0
+            && let Some((_, last)) = rotated_files(path)?.pop()
+        {
+            // The current file is new or empty: continue the chain of the newest rotated file.
+            let mut r = OpenOptions::new().read(true).write(true).open(&last)?;
+            (seq, prev) = recover_tail(&mut r, &last)?;
+        }
         let (tx, rx) = mpsc::channel();
         let healthy = Arc::new(AtomicBool::new(true));
         let h = healthy.clone();
-        std::thread::Builder::new().name("p2p-audit".into()).spawn(move || writer(f, rx, seq, prev, h))?;
+        let rot = max_bytes.map(|m| (path.to_path_buf(), m.max(4096)));
+        std::thread::Builder::new().name("p2p-audit".into()).spawn(move || writer(f, rx, seq, prev, h, rot))?;
         Ok(AuditLog { tx, path: path.to_path_buf(), healthy })
     }
 
@@ -127,6 +142,47 @@ impl AuditLog {
     }
 }
 
+/// Rotated files of the log at `path`, oldest first: `(last seq, path)`.
+pub fn rotated_files(path: &Path) -> std::io::Result<Vec<(u64, PathBuf)>> {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else { return Ok(Vec::new()) };
+    let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let mut out = Vec::new();
+    let rd = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(e) => return Err(e),
+    };
+    for e in rd {
+        let e = e?;
+        let fname = e.file_name();
+        let Some(f) = fname.to_str() else { continue };
+        if let Some(suffix) = f.strip_prefix(name).and_then(|r| r.strip_prefix('.'))
+            && suffix.len() == 12
+            && let Ok(n) = suffix.parse::<u64>()
+        {
+            out.push((n, e.path()));
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// Renames the full log away and opens a fresh one (both fsync'd).
+fn rotate(f: &mut File, path: &Path, seq: u64) -> std::io::Result<()> {
+    f.sync_all()?;
+    let name = path.file_name().and_then(|n| n.to_str()).ok_or_else(|| std::io::Error::other("bad audit path"))?;
+    let target = path.with_file_name(format!("{name}.{seq:012}"));
+    if target.exists() {
+        return Err(std::io::Error::other(format!("{} already exists", target.display())));
+    }
+    std::fs::rename(path, &target)?;
+    let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    *f = OpenOptions::new().read(true).append(true).create_new(true).open(path)?;
+    f.sync_all()?;
+    File::open(dir)?.sync_all()?;
+    Ok(())
+}
+
 /// Finds the last complete record. Truncates a torn trailing line.
 fn recover_tail(f: &mut File, path: &Path) -> std::io::Result<(u64, String)> {
     let len = f.metadata()?.len();
@@ -159,7 +215,14 @@ fn recover_tail(f: &mut File, path: &Path) -> std::io::Result<(u64, String)> {
     Ok((rec.seq, blake3::hash(line).to_hex().to_string()))
 }
 
-fn writer(mut f: File, rx: mpsc::Receiver<Cmd>, mut seq: u64, mut prev: String, healthy: Arc<AtomicBool>) {
+fn writer(
+    mut f: File,
+    rx: mpsc::Receiver<Cmd>,
+    mut seq: u64,
+    mut prev: String,
+    healthy: Arc<AtomicBool>,
+    rotation: Option<(PathBuf, u64)>,
+) {
     let mut failed: Option<String> = None;
     while let Ok(first) = rx.recv() {
         let mut batch = vec![first];
@@ -212,7 +275,10 @@ fn writer(mut f: File, rx: mpsc::Receiver<Cmd>, mut seq: u64, mut prev: String, 
         }
         let res = match &failed {
             Some(e) => Err(std::io::Error::other(e.clone())),
-            None => f.write_all(&buf).and_then(|_| f.sync_data()),
+            None => f.write_all(&buf).and_then(|_| f.sync_data()).and_then(|_| match &rotation {
+                Some((path, max)) if f.metadata()?.len() >= *max => rotate(&mut f, path, seq),
+                _ => Ok(()),
+            }),
         };
         if let Err(e) = &res
             && failed.is_none()
@@ -236,26 +302,55 @@ fn writer(mut f: File, rx: mpsc::Receiver<Cmd>, mut seq: u64, mut prev: String, 
     }
 }
 
-/// Verifies the hash chain of the log at `path`. Returns the number of records.
+/// Verifies the hash chain of the log at `path`, including its rotated files
+/// (oldest first). Returns the number of records checked. The chain may start
+/// at `seq > 1` when older rotated files were archived away; everything from
+/// there on must link up exactly.
 pub fn verify(path: &Path) -> Result<u64, String> {
-    let data = std::fs::read(path).map_err(|e| e.to_string())?;
-    let mut prev = ZERO.to_string();
-    let mut n = 0u64;
-    for (i, line) in data.split(|&b| b == b'\n').enumerate() {
-        if line.is_empty() {
-            continue;
-        }
-        let rec: AuditRecord = serde_json::from_slice(line).map_err(|e| format!("line {}: {e}", i + 1))?;
-        if rec.prev != prev {
-            return Err(format!("line {}: chain broken (prev mismatch)", i + 1));
-        }
-        if rec.seq != n + 1 {
-            return Err(format!("line {}: seq {} expected {}", i + 1, rec.seq, n + 1));
-        }
-        prev = blake3::hash(line).to_hex().to_string();
-        n += 1;
+    Ok(verify_all(path)?.0)
+}
+
+/// Like [`verify`], also returning the first sequence number seen.
+pub fn verify_all(path: &Path) -> Result<(u64, u64), String> {
+    let mut files: Vec<PathBuf> = rotated_files(path).map_err(|e| e.to_string())?.into_iter().map(|x| x.1).collect();
+    if path.exists() {
+        files.push(path.to_path_buf());
     }
-    Ok(n)
+    let mut prev: Option<String> = None;
+    let mut next_seq: Option<u64> = None;
+    let mut first_seq = 0;
+    let mut n = 0u64;
+    for file in &files {
+        let data = std::fs::read(file).map_err(|e| format!("{}: {e}", file.display()))?;
+        for (i, line) in data.split(|&b| b == b'\n').enumerate() {
+            if line.is_empty() {
+                continue;
+            }
+            let at = || format!("{}: line {}", file.display(), i + 1);
+            let rec: AuditRecord = serde_json::from_slice(line).map_err(|e| format!("{}: {e}", at()))?;
+            match (&prev, next_seq) {
+                (Some(p), Some(s)) => {
+                    if rec.prev != *p {
+                        return Err(format!("{}: chain broken (prev mismatch)", at()));
+                    }
+                    if rec.seq != s {
+                        return Err(format!("{}: seq {} expected {s}", at(), rec.seq));
+                    }
+                }
+                _ => {
+                    // First record overall.
+                    if rec.seq == 1 && rec.prev != ZERO {
+                        return Err(format!("{}: first record must chain from zero", at()));
+                    }
+                    first_seq = rec.seq;
+                }
+            }
+            prev = Some(blake3::hash(line).to_hex().to_string());
+            next_seq = Some(rec.seq + 1);
+            n += 1;
+        }
+    }
+    Ok((n, first_seq))
 }
 
 /// Current UTC time as `YYYY-MM-DDTHH:MM:SS.mmmZ`.
@@ -368,6 +463,37 @@ mod tests {
         let s = std::fs::read_to_string(&p).unwrap().replacen("\"r1\"", "\"rX\"", 1);
         std::fs::write(&p, s).unwrap();
         assert!(verify(&p).unwrap_err().contains("line 3"));
+    }
+
+    #[test]
+    fn rotation_keeps_the_chain() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("audit.jsonl");
+        rt().block_on(async {
+            let a = AuditLog::open_with(&p, Some(4096)).unwrap();
+            for i in 0..100 {
+                a.record(ev(i)).await.unwrap();
+            }
+            a.shutdown().await;
+        });
+        let rotated = rotated_files(&p).unwrap();
+        assert!(rotated.len() >= 2, "{rotated:?}");
+        assert_eq!(verify(&p).unwrap(), 100);
+        // Reopen (possibly right after a rotation) and continue the chain.
+        rt().block_on(async {
+            let a = AuditLog::open_with(&p, Some(4096)).unwrap();
+            a.record(ev(100)).await.unwrap();
+            a.shutdown().await;
+        });
+        assert_eq!(verify_all(&p).unwrap(), (101, 1));
+        // Archiving the oldest file is allowed; the chain then starts later.
+        std::fs::remove_file(&rotated[0].1).unwrap();
+        let (n, first) = verify_all(&p).unwrap();
+        assert!(first > 1 && n < 101);
+        // Removing a file between two remaining ones breaks the chain.
+        assert!(rotated.len() >= 3, "{rotated:?}");
+        std::fs::remove_file(&rotated[2].1).unwrap();
+        assert!(verify(&p).unwrap_err().contains("chain broken"));
     }
 
     #[test]

@@ -79,9 +79,13 @@ fn main() -> ExitCode {
             println!("{}", hex(&pico2peta_server::auth::sha256(s.trim().as_bytes())));
             ExitCode::SUCCESS
         }
-        Cmd::VerifyAudit { path } => match pico2peta_server::audit::verify(&path) {
-            Ok(n) => {
-                println!("ok: {n} records, chain intact");
+        Cmd::VerifyAudit { path } => match pico2peta_server::audit::verify_all(&path) {
+            Ok((n, first)) => {
+                if first > 1 {
+                    println!("ok: {n} records (seq {first}..), chain intact; earlier records were archived");
+                } else {
+                    println!("ok: {n} records, chain intact");
+                }
                 ExitCode::SUCCESS
             }
             Err(e) => {

@@ -44,6 +44,7 @@
 //! [audit]
 //! path = "/var/log/pico2peta/audit.jsonl"
 //! log_reads = false
+//! rotate_bytes = 1073741824        # optional: rotate at 1 GiB, chain continues
 //!
 //! [gc]
 //! interval_secs = 0                  # background GC period; 0 = off
@@ -327,6 +328,10 @@ pub struct AuditSection {
     pub path: PathBuf,
     #[serde(default)]
     pub log_reads: bool,
+    /// Rotate the log at this size (renamed to `<path>.<last seq>`; the hash
+    /// chain continues). Unset: never rotate.
+    #[serde(default)]
+    pub rotate_bytes: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -53,7 +53,7 @@ impl TestServer {
                 grant("reader", "shared", Access::Read),
                 grant("reader", "alice/public", Access::Read),
             ],
-            audit: AuditSection { path: dir.path().join("audit/audit.jsonl"), log_reads: true },
+            audit: AuditSection { path: dir.path().join("audit/audit.jsonl"), log_reads: true, rotate_bytes: None },
             log: Default::default(),
             gc: Default::default(),
             oci: Default::default(),
