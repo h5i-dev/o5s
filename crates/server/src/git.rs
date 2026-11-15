@@ -698,10 +698,24 @@ fn index_pack(view: &mut View<'_>, file: &mut std::fs::File, pack_off: u64) -> R
                     let canon = canonical(kind, &body);
                     let oid = oid_of(&canon);
                     if !in_pack.contains(&oid) {
-                        let h = view.st.repo.put(&canon)?;
+                        // Already stored under this oid (a re-push, or a fork's objects): skip the
+                        // put and the oid-map entry. `ensure_live` rewrites it if GC condemned it.
+                        let known = match view.lookup(&oid)? {
+                            Some((k, h)) if k == kind && view.st.repo.ensure_live(&h)? => Some(h),
+                            _ => None,
+                        };
+                        let h = match known {
+                            Some(h) => h,
+                            None => {
+                                let h = view.st.repo.put(&canon)?;
+                                new_entries.push((
+                                    key_of(&oid),
+                                    Value { hash: h, aux: ((kind as u64) << 56) | body.len() as u64 },
+                                ));
+                                h
+                            }
+                        };
                         view.extra.insert(oid, (kind, h));
-                        new_entries
-                            .push((key_of(&oid), Value { hash: h, aux: ((kind as u64) << 56) | body.len() as u64 }));
                         needed.extend(refs_of(kind, &body)?);
                         in_pack.insert(oid);
                     }
