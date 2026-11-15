@@ -14,17 +14,21 @@ PASS_GEO, PASS_MAX = 1.15, 1.30
 P50_MS, P99_MS = 5.0, 25.0
 BUILD_RATIO = 1.0
 RSS_KB = 6 * 1024 * 1024
-ELIGIBLE = ("v1", "v2")
+import os
+# Exp1 (§4.5): V1, V2. Exp1b (§4.8): V4, V5 (set EXP1_ELIGIBLE=v4,v5).
+ELIGIBLE = tuple(os.environ.get("EXP1_ELIGIBLE", "v1,v2").split(","))
+SHOWN = ("v0", "v1", "v2", "v3") if ELIGIBLE == ("v1", "v2") else ELIGIBLE
 
 
-def load(path):
+def load(paths):
     rows = {}
-    for line in open(path):
-        line = line.strip()
-        if not line:
-            continue
-        r = json.loads(line)
-        rows[(r["repo"], r["variant"])] = r  # last measurement wins
+    for path in paths.split(","):
+        for line in open(path):
+            line = line.strip()
+            if not line:
+                continue
+            r = json.loads(line)
+            rows[(r["repo"], r["variant"])] = r  # last measurement wins
     return rows
 
 
@@ -35,21 +39,22 @@ def geomean(xs):
 def main(path):
     rows = load(path)
     repos = [r for r in ("ripgrep", "jq", "redis", "git") if (r, "git-aggressive") in rows]
-    complete = [r for r in repos if all((r, v) in rows for v in ("v0", "v1", "v2", "v3"))]
+    complete = [r for r in repos if all((r, v) in rows for v in SHOWN)]
     out = []
-    out.append("| repo | objects | git --aggressive (B) | git gc (B) | V0 | V1 | V2 | V3 (ceiling) |")
-    out.append("|---|---|---|---|---|---|---|---|")
+    names = {"v0": "V0", "v1": "V1", "v2": "V2", "v3": "V3 (ceiling)", "v4": "V4", "v5": "V5"}
+    out.append("| repo | objects | git --aggressive (B) | git gc (B) | " + " | ".join(names[v] for v in SHOWN) + " |")
+    out.append("|---|---|---|---|" + "---|" * len(SHOWN))
     for r in repos:
         b = rows[(r, "git-aggressive")]["total_bytes"]
         plain = rows.get((r, "git-plain"), {}).get("total_bytes", "")
         cells = []
-        for v in ("v0", "v1", "v2", "v3"):
+        for v in SHOWN:
             x = rows.get((r, v))
             cells.append(f"{x['total_bytes'] / b:.3f}" if x else "pending")
         obj = rows[(r, "git-aggressive")].get("objects", "")
         out.append(f"| {r} | {obj} | {b:,} | {plain:,} | " + " | ".join(cells) + " |")
     out.append("")
-    out.append("Cells are R = S(V) / B, where S includes payload, dictionaries and a 48 B/object index model. Lower is better.")
+    out.append("Cells are R = S(V) / B, where S includes payload, dictionaries and the modeled index (48 B/object; 52 B for V4/V5). Lower is better.")
     out.append("")
 
     # Secondary metrics for the eligible variants.

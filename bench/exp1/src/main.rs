@@ -189,7 +189,8 @@ fn extract(git_dir: &Path, out: &Path) -> R<()> {
             enc.write_all(&body)?;
             let len = canon_hdr.len() as u64 + o.size;
             raw += len;
-            lines.push(format!("O\t{pid}\t{}\t{len}\n", o.sha));
+            let path = o.path.replace(['\t', '\n'], " ");
+            lines.push(format!("O\t{pid}\t{}\t{len}\t{path}\n", o.sha));
         }
         enc.finish()?;
         spill.write_all(&buf)?;
@@ -226,6 +227,8 @@ struct Part {
     spill_len: u64,
     raw: u64,
     objs: Vec<(String, u64)>, // (sha, canonical len)
+    /// Path of each object (empty for commits/tags; absent in old metas).
+    paths: Vec<String>,
 }
 
 fn load_meta(dir: &Path) -> R<Vec<Part>> {
@@ -241,8 +244,13 @@ fn load_meta(dir: &Path) -> R<Vec<Part>> {
                 spill_len: f[5].parse()?,
                 raw: f[7].parse()?,
                 objs: Vec::new(),
+                paths: Vec::new(),
             }),
-            "O" => parts.last_mut().ok_or("O before P")?.objs.push((f[2].to_string(), f[3].parse()?)),
+            "O" => {
+                let p = parts.last_mut().ok_or("O before P")?;
+                p.objs.push((f[2].to_string(), f[3].parse()?));
+                p.paths.push(f.get(4).map(|s| s.to_string()).unwrap_or_default());
+            }
             _ => return Err("bad meta line".into()),
         }
     }
@@ -277,6 +285,9 @@ struct Loc {
     inner: u64,
     len: u64,
     part: u32,
+    /// Exp1b: chain depth (0 = compressed alone) and predecessor index in the partition.
+    depth: u32,
+    pred: Option<u32>,
 }
 
 struct Out {
@@ -325,7 +336,7 @@ fn vm_hwm_kb() -> u64 {
 }
 
 fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
-    if !["v0", "v1", "v2", "v3"].contains(&variant) {
+    if !["v0", "v1", "v2", "v3", "v4", "v5"].contains(&variant) {
         return Err(format!("unknown variant {variant}").into());
     }
     let parts = load_meta(dir)?;
@@ -376,6 +387,8 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
                                         inner: 0,
                                         len: b.len() as u64,
                                         part: pi as u32,
+                                        depth: 0,
+                                        pred: None,
                                     };
                                     buf.extend_from_slice(&z);
                                     pending.push(i);
@@ -386,6 +399,48 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
                                 })?;
                                 flush(&mut buf, &mut pending, &mut ls)?;
                                 dicts.lock().map_err(|_| "poisoned")?[pi] = dict;
+                            }
+                            "v4" | "v5" => {
+                                // Exp1b (PLAN.md §4.8): patch-from delta against the predecessor (same path).
+                                let maxd = if variant == "v4" { 50 } else { 10 };
+                                let mut c = zstd::bulk::Compressor::new(LEVEL)?;
+                                let mut buf = Vec::new();
+                                let mut pending: Vec<usize> = Vec::new();
+                                let flush = |buf: &mut Vec<u8>, pending: &mut Vec<usize>, ls: &mut Vec<Loc>| -> R<()> {
+                                    let base = out.append(buf)?;
+                                    for &m in pending.iter() {
+                                        ls[m].off += base;
+                                    }
+                                    buf.clear();
+                                    pending.clear();
+                                    Ok(())
+                                };
+                                let mut prev: Option<Vec<u8>> = None;
+                                let mut prev_depth = 0u32;
+                                for_each_obj(dir, p, |i, b| {
+                                    let same = i > 0 && p.paths.get(i) == p.paths.get(i - 1);
+                                    let (z, depth, pred) = match prev.as_ref() {
+                                        Some(pv) if same && prev_depth < maxd => {
+                                            let need = (pv.len() + b.len()).max(2) as u64;
+                                            let wl = (64 - (need - 1).leading_zeros()).clamp(23, 27);
+                                            let mut enc = zstd::stream::write::Encoder::with_ref_prefix(Vec::new(), LEVEL, pv)?;
+                                            enc.window_log(wl)?;
+                                            enc.write_all(b)?;
+                                            (enc.finish()?, prev_depth + 1, Some((i - 1) as u32))
+                                        }
+                                        _ => (c.compress(b)?, 0, None),
+                                    };
+                                    ls[i] = Loc { off: buf.len() as u64, clen: z.len() as u64, inner: 0, len: b.len() as u64, part: pi as u32, depth, pred };
+                                    buf.extend_from_slice(&z);
+                                    pending.push(i);
+                                    prev = Some(b.to_vec());
+                                    prev_depth = depth;
+                                    if buf.len() > 64 << 20 {
+                                        flush(&mut buf, &mut pending, &mut ls)?;
+                                    }
+                                    Ok(())
+                                })?;
+                                flush(&mut buf, &mut pending, &mut ls)?;
                             }
                             "v2" => {
                                 let mut c = zstd::bulk::Compressor::new(LEVEL)?;
@@ -416,6 +471,8 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
                                         inner: frame.len() as u64,
                                         len: b.len() as u64,
                                         part: pi as u32,
+                                        depth: 0,
+                                        pred: None,
                                     };
                                     frame.extend_from_slice(b);
                                     members.push(i);
@@ -454,7 +511,9 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
     let payload = std::fs::metadata(&out_path)?.len();
     let dicts = dicts.into_inner().map_err(|_| "poisoned")?;
     let dict_bytes: u64 = dicts.iter().flatten().map(|d| d.len() as u64).sum();
-    let index_bytes = INDEX_BYTES_PER_OBJECT * n_objs as u64;
+    // §4.4: 48 B/object; §4.8 (Exp1b): +4 B predecessor reference.
+    let per_obj = if variant == "v4" || variant == "v5" { INDEX_BYTES_PER_OBJECT + 4 } else { INDEX_BYTES_PER_OBJECT };
+    let index_bytes = per_obj * n_objs as u64;
     let total = payload + dict_bytes + index_bytes;
     let rss_build_kb = vm_hwm_kb();
 
@@ -488,6 +547,31 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
             let mut comp = vec![0u8; l.clen as usize];
             f.read_exact_at(&mut comp, l.off)?;
             let data = match variant {
+                "v4" | "v5" => {
+                    // Decode the chain from its root (§4.8: the whole chain counts).
+                    let mut chain = vec![oi];
+                    let mut cur = l;
+                    while let Some(pp) = cur.pred {
+                        chain.push(pp as usize);
+                        cur = locs[pi][pp as usize];
+                    }
+                    let mut prev: Vec<u8> = Vec::new();
+                    for (k, &ci) in chain.iter().rev().enumerate() {
+                        let cl = locs[pi][ci];
+                        let mut cc = vec![0u8; cl.clen as usize];
+                        f.read_exact_at(&mut cc, cl.off)?;
+                        prev = if k == 0 {
+                            zstd::bulk::decompress(&cc, cl.len as usize)?
+                        } else {
+                            let mut dec = zstd::stream::read::Decoder::with_ref_prefix(&cc[..], &prev)?;
+                            dec.window_log_max(27)?;
+                            let mut o = Vec::with_capacity(cl.len as usize);
+                            dec.read_to_end(&mut o)?;
+                            o
+                        };
+                    }
+                    prev
+                }
                 "v2" => {
                     let fr = zstd::bulk::decompress(&comp, FRAME_CAP.max((l.inner + l.len) as usize))?;
                     fr[l.inner as usize..(l.inner + l.len) as usize].to_vec()
@@ -515,13 +599,16 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
         }
     }
     let _ = std::fs::remove_file(&out_path);
+    let depths: Vec<u32> = locs.iter().flatten().map(|l| l.depth).collect();
+    let max_depth = depths.iter().copied().max().unwrap_or(0);
+    let mean_depth = if depths.is_empty() { 0.0 } else { depths.iter().map(|d| *d as f64).sum::<f64>() / depths.len() as f64 };
     let big: Vec<String> = {
         let mut v: Vec<&Part> = parts.iter().collect();
         v.sort_by_key(|p| std::cmp::Reverse(p.raw));
         v.iter().take(3).map(|p| format!("{}:{}", p.typ, p.key)).collect()
     };
     println!(
-        "{{\"variant\":\"{variant}\",\"objects\":{n_objs},\"partitions\":{},\"raw_bytes\":{raw_total},\"payload_bytes\":{payload},\"dict_bytes\":{dict_bytes},\"index_bytes\":{index_bytes},\"total_bytes\":{total},\"build_secs\":{build_secs:.2},\"threads\":{threads},\"peak_rss_kb\":{rss_build_kb},\"read_p50_ms\":{},\"read_p99_ms\":{},\"verified\":{verified},\"largest_partitions\":\"{}\"}}",
+        "{{\"variant\":\"{variant}\",\"objects\":{n_objs},\"partitions\":{},\"raw_bytes\":{raw_total},\"payload_bytes\":{payload},\"dict_bytes\":{dict_bytes},\"index_bytes\":{index_bytes},\"total_bytes\":{total},\"build_secs\":{build_secs:.2},\"threads\":{threads},\"peak_rss_kb\":{rss_build_kb},\"read_p50_ms\":{},\"read_p99_ms\":{},\"verified\":{verified},\"max_depth\":{max_depth},\"mean_depth\":{mean_depth:.2},\"largest_partitions\":\"{}\"}}",
         parts.len(),
         if p50.is_nan() { "null".to_string() } else { format!("{p50:.4}") },
         if p99.is_nan() { "null".to_string() } else { format!("{p99:.4}") },
