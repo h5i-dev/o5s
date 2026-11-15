@@ -28,6 +28,9 @@
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod retention;
+pub mod search;
+
 use pico2peta_core::{Error, Hash, Name, ObjectStore, RefValue, ReplaceOutcome, Repository, Result};
 use pico2peta_repo::Tracer;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};

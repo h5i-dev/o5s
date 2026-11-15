@@ -229,6 +229,15 @@ pub struct Profile {
     /// Derived-object policy for new versions.
     #[serde(default, skip_serializing_if = "is_default")]
     pub derive: DerivePolicy,
+    /// Retention: keep only the newest N versions of each series (names
+    /// grouped by their parent, ordered by the last segment, version-aware).
+    /// Applied by `pico2peta_prov::retention::apply`, before GC collects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_versions: Option<usize>,
+    /// With `keep_versions`: delete an old version only if provenance can
+    /// regenerate it from stored inputs.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub only_if_regenerable: bool,
 }
 
 fn is_default<T: Default + PartialEq>(v: &T) -> bool {

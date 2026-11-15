@@ -447,6 +447,15 @@ impl LocalRepo {
         Ok(())
     }
 
+    /// The configured `[profiles]` and their `[namespaces]` prefixes:
+    /// `(prefix, profile name, profile)`.
+    pub fn namespace_profiles(&self) -> Vec<(String, String, Profile)> {
+        self.namespaces
+            .iter()
+            .filter_map(|(prefix, p)| self.profiles.get(p).map(|prof| (prefix.clone(), p.clone(), prof.clone())))
+            .collect()
+    }
+
     /// The `[read]` verification policy in effect.
     pub fn read_policy(&self) -> &ReadSection {
         &self.read
