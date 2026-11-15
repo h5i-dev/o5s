@@ -8,7 +8,7 @@ pub mod backend;
 pub mod encoding;
 pub mod fault;
 
-pub use encoding::{Derive, Encoding, PatchFormat};
+pub use encoding::{Derive, Encoding, PatchFormat, ReadVerify};
 
 use std::fmt;
 use std::io::Read;
@@ -274,6 +274,18 @@ pub trait ObjectStore: Send + Sync {
     /// streams, and corruption shows up as an `io::Error` wrapping
     /// `Error::Corrupt`.
     fn open(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Box<dyn Read + Send>>;
+    /// [`ObjectStore::open`] with an explicit verification mode (API v1.17,
+    /// see [`ReadVerify`]). Stores may refuse [`ReadVerify::Eof`] (e.g. when the
+    /// repository doesn't allow it). The default is always strict.
+    fn open_verified(
+        &self,
+        hash: &Hash,
+        range: Option<Range<u64>>,
+        verify: ReadVerify,
+    ) -> Result<Box<dyn Read + Send>> {
+        let _ = verify;
+        self.open(hash, range)
+    }
     /// Length of the object, or `NotFound`.
     fn size(&self, hash: &Hash) -> Result<u64>;
     /// Whether `hash` is stored (any copy, including one GC has condemned; see `ensure_live`).

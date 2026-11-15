@@ -599,7 +599,10 @@ fn generic(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
     })?;
     std::fs::remove_file(&ddout)?;
     // Store: durable write (put_stream + flush) and verified read (warm).
-    let repo = LocalRepo::init(base.join("repo"), &PackConfig::default())?;
+    // Both read modes are measured (PLAN §6.4's read row), so eof reads are allowed here.
+    let mut rcfg = pico2peta_repo::RepoConfig::new(&PackConfig::default());
+    rcfg.read.allow_eof = true;
+    let repo = LocalRepo::init_config(base.join("repo"), &rcfg)?;
     let mut h = None;
     let put_s = secs(&mut || {
         h = Some(repo.put_stream(&mut std::fs::File::open(&input)?)?);
@@ -610,12 +613,15 @@ fn generic(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
     let mut sink = Vec::new();
     repo.open(&h, None)?.read_to_end(&mut sink)?; // warm
     drop(sink);
-    let get_s = secs(&mut || {
-        let mut r = repo.open(&h, None)?;
+    let read_with = |mode: pico2peta_core::ReadVerify| -> Result<f64, Box<dyn std::error::Error>> {
+        let t = Instant::now();
+        let mut r = repo.open_verified(&h, None, mode)?;
         let mut b = vec![0u8; 1 << 20];
         while r.read(&mut b)? > 0 {}
-        Ok(())
-    })?;
+        Ok(t.elapsed().as_secs_f64())
+    };
+    let get_s = read_with(pico2peta_core::ReadVerify::Strict)?;
+    let get_eof_s = read_with(pico2peta_core::ReadVerify::Eof)?;
     // 4 KiB range reads, warm, uniform offsets.
     let mut lat = Vec::new();
     let mut x = 0x2545_F491_4F6C_DD1Du64;
@@ -686,13 +692,15 @@ fn generic(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
     })?;
     let mb = |s: f64| size as f64 / s / 1e6;
     println!(
-        "{{\"mib\":{mib},\"dd_fsync_mb_s\":{:.0},\"put_mb_s\":{:.0},\"write_ratio\":{:.3},\"cat_mb_s\":{:.0},\"get_mb_s\":{:.0},\"read_ratio\":{:.3},\"range4k_p99_ms\":{p99:.3},\"scattered_10v_bytes\":{scattered},\"inserted_10v_bytes\":{inserted},\"one_copy_bytes\":{size}}}",
+        "{{\"mib\":{mib},\"dd_fsync_mb_s\":{:.0},\"put_mb_s\":{:.0},\"write_ratio\":{:.3},\"cat_mb_s\":{:.0},\"get_strict_mb_s\":{:.0},\"read_ratio_strict\":{:.3},\"get_eof_mb_s\":{:.0},\"read_ratio_eof\":{:.3},\"range4k_p99_ms\":{p99:.3},\"scattered_10v_bytes\":{scattered},\"inserted_10v_bytes\":{inserted},\"one_copy_bytes\":{size}}}",
         mb(dd_s),
         mb(put_s),
         dd_s / put_s,
         mb(cat_s),
         mb(get_s),
         cat_s / get_s,
+        mb(get_eof_s),
+        cat_s / get_eof_s,
     );
     std::fs::remove_dir_all(&base)?;
     std::fs::remove_file(&input)?;

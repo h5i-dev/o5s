@@ -60,6 +60,53 @@ pub struct RepoConfig {
     /// wins; a profile named `default` applies to everything else.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub namespaces: std::collections::BTreeMap<String, String>,
+    /// Read verification policy (`[read]`, optional; default strict only).
+    #[serde(default, skip_serializing_if = "ReadSection::is_default")]
+    pub read: ReadSection,
+}
+
+/// `[read]` section: how reads verify content (see [`pico2peta_core::ReadVerify`]).
+///
+/// ```toml
+/// [read]
+/// verify = "strict"   # default for reads that don't ask: "strict" | "eof"
+/// allow_eof = false   # may a request ask for "eof"? (implied by verify = "eof")
+/// ```
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReadSection {
+    /// The mode of reads that don't choose one.
+    #[serde(default, with = "read_verify_serde")]
+    pub verify: pico2peta_core::ReadVerify,
+    /// Whether a single request may ask for `eof` (`verify = "eof"` implies it).
+    #[serde(default)]
+    pub allow_eof: bool,
+}
+
+impl ReadSection {
+    fn is_default(&self) -> bool {
+        *self == ReadSection::default()
+    }
+
+    /// Whether `eof` reads are permitted at all.
+    pub fn eof_allowed(&self) -> bool {
+        self.allow_eof || self.verify == pico2peta_core::ReadVerify::Eof
+    }
+}
+
+mod read_verify_serde {
+    use pico2peta_core::ReadVerify;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(v: &ReadVerify, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(v.as_str())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<ReadVerify, D::Error> {
+        let s = String::deserialize(d)?;
+        ReadVerify::parse(&s)
+            .ok_or_else(|| serde::de::Error::custom(format!("read.verify: {s:?} is not strict or eof")))
+    }
 }
 
 /// `[chunking]` section: the content-defined chunker per namespace.
@@ -122,6 +169,13 @@ impl From<ChunkerChoice> for ChunkerKind {
     }
 }
 
+impl Default for RepoConfig {
+    /// Default pack settings and defaults everywhere else (see [`RepoConfig::new`]).
+    fn default() -> Self {
+        RepoConfig::new(&PackConfig::default())
+    }
+}
+
 impl RepoConfig {
     /// A config with these pack settings and defaults everywhere else. Prefer
     /// this plus field updates over a struct literal: sections get added.
@@ -133,6 +187,7 @@ impl RepoConfig {
             chunking: ChunkingSection::default(),
             profiles: Default::default(),
             namespaces: Default::default(),
+            read: ReadSection::default(),
         }
     }
 }
@@ -237,6 +292,7 @@ pub struct LocalRepo {
     chunking: ChunkingSection,
     profiles: Arc<std::collections::BTreeMap<String, Profile>>,
     namespaces: Arc<std::collections::BTreeMap<String, String>>,
+    read: ReadSection,
     fronts: Arc<FrontRegistry>,
     packs: PackStore,
     refs: Arc<RefStore>,
@@ -262,6 +318,7 @@ impl LocalRepo {
                 chunking: ChunkingSection::default(),
                 profiles: Default::default(),
                 namespaces: Default::default(),
+                read: ReadSection::default(),
             },
         )
     }
@@ -329,6 +386,7 @@ impl LocalRepo {
             chunking: cfg.chunking,
             profiles: Arc::new(cfg.profiles),
             namespaces: Arc::new(cfg.namespaces),
+            read: cfg.read,
             fronts: Arc::new(FrontRegistry::new()),
             packs,
             refs,
@@ -387,6 +445,11 @@ impl LocalRepo {
             )));
         }
         Ok(())
+    }
+
+    /// The `[read]` verification policy in effect.
+    pub fn read_policy(&self) -> &ReadSection {
+        &self.read
     }
 
     /// The `[chunking]` config in effect.
@@ -648,7 +711,21 @@ impl ObjectStore for LocalRepo {
         self.packs.get(hash, range)
     }
     fn open(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Box<dyn Read + Send>> {
-        self.packs.open(hash, range)
+        // The repository's default mode ([read] verify; strict unless configured).
+        self.packs.open_verified(hash, range, self.read.verify)
+    }
+    fn open_verified(
+        &self,
+        hash: &Hash,
+        range: Option<Range<u64>>,
+        verify: pico2peta_core::ReadVerify,
+    ) -> Result<Box<dyn Read + Send>> {
+        if verify == pico2peta_core::ReadVerify::Eof && !self.read.eof_allowed() {
+            return Err(Error::Unsupported(
+                "read_verify = \"eof\" is not enabled for this repository ([read] allow_eof)",
+            ));
+        }
+        self.packs.open_verified(hash, range, verify)
     }
     fn size(&self, hash: &Hash) -> Result<u64> {
         self.packs.size(hash)
@@ -760,6 +837,14 @@ impl ObjectStore for FrontHandle {
     }
     fn open(&self, hash: &Hash, range: Option<std::ops::Range<u64>>) -> Result<Box<dyn Read + Send>> {
         self.repo.open(hash, range)
+    }
+    fn open_verified(
+        &self,
+        hash: &Hash,
+        range: Option<std::ops::Range<u64>>,
+        verify: pico2peta_core::ReadVerify,
+    ) -> Result<Box<dyn Read + Send>> {
+        self.repo.open_verified(hash, range, verify)
     }
     fn size(&self, hash: &Hash) -> Result<u64> {
         self.repo.size(hash)
@@ -913,6 +998,7 @@ mod config_compat {
             chunking: chunking.clone(),
             profiles: Default::default(),
             namespaces: Default::default(),
+            read: ReadSection::default(),
         };
         let d = tempfile::tempdir().unwrap();
         let r = LocalRepo::init_config(d.path(), &cfg(&PackConfig::default(), &chunking)).unwrap();

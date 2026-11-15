@@ -240,3 +240,27 @@ fn profiles_via_cli() {
         assert!(!r2.join("config.toml").exists(), "{bad:?}");
     }
 }
+
+/// `get --read-verify`: eof is refused on a strict repository and works when
+/// `init --allow-eof-reads` enabled it; bad values are errors.
+#[test]
+fn read_verify_via_cli() {
+    let d = tempfile::tempdir().unwrap();
+    let f = d.path().join("d.bin");
+    let data: Vec<u8> = (0..3_000_000u32).map(|i| (i.wrapping_mul(2654435761) >> 11) as u8).collect();
+    std::fs::write(&f, &data).unwrap();
+    for (dir, init, eof_ok) in [("s", &["init"][..], false), ("a", &["init", "--allow-eof-reads"][..], true)] {
+        let repo = d.path().join(dir);
+        ok(&repo, init);
+        let h = ok(&repo, &["put", f.to_str().unwrap()]).trim().to_string();
+        let out = d.path().join(format!("{dir}.out"));
+        let r = run(&repo, &["get", &h, "--read-verify", "eof", "-o", out.to_str().unwrap()]);
+        assert_eq!(r.status.success(), eof_ok, "{dir}: {}", String::from_utf8_lossy(&r.stderr));
+        if eof_ok {
+            assert_eq!(std::fs::read(&out).unwrap(), data);
+        }
+        ok(&repo, &["get", &h, "--read-verify", "strict", "-o", out.to_str().unwrap()]);
+        assert!(!run(&repo, &["get", &h, "--read-verify", "fast"]).status.success());
+    }
+    assert!(!run(&d.path().join("x"), &["init", "--read-verify", "fast"]).status.success());
+}

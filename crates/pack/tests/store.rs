@@ -1070,3 +1070,95 @@ fn anchored_xor_deltas_handle_edits_and_shifts() {
     let chain = dir_bytes(&d2.path().join("objects")) - one;
     assert!(chain < 5 * (1 << 18) + 1_500_000, "5 insertions of 256 KiB along a chain cost {chain}");
 }
+
+/// Read verification modes. A chunk of a large object is corrupted in a
+/// CRC-valid way (payload byte flipped, record CRC recomputed: only BLAKE3 can
+/// tell). Strict never returns a wrong byte: the read stops with an error
+/// before the bad chunk. Eof returns bytes up to and including the bad chunk
+/// (that is its documented trade-off) and fails at EOF. Plain (CRC-invalid)
+/// corruption fails in both modes. Ranged reads are strict even in eof mode.
+#[test]
+fn read_verify_strict_vs_eof() {
+    use pico2peta_core::ReadVerify;
+    use pico2peta_pack::format::{REC_HEADER, REC_TRAILER};
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { chunk_threshold: 1 << 20, zstd_level: 0, pack_cap: 1 << 30, ..PackConfig::default() };
+    let data = pseudo(6 << 20, 88);
+    let (h, victim) = {
+        let s = open(d.path(), cfg.clone());
+        let h = s.put_stream(&mut &data[..]).unwrap();
+        s.flush().unwrap();
+        // A chunk in the middle of the object.
+        let chunks = s.chunks(&h).unwrap().unwrap();
+        (h, chunks[chunks.len() / 2])
+    };
+    let pack = std::fs::read_dir(d.path().join("objects/packs"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "pack"))
+        .unwrap();
+    let name = pack.file_stem().unwrap().to_str().unwrap().to_string();
+    let entry = {
+        let s = open(d.path(), cfg.clone());
+        s.pack_entries(&name).unwrap().into_iter().find(|e| e.hash == victim).unwrap()
+    };
+    let original = std::fs::read(&pack).unwrap();
+    let rec_start = entry.offset as usize;
+    let payload_len = entry.stored_len as usize;
+    let crafted = {
+        let mut b = original.clone();
+        b[rec_start + REC_HEADER + payload_len / 2] ^= 0x01;
+        let body_end = rec_start + REC_HEADER + payload_len;
+        let crc = crc32fast::hash(&b[rec_start..body_end]);
+        b[body_end..body_end + REC_TRAILER].copy_from_slice(&crc.to_le_bytes());
+        b
+    };
+    // The object offset where the bad byte lands, to check what strict returns.
+    let read_all = |s: &PackStore, mode: ReadVerify| -> (Vec<u8>, bool) {
+        let mut r = s.open_verified(&h, None, mode).unwrap();
+        let mut out = Vec::new();
+        let mut buf = vec![0u8; 1 << 16];
+        loop {
+            match r.read(&mut buf) {
+                Ok(0) => return (out, false),
+                Ok(n) => out.extend_from_slice(&buf[..n]),
+                Err(_) => return (out, true),
+            }
+        }
+    };
+    std::fs::write(&pack, &crafted).unwrap();
+    let s = open(d.path(), cfg.clone());
+    // Strict: an error, and every byte returned before it is correct.
+    let (got, err) = read_all(&s, ReadVerify::Strict);
+    assert!(err, "strict detects CRC-valid corruption");
+    assert_eq!(got[..], data[..got.len()], "strict never returns a wrong byte");
+    // Eof: the bad bytes are returned, then the EOF hash check fails.
+    let (got, err) = read_all(&s, ReadVerify::Eof);
+    assert!(err, "eof detects it at EOF");
+    assert!(got.len() > data.len() / 2 && got[..] != data[..got.len()], "eof returned the crafted bytes first");
+    // A ranged read over the bad chunk is strict in either mode.
+    let mid = data.len() as u64 / 2;
+    assert!(s.open_verified(&h, Some(0..data.len() as u64), ReadVerify::Eof).is_ok());
+    let ranged = (|| -> std::io::Result<Vec<u8>> {
+        let mut v = Vec::new();
+        s.open_verified(&h, Some(mid - (1 << 20)..mid + (1 << 20)), ReadVerify::Eof).unwrap().read_to_end(&mut v)?;
+        Ok(v)
+    })();
+    assert!(ranged.is_err() || ranged.unwrap() == data[(mid - (1 << 20)) as usize..(mid + (1 << 20)) as usize]);
+    // Plain corruption (CRC no longer matches): both modes fail.
+    let mut plain = original.clone();
+    plain[rec_start + REC_HEADER + payload_len / 2] ^= 0x01;
+    std::fs::write(&pack, &plain).unwrap();
+    let s = open(d.path(), cfg.clone());
+    for mode in [ReadVerify::Strict, ReadVerify::Eof] {
+        let (got, err) = read_all(&s, mode);
+        assert!(err, "{mode:?} detects CRC-invalid corruption");
+        assert_eq!(got[..], data[..got.len()], "{mode:?}: the CRC stops bad bytes");
+    }
+    // Intact: both modes read exactly.
+    std::fs::write(&pack, &original).unwrap();
+    let s = open(d.path(), cfg);
+    for mode in [ReadVerify::Strict, ReadVerify::Eof] {
+        assert_eq!(read_all(&s, mode), (data.clone(), false));
+    }
+}

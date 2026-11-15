@@ -31,7 +31,7 @@
 use crate::format::*;
 use pico2peta_core::backend::{Backend, PutOutcome, PutSource, fsync_dir};
 use pico2peta_core::fault::{FaultHandle, Faults};
-use pico2peta_core::{Error, Hash, ObjectStore, Result, check_range};
+use pico2peta_core::{Error, Hash, ObjectStore, ReadVerify, Result, check_range};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -2188,6 +2188,15 @@ impl ObjectStore for PackStore {
         self.open_depth(hash, range, 0)
     }
 
+    fn open_verified(
+        &self,
+        hash: &Hash,
+        range: Option<Range<u64>>,
+        verify: ReadVerify,
+    ) -> Result<Box<dyn Read + Send>> {
+        self.open_mode(hash, range, 0, verify)
+    }
+
     fn size(&self, hash: &Hash) -> Result<u64> {
         self.lookup(hash)?.map(|l| l.raw_len).ok_or(Error::NotFound(*hash))
     }
@@ -2248,6 +2257,16 @@ impl ObjectStore for PackStore {
 
 impl PackStore {
     fn open_depth(&self, hash: &Hash, range: Option<Range<u64>>, depth: usize) -> Result<Box<dyn Read + Send>> {
+        self.open_mode(hash, range, depth, ReadVerify::Strict)
+    }
+
+    fn open_mode(
+        &self,
+        hash: &Hash,
+        range: Option<Range<u64>>,
+        depth: usize,
+        mode: ReadVerify,
+    ) -> Result<Box<dyn Read + Send>> {
         if depth > MAX_DELTA_DEPTH {
             return Err(Error::Corrupt(format!("delta chain too deep at {hash}")));
         }
@@ -2276,7 +2295,7 @@ impl PackStore {
             }
             Kind::Manifest => {
                 let pieces = overlapping(self.read_manifest(hash, loc)?, r.start, r.end);
-                Ok(Box::new(ChunkReader::new(self.clone(), pieces, whole.then_some(*hash), r.end - r.start)))
+                Ok(Box::new(ChunkReader::new(self.clone(), pieces, whole.then_some(*hash), r.end - r.start, mode)))
             }
         }
     }
@@ -2642,6 +2661,10 @@ struct ChunkReader {
     pool: Option<(std::sync::mpsc::Sender<ChunkJob>, usize)>,
     /// Bytes this reader will return (decides whether read-ahead pays off).
     span: u64,
+    /// Check each chunk's BLAKE3 before returning it ([`ReadVerify::Strict`]).
+    /// Off only for whole reads in [`ReadVerify::Eof`] mode, which still check
+    /// record CRCs and the whole-object hash at EOF.
+    verify_chunks: bool,
 }
 
 /// A whole-object hash running on its own thread: chunk sender, the thread,
@@ -2654,6 +2677,7 @@ struct ChunkJob {
     loc: Loc,
     a: u64,
     b: u64,
+    verify: bool,
     reply: std::sync::mpsc::SyncSender<Result<Vec<u8>>>,
 }
 
@@ -2665,8 +2689,9 @@ const READAHEAD_PER_WORKER: usize = 4;
 impl PackStore {
     /// Fetches chunk `hash` (verifying it) and returns bytes `[a, b)`, moving
     /// the buffer when the whole chunk is wanted.
-    fn chunk_slice(&self, hash: &Hash, loc: Loc, a: u64, b: u64) -> Result<Vec<u8>> {
-        let mut d = self.read_blob(hash, loc)?;
+    fn chunk_slice(&self, hash: &Hash, loc: Loc, a: u64, b: u64, verify: bool) -> Result<Vec<u8>> {
+        // Unverified (eof mode) still checks the record CRC (`read_record`).
+        let mut d = if verify { self.read_blob(hash, loc)? } else { self.read_record(hash, loc)?.1 };
         if a == 0 && b as usize == d.len() {
             return Ok(d);
         }
@@ -2679,7 +2704,9 @@ impl PackStore {
 }
 
 impl ChunkReader {
-    fn new(store: PackStore, pieces: Vec<(Hash, u64, u64)>, verify: Option<Hash>, span: u64) -> Self {
+    fn new(store: PackStore, pieces: Vec<(Hash, u64, u64)>, verify: Option<Hash>, span: u64, mode: ReadVerify) -> Self {
+        // Per-chunk hashes may be skipped only when the whole object is verified at EOF.
+        let verify_chunks = !(mode == ReadVerify::Eof && verify.is_some());
         // Large whole reads: hash on a separate thread, fed the same buffers.
         let hasher = verify.filter(|_| span >= READAHEAD_MIN).and_then(|want| {
             let (tx, rx) = std::sync::mpsc::sync_channel::<Arc<Vec<u8>>>(READAHEAD_PER_WORKER * 4);
@@ -2705,6 +2732,7 @@ impl ChunkReader {
             pending: Default::default(),
             pool: None,
             span,
+            verify_chunks,
         }
     }
 
@@ -2756,7 +2784,7 @@ impl ChunkReader {
                         Err(_) => return,
                     };
                     let Ok(j) = job else { return };
-                    let _ = j.reply.send(store.chunk_slice(&j.hash, j.loc, j.a, j.b));
+                    let _ = j.reply.send(store.chunk_slice(&j.hash, j.loc, j.a, j.b, j.verify));
                 }
             });
             if spawned.is_err() {
@@ -2772,7 +2800,7 @@ impl ChunkReader {
     fn next_chunk(&mut self) -> Result<Option<Vec<u8>>> {
         if self.span < READAHEAD_MIN {
             return match self.next_leaf()? {
-                Some((h, loc, a, b)) => self.store.chunk_slice(&h, loc, a, b).map(Some),
+                Some((h, loc, a, b)) => self.store.chunk_slice(&h, loc, a, b, self.verify_chunks).map(Some),
                 None => Ok(None),
             };
         }
@@ -2784,7 +2812,7 @@ impl ChunkReader {
         while self.pending.len() < window {
             let Some((hash, loc, a, b)) = self.next_leaf()? else { break };
             let (reply, rx) = std::sync::mpsc::sync_channel(1);
-            let job = ChunkJob { hash, loc, a, b, reply };
+            let job = ChunkJob { hash, loc, a, b, verify: self.verify_chunks, reply };
             let job = match &self.pool {
                 Some((p, _)) => match p.send(job) {
                     Ok(()) => {
@@ -2796,7 +2824,7 @@ impl ChunkReader {
                 None => job,
             };
             // No workers: do it here (the reply channel has room for one).
-            let _ = job.reply.send(self.store.chunk_slice(&job.hash, job.loc, job.a, job.b));
+            let _ = job.reply.send(self.store.chunk_slice(&job.hash, job.loc, job.a, job.b, job.verify));
             self.pending.push_back(rx);
         }
         match self.pending.pop_front() {

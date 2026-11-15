@@ -66,6 +66,13 @@ enum Cmd {
         /// `--namespace models/=weights`). Repeatable; longest prefix wins.
         #[arg(long = "namespace", value_name = "PREFIX=PROFILE")]
         namespace: Vec<String>,
+        /// Default read verification: "strict" (default) or "eof" (see `get
+        /// --read-verify`).
+        #[arg(long, value_name = "strict|eof")]
+        read_verify: Option<String>,
+        /// Let individual reads ask for `--read-verify eof`.
+        #[arg(long)]
+        allow_eof_reads: bool,
     },
     /// Store a file (or stdin with `-`), print its hash.
     Put {
@@ -98,6 +105,12 @@ enum Cmd {
         range: Option<String>,
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Verification for this read: "strict" (every chunk's hash before its
+        /// bytes are returned) or "eof" (record CRCs, plus the whole-object hash
+        /// at EOF, so CRC-valid crafted bytes can be written before the error).
+        /// "eof" needs `[read] allow_eof`. Default: the repository's setting.
+        #[arg(long, value_name = "strict|eof")]
+        read_verify: Option<String>,
     },
     /// Print an object's size in bytes.
     Size { hash: Hash },
@@ -237,6 +250,8 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
         chunk_default,
         profile,
         namespace,
+        read_verify,
+        allow_eof_reads,
     } = &cli.cmd
     {
         if cli.remote.is_some() {
@@ -312,6 +327,14 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 chunking,
                 profiles,
                 namespaces,
+                read: pico2peta_repo::ReadSection {
+                    verify: match read_verify.as_deref() {
+                        None => pico2peta_core::ReadVerify::Strict,
+                        Some(m) => pico2peta_core::ReadVerify::parse(m)
+                            .ok_or_else(|| Error::Parse(format!("--read-verify {m:?}: expected strict or eof")))?,
+                    },
+                    allow_eof: *allow_eof_reads,
+                },
             },
         )?;
         println!("initialized {}", cli.repo.display());
@@ -363,9 +386,16 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             r.flush()?;
             writeln!(out, "{h}")?;
         }
-        Cmd::Get { hash, range, output } => {
+        Cmd::Get { hash, range, output, read_verify } => {
             let range = range.as_deref().map(parse_range).transpose()?;
-            let mut src = r.open(&hash, range)?;
+            let mut src = match read_verify.as_deref() {
+                None => r.open(&hash, range)?,
+                Some(m) => {
+                    let mode = pico2peta_core::ReadVerify::parse(m)
+                        .ok_or_else(|| Error::Parse(format!("--read-verify {m:?}: expected strict or eof")))?;
+                    r.open_verified(&hash, range, mode)?
+                }
+            };
             let mut copy = |w: &mut dyn Write| -> Result<(), Error> {
                 let mut buf = vec![0u8; 1 << 20];
                 loop {

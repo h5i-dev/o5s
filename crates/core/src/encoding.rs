@@ -56,3 +56,39 @@ impl Encoding {
         Encoding { chunker: Some(id.into()), ..Default::default() }
     }
 }
+
+/// How much a read verifies before returning bytes (API v1.17). Both modes
+/// check every record's CRC32 and, for whole-object reads, the BLAKE3 of the
+/// whole object at EOF. Corruption is always reported; the difference is *when*.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ReadVerify {
+    /// The default. Every chunk's BLAKE3 is checked before any of its bytes
+    /// are returned, so a reader never receives bytes that don't match their
+    /// content hash.
+    #[default]
+    Strict,
+    /// Opt-in, for throughput. On whole-object reads the per-chunk BLAKE3 is
+    /// skipped: bytes are returned once their record's CRC32 checks, and the
+    /// whole-object BLAKE3 is checked at EOF. **CRC-valid crafted bytes can
+    /// reach the caller before the error at EOF.** Ranged reads are always strict.
+    Eof,
+}
+
+impl ReadVerify {
+    /// Parses `"strict"` / `"eof"`.
+    pub fn parse(s: &str) -> Option<ReadVerify> {
+        match s {
+            "strict" => Some(ReadVerify::Strict),
+            "eof" => Some(ReadVerify::Eof),
+            _ => None,
+        }
+    }
+
+    /// `"strict"` / `"eof"`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ReadVerify::Strict => "strict",
+            ReadVerify::Eof => "eof",
+        }
+    }
+}

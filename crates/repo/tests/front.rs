@@ -57,6 +57,7 @@ fn cfg(profiles: &[(&str, Profile)], namespaces: &[(&str, &str)]) -> RepoConfig 
         chunking: ChunkingSection::default(),
         profiles: profiles.iter().map(|(n, p)| (n.to_string(), p.clone())).collect::<BTreeMap<_, _>>(),
         namespaces: namespaces.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect(),
+        read: Default::default(),
     }
 }
 
@@ -234,4 +235,45 @@ fn gc_snapshot_tracer_and_owned_handles() {
     }
     assert!(r.contains(&leaf).unwrap());
     assert!(*snap.built.lock().unwrap() >= 3, "built once per GC run");
+}
+
+/// `[read]` policy: eof reads are refused unless the repository allows them;
+/// `verify = "eof"` makes eof the default (and allowed); the section
+/// round-trips through config.toml; strict is always available.
+#[test]
+fn read_verify_policy() {
+    use pico2peta_core::ReadVerify;
+    use pico2peta_repo::ReadSection;
+    let data = vec![5u8; 3 << 20];
+    let mk = |dir: &std::path::Path, read: ReadSection| {
+        let mut c = RepoConfig::new(&PackConfig::default());
+        c.read = read.clone();
+        let r = LocalRepo::init_config(dir, &c).unwrap();
+        assert_eq!(LocalRepo::read_config(dir).unwrap().read, read);
+        r
+    };
+    let d = tempfile::tempdir().unwrap();
+    let strict = mk(&d.path().join("s"), ReadSection::default());
+    let h = strict.put(&data).unwrap();
+    assert!(matches!(strict.open_verified(&h, None, ReadVerify::Eof), Err(Error::Unsupported(_))));
+    assert!(strict.open_verified(&h, None, ReadVerify::Strict).is_ok());
+    let allowed = mk(&d.path().join("a"), ReadSection { verify: ReadVerify::Strict, allow_eof: true });
+    let h = allowed.put(&data).unwrap();
+    let mut v = Vec::new();
+    allowed.open_verified(&h, None, ReadVerify::Eof).unwrap().read_to_end(&mut v).unwrap();
+    assert_eq!(v, data);
+    let eof_default = mk(&d.path().join("e"), ReadSection { verify: ReadVerify::Eof, allow_eof: false });
+    assert!(eof_default.read_policy().eof_allowed());
+    let h = eof_default.put(&data).unwrap();
+    assert_eq!(eof_default.get(&h, None).unwrap(), data);
+    // A bad value in config.toml is an error, not a silent default.
+    let bad = d.path().join("b");
+    std::fs::create_dir_all(&bad).unwrap();
+    let text = toml_like(&d.path().join("s")).replace("format = 1", "format = 1\n[read]\nverify = \"fast\"");
+    std::fs::write(bad.join("config.toml"), text).unwrap();
+    assert!(LocalRepo::read_config(&bad).is_err());
+}
+
+fn toml_like(repo: &std::path::Path) -> String {
+    std::fs::read_to_string(repo.join("config.toml")).unwrap()
 }
