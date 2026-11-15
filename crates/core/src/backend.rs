@@ -41,6 +41,7 @@ use std::path::Path;
 /// can retry or do multipart uploads without buffering everything.
 #[derive(Clone, Copy, Debug)]
 pub enum PutSource<'a> {
+    /// An in-memory buffer.
     Bytes(&'a [u8]),
     /// A local file, complete and fsynced. It must not change during the
     /// call or afterwards. Backends may publish it by reference (e.g. a hard
@@ -56,6 +57,7 @@ impl PutSource<'_> {
             PutSource::File(p) => Ok(std::fs::metadata(p)?.len()),
         }
     }
+    /// True if the body has zero length.
     pub fn is_empty(&self) -> Result<bool> {
         Ok(self.len()? == 0)
     }
@@ -69,17 +71,24 @@ impl PutSource<'_> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Result of [`Backend::put_if_absent`].
 pub enum PutOutcome {
+    /// The blob was created by this call.
     Created,
+    /// The key already existed; nothing was written.
     AlreadyExists,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// A listed or inspected blob.
 pub struct BlobMeta {
+    /// Its key.
     pub key: String,
+    /// Its length in bytes.
     pub len: u64,
 }
 
+/// Immutable blob storage for sealed packs and indexes. See the module docs for the full contract.
 pub trait Backend: Send + Sync {
     /// Atomically creates `key` with `src`'s bytes unless `key` already exists.
     fn put_if_absent(&self, key: &str, src: PutSource<'_>) -> Result<PutOutcome>;
@@ -143,6 +152,7 @@ pub mod conformance {
         concurrent_creators(b);
     }
 
+    /// `put_if_absent` never overwrites.
     pub fn create_only(b: &dyn Backend) {
         let k = "conf/create-only.bin";
         assert_eq!(b.put_if_absent(k, PutSource::Bytes(b"first")).unwrap(), PutOutcome::Created);
@@ -150,6 +160,7 @@ pub mod conformance {
         assert_eq!(read_all(b, k), b"first", "put_if_absent must not overwrite");
     }
 
+    /// Ranged reads return exact bytes and reject reads past the end.
     pub fn ranged_reads(b: &dyn Backend) {
         let k = "conf/range.bin";
         let data: Vec<u8> = (0..10_000u32).map(|i| (i * 7 % 251) as u8).collect();
@@ -160,6 +171,7 @@ pub mod conformance {
         assert!(b.get_range(k, 9_990..10_001).is_err(), "reading past end must fail");
     }
 
+    /// `list` is prefix-filtered and sorted; `head` reports lengths.
     pub fn list_and_head(b: &dyn Backend) {
         b.put_if_absent("conf/list/a", PutSource::Bytes(b"1")).unwrap();
         b.put_if_absent("conf/list/b/c", PutSource::Bytes(b"22")).unwrap();
@@ -172,6 +184,7 @@ pub mod conformance {
         assert_eq!(b.head("conf/nope").unwrap(), None);
     }
 
+    /// `PutSource::File` uploads a multi-MiB file intact.
     pub fn file_source(b: &dyn Backend) {
         let dir =
             std::env::temp_dir().join(format!("p2p-conf-{}-{:?}", std::process::id(), std::thread::current().id()));
@@ -184,6 +197,7 @@ pub mod conformance {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// `delete` is idempotent and frees the key for re-creation.
     pub fn delete_idempotent(b: &dyn Backend) {
         b.put_if_absent("conf/del", PutSource::Bytes(b"x")).unwrap();
         b.delete("conf/del").unwrap();
@@ -192,6 +206,7 @@ pub mod conformance {
         assert_eq!(b.put_if_absent("conf/del", PutSource::Bytes(b"y")).unwrap(), PutOutcome::Created);
     }
 
+    /// Missing keys are `KeyNotFound`; invalid keys are rejected.
     pub fn missing_keys(b: &dyn Backend) {
         assert!(matches!(b.get_range("conf/missing", 0..1), Err(Error::KeyNotFound(_))));
         assert!(matches!(b.open("conf/missing").err(), Some(Error::KeyNotFound(_))));
@@ -230,12 +245,14 @@ pub struct LocalDisk {
 }
 
 impl LocalDisk {
+    /// Opens (creating if needed) a backend rooted at `root`.
     pub fn new(root: impl Into<std::path::PathBuf>) -> Result<Self> {
         let root = root.into();
         std::fs::create_dir_all(&root)?;
         Ok(LocalDisk { root })
     }
 
+    /// The root directory.
     pub fn root(&self) -> &Path {
         &self.root
     }

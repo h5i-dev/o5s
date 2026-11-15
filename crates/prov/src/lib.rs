@@ -25,6 +25,7 @@
 //! alive, but not their outputs. With the log head as a GC root, an
 //! output that nothing else references can be collected and regenerated
 //! later ("old versions deletable if provenance exists").
+#![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use pico2peta_core::{Error, Hash, Name, ObjectStore, RefValue, ReplaceOutcome, Repository, Result};
@@ -175,11 +176,14 @@ pub fn is_record(b: &[u8]) -> bool {
 /// A node of the provenance log: a batch of records plus its predecessor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogNode {
+    /// The previous log node (`None` for the first).
     pub prev: Option<Hash>,
+    /// Records appended by this node.
     pub records: Vec<Hash>,
 }
 
 impl LogNode {
+    /// Canonical encoding (`P2PPLOG1`).
     pub fn encode(&self) -> Vec<u8> {
         let mut v = LOG_MAGIC.to_vec();
         match &self.prev {
@@ -196,6 +200,7 @@ impl LogNode {
         v
     }
 
+    /// Decodes a log node.
     pub fn decode(b: &[u8]) -> Result<LogNode> {
         if b.len() < 8 || &b[..8] != LOG_MAGIC {
             return Err(Error::Corrupt("not a provenance log node".into()));
@@ -291,9 +296,11 @@ impl Provenance {
     pub fn len(&self) -> usize {
         self.records.len()
     }
+    /// True if no records were loaded.
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
     }
+    /// The record with hash `h`.
     pub fn get(&self, h: &Hash) -> Option<&Record> {
         self.records.get(h)
     }
@@ -360,6 +367,7 @@ impl Provenance {
 /// and records keep their **inputs and params** alive, but not their
 /// outputs. Other objects are delegated to `inner`.
 pub struct ProvTracer<T: Tracer> {
+    /// Tracer for every other object (e.g. Git/OCI adapters).
     pub inner: T,
 }
 

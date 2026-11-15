@@ -50,9 +50,11 @@ pub const DEFAULT_MANIFEST_FANOUT: usize = 4096;
 pub struct PackConfig {
     /// Objects at least this large are chunked.
     pub chunk_threshold: usize,
-    /// FastCDC minimum, average and maximum chunk sizes.
+    /// FastCDC minimum chunk size.
     pub cdc_min: u32,
+    /// FastCDC average chunk size.
     pub cdc_avg: u32,
+    /// FastCDC maximum chunk size (must be below `chunk_threshold`).
     pub cdc_max: u32,
     /// The open pack is sealed once it reaches this many bytes.
     pub pack_cap: u64,
@@ -132,11 +134,17 @@ struct Loc {
 /// Summary counters.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PackStats {
+    /// Sealed packs known to this handle.
     pub sealed_packs: usize,
+    /// Addressable hashes (objects, chunks, manifest nodes).
     pub objects: usize,
+    /// Of which blobs (including chunks and frame members).
     pub blobs: usize,
+    /// Of which manifest nodes.
     pub manifests: usize,
+    /// Bytes in this handle's open (unsealed) pack.
     pub open_bytes: u64,
+    /// Sum of blob lengths.
     pub logical_blob_bytes: u64,
 }
 
@@ -300,6 +308,7 @@ impl PackStore {
         Ok(s)
     }
 
+    /// The configuration this store was opened with.
     pub fn config(&self) -> &PackConfig {
         &self.inner.cfg
     }

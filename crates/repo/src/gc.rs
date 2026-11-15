@@ -59,7 +59,9 @@ impl Tracer for OpaqueObjects {
 /// Example (Git): group = file extension, order = path + commit time.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GroupKey {
+    /// Objects with the same group are compressed together.
     pub group: String,
+    /// Position within the group (lexicographic).
     pub order: String,
 }
 
@@ -68,6 +70,7 @@ pub struct GroupKey {
 /// those it knows; unknown objects are copied verbatim. Adapters implement it
 /// (e.g. the Git adapter by walking trees: paths are known only from trees).
 pub trait Grouper: Send + Sync {
+    /// Group keys for (some of) `live`. Objects without a key are copied verbatim.
     fn assign(&self, repo: &dyn Repository, live: &HashSet<Hash>) -> Result<HashMap<Hash, GroupKey>>;
 }
 

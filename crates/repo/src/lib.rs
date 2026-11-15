@@ -12,6 +12,7 @@
 //! Any number of `LocalRepo` handles, in any number of processes, can use one
 //! root at the same time. See `pico2peta-pack` and `pico2peta-refs` for the
 //! concurrency protocols.
+#![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod gc;
@@ -44,11 +45,17 @@ pub struct RepoConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PackSection {
+    /// See [`PackConfig::chunk_threshold`].
     pub chunk_threshold: usize,
+    /// See [`PackConfig::cdc_min`].
     pub cdc_min: u32,
+    /// See [`PackConfig::cdc_avg`].
     pub cdc_avg: u32,
+    /// See [`PackConfig::cdc_max`].
     pub cdc_max: u32,
+    /// See [`PackConfig::pack_cap`].
     pub pack_cap: u64,
+    /// See [`PackConfig::zstd_level`].
     pub zstd_level: i32,
     /// Added after format 1 shipped; defaults keep old configs readable.
     #[serde(default = "default_fanout")]

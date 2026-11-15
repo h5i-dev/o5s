@@ -17,6 +17,7 @@
 //! validation and commit are atomic across processes, and an `Ok` is durable.
 //! Reads take a shared lock, which means they never observe a half-written
 //! record from a live writer.
+#![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use pico2peta_core::fault::{FaultHandle, Faults};

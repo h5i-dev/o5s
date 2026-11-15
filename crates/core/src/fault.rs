@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 #[derive(Debug, Default)]
+/// A fault-injection budget shared by the components under test.
 pub struct Faults {
     /// Remaining successful hits. `-1` = disarmed.
     remaining: AtomicI64,
@@ -21,6 +22,7 @@ pub struct Faults {
     hits: AtomicU64,
 }
 
+/// Shared handle to a [`Faults`] budget.
 pub type FaultHandle = Arc<Faults>;
 
 impl Faults {
