@@ -61,6 +61,8 @@ pub struct AppState {
     pub local: Option<pico2peta_repo::LocalRepo>,
     pub gc: crate::config::GcSection,
     pub gc_running: Arc<AtomicBool>,
+    /// Token management over `auth.token_file` (`None` without a token file).
+    pub token_admin: Option<TokenAdmin>,
     pub oci: Option<Arc<crate::oci::OciState>>,
     pub git: Option<Arc<crate::git::GitState>>,
 }
@@ -121,6 +123,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/namespaces/{*prefix}", put(set_rule))
         .route("/v1/whoami", get(whoami))
         .route("/v1/admin/gc", post(gc))
+        .route("/v1/admin/tokens", get(list_tokens).post(create_token))
+        .route("/v1/admin/tokens/{sha256}", axum::routing::delete(revoke_token))
         .route("/v2/", get(crate::oci::base))
         .route("/v2", get(crate::oci::base))
         .route("/v2/{*rest}", axum::routing::any(crate::oci::dispatch))
@@ -931,6 +935,164 @@ async fn set_rule(
     })
     .await?;
     res?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Manages the tokens in `auth.token_file` (inline config tokens are read-only).
+pub struct TokenAdmin {
+    pub file: std::path::PathBuf,
+    pub inline: Vec<crate::config::TokenEntry>,
+    pub allow_anonymous: bool,
+    pub lock: tokio::sync::Mutex<()>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Default)]
+struct TokenFileDoc {
+    #[serde(default)]
+    tokens: Vec<crate::config::TokenEntry>,
+}
+
+impl TokenAdmin {
+    /// Lower-case hashes in the token file.
+    pub fn read_hashes(&self) -> Result<std::collections::HashSet<String>, String> {
+        Ok(self.read()?.into_iter().map(|t| t.sha256.to_ascii_lowercase()).collect())
+    }
+
+    fn read(&self) -> Result<Vec<crate::config::TokenEntry>, String> {
+        match std::fs::read_to_string(&self.file) {
+            Ok(t) => toml::from_str::<TokenFileDoc>(&t).map(|d| d.tokens).map_err(|e| e.to_string()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// Atomically replaces the token file (tmp + fsync + rename + dir fsync).
+    fn write(&self, tokens: &[crate::config::TokenEntry]) -> Result<(), String> {
+        use std::io::Write;
+        let text = toml::to_string(&TokenFileDoc { tokens: tokens.to_vec() }).map_err(|e| e.to_string())?;
+        let tmp = self.file.with_extension("toml.tmp");
+        {
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&tmp)
+                .map_err(|e| e.to_string())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = f.set_permissions(std::fs::Permissions::from_mode(0o600));
+            }
+            f.write_all(text.as_bytes()).and_then(|_| f.sync_all()).map_err(|e| e.to_string())?;
+        }
+        std::fs::rename(&tmp, &self.file).map_err(|e| e.to_string())?;
+        if let Some(d) = self.file.parent().filter(|d| !d.as_os_str().is_empty()) {
+            std::fs::File::open(d).and_then(|f| f.sync_all()).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct CreateToken {
+    principal: String,
+}
+
+async fn create_token(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
+    Json(req): Json<CreateToken>,
+) -> ApiResult<Response> {
+    st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "create_token", &req.principal)?;
+    let Some(ta) = &st.token_admin else {
+        return Err(ApiError::new(StatusCode::NOT_IMPLEMENTED, "unsupported", "set auth.token_file to manage tokens"));
+    };
+    if !crate::config::valid_principal(&req.principal) {
+        return Err(ApiError::bad_request("invalid principal name"));
+    }
+    st.require_audit_healthy()?;
+    let mut raw = [0u8; 32];
+    getrandom::fill(&mut raw).map_err(|e| ApiError::internal(format!("no system randomness: {e}")))?;
+    let token = format!("p2p_{}", raw.iter().map(|b| format!("{b:02x}")).collect::<String>());
+    let sha: String = crate::auth::sha256(token.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+    let _g = ta.lock.lock().await;
+    let mut file = ta.read().map_err(ApiError::internal)?;
+    file.push(crate::config::TokenEntry { principal: req.principal.clone(), sha256: sha.clone() });
+    ta.write(&file).map_err(ApiError::internal)?;
+    if let Some(t) = &st.tokens {
+        t.reload(&[ta.inline.clone(), file].concat(), ta.allow_anonymous);
+    }
+    st.audit_mutation(Event {
+        request_id: c.request_id.clone(),
+        principal: p.name.clone(),
+        action: "create_token",
+        target: req.principal.clone(),
+        outcome: "ok".into(),
+        detail: Some(format!("sha256={}", &sha[..16])),
+        remote: c.remote.clone(),
+    })
+    .await?;
+    Ok((StatusCode::CREATED, Json(serde_json::json!({"principal": req.principal, "sha256": sha, "token": token})))
+        .into_response())
+}
+
+async fn list_tokens(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
+) -> ApiResult<Json<serde_json::Value>> {
+    st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "list_tokens", "tokens")?;
+    let Some(ta) = &st.token_admin else {
+        return Err(ApiError::new(StatusCode::NOT_IMPLEMENTED, "unsupported", "set auth.token_file to manage tokens"));
+    };
+    let file = ta.read().map_err(ApiError::internal)?;
+    let row = |t: &crate::config::TokenEntry, source: &str| serde_json::json!({"principal": t.principal, "sha256": t.sha256, "source": source});
+    let rows: Vec<_> =
+        ta.inline.iter().map(|t| row(t, "config")).chain(file.iter().map(|t| row(t, "token_file"))).collect();
+    Ok(Json(serde_json::json!({"tokens": rows})))
+}
+
+async fn revoke_token(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
+    Path(sha): Path<String>,
+) -> ApiResult<StatusCode> {
+    st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "revoke_token", &sha)?;
+    let Some(ta) = &st.token_admin else {
+        return Err(ApiError::new(StatusCode::NOT_IMPLEMENTED, "unsupported", "set auth.token_file to manage tokens"));
+    };
+    let sha = sha.to_ascii_lowercase();
+    if ta.inline.iter().any(|t| t.sha256.eq_ignore_ascii_case(&sha)) {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "bad_request",
+            "token is defined in the main config; edit it there",
+        ));
+    }
+    st.require_audit_healthy()?;
+    let _g = ta.lock.lock().await;
+    let mut file = ta.read().map_err(ApiError::internal)?;
+    let before = file.len();
+    file.retain(|t| !t.sha256.eq_ignore_ascii_case(&sha));
+    if file.len() == before {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "not_found", "no such token"));
+    }
+    ta.write(&file).map_err(ApiError::internal)?;
+    if let Some(t) = &st.tokens {
+        t.reload(&[ta.inline.clone(), file].concat(), ta.allow_anonymous);
+    }
+    st.audit_mutation(Event {
+        request_id: c.request_id.clone(),
+        principal: p.name.clone(),
+        action: "revoke_token",
+        target: sha[..sha.len().min(16)].to_string(),
+        outcome: "ok".into(),
+        detail: None,
+        remote: c.remote.clone(),
+    })
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

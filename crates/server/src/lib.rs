@@ -129,6 +129,27 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         local: Some(local),
         gc: cfg.gc.clone(),
         gc_running: Arc::new(AtomicBool::new(false)),
+        token_admin: match cfg.auth.token_file.clone() {
+            Some(file) => {
+                let mut ta = api::TokenAdmin {
+                    file,
+                    inline: Vec::new(),
+                    allow_anonymous: cfg.auth.allow_anonymous,
+                    lock: tokio::sync::Mutex::new(()),
+                };
+                // Inline = configured tokens that are not in the token file.
+                let in_file = ta.read_hashes().map_err(StartError::S3)?;
+                ta.inline = cfg
+                    .auth
+                    .tokens
+                    .iter()
+                    .filter(|t| !in_file.contains(&t.sha256.to_ascii_lowercase()))
+                    .cloned()
+                    .collect();
+                Some(ta)
+            }
+            None => None,
+        },
         oci,
         git,
     }))
