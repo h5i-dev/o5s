@@ -15,7 +15,26 @@
 
 use pico2peta_core::{Error, Hash, Result};
 
-pub const PACK_MAGIC: &[u8; 8] = b"P2PPACK1";
+/// Pack format v1: magic, then records.
+pub const PACK_MAGIC_V1: &[u8; 8] = b"P2PPACK1";
+/// Pack format v2 (current): magic, a 16-byte random nonce, then records.
+/// The nonce makes every pack's content (and so its content-derived name)
+/// unique, even when two packs hold the same records in the same order. GC
+/// relies on this: a rewritten copy must never alias a condemned pack.
+pub const PACK_MAGIC: &[u8; 8] = b"P2PPACK2";
+/// Length of the v2 pack header (magic + nonce).
+pub const PACK_HEADER_V2: usize = 24;
+
+/// Header length implied by a pack's first 8 bytes, or `None` if not a pack.
+pub fn pack_header_len(magic: &[u8]) -> Option<u64> {
+    if magic == PACK_MAGIC_V1 {
+        Some(8)
+    } else if magic == PACK_MAGIC {
+        Some(PACK_HEADER_V2 as u64)
+    } else {
+        None
+    }
+}
 pub const IDX_MAGIC: &[u8; 8] = b"P2PIDX01";
 pub const REC_MAGIC: u32 = u32::from_le_bytes(*b"P2PR");
 pub const REC_HEADER: usize = 4 + 1 + 1 + 2 + 32 + 8 + 4;

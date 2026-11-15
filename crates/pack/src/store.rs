@@ -41,6 +41,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+/// Default [`PackConfig::manifest_fanout`]: 4096 entries (~160 KiB per node).
+/// Two levels cover 2^24 chunks (~1 TiB at 64 KiB average chunks).
+pub const DEFAULT_MANIFEST_FANOUT: usize = 4096;
+
 /// Tunables for the pack store.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PackConfig {
@@ -54,6 +58,9 @@ pub struct PackConfig {
     pub pack_cap: u64,
     /// zstd level for record payloads. 0 disables compression.
     pub zstd_level: i32,
+    /// Maximum entries per manifest node. Larger objects get a tree of
+    /// manifests, so no manifest grows without bound.
+    pub manifest_fanout: usize,
 }
 
 impl Default for PackConfig {
@@ -65,6 +72,7 @@ impl Default for PackConfig {
             cdc_max: 256 << 10,
             pack_cap: 256 << 20,
             zstd_level: 3,
+            manifest_fanout: DEFAULT_MANIFEST_FANOUT,
         }
     }
 }
@@ -79,6 +87,7 @@ impl PackConfig {
             cdc_max: 1024,
             pack_cap: 16 << 10,
             zstd_level: 1,
+            manifest_fanout: 4,
         }
     }
 
@@ -95,7 +104,8 @@ impl PackConfig {
             && (self.cdc_max as usize) < self.chunk_threshold
             && self.chunk_threshold <= (u32::MAX / 2) as usize
             && self.pack_cap >= 1024
-            && (-7..=22).contains(&self.zstd_level);
+            && (-7..=22).contains(&self.zstd_level)
+            && (2..=(1 << 20)).contains(&self.manifest_fanout);
         if ok { Ok(()) } else { Err(Error::Parse(format!("invalid pack config {self:?}"))) }
     }
 }
@@ -442,8 +452,9 @@ impl PackStore {
         let mut entries = Vec::new();
         let mut magic = [0u8; 8];
         let mut good = 0u64;
-        if len >= 8 && f.read_exact_at(&mut magic, 0).is_ok() && &magic == PACK_MAGIC {
-            good = 8;
+        let hl = if len >= 8 && f.read_exact_at(&mut magic, 0).is_ok() { pack_header_len(&magic) } else { None };
+        if let Some(hl) = hl.filter(|hl| len >= *hl) {
+            good = hl;
             let mut hdr = vec![0u8; REC_HEADER];
             while good + REC_HEADER as u64 <= len {
                 if f.read_exact_at(&mut hdr, good).is_err() {
@@ -485,7 +496,10 @@ impl PackStore {
         self.fault("open.create")?;
         let mut f = OpenOptions::new().read(true).write(true).create_new(true).open(&tmp)?;
         f.lock()?;
-        f.write_all(PACK_MAGIC)?;
+        let mut header = PACK_MAGIC.to_vec();
+        let nonce = blake3::hash(format!("{id}-{}-{:?}", std::process::id(), std::time::SystemTime::now()).as_bytes());
+        header.extend_from_slice(&nonce.as_bytes()[..16]);
+        f.write_all(&header)?;
         // Rename while holding the lock. Recovery only considers `*.pack`,
         // so a staging file is never adopted before its lock is held.
         fs::rename(&tmp, &path)?;
@@ -494,7 +508,7 @@ impl PackStore {
             file: Arc::new(f),
             path,
             generation: self.inner.generation.fetch_add(1, Ordering::Relaxed),
-            len: PACK_MAGIC.len() as u64,
+            len: PACK_HEADER_V2 as u64,
             entries: Vec::new(),
         })
     }
@@ -669,28 +683,87 @@ impl PackStore {
     where
         I: Iterator<Item = Result<Vec<u8>>>,
     {
-        let mut hasher = blake3::Hasher::new();
-        let mut manifest = Vec::new();
-        let mut total = 0u64;
+        // A tree of manifests. Every node is the manifest of a contiguous range
+        // of the object and is keyed by the BLAKE3 of that range, so every
+        // index key is still the content hash of what `get` returns for it.
+        struct Level {
+            hasher: blake3::Hasher,
+            entries: Vec<(Hash, u64)>,
+            len: u64,
+        }
+        let fanout = self.inner.cfg.manifest_fanout;
+        let mut whole = blake3::Hasher::new();
+        let mut levels: Vec<Level> = vec![Level { hasher: blake3::Hasher::new(), entries: Vec::new(), len: 0 }];
         for c in chunks {
             let c = c?;
-            hasher.update(&c);
-            total += c.len() as u64;
+            whole.update(&c);
+            for l in levels.iter_mut() {
+                l.hasher.update(&c);
+            }
             let ch = Hash::of(&c);
             if !self.dedup_hit(&ch)? {
                 let mut w = self.inner.writer.lock().map_err(poisoned)?;
                 self.append(&mut w, Kind::Blob, ch, c.len() as u64, &c)?;
                 self.maybe_seal(&mut w)?;
             }
-            manifest.push((ch, c.len() as u64));
+            levels[0].entries.push((ch, c.len() as u64));
+            levels[0].len += c.len() as u64;
+            // Carry full nodes upward.
+            let mut i = 0;
+            while levels[i].entries.len() == fanout {
+                if i + 1 == levels.len() {
+                    // The new parent's first node so far is exactly this node's bytes.
+                    let h = levels[i].hasher.clone();
+                    levels.push(Level { hasher: h, entries: Vec::new(), len: 0 });
+                }
+                let lv = &mut levels[i];
+                let node = self.emit_node(&mut lv.hasher, &mut lv.entries, &mut lv.len)?;
+                levels[i + 1].entries.push(node);
+                levels[i + 1].len += node.1;
+                i += 1;
+            }
         }
-        let hash = Hash(*hasher.finalize().as_bytes());
+        let hash = Hash(*whole.finalize().as_bytes());
+        // Close partial nodes below the top.
+        let top = levels.len() - 1;
+        for i in 0..top {
+            if !levels[i].entries.is_empty() {
+                let lv = &mut levels[i];
+                let node = self.emit_node(&mut lv.hasher, &mut lv.entries, &mut lv.len)?;
+                levels[i + 1].entries.push(node);
+                levels[i + 1].len += node.1;
+            }
+        }
+        let root = &levels[top];
+        if root.entries.len() == 1 && root.entries[0].0 == hash {
+            return Ok(hash); // the single child already is the whole object
+        }
         if !self.dedup_hit(&hash)? {
             let mut w = self.inner.writer.lock().map_err(poisoned)?;
-            self.append(&mut w, Kind::Manifest, hash, total, &encode_manifest(&manifest))?;
+            self.append(&mut w, Kind::Manifest, hash, root.len, &encode_manifest(&root.entries))?;
             self.maybe_seal(&mut w)?;
         }
         Ok(hash)
+    }
+
+    /// Writes one interior manifest node and resets the level.
+    fn emit_node(
+        &self,
+        hasher: &mut blake3::Hasher,
+        entries: &mut Vec<(Hash, u64)>,
+        len: &mut u64,
+    ) -> Result<(Hash, u64)> {
+        let h = Hash(*hasher.finalize().as_bytes());
+        let l = *len;
+        if !self.dedup_hit(&h)? {
+            let mut w = self.inner.writer.lock().map_err(poisoned)?;
+            self.append(&mut w, Kind::Manifest, h, l, &encode_manifest(entries))?;
+            self.maybe_seal(&mut w)?;
+        }
+        *hasher = blake3::Hasher::new();
+        entries.clear();
+        *len = 0;
+        Ok((h, l))
     }
 
     /// Counters (local view, without a refresh).
@@ -800,6 +873,29 @@ impl PackStore {
         self.maybe_seal(&mut w)
     }
 
+    /// See [`ObjectStore::ensure_live`]. Walks manifest trees, so cost is
+    /// proportional to the object's manifest size, not its data.
+    pub fn ensure_live_impl(&self, hash: &Hash) -> Result<bool> {
+        // Refresh first if our view of condemnations may be stale.
+        let _ = self.dedup_hit(hash)?;
+        let Some(loc) = self.lookup(hash)? else { return Ok(false) };
+        if loc.kind == Kind::Manifest {
+            for (child, _) in self.read_manifest(hash, loc)? {
+                if !self.ensure_live_impl(&child)? {
+                    return Err(Error::Corrupt(format!("{hash} references missing chunk {child}")));
+                }
+            }
+        }
+        let condemned_only = {
+            let idx = self.inner.index.read().map_err(poisoned)?;
+            idx.map.get(hash).is_some_and(|l| rank(&idx, l) == 2)
+        };
+        if condemned_only {
+            self.copy_record(hash)?;
+        }
+        Ok(true)
+    }
+
     /// Name of the sealed pack `hash` is currently served from (`None` if it
     /// comes from this handle's open pack, or isn't present).
     pub fn serving_pack(&self, hash: &Hash) -> Result<Option<String>> {
@@ -874,21 +970,13 @@ impl ObjectStore for PackStore {
                 Ok(Box::new(std::io::Cursor::new(d[r.start as usize..r.end as usize].to_vec())))
             }
             Kind::Manifest => {
-                let m = self.read_manifest(hash, loc)?;
-                let mut pieces = Vec::new();
-                let mut pos = 0u64;
-                for (ch, len) in m {
-                    let (cs, ce) = (pos, pos + len);
-                    pos = ce;
-                    if ce > r.start && cs < r.end {
-                        pieces.push((ch, r.start.max(cs) - cs, r.end.min(ce) - cs));
-                    }
-                }
+                let pieces = overlapping(self.read_manifest(hash, loc)?, r.start, r.end);
                 Ok(Box::new(ChunkReader {
                     store: self.clone(),
-                    pieces: pieces.into_iter(),
+                    stack: vec![pieces.into_iter()],
                     cur: std::io::Cursor::new(Vec::new()),
                     verify: whole.then(|| (blake3::Hasher::new(), *hash)),
+                    depth_limit: 16,
                 }))
             }
         }
@@ -900,6 +988,10 @@ impl ObjectStore for PackStore {
 
     fn contains(&self, hash: &Hash) -> Result<bool> {
         Ok(self.lookup(hash)?.is_some())
+    }
+
+    fn ensure_live(&self, hash: &Hash) -> Result<bool> {
+        self.ensure_live_impl(hash)
     }
 
     fn flush(&self) -> Result<()> {
@@ -940,13 +1032,34 @@ fn unwrap_io(e: std::io::Error) -> Error {
     }
 }
 
-/// Streams a chunked object one chunk at a time.
+/// Entries of `m` that overlap `[start, end)`, with their local sub-range.
+fn overlapping(m: Vec<(Hash, u64)>, start: u64, end: u64) -> Vec<(Hash, u64, u64)> {
+    let mut out = Vec::new();
+    let mut pos = 0u64;
+    for (h, len) in m {
+        let (cs, ce) = (pos, pos + len);
+        pos = ce;
+        if ce > start && cs < end {
+            out.push((h, start.max(cs) - cs, end.min(ce) - cs));
+        }
+    }
+    out
+}
+
+/// Streams a chunked object, expanding the manifest tree lazily, so memory
+/// is bounded by tree depth times fanout, whatever the object's size.
 struct ChunkReader {
     store: PackStore,
-    pieces: std::vec::IntoIter<(Hash, u64, u64)>,
+    /// One iterator per tree level: `(hash, start, end)` local to that entry.
+    stack: Vec<std::vec::IntoIter<(Hash, u64, u64)>>,
     cur: std::io::Cursor<Vec<u8>>,
     /// Whole-object reads also verify the reassembled hash at EOF.
     verify: Option<(blake3::Hasher, Hash)>,
+    depth_limit: usize,
+}
+
+fn io_err(e: Error) -> std::io::Error {
+    std::io::Error::other(e)
 }
 
 impl Read for ChunkReader {
@@ -956,27 +1069,49 @@ impl Read for ChunkReader {
             if n > 0 || buf.is_empty() {
                 return Ok(n);
             }
-            let Some((ch, a, b)) = self.pieces.next() else {
-                if let Some((h, want)) = self.verify.take()
-                    && Hash(*h.finalize().as_bytes()) != want
+            let next = loop {
+                match self.stack.last_mut() {
+                    None => break None,
+                    Some(it) => match it.next() {
+                        Some(p) => break Some(p),
+                        None => {
+                            self.stack.pop();
+                        }
+                    },
+                }
+            };
+            let Some((h, a, b)) = next else {
+                if let Some((hs, want)) = self.verify.take()
+                    && Hash(*hs.finalize().as_bytes()) != want
                 {
-                    return Err(std::io::Error::other(Error::Corrupt(format!("reassembled hash mismatch for {want}"))));
+                    return Err(io_err(Error::Corrupt(format!("reassembled hash mismatch for {want}"))));
                 }
                 return Ok(0);
             };
             let loc = self
                 .store
-                .lookup(&ch)
-                .map_err(std::io::Error::other)?
-                .ok_or_else(|| std::io::Error::other(Error::Corrupt(format!("missing chunk {ch}"))))?;
-            let d = self.store.read_blob(&ch, loc).map_err(std::io::Error::other)?;
-            if let Some((h, _)) = self.verify.as_mut() {
-                h.update(&d);
+                .lookup(&h)
+                .map_err(io_err)?
+                .ok_or_else(|| io_err(Error::Corrupt(format!("missing chunk {h}"))))?;
+            match loc.kind {
+                Kind::Manifest => {
+                    if self.stack.len() >= self.depth_limit {
+                        return Err(io_err(Error::Corrupt("manifest tree too deep".into())));
+                    }
+                    let m = self.store.read_manifest(&h, loc).map_err(io_err)?;
+                    self.stack.push(overlapping(m, a, b).into_iter());
+                }
+                Kind::Blob => {
+                    let d = self.store.read_blob(&h, loc).map_err(io_err)?;
+                    if let Some((hs, _)) = self.verify.as_mut() {
+                        hs.update(&d);
+                    }
+                    let slice = d
+                        .get(a as usize..b as usize)
+                        .ok_or_else(|| io_err(Error::Corrupt("chunk shorter than manifest".into())))?;
+                    self.cur = std::io::Cursor::new(slice.to_vec());
+                }
             }
-            let slice = d
-                .get(a as usize..b as usize)
-                .ok_or_else(|| std::io::Error::other(Error::Corrupt("chunk shorter than manifest".into())))?;
-            self.cur = std::io::Cursor::new(slice.to_vec());
         }
     }
 }

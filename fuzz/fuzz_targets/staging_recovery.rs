@@ -7,7 +7,7 @@ use std::sync::Arc;
 fuzz_target!(|data: &[u8]| {
     let d = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(d.path().join("staging")).unwrap();
-    let mut f = b"P2PPACK1".to_vec();
+    let mut f = if data.first().is_some_and(|b| b & 1 == 1) { b"P2PPACK1".to_vec() } else { b"P2PPACK2\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0".to_vec() };
     f.extend_from_slice(data);
     std::fs::write(d.path().join("staging/x.pack"), &f).unwrap();
     let backend: Arc<dyn Backend> = Arc::new(LocalDisk::new(d.path().join("objects")).unwrap());

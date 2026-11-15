@@ -84,6 +84,7 @@ proptest! {
         let mut f = Vec::new();
         if prefix_valid {
             f.extend_from_slice(PACK_MAGIC);
+            f.extend_from_slice(&[7u8; 16]); // v2 nonce
             f.extend_from_slice(&valid_record());
         }
         f.extend_from_slice(&garbage);
