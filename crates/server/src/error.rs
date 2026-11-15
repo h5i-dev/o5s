@@ -66,6 +66,7 @@ impl From<Error> for ApiError {
             Error::RuleChangeOnNonEmpty(_) => StatusCode::CONFLICT,
             Error::Unsupported(_) => StatusCode::NOT_IMPLEMENTED,
             Error::Locked => StatusCode::SERVICE_UNAVAILABLE,
+            Error::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             Error::Backend { transient: true, .. } => StatusCode::SERVICE_UNAVAILABLE,
             Error::Backend { .. } | Error::Corrupt(_) | Error::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };

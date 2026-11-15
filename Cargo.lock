@@ -1017,6 +1017,7 @@ name = "pico2peta-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "pico2peta-client",
  "pico2peta-core",
  "pico2peta-repo",
  "tempfile",

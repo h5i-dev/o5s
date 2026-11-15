@@ -18,6 +18,12 @@ struct Cli {
     /// Repository directory.
     #[arg(short = 'C', long, env = "PICO2PETA_REPO", default_value = ".")]
     repo: PathBuf,
+    /// Talk to a pico2peta server instead of a local repository (e.g. https://p2p.example.com).
+    #[arg(long, env = "P2P_REMOTE")]
+    remote: Option<String>,
+    /// Bearer token for --remote.
+    #[arg(long, env = "P2P_TOKEN", hide_env_values = true)]
+    token: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -143,14 +149,27 @@ enum Outcome {
 
 fn run(cli: Cli) -> Result<Outcome, Error> {
     if let Cmd::Init { chunk_threshold, pack_cap, zstd_level } = &cli.cmd {
+        if cli.remote.is_some() {
+            return Err(Error::Unsupported("init is only available for local repositories"));
+        }
         let mut cfg = pico2peta_repo::PackConfig::default();
         cfg.apply_overrides(*chunk_threshold, *pack_cap, *zstd_level);
         LocalRepo::init(&cli.repo, &cfg)?;
         println!("initialized {}", cli.repo.display());
         return Ok(Outcome::Ok);
     }
-    let repo = LocalRepo::open(&cli.repo)?;
-    let r: &dyn Repository = &repo;
+    let remote = match &cli.remote {
+        Some(url) => Some(pico2peta_client::RemoteRepo::connect(url, cli.token.clone())?),
+        None => None,
+    };
+    let local = if remote.is_none() { Some(LocalRepo::open(&cli.repo)?) } else { None };
+    let r: &dyn Repository = match (&remote, &local) {
+        (Some(rr), _) => rr,
+        (None, Some(l)) => l,
+        (None, None) => return Err(Error::Unsupported("no repository")),
+    };
+    let local_only =
+        |what: &'static str| -> Result<&LocalRepo, Error> { local.as_ref().ok_or(Error::Unsupported(what)) };
     let mut out = std::io::stdout().lock();
     match cli.cmd {
         Cmd::Init { .. } => unreachable!("handled above"),
@@ -238,6 +257,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 dry_run,
                 ..Default::default()
             };
+            let repo = local_only("gc is only available for local repositories (run it on the server host)")?;
             let rep = repo.gc(&opts, &pico2peta_repo::OpaqueObjects)?;
             if let Some(p) = &rep.planned {
                 writeln!(out, "planned        {p}")?;
@@ -252,13 +272,14 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             }
         }
         Cmd::Stat => {
+            let repo = local_only("stat is only available for local repositories (run it on the server host)")?;
             let s = repo.pack_stats()?;
             writeln!(out, "backend        {}", repo.backend().describe())?;
             writeln!(out, "sealed_packs   {}", s.sealed_packs)?;
             writeln!(out, "objects        {} ({} blobs, {} manifests)", s.objects, s.blobs, s.manifests)?;
             writeln!(out, "logical_bytes  {}", s.logical_blob_bytes)?;
             writeln!(out, "refs           {}", r.list_refs("")?.len())?;
-            let g = pico2peta_repo::gc::gc_state(&repo)?;
+            let g = pico2peta_repo::gc::gc_state(repo)?;
             writeln!(out, "gc_plans       {}", g.get("plans").copied().unwrap_or(0))?;
             writeln!(out, "gc_condemned   {}", g.get("condemned").copied().unwrap_or(0))?;
         }
