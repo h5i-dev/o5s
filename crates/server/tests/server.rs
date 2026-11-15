@@ -442,4 +442,16 @@ fn delete_ref_over_http() {
         o => panic!("{o:?}"),
     }
     assert!(matches!(c.delete_ref(&n("shared/x"), &[(n("shared/x"), Observed::Absent)]), Err(Error::Unauthorized(_))));
+    // update_many: atomic set + delete.
+    let b = n("alice/e");
+    let va = c.resolve(&a).unwrap().unwrap().version;
+    let out = c
+        .update_many(
+            &[(a.clone(), None), (b.clone(), Some(h))],
+            &[(a.clone(), Observed::Version(va)), (b.clone(), Observed::Absent)],
+        )
+        .unwrap();
+    assert!(matches!(out, pico2peta_core::ReplaceManyOutcome::Ok { .. }), "{out:?}");
+    assert!(c.resolve(&a).unwrap().is_none());
+    assert!(c.resolve(&b).unwrap().is_some());
 }

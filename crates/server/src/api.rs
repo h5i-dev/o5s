@@ -111,6 +111,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/refs/{*name}", get(resolve).delete(delete_ref))
         .route("/v1/replace", post(replace))
         .route("/v1/replace_many", post(replace_many))
+        .route("/v1/update_many", post(update_many))
         .route("/v1/namespaces", get(list_rules))
         .route("/v1/namespaces/{*prefix}", put(set_rule))
         .route("/v1/whoami", get(whoami))
@@ -725,33 +726,72 @@ async fn replace_many(
     let req: wire::ReplaceManyRequest =
         serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("bad replace_many request: {e}")))?;
     let (updates, read_set) = req.to_core().map_err(ApiError::from)?;
+    let updates = updates.into_iter().map(|(n, h)| (n, Some(h))).collect();
+    multi_update(&st, &p, &c, updates, read_set, false).await
+}
+
+async fn update_many(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let req: wire::UpdateManyRequest =
+        serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("bad update_many request: {e}")))?;
+    let (updates, read_set) = req.to_core().map_err(ApiError::from)?;
+    multi_update(&st, &p, &c, updates, read_set, true).await
+}
+
+/// Shared body of `replace_many` / `update_many` (None = delete, only when `allow_delete`).
+async fn multi_update(
+    st: &AppState,
+    p: &Principal,
+    c: &Caller,
+    updates: Vec<(Name, Option<Hash>)>,
+    read_set: Vec<(Name, pico2peta_core::Observed)>,
+    allow_delete: bool,
+) -> ApiResult<Response> {
     if updates.is_empty() {
-        return Err(ApiError::bad_request("replace_many needs at least one update"));
+        return Err(ApiError::bad_request("at least one update is required"));
     }
     for (n, _) in &updates {
-        st.require(st.authz.allows(&p, n.as_str(), Access::Write), &p, &c, "replace", n.as_str())?;
+        st.require(st.authz.allows(p, n.as_str(), Access::Write), p, c, "replace", n.as_str())?;
         if is_reserved(n.as_str()) {
-            st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "replace_reserved", n.as_str())?;
+            st.require(st.authz.allows(p, "", Access::Admin), p, c, "replace_reserved", n.as_str())?;
         }
     }
     for (n, _) in &read_set {
-        st.require(st.authz.allows(&p, n.as_str(), Access::Read), &p, &c, "replace", n.as_str())?;
+        st.require(st.authz.allows(p, n.as_str(), Access::Read), p, c, "replace", n.as_str())?;
     }
     st.require_audit_healthy()?;
     let repo = st.repo.clone();
     let (u, rs) = (updates.clone(), read_set.clone());
-    let res = blocking(move || repo.replace_many(&u, &rs)).await;
+    let res = blocking(move || {
+        if allow_delete {
+            repo.update_many(&u, &rs)
+        } else {
+            let sets: Vec<(Name, Hash)> = u.into_iter().filter_map(|(n, h)| Some((n, h?))).collect();
+            repo.replace_many(&sets, &rs)
+        }
+    })
+    .await;
     let outcome = match &res {
         Ok(pico2peta_core::ReplaceManyOutcome::Ok { .. }) => "ok",
         Ok(pico2peta_core::ReplaceManyOutcome::Conflict { .. }) => "conflict",
         Err(_) => "rejected",
     };
     st.metrics.replace.get_or_create(&OutcomeLabels { outcome: outcome.into() }).inc();
-    let targets: Vec<String> = updates.iter().map(|(n, h)| format!("{n}={h}")).collect();
+    let targets: Vec<String> = updates
+        .iter()
+        .map(|(n, h)| match h {
+            Some(h) => format!("{n}={h}"),
+            None => format!("{n}=<delete>"),
+        })
+        .collect();
     st.audit_mutation(Event {
         request_id: c.request_id.clone(),
         principal: p.name.clone(),
-        action: "replace_many",
+        action: if allow_delete { "update_many" } else { "replace_many" },
         target: updates.first().map(|(n, _)| n.to_string()).unwrap_or_default(),
         outcome: outcome.into(),
         detail: Some(targets.join(" ")),

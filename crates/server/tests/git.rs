@@ -52,6 +52,14 @@ fn head(dir: &Path) -> String {
     ok(dir, &["rev-parse", "HEAD"]).trim().to_string()
 }
 
+/// The git oid a server ref points at.
+fn oid_of_ref(s: &TestServer, name: &str) -> String {
+    use sha1::Digest as _;
+    let c = s.client(ALICE);
+    let v = c.resolve(&n(name)).unwrap().unwrap();
+    hex(&sha1::Sha1::digest(c.get(&v.hash, None).unwrap()))
+}
+
 fn git_server() -> TestServer {
     TestServer::start(|c| {
         c.policy.push(grant("alice", "git/team", Access::Write));
@@ -207,7 +215,8 @@ fn grouped_repack_vs_git() {
     let u = url(&s, ALICE, "team/m");
     // P2P_GIT_ALL_REFS=1: every ref (incl. refs/pull/*), i.e. the Experiment 1 corpus.
     let all = std::env::var("P2P_GIT_ALL_REFS").is_ok_and(|v| v == "1");
-    let specs: Vec<&str> = if all { vec!["refs/*:refs/*"] } else { vec!["refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"] };
+    let specs: Vec<&str> =
+        if all { vec!["refs/*:refs/*"] } else { vec!["refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"] };
     let mut args = vec!["push", "-q", &u];
     args.extend(specs.iter().copied());
     ok(&mirror, &args);
@@ -313,4 +322,9 @@ fn branch_deletion() {
     // Re-create after delete.
     ok(&a, &["push", "-q", &u, "tmp"]);
     assert!(s.client(ALICE).resolve(&n("git/team/del/refs/heads/tmp")).unwrap().is_some());
+    // Atomic push mixing a delete and an update.
+    commit(&a, "f", "2", "two");
+    ok(&a, &["push", "-q", "--atomic", &u, "main", ":tmp"]);
+    assert!(s.client(ALICE).resolve(&n("git/team/del/refs/heads/tmp")).unwrap().is_none());
+    assert_eq!(oid_of_ref(&s, "git/team/del/refs/heads/main"), head(&a), "main moved in the same atomic update");
 }

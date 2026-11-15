@@ -1397,17 +1397,10 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
             }
             return Ok(PushResult { unpack, statuses, sideband });
         }
-        if updates.iter().any(|u| u.1.is_none()) {
-            // replace_many cannot delete; refuse rather than lose atomicity.
-            for s in statuses.iter_mut() {
-                s.1 = Err("atomic pushes cannot delete refs".into());
-            }
-            return Ok(PushResult { unpack, statuses, sideband });
-        }
         if !updates.is_empty() {
-            let u: Vec<(Name, Hash)> = updates.iter().filter_map(|x| Some((x.0.clone(), x.1?))).collect();
+            let u: Vec<(Name, Option<Hash>)> = updates.iter().map(|x| (x.0.clone(), x.1)).collect();
             let rs: Vec<(Name, Observed)> = updates.iter().map(|x| (x.0.clone(), x.2)).collect();
-            let why = match git.repo.replace_many(&u, &rs) {
+            let why = match git.repo.update_many(&u, &rs) {
                 Ok(ReplaceManyOutcome::Ok { .. }) => None,
                 Ok(ReplaceManyOutcome::Conflict { .. }) => Some("fetch first (concurrent update)".to_string()),
                 Err(Error::Forbidden { .. }) => Some("ref is immutable".to_string()),
