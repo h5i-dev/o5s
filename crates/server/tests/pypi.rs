@@ -178,6 +178,32 @@ fn twine_upload_pip_and_uv_install_and_proxy_cache() {
         assert_eq!(import_value(&py, &t, "demo_pkg"), "2");
     }
 
+    // PEP 592 yank: pip skips a yanked file unless it's pinned exactly.
+    let yank_url = format!("{}/pypi/local/-/yank/demo-pkg/demo_pkg-1.1-py3-none-any.whl", up.url());
+    assert_eq!(http.put(&yank_url).bearer_auth(READER).body("x").send().unwrap().status(), 403, "readers can't yank");
+    assert!(http.put(&yank_url).bearer_auth(ALICE).body("broken build").send().unwrap().status().is_success());
+    let page: serde_json::Value = http
+        .get(format!("{}/pypi/local/simple/demo-pkg/", up.url()))
+        .bearer_auth(READER)
+        .header("accept", "application/vnd.pypi.simple.v1+json")
+        .send()
+        .unwrap()
+        .json()
+        .unwrap();
+    let y =
+        page["files"].as_array().unwrap().iter().find(|f| f["filename"] == "demo_pkg-1.1-py3-none-any.whl").unwrap();
+    assert_eq!(y["yanked"], "broken build");
+    let t = w.path().join("ty1");
+    assert!(pip_install(&py, &index_url(&up, READER, "local"), &t, "demo-pkg").status.success());
+    assert_eq!(import_value(&py, &t, "demo_pkg"), "1", "unpinned install skips the yanked 1.1");
+    let t = w.path().join("ty2");
+    assert!(pip_install(&py, &index_url(&up, READER, "local"), &t, "demo-pkg==1.1").status.success());
+    assert_eq!(import_value(&py, &t, "demo_pkg"), "2", "an exact pin still installs it");
+    assert!(http.delete(&yank_url).bearer_auth(ALICE).send().unwrap().status().is_success());
+    let t = w.path().join("ty3");
+    assert!(pip_install(&py, &index_url(&up, READER, "local"), &t, "demo-pkg").status.success());
+    assert_eq!(import_value(&py, &t, "demo_pkg"), "2", "unyanked");
+
     // Proxy-cache: a second server whose index "mirror" proxies the first.
     let upstream = format!("{}/pypi/local/simple", up.url());
     let proxy = TestServer::start(move |cfg| {

@@ -35,6 +35,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const RECORD_MAGIC: &[u8; 8] = b"P2PPYPI1";
+const YANK_MAGIC: &[u8; 8] = b"P2PPYYK1";
 const JSON_TYPE: &str = "application/vnd.pypi.simple.v1+json";
 
 pub struct PypiState {
@@ -234,6 +235,17 @@ pub async fn dispatch(
             };
             upload(&st, &py, &p, &c, index, mp).await
         }
+        // PEP 592 yank (no client tool has a yank command; this is the server's own API).
+        (m @ (Method::PUT | Method::DELETE), ["-", "yank", project, file]) => {
+            if let Err(r) = check(&st, &p, &c, index, Access::Write) {
+                return r;
+            }
+            let project = normalize(project);
+            if !valid_filename(file, &project) {
+                return err(StatusCode::NOT_FOUND, "no such file");
+            }
+            yank(&st, &py, &p, &c, index, &project, file, m == Method::PUT, req).await
+        }
         (Method::GET | Method::HEAD, ["simple"]) => {
             if let Err(r) = check(&st, &p, &c, index, Access::Read) {
                 return r;
@@ -324,10 +336,24 @@ async fn local_files(py: &Arc<PypiState>, index: &str, project: &str) -> std::re
     let (py2, prefix) = (py.clone(), format!("pypi/{index}/{project}"));
     blocking(move || {
         let mut out = Vec::new();
+        let mut yanks: HashMap<String, String> = HashMap::new();
+        for (n, v) in py2.repo.list_refs(&format!("{prefix}/_yanked"))? {
+            let b = py2.repo.get(&v.hash, None)?;
+            if let (Some(f), Some(r)) = (n.as_str().rsplit('/').next(), b.strip_prefix(YANK_MAGIC.as_slice())) {
+                yanks.insert(f.to_string(), String::from_utf8_lossy(r).into_owned());
+            }
+        }
         for (n, v) in py2.repo.list_refs(&prefix)? {
             let Some(f) = n.as_str().rsplit('/').next() else { continue };
+            if n.as_str().contains("/_yanked/") {
+                continue;
+            }
             let b = py2.repo.get(&v.hash, None)?;
-            let Some((_, m)) = decode_record(&b) else { continue };
+            let Some((_, mut m)) = decode_record(&b) else { continue };
+            // PEP 592: a yank note overrides the record (records are create-once).
+            if let Some(r) = yanks.get(f) {
+                m.yanked = if r.is_empty() { serde_json::json!(true) } else { serde_json::json!(r) };
+            }
             out.push(Row {
                 filename: f.to_string(),
                 sha256: Some(m.sha256),
@@ -658,6 +684,67 @@ async fn download(
         hm.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=31536000, immutable"));
     })
     .await
+}
+
+/// Yanks (or unyanks) a file. The body is the optional reason (plain text).
+#[allow(clippy::too_many_arguments)]
+async fn yank(
+    st: &Arc<AppState>,
+    py: &Arc<PypiState>,
+    p: &Principal,
+    c: &Caller,
+    index: &str,
+    project: &str,
+    file: &str,
+    on: bool,
+    req: Request,
+) -> Response {
+    let (Some(target), Ok(yn)) =
+        (file_name(index, project, file), Name::new(format!("pypi/{index}/{project}/_yanked/{file}")))
+    else {
+        return err(StatusCode::NOT_FOUND, "no such file");
+    };
+    let reason = axum::body::to_bytes(req.into_body(), 4096).await.unwrap_or_default();
+    let (py2, t2, y2) = (py.clone(), target.clone(), yn.clone());
+    let res = blocking(move || {
+        if py2.repo.resolve(&t2)?.is_none() {
+            return Ok(false);
+        }
+        let h = if on { Some(py2.repo.put(&[YANK_MAGIC.as_slice(), &reason].concat())?) } else { None };
+        for _ in 0..8 {
+            let cur = py2.repo.resolve(&y2)?;
+            let obs = cur.map_or(pico2peta_core::Observed::Absent, |c| pico2peta_core::Observed::Version(c.version));
+            let out = match (h, cur) {
+                (Some(h), _) => py2.repo.replace(&y2, &[(y2.clone(), obs)], h)?,
+                (None, Some(_)) => py2.repo.delete_ref(&y2, &[(y2.clone(), obs)])?,
+                (None, None) => return Ok(true),
+            };
+            if let pico2peta_core::ReplaceOutcome::Ok { .. } = out {
+                return Ok(true);
+            }
+        }
+        Err(Error::Corrupt("yank did not settle".into()))
+    })
+    .await;
+    match res {
+        Ok(true) => {
+            let _ = st
+                .audit
+                .record(Event {
+                    request_id: c.request_id.clone(),
+                    principal: p.name.clone(),
+                    action: if on { "pypi_yank" } else { "pypi_unyank" },
+                    target: target.to_string(),
+                    outcome: "ok".into(),
+                    detail: None,
+                    remote: c.remote.clone(),
+                })
+                .await;
+            StatusCode::OK.into_response()
+        }
+        Ok(false) => err(StatusCode::NOT_FOUND, "no such file"),
+        Err(r) => r,
+    }
 }
 
 /// `<wheel>.metadata` (PEP 658): stored at upload, or fetched once from the upstream.

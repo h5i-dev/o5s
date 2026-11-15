@@ -156,6 +156,7 @@ uv pip install --index-url "https://token:$TOKEN@p2p.example.com/pypi/team/simpl
 ```
 - Simple API (PEP 503 HTML and PEP 691 JSON, with sha256, `requires-python` and PEP 658/714 core metadata: `<wheel>.metadata`). Uploads use the legacy API that twine and `uv publish` speak. Authorization is on `pypi/<index>`.
 - Files are create-once: an identical re-upload is a no-op, while different bytes under the same filename get 409.
+- PEP 592 yank: `PUT /pypi/<index>/-/yank/<project>/<file>` (the body is the reason) and `DELETE` to unyank, with write access. pip skips yanked files unless they're pinned exactly.
 - Proxy-cache: `[pypi.upstream.<index>] url = "https://pypi.org/simple"` (optional `token`, `ttl_secs`). Project pages merge local uploads with upstream files. An upstream file is fetched and sha256-checked on first download, then served from the store, including while the upstream is down.
 
 ## npm (`/npm/<registry>`)

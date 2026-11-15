@@ -235,7 +235,11 @@ The contended run checks that no update is lost: the final version equals the nu
     - Pages advertise `core-metadata` and `data-dist-info-metadata` (JSON and HTML).
     - Proxies pass the upstream's metadata through and cache it on first use (sha256-checked, with the upstream token on the upstream host).
     - Tested: sha256 equality, and a proxy pass-through used by pip, including offline.
-  - Not done: yanking via the API, and the `/pypi/<i>/simple/` root listing of upstream projects (only local projects are listed).
+  - PEP 592 yank/unyank: DONE (`/pypi/<i>/-/yank/<p>/<f>`, a mutable note over the create-once record). Tested with pip: an unpinned install skips the yanked file and an exact pin installs it.
+  - Proxy semantics when the upstream fails ("stale-if-error"): pages list only locally cached files, all of which install. I tried serving the stale upstream listing and reverted it: it advertises never-cached versions, and pip and npm pick those (the newest) and fail, when a cached older one would have worked. Maven serves the stale `maven-metadata.xml`, which is right for a mutable index file.
+  - Per-tool auth with one pico2peta token: pip, uv and twine use Basic (password = token, after a 401 Basic challenge); npm uses `_authToken` (Bearer); Maven uses settings.xml `<server>` (Basic); git uses Basic in the URL; docker, oras and crane use Basic. Tokens come from `pico2peta-server gen-token` / `/v1/admin/tokens`. `npm login` / `npm adduser` are not supported.
+  - Maven: no yank or unpublish (the Maven protocol has none); releases stay create-once by design.
+  - Not done: the `/pypi/<i>/simple/` root listing of upstream projects (only local projects are listed).
 - Fix: early-rejected uploads (LFS capability, PyPI authz) now send `Connection: close`. Before, a client's pooled connection could be reset mid-body, which made one HF test flaky.
 - Disk hygiene (2026-11-15, asked by the human): `tests/hf/client.py` leaked a 3–9 MB `tmp*` dir per run into `$TMPDIR`. It now removes it at exit, and the HF and PyPI tests give their subprocesses a TMPDIR inside the test's own directory. A whole-workspace test run now leaves nothing in `$TMPDIR`. Pruned the cargo target dir from 8 GB to under 4 GB.
 - **npm front: DONE** (`crates/server/src/npm.rs`, `tests/npm.rs`).
