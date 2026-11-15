@@ -53,6 +53,15 @@ access = "read"
 path = "/var/lib/pico2peta/audit/audit.jsonl"
 log_reads = false                  # true: also audit every object read
 
+# Garbage collection: unreferenced objects are reclaimed in three phases,
+# each at least grace_secs apart. Clients must point a ref at a new object
+# within grace_secs of putting it (the put->replace lease).
+[gc]
+interval_secs = 1800               # 0 = no background GC (POST /v1/admin/gc still works)
+grace_secs = 3600
+min_garbage_ratio = 0.2
+small_pack_bytes = 16777216
+
 [log]
 format = "json"
 filter = "info"                    # RUST_LOG overrides

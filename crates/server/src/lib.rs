@@ -71,10 +71,11 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         info!(path = %path.display(), "initializing repository");
         drop(LocalRepo::init(path, &pico2peta_pack::PackConfig::default())?);
     }
-    let repo: Arc<dyn Repository> = match backend {
-        None => Arc::new(LocalRepo::open(path)?),
-        Some(b) => Arc::new(LocalRepo::open_with_backend(path, b)?),
+    let local = match backend {
+        None => LocalRepo::open(path)?,
+        Some(b) => LocalRepo::open_with_backend(path, b)?,
     };
+    let repo: Arc<dyn Repository> = Arc::new(local.clone());
     let audit = audit::AuditLog::open(&cfg.audit.path).map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
     Ok(Arc::new(AppState {
         repo,
@@ -87,6 +88,9 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         shutting_down: Arc::new(AtomicBool::new(false)),
         limiter: Arc::new(tokio::sync::Semaphore::new(cfg.server.max_concurrent_requests)),
         trust_forwarded_for: cfg.server.trust_forwarded_for,
+        local: Some(local),
+        gc: cfg.gc.clone(),
+        gc_running: Arc::new(AtomicBool::new(false)),
     }))
 }
 
@@ -138,6 +142,7 @@ pub async fn serve(
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
     let app = app(state.clone(), request_timeout);
+    let gc_task = (state.gc.interval_secs > 0).then(|| tokio::spawn(gc_loop(state.clone())));
     let (stopping_tx, stopping_rx) = tokio::sync::oneshot::channel::<()>();
     let st = state.clone();
     let graceful = async move {
@@ -156,6 +161,9 @@ pub async fn serve(
             warn!(?grace, "grace period expired; closing remaining connections");
         }
     }
+    if let Some(t) = gc_task {
+        t.abort();
+    }
     let repo = state.repo.clone();
     match tokio::task::spawn_blocking(move || repo.flush()).await {
         Ok(Ok(())) => info!("repository flushed"),
@@ -165,6 +173,43 @@ pub async fn serve(
     state.audit.shutdown().await;
     info!("stopped");
     Ok(())
+}
+
+/// Runs GC every `gc.interval_secs` (with jitter) until the server stops.
+async fn gc_loop(state: Arc<AppState>) {
+    let period = Duration::from_secs(state.gc.interval_secs);
+    loop {
+        let jitter = Duration::from_millis(fastrand::u64(0..=period.as_millis() as u64 / 10));
+        tokio::time::sleep(period + jitter).await;
+        if state.shutting_down.load(Ordering::Acquire) {
+            return;
+        }
+        match api::run_gc(&state, false).await {
+            Ok(r) => info!(
+                planned = ?r.planned,
+                swept = r.swept.len(),
+                condemned_packs = r.condemned_packs,
+                deleted_packs = r.deleted_packs,
+                deleted_bytes = r.deleted_bytes,
+                live = r.live_hashes,
+                dangling_refs = r.dangling_refs.len(),
+                "gc run"
+            ),
+            Err(e) => warn!(code = e.code, error = %e.message, "gc run failed"),
+        }
+        if !state.audit.is_healthy() {
+            return;
+        }
+        state.audit.record_nowait(audit::Event {
+            request_id: "-".into(),
+            principal: "system".into(),
+            action: "gc",
+            target: "repository".into(),
+            outcome: "scheduled".into(),
+            detail: None,
+            remote: None,
+        });
+    }
 }
 
 /// Resolves on SIGINT or SIGTERM.

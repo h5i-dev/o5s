@@ -363,3 +363,29 @@ fn s3_backend_end_to_end() {
 fn fastrand_u64() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0)
 }
+
+#[test]
+fn admin_gc_endpoint() {
+    let mut s = TestServer::start(|_| {});
+    let admin = s.client(ADMIN);
+    let alice = s.client(ALICE);
+    let h = alice.put(b"live").unwrap();
+    alice.replace(&n("alice/live"), &[(n("alice/live"), Observed::Absent)], h).unwrap();
+    alice.put(b"garbage").unwrap();
+    alice.flush().unwrap();
+    assert!(matches!(alice.gc(false), Err(Error::Unauthorized(_))));
+    let dry = admin.gc(true).unwrap();
+    assert!(dry.dry_run);
+    let r = admin.gc(false).unwrap();
+    // First invocation only writes a plan; later phases need the grace period.
+    assert!(r.planned.is_some(), "{r:?}");
+    assert_eq!(r.deleted_packs, 0);
+    assert!(r.dangling_refs.is_empty());
+    assert_eq!(alice.get(&h, None).unwrap(), b"live");
+    let text = http().get(format!("{}/metrics", s.url())).send().unwrap().text().unwrap();
+    assert!(text.contains("p2p_gc_runs_total{outcome=\"ok\"} 2"), "{text}");
+    s.shutdown();
+    let audit = std::fs::read_to_string(s.audit_path()).unwrap();
+    assert!(audit.lines().any(|l| l.contains("\"action\":\"gc\"") && l.contains("\"principal\":\"admin\"")));
+    assert!(audit.lines().any(|l| l.contains("\"action\":\"gc\"") && l.contains("\"outcome\":\"denied\"")));
+}

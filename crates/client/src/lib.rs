@@ -202,6 +202,22 @@ impl RemoteRepo {
         })
     }
 
+    /// Triggers one GC invocation on the server (needs admin on `""`).
+    pub fn gc(&self, dry_run: bool) -> Result<wire::GcReportJson> {
+        let this = self.clone();
+        self.block(async move {
+            let rb = this
+                .request(Method::POST, "/v1/admin/gc")
+                .query(&[("dry_run", if dry_run { "true" } else { "false" })])
+                .timeout(Duration::from_secs(24 * 3600));
+            let resp = rb.send().await.map_err(transport)?;
+            if !resp.status().is_success() {
+                return Err(error_from(resp, &Ctx::default()).await);
+            }
+            resp.json().await.map_err(transport)
+        })
+    }
+
     /// Base URL of the server.
     pub fn url(&self) -> &str {
         &self.inner.base

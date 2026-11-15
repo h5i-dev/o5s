@@ -37,6 +37,10 @@
 //! path = "/var/log/pico2peta/audit.jsonl"
 //! log_reads = false
 //!
+//! [gc]
+//! interval_secs = 0                  # background GC period; 0 = off
+//! grace_secs = 3600                  # >= 600; also the put->replace lease
+//!
 //! [log]
 //! format = "json"                    # json | text
 //! filter = "info"                    # RUST_LOG syntax
@@ -61,6 +65,45 @@ pub struct Config {
     pub audit: AuditSection,
     #[serde(default)]
     pub log: LogSection,
+    #[serde(default)]
+    pub gc: GcSection,
+}
+
+/// Garbage collection (see `pico2peta_repo::gc` for the protocol).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct GcSection {
+    /// Run GC every this many seconds; 0 disables the background task
+    /// (admins can still trigger `POST /v1/admin/gc`).
+    pub interval_secs: u64,
+    /// Minimum time between GC phases, and the put→replace lease (>= 600).
+    pub grace_secs: u64,
+    pub min_garbage_ratio: f64,
+    pub small_pack_bytes: u64,
+}
+
+impl Default for GcSection {
+    fn default() -> Self {
+        let d = pico2peta_repo::GcOptions::default();
+        GcSection {
+            interval_secs: 0,
+            grace_secs: d.grace.as_secs(),
+            min_garbage_ratio: d.min_garbage_ratio,
+            small_pack_bytes: d.small_pack_bytes,
+        }
+    }
+}
+
+impl GcSection {
+    pub fn options(&self, dry_run: bool) -> pico2peta_repo::GcOptions {
+        pico2peta_repo::GcOptions {
+            grace: std::time::Duration::from_secs(self.grace_secs),
+            allow_short_grace: false,
+            min_garbage_ratio: self.min_garbage_ratio,
+            small_pack_bytes: self.small_pack_bytes,
+            dry_run,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -228,6 +271,12 @@ impl Config {
         }
         if self.server.request_timeout_secs == 0 {
             return bad("server.request_timeout_secs must be >= 1".into());
+        }
+        if self.gc.grace_secs < 600 {
+            return bad("gc.grace_secs must be >= 600 (it is also the put->replace lease)".into());
+        }
+        if !(0.0..=1.0).contains(&self.gc.min_garbage_ratio) {
+            return bad("gc.min_garbage_ratio must be in [0, 1]".into());
         }
         let mut seen = std::collections::HashSet::new();
         for t in &self.auth.tokens {

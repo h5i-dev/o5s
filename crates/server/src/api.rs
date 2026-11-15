@@ -50,6 +50,10 @@ pub struct AppState {
     pub shutting_down: Arc<AtomicBool>,
     pub limiter: Arc<Semaphore>,
     pub trust_forwarded_for: bool,
+    /// The concrete repository, for admin operations outside the trait (GC).
+    pub local: Option<pico2peta_repo::LocalRepo>,
+    pub gc: crate::config::GcSection,
+    pub gc_running: Arc<AtomicBool>,
 }
 
 type St = State<Arc<AppState>>;
@@ -89,6 +93,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/namespaces", get(list_rules))
         .route("/v1/namespaces/{*prefix}", put(set_rule))
         .route("/v1/whoami", get(whoami))
+        .route("/v1/admin/gc", post(gc))
         .layer(middleware::from_fn_with_state(state.clone(), authenticate))
         .layer(middleware::from_fn_with_state(state.clone(), shed_load));
     Router::new()
@@ -665,6 +670,81 @@ async fn set_rule(
     .await?;
     res?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(serde::Deserialize)]
+struct GcQuery {
+    #[serde(default)]
+    dry_run: bool,
+}
+
+/// Runs one GC invocation, unless one is already running.
+pub async fn run_gc(st: &AppState, dry_run: bool) -> ApiResult<wire::GcReportJson> {
+    let Some(local) = st.local.clone() else {
+        return Err(ApiError::new(StatusCode::NOT_IMPLEMENTED, "unsupported", "GC needs a local repository"));
+    };
+    if st.gc_running.swap(true, Ordering::AcqRel) {
+        return Err(ApiError::new(StatusCode::CONFLICT, codes::GC_RUNNING, "a GC run is already in progress"));
+    }
+    let opts = st.gc.options(dry_run);
+    let running = st.gc_running.clone();
+    let res = blocking(move || {
+        let r = local.gc(&opts, &pico2peta_repo::OpaqueObjects);
+        running.store(false, Ordering::Release);
+        r
+    })
+    .await;
+    if res.is_err() {
+        st.gc_running.store(false, Ordering::Release);
+    }
+    let r = res?;
+    let outcome = if r.dangling_refs.is_empty() { "ok" } else { "dangling_refs" };
+    st.metrics.gc_runs.get_or_create(&OutcomeLabels { outcome: outcome.into() }).inc();
+    if !dry_run {
+        st.metrics.gc_deleted_bytes.inc_by(r.deleted_bytes);
+    }
+    Ok(wire::GcReportJson {
+        dry_run,
+        planned: r.planned,
+        swept: r.swept,
+        condemned_packs: r.condemned_packs,
+        copied_records: r.copied_records,
+        rescued_records: r.rescued_records,
+        deleted_packs: r.deleted_packs,
+        deleted_bytes: r.deleted_bytes,
+        live_hashes: r.live_hashes,
+        dangling_refs: r.dangling_refs,
+    })
+}
+
+async fn gc(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
+    Query(q): Query<GcQuery>,
+) -> ApiResult<Json<wire::GcReportJson>> {
+    st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "gc", "repository")?;
+    st.require_audit_healthy()?;
+    let res = run_gc(&st, q.dry_run).await;
+    st.audit_mutation(Event {
+        request_id: c.request_id.clone(),
+        principal: p.name.clone(),
+        action: "gc",
+        target: "repository".into(),
+        outcome: match &res {
+            Ok(_) => "ok".into(),
+            Err(e) => e.code.to_string(),
+        },
+        detail: res.as_ref().ok().map(|r| {
+            format!(
+                "dry_run={} deleted_packs={} deleted_bytes={} live={}",
+                r.dry_run, r.deleted_packs, r.deleted_bytes, r.live_hashes
+            )
+        }),
+        remote: c.remote.clone(),
+    })
+    .await?;
+    Ok(Json(res?))
 }
 
 async fn whoami(Extension(p): Extension<Principal>) -> Json<wire::WhoAmI> {

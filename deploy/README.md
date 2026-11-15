@@ -70,6 +70,9 @@ pico2peta-server verify-audit /var/log/pico2peta/audit.jsonl
 ```
 If an audit write fails (for example, the disk is full), the server refuses all further mutations, returns 503 from `/readyz`, and increments `p2p_audit_write_failures_total`. Rotation is not built in. To rotate, stop the server, move the file away, and start it again: a new chain starts in the new file. Archive the old file together with the last `prev` hash it ended on.
 
+## Garbage collection
+With `gc.interval_secs > 0`, the server advances the GC protocol on that schedule: plan, then sweep and repack, then delete, with each phase at least `gc.grace_secs` after the previous one. Admins can also trigger it with `POST /v1/admin/gc` (`?dry_run=true` for a report only). GC is safe with concurrent writers, but it relies on the **put→replace lease**: a client must make a ref point at a newly put object within `grace_secs`. Results show up in `p2p_gc_runs_total`, `p2p_gc_deleted_bytes_total`, the logs, and the audit log (`action = "gc"`). Any `dangling_refs` in a report means the repository is corrupt, so investigate it before the next run.
+
 ## Capacity notes
 - Each transfer buffers at most about 2 MiB, whatever the object size. Measured: 19 MiB peak RSS growth while streaming 512 MiB up and back down (`crates/server/tests/memory.rs`).
 - `max_concurrent_requests` bounds concurrent requests, including those still streaming bodies. Beyond it, the server answers 503 with `Retry-After: 1`.

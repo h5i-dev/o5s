@@ -12,6 +12,11 @@
 //! | `GET` | `/v1/namespaces` | [`RuleList`] |
 //! | `PUT` | `/v1/namespaces/{prefix}` | [`SetRuleRequest`] (admin) |
 //! | `GET` | `/v1/whoami` | [`WhoAmI`] |
+//! | `POST` | `/v1/admin/gc?dry_run=bool` | [`GcReportJson`] (admin on `""`); 409 if a GC is running |
+//!
+//! **Operation lease:** GC reclaims objects that no ref reaches once the GC grace
+//! period (default 1 h) has passed. A client must `replace` a ref to point at a
+//! newly put object within that period, or put it again.
 //!
 //! Errors are `4xx/5xx` with an [`ErrorBody`]; `error.code` is
 //! `pico2peta_core::Error::code()` or one of the HTTP-only codes in [`codes`].
@@ -37,6 +42,7 @@ pub mod codes {
     pub const SHUTTING_DOWN: &str = "shutting_down";
     pub const OVERLOADED: &str = "overloaded";
     pub const INTERNAL: &str = "internal";
+    pub const GC_RUNNING: &str = "gc_running";
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,6 +104,21 @@ pub struct SetRuleRequest {
 pub struct WhoAmI {
     pub principal: String,
     pub authenticated: bool,
+}
+
+/// Result of one GC invocation (see `pico2peta_repo::GcReport`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GcReportJson {
+    pub dry_run: bool,
+    pub planned: Option<String>,
+    pub swept: Vec<String>,
+    pub condemned_packs: usize,
+    pub copied_records: usize,
+    pub rescued_records: usize,
+    pub deleted_packs: usize,
+    pub deleted_bytes: u64,
+    pub live_hashes: usize,
+    pub dangling_refs: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
