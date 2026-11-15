@@ -15,6 +15,8 @@ libfuzzer-sys = "0.4"
 pico2peta-core = { path = "../crates/core" }
 pico2peta-pack = { path = "../crates/pack" }
 pico2peta-refs = { path = "../crates/refs" }
+pico2peta-server = { path = "../crates/server" }
+pico2peta-backend-s3 = { path = "../crates/backend-s3" }
 tempfile = "3"
 
 [[bin]]
@@ -55,6 +57,56 @@ bench = false
 [[bin]]
 name = "names"
 path = "fuzz_targets/names.rs"
+test = false
+doc = false
+bench = false
+
+# --- net session targets (server and S3 backend decoders) ---
+[[bin]]
+name = "git_push"
+path = "fuzz_targets/git_push.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "git_parsers"
+path = "fuzz_targets/git_parsers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "oci_parsers"
+path = "fuzz_targets/oci_parsers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "segmap"
+path = "fuzz_targets/segmap.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "audit_log"
+path = "fuzz_targets/audit_log.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "s3_xml"
+path = "fuzz_targets/s3_xml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http_range"
+path = "fuzz_targets/http_range.rs"
 test = false
 doc = false
 bench = false
