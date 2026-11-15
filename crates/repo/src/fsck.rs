@@ -56,6 +56,12 @@ impl LocalRepo {
                 Err(e) => rep.err(format!("object {h}: {e}")),
             }
         }
+        for q in self.packs().quarantined()? {
+            rep.err(format!("quarantined corrupt staging file {}", q.display()));
+        }
+        for name in self.packs().orphan_indexes()? {
+            rep.err(format!("index without pack: packs/{name}.idx"));
+        }
         for (name, v) in self.list_refs("")? {
             rep.refs_checked += 1;
             match self.size(&v.hash) {
