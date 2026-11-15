@@ -98,9 +98,13 @@ pub struct S3Config {
     /// `true`: `endpoint/bucket/key` (MinIO, most S3-compatibles).
     /// `false`: `bucket.endpoint/key` (AWS virtual-hosted style).
     pub path_style: bool,
-    /// Use `If-None-Match: *` for create-only writes. Disable only for stores that
-    /// reject the header; the fallback is HEAD-then-PUT, which is safe only because
-    /// keys are content-derived (racing writers write identical bytes).
+    /// Use `If-None-Match: *` for create-only writes (atomic: exactly one of
+    /// several concurrent creators wins). Disable only for stores that reject the
+    /// header. The fallback is HEAD-then-PUT, which is **not** atomic: it is safe
+    /// for content-named keys (packs: racing writers write identical bytes), but
+    /// not for the ref log, whose keys are a commit point. Without conditional
+    /// writes the backend reports `atomic_create() == false` and the backend ref
+    /// engine refuses to use it.
     pub conditional_writes: bool,
     /// Objects at least this large are uploaded with multipart upload.
     pub multipart_threshold: u64,

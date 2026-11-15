@@ -154,6 +154,11 @@ impl Backend for S3Backend {
     fn describe(&self) -> String {
         self.client.describe()
     }
+
+    /// Only `If-None-Match` creates are atomic; HEAD-then-PUT is not (API v1.9).
+    fn atomic_create(&self) -> bool {
+        self.client.config().conditional_writes
+    }
 }
 
 /// Streams `key` into `tx`, resuming with a ranged GET (pinned by `If-Match`

@@ -418,6 +418,12 @@ impl Config {
         if !(0.0..=1.0).contains(&self.gc.min_garbage_ratio) {
             return bad("gc.min_garbage_ratio must be in [0, 1]".into());
         }
+        if let BackendSection::S3(s3) = &self.backend
+            && !s3.conditional_writes
+            && self.repo.refs == pico2peta_repo::RefsStore::Backend
+        {
+            return bad("repo.refs = \"backend\" needs backend.conditional_writes = true (the ref log's commit point must be an atomic create)".into());
+        }
         if let Some(o) = &self.auth.oidc {
             let local = |u: &str| u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost");
             for u in std::iter::once(&o.issuer).chain(o.jwks_url.iter()) {
