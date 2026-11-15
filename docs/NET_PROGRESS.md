@@ -348,6 +348,7 @@ The contended run checks that no update is lost: the final version equals the nu
     - Quota: a background scan every `server.limits_scan_secs` sums the logical bytes reachable from the namespace's names, through the fronts' GC tracers. Writes at or over the quota get 507 `quota_exceeded`. Reads, `/v1` ref deletes, OCI manifest deletes and global admins are exempt.
     - Metric `p2p_namespace_limited_total{outcome}`. Tests: unit `longest_prefix_rate_and_quota`, end-to-end `namespace_rate_and_quota`.
     - Limits: usage is as fresh as the last scan, and shared content is charged to every namespace that references it.
+  - S3 deployment guide: DONE (deploy/README "S3 deployment guide": bucket and encryption, VPC endpoint, identity, local vs backend refs and the conditional-create requirement, storage classes vs GC, throughput and throttling, cost model, monitoring, backup/DR and failover with fsck, a pre-launch check).
   - Remaining: a Helm chart (not planned: plain manifests cover it).
 - **ROADMAP Net 3 (P5, front side): DONE** (`crates/server/src/prov_api.rs`, `tests/p5.rs`).
   - Every front records its publishes as provenance through the core API, with the front's ids in `meta`, which makes them searchable.
