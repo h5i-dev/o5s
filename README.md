@@ -54,4 +54,4 @@ CLI exit codes: 0 ok, 1 error, 2 not found/absent, 3 replace conflict, 4 forbidd
 | `fuzz/` | cargo-fuzz targets for every decoder |
 
 Design: `docs/DESIGN_BRIEF.md` and `docs/PLAN.md`. Status: `docs/PROGRESS.md` and `docs/NET_PROGRESS.md`.
-Measurements: `docs/EXP1.md` (vs Git) and `docs/BENCH.md` (throughput, model weights). HTTP API: `docs/API.md`.
+Measurements: `docs/EXP1.md` (vs Git) and `docs/BENCH.md` (throughput, model weights). HTTP API: `docs/API.md`. Formats and protocols: `docs/ARCHITECTURE.md`.
