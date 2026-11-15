@@ -12,7 +12,7 @@
 
 pub mod bytegroup;
 
-use pico2peta_core::{Error, Hash, ObjectStore, Result};
+use pico2peta_core::{Derive, Encoding, Error, Hash, ObjectStore, PatchFormat, Result};
 use std::collections::HashMap;
 use std::io::Read;
 
@@ -116,6 +116,39 @@ fn read_head(src: &mut dyn Read) -> Result<Vec<u8>> {
     Ok(head)
 }
 
+/// Plans how to store a weights file whose first bytes are `head`, optionally
+/// as a derived object of `base`: the grouping width from the dominant dtype,
+/// and for safetensors on both sides, tensor-aligned XOR segments (each tensor
+/// against the same-named, same-size tensor of the base). A non-safetensors
+/// side falls back to an offset-aligned delta. `byte_group = false` disables
+/// grouping (ablation).
+pub fn plan_weights(store: &dyn ObjectStore, head: &[u8], base: Option<&Hash>, byte_group: bool) -> Result<Encoding> {
+    let group_width = if byte_group { group_width(head) } else { None };
+    let derive = match base {
+        None => None,
+        Some(base) => {
+            let base_len = store.size(base)?;
+            let bhead_len = store.get(base, Some(0..8.min(base_len)))?;
+            let bn = bhead_len.get(..8).and_then(|b| b.try_into().ok()).map(u64::from_le_bytes).unwrap_or(0);
+            let base_layout = if bn > 0 && bn <= MAX_HEADER && 8 + bn <= base_len {
+                parse_layout(&store.get(base, Some(0..8 + bn))?)
+            } else {
+                None
+            };
+            let segments = match (base_layout, parse_layout(head)) {
+                // A malformed base header could point past its own end: drop such segments.
+                (Some(b), Some(n)) => plan(&b, &n)
+                    .into_iter()
+                    .filter(|&(_, src, len)| src.checked_add(len).is_some_and(|e| e <= base_len))
+                    .collect(),
+                _ => Vec::new(), // offset-aligned
+            };
+            Some(Derive { base: *base, patch: PatchFormat::Xor, segments })
+        }
+    };
+    Ok(Encoding { chunker: None, group_width, derive })
+}
+
 /// Stores the checkpoint read from `src` as a tensor-aligned delta against
 /// `base` (falls back to an offset-aligned delta when either side isn't
 /// safetensors). Returns the content hash of the new checkpoint.
@@ -123,33 +156,37 @@ pub fn put_checkpoint(store: &dyn ObjectStore, base: &Hash, src: &mut dyn Read) 
     put_checkpoint_opts(store, base, src, true)
 }
 
-/// [`put_checkpoint`], choosing whether to pass the byte-grouping hint
-/// ([`group_width`]) to the store. `false` is for ablation.
+/// [`put_checkpoint`], choosing whether to byte-group ([`group_width`]).
+/// `false` is for ablation.
 pub fn put_checkpoint_opts(store: &dyn ObjectStore, base: &Hash, src: &mut dyn Read, byte_group: bool) -> Result<Hash> {
     let head = read_head(src)?;
-    let width = if byte_group { group_width(&head) } else { None };
-    let base_len = store.size(base)?;
-    let bhead_len = store.get(base, Some(0..8.min(base_len)))?;
-    let bn = bhead_len.get(..8).and_then(|b| b.try_into().ok()).map(u64::from_le_bytes).unwrap_or(0);
-    let base_layout = if bn > 0 && bn <= MAX_HEADER && 8 + bn <= base_len {
-        parse_layout(&store.get(base, Some(0..8 + bn))?)
-    } else {
-        None
-    };
-    let mut rest = std::io::Cursor::new(head.clone()).chain(src);
-    match (base_layout, parse_layout(&head)) {
-        (Some(b), Some(n)) => {
-            // A malformed base header could point past its own end: drop such segments.
-            let segs: Vec<(u64, u64, u64)> = plan(&b, &n)
-                .into_iter()
-                .filter(|&(_, src, len)| src.checked_add(len).is_some_and(|e| e <= base_len))
-                .collect();
-            match width {
-                Some(w) => store.put_delta_mapped_grouped(base, &segs, &mut rest, w),
-                None => store.put_delta_mapped(base, &segs, &mut rest),
-            }
-        }
-        _ => store.put_delta(base, &mut rest),
+    let enc = plan_weights(store, &head, Some(base), byte_group)?;
+    // An offset-aligned delta (no segments) is what `put_delta` does.
+    let mut rest = std::io::Cursor::new(head).chain(src);
+    store.put_encoded(&mut rest, &enc)
+}
+
+/// The `safetensors` front: model weights. Plans each put with
+/// [`plan_weights`]: byte grouping by dominant dtype, and, when the profile
+/// derives new versions from the previous one, a tensor-aligned XOR delta.
+/// It owns no name prefix: weights can live under any namespace whose
+/// profile names it (`front = "safetensors"`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SafetensorsFront;
+
+/// Id of [`SafetensorsFront`] in config (`front = "safetensors"`).
+pub const SAFETENSORS_FRONT: &str = "safetensors";
+
+impl pico2peta_repo::Front for SafetensorsFront {
+    fn id(&self) -> &str {
+        SAFETENSORS_FRONT
+    }
+
+    fn plan(&self, ctx: &pico2peta_repo::PlanCtx<'_>, src: &mut dyn Read) -> Result<(Vec<u8>, Encoding)> {
+        let head = read_head(src)?;
+        let mut enc = plan_weights(ctx.store, &head, ctx.previous.as_ref(), true)?;
+        enc.chunker = ctx.default.chunker.clone();
+        Ok((head, enc))
     }
 }
 
@@ -371,5 +408,58 @@ mod tests {
             })
         }
         walk(p)
+    }
+
+    /// The `safetensors` front through a profile gives the same result as
+    /// the explicit `put_checkpoint` call: grouped, tensor-aligned delta.
+    #[test]
+    fn safetensors_front_via_profile_matches_put_checkpoint() {
+        use pico2peta_core::{Name, Repository};
+        use pico2peta_repo::{DerivePolicy, FrontRegistry, Profile};
+        let bf16 = |seed: u64, n: usize| -> Vec<u8> {
+            noise(seed, n).chunks(2).flat_map(|c| [c[0], 0x3c + c.get(1).map_or(0, |b| b % 3)]).collect()
+        };
+        let a = bf16(7, 2_000_000);
+        let mut b = a.clone();
+        for i in (0..b.len()).step_by(2) {
+            b[i] ^= (i as u8) & 0x07;
+        }
+        // Reordered tensors in v2, so only a tensor-aligned delta works well.
+        let base = safetensors(&[("w", a.clone()), ("v", a[..4000].to_vec())], "v1");
+        let next = safetensors(&[("v", a[..4000].to_vec()), ("w", b)], "v2");
+        // Explicit path.
+        let d1 = tempfile::tempdir().unwrap();
+        let r1 = LocalRepo::init(d1.path(), &PackConfig::default()).unwrap();
+        let hb = put_weights(&r1, &mut &base[..]).unwrap();
+        let s0 = dir_size(&d1.path().join("objects"), &r1);
+        let hn = put_checkpoint(&r1, &hb, &mut &next[..]).unwrap();
+        let explicit = dir_size(&d1.path().join("objects"), &r1) - s0;
+        // Profile path.
+        let d2 = tempfile::tempdir().unwrap();
+        let p = Profile { front: Some(SAFETENSORS_FRONT.into()), chunker: None, derive: DerivePolicy::Previous };
+        let cfg = pico2peta_repo::RepoConfig {
+            format: pico2peta_repo::FORMAT_VERSION,
+            pack: (&PackConfig::default()).into(),
+            refs: Default::default(),
+            chunking: Default::default(),
+            profiles: [("weights".to_string(), p)].into_iter().collect(),
+            namespaces: [("models/".to_string(), "weights".to_string())].into_iter().collect(),
+        };
+        let r2 = LocalRepo::init_config(d2.path(), &cfg)
+            .unwrap()
+            .with_fronts(FrontRegistry::new().with(std::sync::Arc::new(SafetensorsFront)).unwrap())
+            .unwrap();
+        let name = Name::new("models/m").unwrap();
+        let h1 = r2.put_named(&name, &mut &base[..]).unwrap();
+        assert_eq!(h1, hb);
+        let obs = pico2peta_core::RefValue::observed(r2.resolve(&name).unwrap());
+        r2.replace(&name, &[(name.clone(), obs)], h1).unwrap();
+        let s1 = dir_size(&d2.path().join("objects"), &r2);
+        let h2 = r2.put_named(&name, &mut &next[..]).unwrap();
+        let via_front = dir_size(&d2.path().join("objects"), &r2) - s1;
+        assert_eq!(h2, hn);
+        assert_eq!(r2.get(&h2, None).unwrap(), next);
+        let diff = (via_front as i64 - explicit as i64).abs();
+        assert!(diff < 4096, "front {via_front} vs explicit {explicit}");
     }
 }

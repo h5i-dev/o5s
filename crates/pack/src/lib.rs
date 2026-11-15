@@ -5,6 +5,7 @@
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod bytegroup;
 pub mod format;
 pub mod store;
 

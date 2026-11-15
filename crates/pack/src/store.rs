@@ -61,6 +61,25 @@ pub enum ChunkerKind {
     Xet,
 }
 
+impl ChunkerKind {
+    /// Parses a chunker id (`"fastcdc"`, `"xet"`); `None` = the default.
+    pub fn from_id(id: Option<&str>) -> Result<ChunkerKind> {
+        match id {
+            None | Some("fastcdc") => Ok(ChunkerKind::FastCdc),
+            Some("xet") => Ok(ChunkerKind::Xet),
+            Some(other) => Err(Error::Parse(format!("unknown chunker {other:?} (fastcdc or xet)"))),
+        }
+    }
+
+    /// The chunker's id (inverse of [`ChunkerKind::from_id`]).
+    pub fn id(self) -> &'static str {
+        match self {
+            ChunkerKind::FastCdc => "fastcdc",
+            ChunkerKind::Xet => "xet",
+        }
+    }
+}
+
 /// Per-put options for [`PackStore::put_stream_opts`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PutOpts {
@@ -1476,7 +1495,7 @@ impl PackStore {
         }
         let group = match opts.group_width {
             None | Some(0 | 1) => None,
-            Some(w) if (w as usize) <= pico2peta_weights::bytegroup::MAX_WIDTH => Some(w),
+            Some(w) if (w as usize) <= crate::bytegroup::MAX_WIDTH => Some(w),
             Some(w) => return Err(Error::Parse(format!("byte-group width {w} out of range"))),
         };
         let mut head = Vec::with_capacity(thr.min(1 << 16));
@@ -1649,17 +1668,17 @@ impl PackStore {
     /// Like [`PackStore::put_delta_impl`] with an explicit alignment (for formats
     /// whose regions move between versions, such as reordered tensors).
     pub fn put_delta_mapped_impl(&self, base: &Hash, segs: Option<&[DeltaSeg]>, src: &mut dyn Read) -> Result<Hash> {
-        self.put_delta_opts(base, segs, src, None)
+        self.put_delta_opts(base, segs, src, PutOpts::default())
     }
 
-    /// Like [`PackStore::put_delta_mapped_impl`], byte-grouping the XOR
-    /// stream's chunks with `group_width` (see [`PutOpts::group_width`]).
+    /// Like [`PackStore::put_delta_mapped_impl`], storing the XOR stream with
+    /// `opts` (chunker, byte grouping).
     pub fn put_delta_opts(
         &self,
         base: &Hash,
         segs: Option<&[DeltaSeg]>,
         src: &mut dyn Read,
-        group_width: Option<u8>,
+        opts: PutOpts,
     ) -> Result<Hash> {
         if !self.ensure_live_impl(base)? {
             return Err(Error::NotFound(*base));
@@ -1677,7 +1696,7 @@ impl PackStore {
             len: 0,
             tmp: Vec::new(),
         };
-        let xor = self.put_stream_opts(PutOpts { chunker: ChunkerKind::FastCdc, group_width }, &mut xs)?;
+        let xor = self.put_stream_opts(opts, &mut xs)?;
         let hash = Hash(*xs.hasher.finalize().as_bytes());
         let len = xs.len;
         if self.dedup_hit(&hash)? {
@@ -1937,7 +1956,23 @@ impl ObjectStore for PackStore {
         width: u8,
     ) -> Result<Hash> {
         let segs: Vec<DeltaSeg> = segments.iter().map(|&(dst, src, len)| DeltaSeg { dst, src, len }).collect();
-        self.put_delta_opts(base, Some(&segs), src, Some(width))
+        self.put_delta_opts(base, Some(&segs), src, PutOpts { chunker: ChunkerKind::FastCdc, group_width: Some(width) })
+    }
+
+    fn put_encoded(&self, src: &mut dyn Read, enc: &pico2peta_core::Encoding) -> Result<Hash> {
+        let opts = PutOpts { chunker: ChunkerKind::from_id(enc.chunker.as_deref())?, group_width: enc.group_width };
+        match &enc.derive {
+            None => self.put_stream_opts(opts, src),
+            Some(d) => match d.patch {
+                pico2peta_core::PatchFormat::Xor => {
+                    let segs: Vec<DeltaSeg> =
+                        d.segments.iter().map(|&(dst, src, len)| DeltaSeg { dst, src, len }).collect();
+                    let segs = if segs.is_empty() { None } else { Some(&segs[..]) };
+                    self.put_delta_opts(&d.base, segs, src, opts)
+                }
+                _ => Err(Error::Unsupported("patch format not supported by this store")),
+            },
+        }
     }
 
     fn contains(&self, hash: &Hash) -> Result<bool> {
@@ -2138,7 +2173,7 @@ fn encode_grouped_or_raw(level: i32, width: u8, hash: &Hash, raw: &[u8]) -> (Cod
     if level == 0 || raw.len() < 64 {
         return raw_rec();
     }
-    let Ok(g) = pico2peta_weights::bytegroup::group(raw, width as usize) else {
+    let Ok(g) = crate::bytegroup::group(raw, width as usize) else {
         return raw_rec();
     };
     match zstd_compress(&g, level) {

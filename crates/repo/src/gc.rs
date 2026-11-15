@@ -263,6 +263,29 @@ impl LocalRepo {
         self.gc_with(opts, tracer, None)
     }
 
+    /// GC driven by the registered fronts: the union of their tracers, plus
+    /// `extra` (e.g. provenance), and their groupers when `grouped`.
+    pub fn gc_with_fronts(&self, opts: &GcOptions, extra: Option<&dyn Tracer>, grouped: bool) -> Result<GcReport> {
+        struct Both<'a>(&'a dyn Tracer, Option<&'a dyn Tracer>);
+        impl Tracer for Both<'_> {
+            fn children(&self, h: &Hash, store: &dyn ObjectStore) -> Result<Vec<Hash>> {
+                let mut c = self.0.children(h, store)?;
+                if let Some(x) = self.1 {
+                    for k in x.children(h, store)? {
+                        if !c.contains(&k) {
+                            c.push(k);
+                        }
+                    }
+                }
+                Ok(c)
+            }
+        }
+        let tracer = self.fronts().tracer();
+        let grouper = self.fronts().grouper();
+        let both = Both(&tracer, extra);
+        self.gc_with(opts, &both, if grouped { Some(&grouper) } else { None })
+    }
+
     /// Like [`LocalRepo::gc`], with an optional [`Grouper`] for similarity-grouped repack.
     pub fn gc_with(&self, opts: &GcOptions, tracer: &dyn Tracer, grouper: Option<&dyn Grouper>) -> Result<GcReport> {
         if opts.grace < Duration::from_secs(600) && !opts.allow_short_grace {

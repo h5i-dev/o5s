@@ -104,6 +104,25 @@ the tombstone switch generations.
 `head-release` (`heads/*` mutable, `releases/*` create-once, anything else forbidden). A rule can only be
 set on a prefix that has no refs, so immutability can never be retracted.
 
+## Fronts (crates/repo/src/front.rs; docs/VISION.md)
+
+The core is domain-agnostic. Domain behaviour comes from **fronts** registered when a repository is opened
+(`LocalRepo::with_fronts`).
+- **Encoding plan.** `Front::plan` returns an `Encoding` for each put: chunker, byte-grouping width, and whether to
+  store the object as a derived `base + patch` object (patch format: XOR with alignment segments; more formats to
+  come). It only affects storage: identity is always the BLAKE3 of the bytes `get` returns.
+- **Owned prefixes.** Names under a claimed prefix (longest claim wins, so `git/` and `git/hf/` nest) can only be
+  moved through `LocalRepo::front(id)`. Reads are unrestricted.
+- **GC and repack.** Every front sees every object; GC follows the union of their children
+  (`gc_with_fronts`), and repack merges their grouping keys.
+- **Profiles.** `[profiles.<p>]` (`front`, `chunker`, `derive = "none" | "previous"`) assigned to name prefixes in
+  `[namespaces]` decide what `put_named(name, src)` does. `derive = "previous"` offers the name's current object as
+  the base.
+- **External ids.** `idmap` (sorted, content-addressed segments behind one ref, union-merged with OCC) maps Git
+  oids, OCI digests and so on to core hashes.
+- **Built-in fronts:** `safetensors` (crates/weights: grouping width from the dominant dtype, tensor-aligned XOR
+  delta against the previous version). Net's Git, OCI and HF fronts are being ported onto this API.
+
 ## GC (crates/repo/src/gc.rs)
 
 Phases, each at least `grace` (≥ 10 min) apart:
