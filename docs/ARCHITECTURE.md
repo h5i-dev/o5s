@@ -160,7 +160,9 @@ dangling ref.
 | no undetected overwrite | `no_lost_update`, `replace_ok_validated` | contention tests (threads, processes), Lean↔Rust difftest |
 | immutable names never move (incl. deletes, transactions) | `frozen_run`, `updateMany_frozen` | rule tests, model proptest, difftest |
 | unauthorized principals can't move/read | `unauthorized_cannot_move_run`, `resolve_denied` | server authz tests (net) |
-| GC never loses live objects | `gc_preserves_live` | GC crash sweep, concurrent-writer GC, SIGKILL test |
+| GC never loses live objects (incl. Frame3 references as children) | `gc_preserves_live` | GC crash sweep, concurrent-writer GC, SIGKILL test, Frame3 reference GC test |
+| a front's names move only through its handle | `non_owner_cannot_move_run` | nested-claims and every-write-path tests (`crates/repo/tests/front.rs`) |
+| promotion moves only `dst`, never from a stale `src` | `promote_only_moves_dst`, `updateMany_stale_noop` | difftest `M` op, `crates/attest` promotion test |
 
 Crash consistency (fsync honesty, atomic rename, create-only puts) is assumed by the proofs and tested
 by fault injection at every write/fsync point plus real SIGKILLs.

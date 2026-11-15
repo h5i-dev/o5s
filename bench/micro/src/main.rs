@@ -2,7 +2,7 @@
 //! table. Deterministic inputs (seeded xorshift), so runs are reproducible.
 //! Run with `--release`. Record results in docs/BENCH.md with the host description.
 
-use pico2peta_core::{Name, ObjectStore, Observed, RefValue, ReplaceOutcome, Repository};
+use pico2peta_core::{Hash, Name, ObjectStore, Observed, RefValue, ReplaceOutcome, Repository};
 use pico2peta_repo::{LocalRepo, PackConfig};
 use std::io::Read;
 use std::time::Instant;
@@ -707,7 +707,242 @@ fn generic(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// The 64 bytes of synthetic object `i` (deterministic; distinct per `i`).
+fn scale_obj(i: u64) -> [u8; 64] {
+    let mut out = [0u8; 64];
+    let mut x = i.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xD1B5_4A32_D192_ED03;
+    for c in out.chunks_mut(8) {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        c.copy_from_slice(&x.to_le_bytes());
+    }
+    out[..8].copy_from_slice(&i.to_le_bytes()); // guarantees distinctness
+    out
+}
+
+fn vm_rss_mb() -> f64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines().find(|l| l.starts_with("VmRSS:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok())
+        })
+        .unwrap_or(0.0)
+        / 1024.0
+}
+
+fn pct(v: &mut [f64], p: f64) -> f64 {
+    v.sort_by(|a, b| a.total_cmp(b));
+    v.get(((v.len() as f64 - 1.0) * p).round() as usize).copied().unwrap_or(f64::NAN)
+}
+
+/// `p2p-bench scale <dir> <objects|names|prov|gc> <count>` (PLAN §6.7): one JSON line.
+/// `objects` creates (or reuses) `<dir>/scale-objects-<count>`; `gc` runs on it.
+fn scale(dir: &str, part: &str, count: u64) -> Result<(), Box<dyn std::error::Error>> {
+    let du = |p: &std::path::Path| -> u64 {
+        fn walk(p: &std::path::Path) -> u64 {
+            std::fs::read_dir(p).map_or(0, |rd| {
+                rd.flatten()
+                    .map(|e| if e.path().is_dir() { walk(&e.path()) } else { e.metadata().map_or(0, |m| m.len()) })
+                    .sum()
+            })
+        }
+        walk(p)
+    };
+    let load = || {
+        std::fs::read_to_string("/proc/loadavg")
+            .ok()
+            .and_then(|s| s.split(' ').next().map(String::from))
+            .unwrap_or_default()
+    };
+    match part {
+        "objects" => {
+            let root = std::path::Path::new(dir).join(format!("scale-objects-{count}"));
+            let repo = LocalRepo::init(&root, &PackConfig::default())?;
+            let t = Instant::now();
+            let mut first_rate = 0.0;
+            for i in 0..count {
+                repo.put(&scale_obj(i))?;
+                if (i + 1) % 100_000 == 0 {
+                    repo.flush()?;
+                }
+                if i + 1 == count.min(1_000_000) {
+                    first_rate = (i + 1) as f64 / t.elapsed().as_secs_f64();
+                }
+            }
+            repo.flush()?;
+            let put_rate = count as f64 / t.elapsed().as_secs_f64();
+            drop(repo);
+            // Cold open: a fresh handle, then the first lookup.
+            let t = Instant::now();
+            let repo = LocalRepo::open(&root)?;
+            let _ = repo.get(&Hash::of(&scale_obj(count / 2)), None)?;
+            let open_s = t.elapsed().as_secs_f64();
+            let rss_before = vm_rss_mb();
+            let mut x = 0x2545_F491_4F6C_DD1Du64;
+            let mut idx = Vec::with_capacity(100_000);
+            for _ in 0..100_000 {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                idx.push(x % count);
+            }
+            for &i in &idx {
+                let _ = repo.get(&Hash::of(&scale_obj(i)), None)?; // warm
+            }
+            let mut lat = Vec::with_capacity(idx.len());
+            for &i in &idx {
+                let h = Hash::of(&scale_obj(i));
+                let t = Instant::now();
+                let d = repo.get(&h, None)?;
+                lat.push(t.elapsed().as_secs_f64() * 1e3);
+                assert_eq!(d, scale_obj(i));
+            }
+            let rss = vm_rss_mb();
+            println!(
+                "{{\"part\":\"objects\",\"n\":{count},\"put_rate_first_1e6\":{first_rate:.0},\"put_rate\":{put_rate:.0},\"open_s\":{open_s:.2},\"get_p50_ms\":{:.4},\"get_p99_ms\":{:.4},\"rss_mb\":{rss:.0},\"rss_open_mb\":{rss_before:.0},\"rss_bytes_per_object\":{:.1},\"disk_bytes\":{},\"load\":\"{}\"}}",
+                pct(&mut lat.clone(), 0.5),
+                pct(&mut lat, 0.99),
+                rss * 1048576.0 / count as f64,
+                du(&root),
+                load()
+            );
+        }
+        "names" => {
+            let root = std::path::Path::new(dir).join(format!("scale-names-{count}"));
+            let repo = LocalRepo::init(&root, &PackConfig::default())?;
+            let target = repo.put(b"target")?;
+            let t = Instant::now();
+            let mut i = 0u64;
+            while i < count {
+                let end = (i + 10_000).min(count);
+                let ups: Vec<(Name, Hash)> = (i..end)
+                    .map(|k| (Name::new(format!("s/{}/{k}", k % 1000)).unwrap_or_else(|_| unreachable!()), target))
+                    .collect();
+                let rs: Vec<(Name, Observed)> = ups.iter().map(|(n, _)| (n.clone(), Observed::Absent)).collect();
+                repo.replace_many(&ups, &rs)?;
+                i = end;
+            }
+            let bulk_s = t.elapsed().as_secs_f64();
+            let t = Instant::now();
+            for k in 0..1000u64 {
+                let n = Name::new(format!("single/{k}"))?;
+                repo.replace(&n, &[(n.clone(), Observed::Absent)], target)?;
+            }
+            let single_rate = 1000.0 / t.elapsed().as_secs_f64();
+            let mut x = 0x9E37_79B9u64;
+            let mut lat = Vec::new();
+            for _ in 0..100_000 {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                let k = x % count;
+                let n = Name::new(format!("s/{}/{k}", k % 1000))?;
+                let t = Instant::now();
+                let v = repo.resolve(&n)?;
+                lat.push(t.elapsed().as_secs_f64() * 1e3);
+                assert!(v.is_some());
+            }
+            drop(repo);
+            let t = Instant::now();
+            let repo = LocalRepo::open(&root)?;
+            let _ = repo.resolve(&Name::new("s/1/1")?)?;
+            let open_s = t.elapsed().as_secs_f64();
+            println!(
+                "{{\"part\":\"names\",\"m\":{count},\"bulk_s\":{bulk_s:.1},\"replace_rate\":{single_rate:.0},\"resolve_p99_ms\":{:.4},\"open_s\":{open_s:.2},\"rss_mb\":{:.0},\"disk_bytes\":{},\"load\":\"{}\"}}",
+                pct(&mut lat, 0.99),
+                vm_rss_mb(),
+                du(&root),
+                load()
+            );
+            std::fs::remove_dir_all(&root)?;
+        }
+        "prov" => {
+            let root = std::path::Path::new(dir).join(format!("scale-prov-{count}"));
+            let repo = LocalRepo::init(&root, &PackConfig::default())?;
+            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
+            let t = Instant::now();
+            let mut i = 0u64;
+            while i < count {
+                let end = (i + 10_000).min(count);
+                // Records may only refer to stored objects.
+                for k in i..end {
+                    repo.put(&scale_obj(k))?;
+                    repo.put(&scale_obj(k + count))?;
+                }
+                let recs: Vec<pico2peta_prov::Record> = (i..end)
+                    .map(|k| pico2peta_prov::Record {
+                        op: "build".into(),
+                        inputs: [("src".to_string(), Hash::of(&scale_obj(k)))].into_iter().collect(),
+                        outputs: [("out".to_string(), Hash::of(&scale_obj(k + count)))].into_iter().collect(),
+                        meta: [("n".to_string(), k.to_string())].into_iter().collect(),
+                        params: None,
+                    })
+                    .collect();
+                pico2peta_prov::record(&repo, &log, &recs)?;
+                i = end;
+            }
+            let record_s = t.elapsed().as_secs_f64();
+            drop(repo);
+            let repo = LocalRepo::open(&root)?;
+            let t = Instant::now();
+            let p = pico2peta_prov::Provenance::load(&repo, &log)?;
+            let load_s = t.elapsed().as_secs_f64();
+            let lin = p.lineage(&Hash::of(&scale_obj(count / 2 + count)))?;
+            assert!(lin.contains(&Hash::of(&scale_obj(count / 2))));
+            println!(
+                "{{\"part\":\"prov\",\"r\":{count},\"record_s\":{record_s:.1},\"load_s\":{load_s:.2},\"rss_mb\":{:.0},\"disk_bytes\":{},\"load\":\"{}\"}}",
+                vm_rss_mb(),
+                du(&root),
+                load()
+            );
+            std::fs::remove_dir_all(&root)?;
+        }
+        "gc" => {
+            // On the objects repository of the same count: every object is live, via a
+            // tracer that lists them all as children of one root (no materialized list).
+            struct All(u64, Hash);
+            impl pico2peta_repo::Tracer for All {
+                fn children(&self, h: &Hash, _: &dyn ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+                    Ok(if *h == self.1 { (0..self.0).map(|i| Hash::of(&scale_obj(i))).collect() } else { Vec::new() })
+                }
+            }
+            let root = std::path::Path::new(dir).join(format!("scale-objects-{count}"));
+            let repo = LocalRepo::open(&root)?;
+            let rootobj = repo.put(b"scale root")?;
+            let rn = Name::new("scale/root")?;
+            let _ = repo.replace(&rn, &[(rn.clone(), RefValue::observed(repo.resolve(&rn)?))], rootobj)?;
+            repo.flush()?;
+            let opts = pico2peta_repo::GcOptions {
+                grace: std::time::Duration::ZERO,
+                allow_short_grace: true,
+                ..pico2peta_repo::GcOptions::default()
+            };
+            let t = Instant::now();
+            for _ in 0..3 {
+                repo.gc(&opts, &All(count, rootobj))?;
+            }
+            let gc_s = t.elapsed().as_secs_f64();
+            let ok =
+                (0..1000u64).all(|i| repo.contains(&Hash::of(&scale_obj(i * (count / 1000).max(1)))).unwrap_or(false));
+            println!(
+                "{{\"part\":\"gc\",\"n\":{count},\"gc_s\":{gc_s:.1},\"all_live_kept\":{ok},\"peak_rss_mb\":{:.0},\"load\":\"{}\"}}",
+                hwm_mb(),
+                load()
+            );
+        }
+        _ => return Err("parts: objects names prov gc".into()),
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("scale") {
+        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench scale <dir> <objects|names|prov|gc> <count>")?;
+        let part = std::env::args().nth(3).ok_or("part")?;
+        let count = std::env::args().nth(4).and_then(|s| s.parse().ok()).ok_or("count")?;
+        return scale(&dir, &part, count);
+    }
     if std::env::args().nth(1).as_deref() == Some("generic") {
         let dir = std::env::args().nth(2).ok_or("usage: p2p-bench generic <dir> [MiB]")?;
         let mib = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(1024);

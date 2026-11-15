@@ -1,4 +1,5 @@
 import Pico2peta.Model
+import Pico2peta.Fronts
 
 /-!
 # Executable model (for differential testing against Rust)
@@ -110,6 +111,10 @@ def execLine (st : ExecState) (line : String) : ExecState × String :=
         let (o, s') := updateMany st.s ups rs
         let keys := if o.isOk then ups.map Prod.fst ++ st.keys else st.keys
         ({ s := s', keys := keys }, showOutcome o)
+  | ["M", src, dst] =>
+    let (o, s') := promote st.s (parseName src) (parseName dst)
+    let keys := if o.isOk then parseName dst :: st.keys else st.keys
+    ({ s := s', keys := keys }, showOutcome o)
   | ["S", p, r] =>
     let rule := if r == "i" then Rule.immutable else if r == "h" then Rule.headRelease else Rule.mutable
     let (o, s') := setRuleC st.s st.keys (parseName p) rule
