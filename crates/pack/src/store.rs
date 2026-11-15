@@ -1545,7 +1545,9 @@ impl PackStore {
         if loc.kind == Kind::Manifest {
             for (child, _) in self.read_manifest(hash, loc)? {
                 if !self.ensure_live_impl(&child)? {
-                    return Err(Error::Corrupt(format!("{hash} references missing chunk {child}")));
+                    // A broken object (a child is gone) is reported absent, so the
+                    // caller uploads it again, and that put rewrites the missing chunks.
+                    return Ok(false);
                 }
             }
         }
@@ -1553,7 +1555,7 @@ impl PackStore {
             let (b, x, _) = self.read_delta(hash, loc)?;
             for child in [b, x] {
                 if !self.ensure_live_impl(&child)? {
-                    return Err(Error::Corrupt(format!("delta {hash} references missing {child}")));
+                    return Ok(false);
                 }
             }
         }

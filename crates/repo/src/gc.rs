@@ -40,6 +40,7 @@
 use crate::LocalRepo;
 use pico2peta_core::backend::PutSource;
 use pico2peta_core::{Error, Hash, ObjectStore, Repository, Result};
+use pico2peta_pack::format::Kind;
 use pico2peta_pack::{GC_PREFIX, read_name_list};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -185,6 +186,48 @@ impl LocalRepo {
         Ok(key)
     }
 
+    /// Every record referenced by a manifest or delta record in a pack that will
+    /// *survive* (any sealed pack not in `excluded`), transitively. These must
+    /// never be deleted, even if unreferenced (garbage left by an interrupted
+    /// put): a surviving parent pointing at a deleted child would make the index
+    /// serve an object that can't be read.
+    fn protected_children(&self, excluded: &HashSet<String>) -> Result<HashSet<Hash>> {
+        let mut out = HashSet::new();
+        let mut queue: VecDeque<Hash> = VecDeque::new();
+        for m in self.packs.backend().list("packs/")? {
+            let Some(name) = m.key.strip_prefix("packs/").and_then(|k| k.strip_suffix(".idx")) else { continue };
+            if excluded.contains(name) {
+                continue;
+            }
+            let entries = match self.packs.pack_entries(name) {
+                Ok(e) => e,
+                Err(Error::KeyNotFound(_)) => continue, // deleted meanwhile
+                Err(e) => return Err(e),
+            };
+            for e in entries {
+                if e.frame.is_none() && matches!(e.kind, Kind::Manifest | Kind::Delta) {
+                    queue.push_back(e.hash);
+                }
+            }
+        }
+        while let Some(h) = queue.pop_front() {
+            match self.packs.chunks(&h) {
+                Ok(Some(kids)) => {
+                    for k in kids {
+                        if out.insert(k) {
+                            queue.push_back(k);
+                        }
+                    }
+                }
+                Ok(None) => {}
+                // Already broken (e.g. by an older version): nothing more to protect below it.
+                Err(Error::NotFound(_)) | Err(Error::Corrupt(_)) => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(out)
+    }
+
     /// Live set: ref targets, manifest chunks, and tracer children.
     fn mark(&self, tracer: &dyn Tracer, report: &mut GcReport) -> Result<HashSet<Hash>> {
         let mut live = HashSet::new();
@@ -238,8 +281,11 @@ impl LocalRepo {
 
         // --- Delete phase -------------------------------------------------
         for rec in condemned.iter().filter(|r| due(r.ts)) {
-            let live = self.mark(tracer, &mut report)?;
+            let mut live = self.mark(tracer, &mut report)?;
             let doomed: HashSet<&String> = rec.packs.iter().collect();
+            // Children of records that survive must survive too (see protected_children).
+            let doomed_owned: HashSet<String> = rec.packs.iter().cloned().collect();
+            live.extend(self.protected_children(&doomed_owned)?);
             let mut rescued = 0;
             for h in &live {
                 if self.packs.serving_pack(h)?.is_some_and(|p| doomed.contains(&p)) {
@@ -305,8 +351,14 @@ impl LocalRepo {
             }
             if !opts.dry_run {
                 let mut copied: HashSet<Hash> = HashSet::new();
-                let to_copy: HashSet<Hash> =
-                    victims.iter().flat_map(|(_, es)| es.iter().map(|e| e.hash)).filter(|h| live.contains(h)).collect();
+                // Keep what refs reach, plus every child of a record in a pack that survives.
+                let victim_names: HashSet<String> = victims.iter().map(|v| v.0.clone()).collect();
+                let protected = self.protected_children(&victim_names)?;
+                let to_copy: HashSet<Hash> = victims
+                    .iter()
+                    .flat_map(|(_, es)| es.iter().map(|e| e.hash))
+                    .filter(|h| live.contains(h) || protected.contains(h))
+                    .collect();
                 if let Some(g) = grouper {
                     copied.extend(self.write_grouped(g, &to_copy, opts)?);
                 }

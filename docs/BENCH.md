@@ -96,3 +96,14 @@ no-dedup baseline and identifies where tensor-aware dedup (ZipLLM, Xet) is neede
 - **Alignment matters:** a byte-offset XOR is useless once tensors move (v6, a whole copy). Aligning each
   tensor with its same-named counterpart makes the identical tensors' XOR all zeros, which deduplicates
   to nothing.
+
+## Server over HTTP (quiet host; measured by the net session, see NET_PROGRESS.md)
+
+Release build; client and server on the same box over loopback.
+
+| benchmark | result |
+|---|---|
+| put 4 KiB, 16 concurrent clients | 9.5k ops/s, p99 2.5 ms |
+| replace on own names | 4.8k/s |
+| contended single-name OCC | 1.2k commits/s, no lost updates |
+| streaming upload / download (BLAKE3-verified) | 181 MiB/s up, 1,269 MiB/s down |
