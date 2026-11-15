@@ -127,6 +127,13 @@ fn extract(git_dir: &Path, out: &Path) -> R<()> {
     }
     feeder.join().map_err(|_| "feeder panicked")??;
     check.wait()?;
+    // rev-list prints annotated tags with their tag *name* as the path. Per PLAN §4.4/§4.8,
+    // tags (like commits) have no path: they're ordered by history position.
+    for o in objs.iter_mut() {
+        if o.typ == "tag" {
+            o.path.clear();
+        }
+    }
 
     // 3. Partition and order: (path, oldest first). Commits and tags: oldest first.
     let mut parts: HashMap<(String, String), Vec<usize>> = HashMap::new();
@@ -417,17 +424,27 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
                                 };
                                 let mut prev: Option<Vec<u8>> = None;
                                 let mut prev_depth = 0u32;
+                                // Each delta frame records its content size (pledged), so the
+                                // encoder and decoder size their buffers to the object, not the window.
                                 for_each_obj(dir, p, |i, b| {
                                     let same = i > 0 && p.paths.get(i) == p.paths.get(i - 1);
                                     let (z, depth, pred) = match prev.as_ref() {
                                         Some(pv) if same && prev_depth < maxd => {
+                                            use zstd::zstd_safe::{CParameter, ResetDirective};
                                             let need = (pv.len() + b.len()).max(2) as u64;
                                             let wl = (64 - (need - 1).leading_zeros()).clamp(23, 27);
-                                            let mut enc =
-                                                zstd::stream::write::Encoder::with_ref_prefix(Vec::new(), LEVEL, pv)?;
-                                            enc.window_log(wl)?;
-                                            enc.write_all(b)?;
-                                            (enc.finish()?, prev_depth + 1, Some((i - 1) as u32))
+                                            let zerr =
+                                                |c: usize| format!("zstd: {}", zstd::zstd_safe::get_error_name(c));
+                                            let mut cctx = zstd::zstd_safe::CCtx::create();
+                                            cctx.reset(ResetDirective::SessionAndParameters).map_err(zerr)?;
+                                            cctx.set_parameter(CParameter::CompressionLevel(LEVEL)).map_err(zerr)?;
+                                            cctx.set_parameter(CParameter::WindowLog(wl)).map_err(zerr)?;
+                                            cctx.set_pledged_src_size(Some(b.len() as u64)).map_err(zerr)?;
+                                            cctx.ref_prefix(pv).map_err(zerr)?;
+                                            let mut out: Vec<u8> =
+                                                Vec::with_capacity(zstd::zstd_safe::compress_bound(b.len()));
+                                            cctx.compress2(&mut out, b).map_err(zerr)?;
+                                            (out, prev_depth + 1, Some((i - 1) as u32))
                                         }
                                         _ => (c.compress(b)?, 0, None),
                                     };
@@ -512,11 +529,12 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
         }
         Ok(())
     })?;
-    let build_secs = t0.elapsed().as_secs_f64();
     {
         let g = out.file.lock().map_err(|_| "poisoned")?;
         g.0.sync_all()?;
     }
+    // Includes the final fsync, as Git's wall time includes its own (fixed for Exp1b; see EXP1.md).
+    let build_secs = t0.elapsed().as_secs_f64();
     let payload = std::fs::metadata(&out_path)?.len();
     let dicts = dicts.into_inner().map_err(|_| "poisoned")?;
     let dict_bytes: u64 = dicts.iter().flatten().map(|d| d.len() as u64).sum();
@@ -565,17 +583,31 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
                         cur = locs[pi][pp as usize];
                     }
                     let mut prev: Vec<u8> = Vec::new();
+                    let zerr = |c: usize| format!("zstd: {}", zstd::zstd_safe::get_error_name(c));
+                    let n = chain.len();
                     for (k, &ci) in chain.iter().rev().enumerate() {
                         let cl = locs[pi][ci];
-                        let mut cc = vec![0u8; cl.clen as usize];
-                        f.read_exact_at(&mut cc, cl.off)?;
-                        prev = if k == 0 {
-                            zstd::bulk::decompress(&cc, cl.len as usize)?
+                        // The target record was already read (`comp`); read only its ancestors.
+                        let owned;
+                        let cc: &[u8] = if k + 1 == n {
+                            &comp
                         } else {
-                            let mut dec = zstd::stream::read::Decoder::with_ref_prefix(&cc[..], &prev)?;
-                            dec.window_log_max(27)?;
-                            let mut o = Vec::with_capacity(cl.len as usize);
-                            dec.read_to_end(&mut o)?;
+                            let mut v = vec![0u8; cl.clen as usize];
+                            f.read_exact_at(&mut v, cl.off)?;
+                            owned = v;
+                            &owned
+                        };
+                        prev = if k == 0 {
+                            zstd::bulk::decompress(cc, cl.len as usize)?
+                        } else {
+                            use zstd::zstd_safe::{DParameter, ResetDirective};
+                            let mut dctx = zstd::zstd_safe::DCtx::create();
+                            dctx.reset(ResetDirective::SessionAndParameters).map_err(zerr)?;
+                            dctx.set_parameter(DParameter::WindowLogMax(27)).map_err(zerr)?;
+                            dctx.ref_prefix(&prev).map_err(zerr)?;
+                            let mut o: Vec<u8> = Vec::with_capacity(cl.len as usize);
+                            dctx.decompress(&mut o, cc).map_err(zerr)?;
+                            drop(dctx);
                             o
                         };
                     }

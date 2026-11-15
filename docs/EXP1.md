@@ -56,6 +56,24 @@ scripts/exp1-report.py $BENCH_DATA/exp1/results.jsonl
    a build-time comparison is close, both are re-timed back-to-back on a quiet host and both numbers
    are reported (see Results).
 
+6. **Independent harness review (2026-11-15, during the git.git run).** No silent-corruption bug: offsets,
+   object coverage, chain encode/decode symmetry, and SHA-1 verification were all checked. The review found
+   deviations, each disclosed here with its direction:
+   - *Partition key detail:* extensions are lowercased, and extension-less files are grouped by basename.
+     This was fixed before the first run but only partly stated above. It affects V1/V2 only, probably slightly in our favour.
+   - *Order:* "history position" is the rev-list first-encounter position, i.e. the newest commit containing
+     each version, reversed. On linear history this is time order; after reverts or merges it can differ. Direction mixed.
+   - *Read latency* is measured with one reader thread. §4.5's "4 threads" was applied to the build, so the latency
+     numbers are optimistic relative to a 4-concurrent-reader reading.
+   - *Build time* for Exp1 V0–V3 stops before the output's final fsync, while Git's wall time includes its own
+     fsyncs and housekeeping. That's slightly in our favour. **Fixed for Exp1b** (the timer now includes the fsync).
+   - *Annotated tags* were ordered by tag name (rev-list prints the tag name as a path). **Fixed for Exp1b:**
+     tags are path-less, as §4.4/§4.8 specify. Tags are a negligible share of bytes.
+   - *Exp1b V4/V5 zstd usage:* the first harness version used streaming frames without a declared size
+     (8 MiB+ buffers per object and per chain link) and read the target record twice, which biased V4/V5 build
+     time and read latency *against* them. **Fixed before the official 1b run:** the content size is pledged and
+     the target is read once. The sanity numbers above came from the old version.
+
 ## Results
 
 *(git.git is still running. The table is regenerated from `results.jsonl` at the end. The verdict below is
