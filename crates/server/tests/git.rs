@@ -205,7 +205,12 @@ fn grouped_repack_vs_git() {
     let mirror = std::path::PathBuf::from(mirror);
     let s = git_server();
     let u = url(&s, ALICE, "team/m");
-    ok(&mirror, &["push", "-q", &u, "refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"]);
+    // P2P_GIT_ALL_REFS=1: every ref (incl. refs/pull/*), i.e. the Experiment 1 corpus.
+    let all = std::env::var("P2P_GIT_ALL_REFS").is_ok_and(|v| v == "1");
+    let specs: Vec<&str> = if all { vec!["refs/*:refs/*"] } else { vec!["refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"] };
+    let mut args = vec!["push", "-q", &u];
+    args.extend(specs.iter().copied());
+    ok(&mirror, &args);
     let objects = s.dir.path().join("repo/objects");
     let before = dir_bytes(&objects);
     let repo = pico2peta_repo::LocalRepo::open(s.dir.path().join("repo")).unwrap();
@@ -253,7 +258,9 @@ fn grouped_repack_vs_git() {
     let b = tempfile::tempdir().unwrap();
     ok(b.path(), &["init", "-q", "--bare", "base"]);
     let base = b.path().join("base");
-    ok(&base, &["fetch", "-q", mirror.to_str().unwrap(), "refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"]);
+    let mut fetch = vec!["fetch", "-q", mirror.to_str().unwrap()];
+    fetch.extend(specs.iter().copied());
+    ok(&base, &fetch);
     ok(&base, &["-c", "pack.threads=4", "gc", "-q", "--aggressive", "--prune=now"]);
     let sum = |ext: &str| -> u64 {
         std::fs::read_dir(base.join("objects/pack"))
@@ -275,7 +282,13 @@ fn grouped_repack_vs_git() {
     // Everything still clones identically.
     let w = tempfile::tempdir().unwrap();
     ok(w.path(), &["clone", "-q", "--mirror", &u, "c"]);
-    let list = |d: &Path| ok(d, &["for-each-ref", "--format=%(objectname) %(refname)", "refs/heads", "refs/tags"]);
+    let list = |d: &Path| {
+        let mut a = vec!["for-each-ref", "--format=%(objectname) %(refname)"];
+        if !all {
+            a.extend(["refs/heads", "refs/tags"]);
+        }
+        ok(d, &a)
+    };
     assert_eq!(list(&mirror), list(&w.path().join("c")));
     ok(&w.path().join("c"), &["fsck", "--full"]);
 }
