@@ -13,6 +13,7 @@ path = "src/main.rs"
 pico2peta-core.workspace = true
 pico2peta-repo.workspace = true
 pico2peta-pack.workspace = true
+pico2peta-prov.workspace = true
 pico2peta-client = { path = "../client" }
 pico2peta-backend-s3 = { path = "../backend-s3" }
 serde.workspace = true
@@ -34,6 +35,9 @@ sha2 = "0.10"
 fastrand = "2"
 clap.workspace = true
 getrandom = "0.3"
+base64 = "0.22"
+flate2 = "1"
+sha1 = "0.10"
 
 [dev-dependencies]
 tempfile.workspace = true

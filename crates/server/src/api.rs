@@ -49,9 +49,35 @@ pub struct AppState {
     pub max_upload_bytes: u64,
     pub shutting_down: Arc<AtomicBool>,
     pub limiter: Arc<Semaphore>,
+    pub trust_forwarded_for: bool,
+    /// The concrete repository, for admin operations outside the trait (GC).
+    pub local: Option<pico2peta_repo::LocalRepo>,
+    pub gc: crate::config::GcSection,
+    pub gc_running: Arc<AtomicBool>,
+    pub oci: Option<Arc<crate::oci::OciState>>,
+    pub git: Option<Arc<crate::git::GitState>>,
 }
 
 type St = State<Arc<AppState>>;
+
+/// Per-request metadata for audit records.
+#[derive(Clone, Debug)]
+pub struct Caller {
+    pub request_id: String,
+    /// Client address: the TCP peer, or the first `X-Forwarded-For` hop when
+    /// `server.trust_forwarded_for` is set (only behind a trusted proxy).
+    pub remote: Option<String>,
+}
+
+fn client_addr(req: &Request, trust_forwarded_for: bool) -> Option<String> {
+    if trust_forwarded_for
+        && let Some(f) = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok())
+        && let Some(first) = f.split(',').next().map(str::trim).filter(|s| !s.is_empty() && s.len() <= 64)
+    {
+        return Some(first.to_string());
+    }
+    req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|ci| ci.0.to_string())
+}
 
 /// The request id assigned by the request-id layer.
 fn request_id(h: &HeaderMap) -> String {
@@ -66,9 +92,15 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/refs", get(list_refs))
         .route("/v1/refs/{*name}", get(resolve))
         .route("/v1/replace", post(replace))
+        .route("/v1/replace_many", post(replace_many))
         .route("/v1/namespaces", get(list_rules))
         .route("/v1/namespaces/{*prefix}", put(set_rule))
         .route("/v1/whoami", get(whoami))
+        .route("/v1/admin/gc", post(gc))
+        .route("/v2/", get(crate::oci::base))
+        .route("/v2", get(crate::oci::base))
+        .route("/v2/{*rest}", axum::routing::any(crate::oci::dispatch))
+        .route("/git/{*rest}", axum::routing::any(crate::git::dispatch))
         .layer(middleware::from_fn_with_state(state.clone(), authenticate))
         .layer(middleware::from_fn_with_state(state.clone(), shed_load));
     Router::new()
@@ -117,6 +149,9 @@ async fn shed_load(State(st): St, req: Request, next: Next) -> Response {
 
 /// Authenticates the caller and stores the [`Principal`] in request extensions.
 async fn authenticate(State(st): St, mut req: Request, next: Next) -> Response {
+    let caller_remote = client_addr(&req, st.trust_forwarded_for);
+    let rid = request_id(req.headers());
+    req.extensions_mut().insert(Caller { request_id: rid, remote: caller_remote.clone() });
     match st.authn.authenticate(req.headers()).await {
         Ok(p) => {
             req.extensions_mut().insert(p);
@@ -138,11 +173,23 @@ async fn authenticate(State(st): St, mut req: Request, next: Next) -> Response {
                     target: req.uri().path().to_string(),
                     outcome: "denied".into(),
                     detail: Some(reason.into()),
-                    remote: None,
+                    remote: caller_remote.clone(),
                 });
             }
             if let crate::auth::AuthError::Unavailable(m) = e {
                 return ApiError::unavailable(codes::INTERNAL, m).into_response();
+            }
+            if req.uri().path().starts_with("/git/") {
+                let mut r = (StatusCode::UNAUTHORIZED, e.to_string()).into_response();
+                r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"pico2peta\""));
+                return r;
+            }
+            if req.uri().path().starts_with("/v2") {
+                let body = serde_json::json!({"errors": [{"code": "UNAUTHORIZED", "message": e.to_string()}]});
+                let mut r = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
+                r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"pico2peta\""));
+                r.headers_mut().insert("docker-distribution-api-version", HeaderValue::from_static("registry/2.0"));
+                return r;
             }
             ApiError::unauthenticated(e.to_string()).into_response()
         }
@@ -155,18 +202,19 @@ async fn authenticate(State(st): St, mut req: Request, next: Next) -> Response {
 
 impl AppState {
     /// Fails with 403 (and audits the denial) unless `cond`.
-    fn require(&self, cond: bool, p: &Principal, h: &HeaderMap, action: &'static str, target: &str) -> ApiResult<()> {
+    fn require(&self, cond: bool, p: &Principal, c: &Caller, action: &'static str, target: &str) -> ApiResult<()> {
         if cond {
             return Ok(());
         }
         self.metrics.denied.inc();
         self.audit.record_nowait(Event {
-            request_id: request_id(h),
+            request_id: c.request_id.clone(),
             principal: p.name.clone(),
             action,
             target: target.to_string(),
             outcome: "denied".into(),
-            ..Default::default()
+            detail: None,
+            remote: c.remote.clone(),
         });
         Err(ApiError::denied(format!("{} may not {action} {target}", p.name)))
     }
@@ -187,6 +235,11 @@ impl AppState {
             ApiError::internal(format!("operation applied but audit write failed: {e}"))
         })
     }
+}
+
+/// Namespaces owned by protocol adapters (OCI, Git) and the provenance log.
+pub fn is_reserved(name: &str) -> bool {
+    ["oci", "git", "_prov"].iter().any(|p| pico2peta_core::is_under(name, p))
 }
 
 /// Runs a repository call on the blocking pool.
@@ -267,10 +320,11 @@ impl Read for ChannelReader {
 async fn put_object(
     State(st): St,
     Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
     headers: HeaderMap,
     body: Body,
 ) -> ApiResult<Response> {
-    st.require(st.authz.allows_somewhere(&p, Access::Write), &p, &headers, "put", "objects")?;
+    st.require(st.authz.allows_somewhere(&p, Access::Write), &p, &c, "put", "objects")?;
     st.require_audit_healthy()?;
     let max = st.max_upload_bytes;
     if let Some(cl) =
@@ -345,13 +399,13 @@ async fn put_object(
         );
     }
     st.audit_mutation(Event {
-        request_id: request_id(&headers),
+        request_id: c.request_id.clone(),
         principal: p.name.clone(),
         action: "put",
         target: hash.to_hex(),
         outcome: "ok".into(),
         detail: Some(format!("size={size}")),
-        remote: None,
+        remote: c.remote.clone(),
     })
     .await?;
     Ok((StatusCode::OK, Json(wire::PutResponse { hash: hash.to_hex(), size })).into_response())
@@ -377,10 +431,10 @@ fn object_headers(h: &mut HeaderMap, hash: &Hash) {
 async fn head_object(
     State(st): St,
     Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
     Path(hash): Path<String>,
-    headers: HeaderMap,
 ) -> ApiResult<Response> {
-    st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &headers, "get", "objects")?;
+    st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &c, "get", "objects")?;
     let hash = parse_hash(&hash)?;
     let repo = st.repo.clone();
     let size = blocking(move || repo.size(&hash)).await?;
@@ -393,10 +447,11 @@ async fn head_object(
 async fn get_object(
     State(st): St,
     Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
     Path(hash): Path<String>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
-    st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &headers, "get", "objects")?;
+    st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &c, "get", "objects")?;
     let hash = parse_hash(&hash)?;
     let repo = st.repo.clone();
     let size = blocking(move || repo.size(&hash)).await?;
@@ -416,13 +471,13 @@ async fn get_object(
     let reader = blocking(move || repo.open(&hash, rr)).await?;
     if st.log_reads {
         st.audit.record_nowait(Event {
-            request_id: request_id(&headers),
+            request_id: c.request_id.clone(),
             principal: p.name.clone(),
             action: "get",
             target: hash.to_hex(),
             outcome: "ok".into(),
             detail: range.as_ref().map(|r| format!("range={}-{}", r.start, r.end)),
-            remote: None,
+            remote: c.remote.clone(),
         });
     }
     let len = range.as_ref().map_or(size, |r| r.end - r.start);
@@ -440,7 +495,7 @@ async fn get_object(
 }
 
 /// Streams `reader` (exactly `len` bytes) as a response body with bounded buffering.
-fn stream_reader(reader: Box<dyn Read + Send>, len: u64, metrics: Arc<Metrics>) -> Body {
+pub(crate) fn stream_reader(reader: Box<dyn Read + Send>, len: u64, metrics: Arc<Metrics>) -> Body {
     let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(4);
     tokio::spawn(async move {
         let mut reader = Some(reader);
@@ -496,8 +551,12 @@ fn stream_reader(reader: Box<dyn Read + Send>, len: u64, metrics: Arc<Metrics>) 
     Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|i| (i, rx)) }))
 }
 
-async fn flush(State(st): St, Extension(p): Extension<Principal>, headers: HeaderMap) -> ApiResult<StatusCode> {
-    st.require(st.authz.allows_somewhere(&p, Access::Write), &p, &headers, "flush", "objects")?;
+async fn flush(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
+) -> ApiResult<StatusCode> {
+    st.require(st.authz.allows_somewhere(&p, Access::Write), &p, &c, "flush", "objects")?;
     let repo = st.repo.clone();
     blocking(move || repo.flush()).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -510,11 +569,11 @@ async fn flush(State(st): St, Extension(p): Extension<Principal>, headers: Heade
 async fn resolve(
     State(st): St,
     Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
     Path(name): Path<String>,
-    headers: HeaderMap,
 ) -> ApiResult<Json<wire::RefJson>> {
     let name = parse_name(&name)?;
-    st.require(st.authz.allows(&p, name.as_str(), Access::Read), &p, &headers, "resolve", name.as_str())?;
+    st.require(st.authz.allows(&p, name.as_str(), Access::Read), &p, &c, "resolve", name.as_str())?;
     let repo = st.repo.clone();
     let n = name.clone();
     match blocking(move || repo.resolve(&n)).await? {
@@ -551,16 +610,21 @@ async fn list_refs(
 async fn replace(
     State(st): St,
     Extension(p): Extension<Principal>,
-    headers: HeaderMap,
+    Extension(c): Extension<Caller>,
     body: Bytes,
 ) -> ApiResult<Response> {
     let req: wire::ReplaceRequest =
         serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("bad replace request: {e}")))?;
     let (name, read_set, new) = req.to_core().map_err(ApiError::from)?;
-    st.require(st.authz.allows(&p, name.as_str(), Access::Write), &p, &headers, "replace", name.as_str())?;
+    st.require(st.authz.allows(&p, name.as_str(), Access::Write), &p, &c, "replace", name.as_str())?;
+    // Adapter-managed namespaces keep invariants (digest ↔ content) that raw
+    // replaces could break; only global admins may touch them through /v1.
+    if is_reserved(name.as_str()) {
+        st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "replace_reserved", name.as_str())?;
+    }
     // Conflict responses reveal versions of read-set names, so require read on them.
     for (n, _) in &read_set {
-        st.require(st.authz.allows(&p, n.as_str(), Access::Read), &p, &headers, "replace", n.as_str())?;
+        st.require(st.authz.allows(&p, n.as_str(), Access::Read), &p, &c, "replace", n.as_str())?;
     }
     st.require_audit_healthy()?;
     let repo = st.repo.clone();
@@ -575,19 +639,70 @@ async fn replace(
     };
     st.metrics.replace.get_or_create(&OutcomeLabels { outcome: outcome.into() }).inc();
     st.audit_mutation(Event {
-        request_id: request_id(&headers),
+        request_id: c.request_id.clone(),
         principal: p.name.clone(),
         action: "replace",
         target: name.to_string(),
         outcome: outcome.into(),
         detail: Some(detail),
-        remote: None,
+        remote: c.remote.clone(),
     })
     .await?;
     let out = res?;
     let status =
         if matches!(out, pico2peta_core::ReplaceOutcome::Ok { .. }) { StatusCode::OK } else { StatusCode::CONFLICT };
     Ok((status, Json(wire::ReplaceResponse::from_core(&out))).into_response())
+}
+
+async fn replace_many(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let req: wire::ReplaceManyRequest =
+        serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("bad replace_many request: {e}")))?;
+    let (updates, read_set) = req.to_core().map_err(ApiError::from)?;
+    if updates.is_empty() {
+        return Err(ApiError::bad_request("replace_many needs at least one update"));
+    }
+    for (n, _) in &updates {
+        st.require(st.authz.allows(&p, n.as_str(), Access::Write), &p, &c, "replace", n.as_str())?;
+        if is_reserved(n.as_str()) {
+            st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "replace_reserved", n.as_str())?;
+        }
+    }
+    for (n, _) in &read_set {
+        st.require(st.authz.allows(&p, n.as_str(), Access::Read), &p, &c, "replace", n.as_str())?;
+    }
+    st.require_audit_healthy()?;
+    let repo = st.repo.clone();
+    let (u, rs) = (updates.clone(), read_set.clone());
+    let res = blocking(move || repo.replace_many(&u, &rs)).await;
+    let outcome = match &res {
+        Ok(pico2peta_core::ReplaceManyOutcome::Ok { .. }) => "ok",
+        Ok(pico2peta_core::ReplaceManyOutcome::Conflict { .. }) => "conflict",
+        Err(_) => "rejected",
+    };
+    st.metrics.replace.get_or_create(&OutcomeLabels { outcome: outcome.into() }).inc();
+    let targets: Vec<String> = updates.iter().map(|(n, h)| format!("{n}={h}")).collect();
+    st.audit_mutation(Event {
+        request_id: c.request_id.clone(),
+        principal: p.name.clone(),
+        action: "replace_many",
+        target: updates.first().map(|(n, _)| n.to_string()).unwrap_or_default(),
+        outcome: outcome.into(),
+        detail: Some(targets.join(" ")),
+        remote: c.remote.clone(),
+    })
+    .await?;
+    let out = res?;
+    let status = if matches!(out, pico2peta_core::ReplaceManyOutcome::Ok { .. }) {
+        StatusCode::OK
+    } else {
+        StatusCode::CONFLICT
+    };
+    Ok((status, Json(wire::ReplaceManyResponse::from_core(&out))).into_response())
 }
 
 // ---------------------------------------------------------------------------
@@ -597,9 +712,9 @@ async fn replace(
 async fn list_rules(
     State(st): St,
     Extension(p): Extension<Principal>,
-    headers: HeaderMap,
+    Extension(c): Extension<Caller>,
 ) -> ApiResult<Json<wire::RuleList>> {
-    st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &headers, "list_rules", "namespaces")?;
+    st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &c, "list_rules", "namespaces")?;
     let repo = st.repo.clone();
     let rules = blocking(move || repo.rules()).await?;
     Ok(Json(wire::RuleList {
@@ -610,31 +725,130 @@ async fn list_rules(
 async fn set_rule(
     State(st): St,
     Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
     Path(prefix): Path<String>,
-    headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult<StatusCode> {
     validate_path(&prefix).map_err(ApiError::from)?;
     let req: wire::SetRuleRequest =
         serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("bad set-rule request: {e}")))?;
     let rule = wire::rule_from_wire(&req.rule).map_err(ApiError::from)?;
-    st.require(st.authz.allows(&p, &prefix, Access::Admin), &p, &headers, "set_rule", &prefix)?;
+    st.require(st.authz.allows(&p, &prefix, Access::Admin), &p, &c, "set_rule", &prefix)?;
     st.require_audit_healthy()?;
     let repo = st.repo.clone();
     let pf = prefix.clone();
     let res = blocking(move || repo.set_rule(&pf, rule)).await;
     st.audit_mutation(Event {
-        request_id: request_id(&headers),
+        request_id: c.request_id.clone(),
         principal: p.name.clone(),
         action: "set_rule",
         target: prefix,
         outcome: if res.is_ok() { "ok".into() } else { "rejected".into() },
         detail: Some(format!("rule={}", rule.as_str())),
-        remote: None,
+        remote: c.remote.clone(),
     })
     .await?;
     res?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// GC tracer for adapter content: git objects first, then OCI/segment maps.
+pub struct AdapterTracer {
+    pub git: crate::git::GitTracer,
+    pub oci: crate::oci::OciTracer,
+}
+
+impl pico2peta_repo::Tracer for AdapterTracer {
+    fn children(&self, h: &Hash, store: &dyn pico2peta_core::ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+        if let Some(c) = self.git.children_of(h, store)? {
+            return Ok(c);
+        }
+        Ok(self.oci.children_of(h, store)?.unwrap_or_default())
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct GcQuery {
+    #[serde(default)]
+    dry_run: bool,
+}
+
+/// Runs one GC invocation, unless one is already running.
+pub async fn run_gc(st: &AppState, dry_run: bool) -> ApiResult<wire::GcReportJson> {
+    let Some(local) = st.local.clone() else {
+        return Err(ApiError::new(StatusCode::NOT_IMPLEMENTED, "unsupported", "GC needs a local repository"));
+    };
+    if st.gc_running.swap(true, Ordering::AcqRel) {
+        return Err(ApiError::new(StatusCode::CONFLICT, codes::GC_RUNNING, "a GC run is already in progress"));
+    }
+    let opts = st.gc.options(dry_run);
+    let running = st.gc_running.clone();
+    let res = blocking(move || {
+        // Provenance records, then git objects, OCI manifests and segment maps;
+        // everything else is a leaf.
+        let shared: Arc<dyn Repository> = Arc::new(local.clone());
+        let tracer = pico2peta_prov::ProvTracer {
+            inner: AdapterTracer {
+                git: crate::git::GitTracer::new(shared.clone())?,
+                oci: crate::oci::OciTracer::new(shared),
+            },
+        };
+        let r = local.gc(&opts, &tracer);
+        running.store(false, Ordering::Release);
+        r
+    })
+    .await;
+    if res.is_err() {
+        st.gc_running.store(false, Ordering::Release);
+    }
+    let r = res?;
+    let outcome = if r.dangling_refs.is_empty() { "ok" } else { "dangling_refs" };
+    st.metrics.gc_runs.get_or_create(&OutcomeLabels { outcome: outcome.into() }).inc();
+    if !dry_run {
+        st.metrics.gc_deleted_bytes.inc_by(r.deleted_bytes);
+    }
+    Ok(wire::GcReportJson {
+        dry_run,
+        planned: r.planned,
+        swept: r.swept,
+        condemned_packs: r.condemned_packs,
+        copied_records: r.copied_records,
+        rescued_records: r.rescued_records,
+        deleted_packs: r.deleted_packs,
+        deleted_bytes: r.deleted_bytes,
+        live_hashes: r.live_hashes,
+        dangling_refs: r.dangling_refs,
+    })
+}
+
+async fn gc(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
+    Query(q): Query<GcQuery>,
+) -> ApiResult<Json<wire::GcReportJson>> {
+    st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "gc", "repository")?;
+    st.require_audit_healthy()?;
+    let res = run_gc(&st, q.dry_run).await;
+    st.audit_mutation(Event {
+        request_id: c.request_id.clone(),
+        principal: p.name.clone(),
+        action: "gc",
+        target: "repository".into(),
+        outcome: match &res {
+            Ok(_) => "ok".into(),
+            Err(e) => e.code.to_string(),
+        },
+        detail: res.as_ref().ok().map(|r| {
+            format!(
+                "dry_run={} deleted_packs={} deleted_bytes={} live={}",
+                r.dry_run, r.deleted_packs, r.deleted_bytes, r.live_hashes
+            )
+        }),
+        remote: c.remote.clone(),
+    })
+    .await?;
+    Ok(Json(res?))
 }
 
 async fn whoami(Extension(p): Extension<Principal>) -> Json<wire::WhoAmI> {

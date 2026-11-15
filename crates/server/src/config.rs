@@ -7,6 +7,7 @@
 //! max_concurrent_requests = 256
 //! request_timeout_secs = 3600        # whole request, including body transfer
 //! shutdown_grace_secs = 30
+//! trust_forwarded_for = false      # true only behind a proxy that sets X-Forwarded-For
 //!
 //! [repo]
 //! path = "/var/lib/pico2peta/repo"
@@ -36,6 +37,10 @@
 //! path = "/var/log/pico2peta/audit.jsonl"
 //! log_reads = false
 //!
+//! [gc]
+//! interval_secs = 0                  # background GC period; 0 = off
+//! grace_secs = 3600                  # >= 600; also the put->replace lease
+//!
 //! [log]
 //! format = "json"                    # json | text
 //! filter = "info"                    # RUST_LOG syntax
@@ -60,6 +65,81 @@ pub struct Config {
     pub audit: AuditSection,
     #[serde(default)]
     pub log: LogSection,
+    #[serde(default)]
+    pub gc: GcSection,
+    #[serde(default)]
+    pub oci: OciSection,
+    #[serde(default)]
+    pub git: GitSection,
+}
+
+/// Git smart HTTP endpoint (`/git/<repo>.git/...`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct GitSection {
+    pub enabled: bool,
+    /// Spool directory for incoming pushes (default `<repo.path>.git-spool`).
+    pub spool_dir: Option<PathBuf>,
+}
+
+impl Default for GitSection {
+    fn default() -> Self {
+        GitSection { enabled: true, spool_dir: None }
+    }
+}
+
+/// OCI distribution endpoint (`/v2/`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct OciSection {
+    pub enabled: bool,
+    /// Spool directory for chunked uploads (default `<repo.path>/../oci-uploads`).
+    /// Emptied at startup, since upload sessions do not survive restarts.
+    pub upload_dir: Option<PathBuf>,
+    pub max_upload_sessions: usize,
+}
+
+impl Default for OciSection {
+    fn default() -> Self {
+        OciSection { enabled: true, upload_dir: None, max_upload_sessions: 1024 }
+    }
+}
+
+/// Garbage collection (see `pico2peta_repo::gc` for the protocol).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct GcSection {
+    /// Run GC every this many seconds; 0 disables the background task
+    /// (admins can still trigger `POST /v1/admin/gc`).
+    pub interval_secs: u64,
+    /// Minimum time between GC phases, and the put→replace lease (>= 600).
+    pub grace_secs: u64,
+    pub min_garbage_ratio: f64,
+    pub small_pack_bytes: u64,
+}
+
+impl Default for GcSection {
+    fn default() -> Self {
+        let d = pico2peta_repo::GcOptions::default();
+        GcSection {
+            interval_secs: 0,
+            grace_secs: d.grace.as_secs(),
+            min_garbage_ratio: d.min_garbage_ratio,
+            small_pack_bytes: d.small_pack_bytes,
+        }
+    }
+}
+
+impl GcSection {
+    pub fn options(&self, dry_run: bool) -> pico2peta_repo::GcOptions {
+        pico2peta_repo::GcOptions {
+            grace: std::time::Duration::from_secs(self.grace_secs),
+            allow_short_grace: false,
+            min_garbage_ratio: self.min_garbage_ratio,
+            small_pack_bytes: self.small_pack_bytes,
+            dry_run,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -70,6 +150,9 @@ pub struct ServerSection {
     pub max_concurrent_requests: usize,
     pub request_timeout_secs: u64,
     pub shutdown_grace_secs: u64,
+    /// Take the client address for audit records from `X-Forwarded-For`.
+    /// Enable only behind a reverse proxy that sets it.
+    pub trust_forwarded_for: bool,
 }
 
 impl Default for ServerSection {
@@ -80,6 +163,7 @@ impl Default for ServerSection {
             max_concurrent_requests: 256,
             request_timeout_secs: 3600,
             shutdown_grace_secs: 30,
+            trust_forwarded_for: false,
         }
     }
 }
@@ -223,6 +307,12 @@ impl Config {
         }
         if self.server.request_timeout_secs == 0 {
             return bad("server.request_timeout_secs must be >= 1".into());
+        }
+        if self.gc.grace_secs < 600 {
+            return bad("gc.grace_secs must be >= 600 (it is also the put->replace lease)".into());
+        }
+        if !(0.0..=1.0).contains(&self.gc.min_garbage_ratio) {
+            return bad("gc.min_garbage_ratio must be in [0, 1]".into());
         }
         let mut seen = std::collections::HashSet::new();
         for t in &self.auth.tokens {

@@ -38,6 +38,8 @@ pub struct Metrics {
     pub auth_failures: Family<OutcomeLabels, Counter>,
     pub denied: Counter,
     pub audit_failures: Counter,
+    pub gc_runs: Family<OutcomeLabels, Counter>,
+    pub gc_deleted_bytes: Counter,
     s3: Option<Arc<dyn Fn() -> pico2peta_backend_s3::S3StatsSnapshot + Send + Sync>>,
 }
 
@@ -68,8 +70,14 @@ impl Metrics {
         registry.register("authz_denied", "requests denied by policy", denied.clone());
         let audit_failures = Counter::default();
         registry.register("audit_write_failures", "failed audit log writes", audit_failures.clone());
+        let gc_runs = Family::<OutcomeLabels, Counter>::default();
+        registry.register("gc_runs", "GC invocations by outcome", gc_runs.clone());
+        let gc_deleted_bytes = Counter::default();
+        registry.register("gc_deleted_bytes", "bytes deleted by GC", gc_deleted_bytes.clone());
         Metrics {
             registry,
+            gc_runs,
+            gc_deleted_bytes,
             http_requests,
             http_duration,
             in_flight,

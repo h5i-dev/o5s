@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main, demo, net]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: clippy (-D warnings)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # S3 integration tests skip themselves here (no P2P_S3_ENDPOINT).
+      - run: cargo test --workspace --locked
+
+  docs:
+    name: rustdoc (-D warnings)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  minio:
+    name: S3 integration (MinIO)
+    runs-on: ubuntu-24.04
+    env:
+      MINIO_TAG: RELEASE.2025-09-07T16-13-09Z
+      MINIO_BIN: ${{ github.workspace }}/.minio/minio
+      MINIO_TEST_DIR: ${{ runner.temp }}/minio-test
+      SCRATCH: ${{ runner.temp }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache MinIO binary
+        id: minio-cache
+        uses: actions/cache@v4
+        with:
+          path: .minio/minio
+          key: minio-${{ env.MINIO_TAG }}-linux-amd64
+      - uses: actions/setup-go@v5
+        if: steps.minio-cache.outputs.cache-hit != 'true'
+        with:
+          go-version: stable
+          cache: false
+      - name: Build MinIO from source
+        if: steps.minio-cache.outputs.cache-hit != 'true'
+        run: mkdir -p .minio && scripts/build-minio.sh "$MINIO_BIN"
+      - name: Start MinIO
+        run: scripts/minio-test.sh start | sed 's/^export //' >> "$GITHUB_ENV"
+      - name: S3 backend + server integration tests
+        run: cargo test --locked -p pico2peta-backend-s3 -p pico2peta-server
+      - name: MinIO log on failure
+        if: failure()
+        run: cat "$MINIO_TEST_DIR/minio.log" || true
+      - name: Stop MinIO
+        if: always()
+        run: scripts/minio-test.sh stop
+
+  oci-conformance:
+    name: OCI distribution-spec conformance
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - run: cargo build --locked -p pico2peta-server
+      - run: scripts/oci-conformance.sh target/debug/pico2peta-server "$RUNNER_TEMP/oci-conformance"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oci-conformance-report
+          path: ${{ runner.temp }}/oci-conformance/server/report.html
+          if-no-files-found: ignore

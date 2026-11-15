@@ -53,6 +53,9 @@ impl TestServer {
             ],
             audit: AuditSection { path: dir.path().join("audit/audit.jsonl"), log_reads: true },
             log: Default::default(),
+            gc: Default::default(),
+            oci: Default::default(),
+            git: Default::default(),
         };
         tweak(&mut cfg);
         let state = pico2peta_server::build_state(&cfg).unwrap();

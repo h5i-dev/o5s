@@ -103,7 +103,7 @@ fn authentication() {
     let body: wire::ErrorBody = r.json().unwrap();
     assert_eq!(body.error.code, wire::codes::UNAUTHENTICATED);
     assert_eq!(s.client(ALICE).whoami().unwrap(), wire::WhoAmI { principal: "alice".into(), authenticated: true });
-    assert!(RemoteRepo::connect(&s.url(), Some("wrong".into())).is_err());
+    assert!(matches!(RemoteRepo::connect(&s.url(), Some("wrong".into())), Err(Error::Unauthorized(_))));
     // Ops endpoints need no credentials.
     assert_eq!(http().get(format!("{}/healthz", s.url())).send().unwrap().status(), 200);
     assert_eq!(http().get(format!("{}/readyz", s.url())).send().unwrap().status(), 200);
@@ -138,7 +138,7 @@ fn authorization_per_namespace() {
     admin.replace(&n("shared/c"), &[(n("shared/c"), Observed::Absent)], h).unwrap();
     admin.replace(&n("secret/d"), &[(n("secret/d"), Observed::Absent)], h).unwrap();
 
-    let denied = |r: pico2peta_core::Result<_>| matches!(r, Err(Error::Backend { transient: false, msg }) if msg.starts_with("permission denied"));
+    let denied = |r: pico2peta_core::Result<_>| matches!(r, Err(Error::Unauthorized(msg)) if msg.starts_with("permission denied"));
     // Readers cannot write anything, not even objects.
     assert!(denied(reader.put(b"y").map(|_| ())));
     assert!(denied(reader.replace(&n("shared/c"), &[(n("shared/c"), Observed::Version(1))], h).map(|_| ())));
@@ -187,6 +187,10 @@ fn audit_log_records_and_chains() {
     assert!(has("auth", "denied"));
     assert!(recs.iter().filter(|r| r.action == "replace").all(|r| r.principal == "alice" && r.target == "alice/a"));
     assert!(recs.iter().all(|r| r.request_id.len() == 32), "every record carries the request id");
+    assert!(
+        recs.iter().all(|r| r.remote.as_deref().is_some_and(|a| a.starts_with("127.0.0.1:"))),
+        "every record carries the client address"
+    );
 }
 
 #[test]
@@ -358,4 +362,65 @@ fn s3_backend_end_to_end() {
 
 fn fastrand_u64() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0)
+}
+
+#[test]
+fn admin_gc_endpoint() {
+    let mut s = TestServer::start(|_| {});
+    let admin = s.client(ADMIN);
+    let alice = s.client(ALICE);
+    let h = alice.put(b"live").unwrap();
+    alice.replace(&n("alice/live"), &[(n("alice/live"), Observed::Absent)], h).unwrap();
+    alice.put(b"garbage").unwrap();
+    alice.flush().unwrap();
+    assert!(matches!(alice.gc(false), Err(Error::Unauthorized(_))));
+    let dry = admin.gc(true).unwrap();
+    assert!(dry.dry_run);
+    let r = admin.gc(false).unwrap();
+    // First invocation only writes a plan; later phases need the grace period.
+    assert!(r.planned.is_some(), "{r:?}");
+    assert_eq!(r.deleted_packs, 0);
+    assert!(r.dangling_refs.is_empty());
+    assert_eq!(alice.get(&h, None).unwrap(), b"live");
+    let text = http().get(format!("{}/metrics", s.url())).send().unwrap().text().unwrap();
+    assert!(text.contains("p2p_gc_runs_total{outcome=\"ok\"} 2"), "{text}");
+    s.shutdown();
+    let audit = std::fs::read_to_string(s.audit_path()).unwrap();
+    assert!(audit.lines().any(|l| l.contains("\"action\":\"gc\"") && l.contains("\"principal\":\"admin\"")));
+    assert!(audit.lines().any(|l| l.contains("\"action\":\"gc\"") && l.contains("\"outcome\":\"denied\"")));
+}
+
+#[test]
+fn replace_many_is_atomic_over_http() {
+    let s = TestServer::start(|_| {});
+    let c = s.client(ALICE);
+    let h1 = c.put(b"one").unwrap();
+    let h2 = c.put(b"two").unwrap();
+    let (a, b) = (n("alice/a"), n("alice/b"));
+    let out = c
+        .replace_many(
+            &[(a.clone(), h1), (b.clone(), h2)],
+            &[(a.clone(), Observed::Absent), (b.clone(), Observed::Absent)],
+        )
+        .unwrap();
+    assert!(matches!(out, pico2peta_core::ReplaceManyOutcome::Ok { ref versions } if versions.len() == 2), "{out:?}");
+    // One stale entry: nothing changes.
+    let out = c
+        .replace_many(
+            &[(a.clone(), h2), (b.clone(), h1)],
+            &[(a.clone(), Observed::Version(1)), (b.clone(), Observed::Absent)],
+        )
+        .unwrap();
+    assert!(matches!(out, pico2peta_core::ReplaceManyOutcome::Conflict { .. }));
+    assert_eq!(c.resolve(&a).unwrap().unwrap().hash, h1);
+    assert_eq!(c.resolve(&b).unwrap().unwrap().hash, h2);
+    // Authz is per target.
+    assert!(matches!(
+        c.replace_many(
+            &[(a.clone(), h2), (n("shared/x"), h1)],
+            &[(a.clone(), Observed::Version(1)), (n("shared/x"), Observed::Absent)]
+        ),
+        Err(Error::Unauthorized(_))
+    ));
+    assert_eq!(c.resolve(&a).unwrap().unwrap().hash, h1);
 }

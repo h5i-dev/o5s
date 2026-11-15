@@ -1,0 +1,54 @@
+[Unit]
+Description=pico2peta server
+Documentation=file:///usr/share/doc/pico2peta/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=pico2peta
+Group=pico2peta
+ExecStartPre=/usr/local/bin/pico2peta-server check-config --config /etc/pico2peta/server.toml
+ExecStart=/usr/local/bin/pico2peta-server serve --config /etc/pico2peta/server.toml
+# Optional: AWS_ACCESS_KEY_ID=..., AWS_SECRET_ACCESS_KEY=..., RUST_LOG=...
+EnvironmentFile=-/etc/pico2peta/env
+# Graceful drain: must exceed server.shutdown_grace_secs.
+KillSignal=SIGTERM
+TimeoutStopSec=60
+Restart=on-failure
+RestartSec=2s
+LimitNOFILE=65536
+
+StateDirectory=pico2peta
+StateDirectoryMode=0750
+LogsDirectory=pico2peta
+LogsDirectoryMode=0750
+ConfigurationDirectory=pico2peta
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

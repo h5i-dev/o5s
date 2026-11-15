@@ -10,7 +10,10 @@ pub mod audit;
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod git;
 pub mod metrics;
+pub mod oci;
+pub mod segmap;
 
 use crate::api::AppState;
 use crate::config::{BackendSection, Config};
@@ -71,9 +74,32 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         info!(path = %path.display(), "initializing repository");
         drop(LocalRepo::init(path, &pico2peta_pack::PackConfig::default())?);
     }
-    let repo: Arc<dyn Repository> = match backend {
-        None => Arc::new(LocalRepo::open(path)?),
-        Some(b) => Arc::new(LocalRepo::open_with_backend(path, b)?),
+    let local = match backend {
+        None => LocalRepo::open(path)?,
+        Some(b) => LocalRepo::open_with_backend(path, b)?,
+    };
+    let repo: Arc<dyn Repository> = Arc::new(local.clone());
+    let oci = if cfg.oci.enabled {
+        let dir = cfg.oci.upload_dir.clone().unwrap_or_else(|| {
+            let parent = path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| path.clone());
+            parent.join(format!("{}.oci-uploads", path.file_name().and_then(|n| n.to_str()).unwrap_or("repo")))
+        });
+        let st = oci::OciState::new(repo.clone(), dir.clone(), cfg.oci.max_upload_sessions)
+            .map_err(|e| StartError::Audit(dir, e))?;
+        Some(Arc::new(st))
+    } else {
+        None
+    };
+    let git = if cfg.git.enabled {
+        let dir = cfg.git.spool_dir.clone().unwrap_or_else(|| {
+            let parent = path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| path.clone());
+            parent.join(format!("{}.git-spool", path.file_name().and_then(|n| n.to_str()).unwrap_or("repo")))
+        });
+        let st = git::GitState::new(repo.clone(), dir.clone(), cfg.server.max_upload_bytes)
+            .map_err(|e| StartError::Audit(dir, e))?;
+        Some(Arc::new(st))
+    } else {
+        None
     };
     let audit = audit::AuditLog::open(&cfg.audit.path).map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
     Ok(Arc::new(AppState {
@@ -86,6 +112,12 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         max_upload_bytes: cfg.server.max_upload_bytes,
         shutting_down: Arc::new(AtomicBool::new(false)),
         limiter: Arc::new(tokio::sync::Semaphore::new(cfg.server.max_concurrent_requests)),
+        trust_forwarded_for: cfg.server.trust_forwarded_for,
+        local: Some(local),
+        gc: cfg.gc.clone(),
+        gc_running: Arc::new(AtomicBool::new(false)),
+        oci,
+        git,
     }))
 }
 
@@ -106,10 +138,17 @@ pub fn app(state: Arc<AppState>, request_timeout: Duration) -> axum::Router {
     use tower_http::timeout::TimeoutLayer;
     use tower_http::trace::TraceLayer;
     let rid = HeaderName::from_static(pico2peta_client::wire::REQUEST_ID_HEADER);
-    let trace = TraceLayer::new_for_http().make_span_with(|req: &Request<axum::body::Body>| {
-        let id = req.headers().get("x-request-id").and_then(|v| v.to_str().ok()).unwrap_or("-");
-        tracing::info_span!("http", method = %req.method(), path = %req.uri().path(), request_id = %id)
-    });
+    let trace = TraceLayer::new_for_http()
+        .on_response(
+            tower_http::trace::DefaultOnResponse::new()
+                .level(tracing::Level::INFO)
+                .latency_unit(tower_http::LatencyUnit::Micros),
+        )
+        .on_failure(tower_http::trace::DefaultOnFailure::new().level(tracing::Level::WARN))
+        .make_span_with(|req: &Request<axum::body::Body>| {
+            let id = req.headers().get("x-request-id").and_then(|v| v.to_str().ok()).unwrap_or("-");
+            tracing::info_span!("http", method = %req.method(), path = %req.uri().path(), request_id = %id)
+        });
     api::router(state)
         .layer(TimeoutLayer::with_status_code(axum::http::StatusCode::REQUEST_TIMEOUT, request_timeout))
         .layer(CatchPanicLayer::new())
@@ -130,6 +169,15 @@ pub async fn serve(
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
     let app = app(state.clone(), request_timeout);
+    let gc_task = (state.gc.interval_secs > 0).then(|| tokio::spawn(gc_loop(state.clone())));
+    let reaper = state.oci.clone().map(|o| {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+                o.reap().await;
+            }
+        })
+    });
     let (stopping_tx, stopping_rx) = tokio::sync::oneshot::channel::<()>();
     let st = state.clone();
     let graceful = async move {
@@ -138,7 +186,8 @@ pub async fn serve(
         info!("shutdown requested; draining");
         let _ = stopping_tx.send(());
     };
-    let server = axum::serve(listener, app).with_graceful_shutdown(graceful);
+    let server = axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+        .with_graceful_shutdown(graceful);
     let server = server.into_future();
     tokio::pin!(server);
     tokio::select! {
@@ -146,6 +195,12 @@ pub async fn serve(
         _ = async { if stopping_rx.await.is_ok() { tokio::time::sleep(grace).await } else { std::future::pending::<()>().await } } => {
             warn!(?grace, "grace period expired; closing remaining connections");
         }
+    }
+    if let Some(t) = gc_task {
+        t.abort();
+    }
+    if let Some(t) = reaper {
+        t.abort();
     }
     let repo = state.repo.clone();
     match tokio::task::spawn_blocking(move || repo.flush()).await {
@@ -156,6 +211,43 @@ pub async fn serve(
     state.audit.shutdown().await;
     info!("stopped");
     Ok(())
+}
+
+/// Runs GC every `gc.interval_secs` (with jitter) until the server stops.
+async fn gc_loop(state: Arc<AppState>) {
+    let period = Duration::from_secs(state.gc.interval_secs);
+    loop {
+        let jitter = Duration::from_millis(fastrand::u64(0..=period.as_millis() as u64 / 10));
+        tokio::time::sleep(period + jitter).await;
+        if state.shutting_down.load(Ordering::Acquire) {
+            return;
+        }
+        match api::run_gc(&state, false).await {
+            Ok(r) => info!(
+                planned = ?r.planned,
+                swept = r.swept.len(),
+                condemned_packs = r.condemned_packs,
+                deleted_packs = r.deleted_packs,
+                deleted_bytes = r.deleted_bytes,
+                live = r.live_hashes,
+                dangling_refs = r.dangling_refs.len(),
+                "gc run"
+            ),
+            Err(e) => warn!(code = e.code, error = %e.message, "gc run failed"),
+        }
+        if !state.audit.is_healthy() {
+            return;
+        }
+        state.audit.record_nowait(audit::Event {
+            request_id: "-".into(),
+            principal: "system".into(),
+            action: "gc",
+            target: "repository".into(),
+            outcome: "scheduled".into(),
+            detail: None,
+            remote: None,
+        });
+    }
 }
 
 /// Resolves on SIGINT or SIGTERM.

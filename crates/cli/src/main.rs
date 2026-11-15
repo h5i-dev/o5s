@@ -18,7 +18,7 @@ struct Cli {
     /// Repository directory.
     #[arg(short = 'C', long, env = "PICO2PETA_REPO", default_value = ".")]
     repo: PathBuf,
-    /// Talk to a pico2peta server instead of a local repository (e.g. https://p2p.example.com).
+    /// Talk to a pico2peta server instead of a local repository (e.g. <https://p2p.example.com>).
     #[arg(long, env = "P2P_REMOTE")]
     remote: Option<String>,
     /// Bearer token for --remote.

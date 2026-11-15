@@ -62,11 +62,10 @@ impl From<Error> for ApiError {
             Error::InvalidRange { .. } => StatusCode::RANGE_NOT_SATISFIABLE,
             Error::InvalidName(..) | Error::Parse(_) | Error::TargetNotInReadSet(_) => StatusCode::BAD_REQUEST,
             Error::MissingObject(_) => StatusCode::UNPROCESSABLE_ENTITY,
-            Error::Forbidden { .. } => StatusCode::FORBIDDEN,
+            Error::Forbidden { .. } | Error::Unauthorized(_) => StatusCode::FORBIDDEN,
             Error::RuleChangeOnNonEmpty(_) => StatusCode::CONFLICT,
             Error::Unsupported(_) => StatusCode::NOT_IMPLEMENTED,
             Error::Locked => StatusCode::SERVICE_UNAVAILABLE,
-            Error::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             Error::Backend { transient: true, .. } => StatusCode::SERVICE_UNAVAILABLE,
             Error::Backend { .. } | Error::Corrupt(_) | Error::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };

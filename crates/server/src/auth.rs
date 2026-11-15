@@ -1,7 +1,8 @@
 //! Authentication (who is calling) and authorization (what they may do).
 //!
-//! * [`Authenticator`] is pluggable. [`TokenAuthenticator`] checks static bearer
-//!   tokens stored as SHA-256 hashes. An OIDC/JWT authenticator can implement
+//! * [`Authenticator`] is pluggable. [`TokenAuthenticator`] checks static
+//!   tokens stored as SHA-256 hashes, sent as `Bearer <token>` or as the
+//!   password of HTTP Basic auth (for `docker login` and other OCI clients). An OIDC/JWT authenticator can implement
 //!   the same trait later.
 //! * [`Authorizer`] evaluates per-namespace policies. Access levels are ordered
 //!   `read < write < admin`, and a grant on namespace `p` covers every name
@@ -87,11 +88,20 @@ impl TokenAuthenticator {
             return if self.allow_anonymous { Ok(Principal::anonymous()) } else { Err(AuthError::Missing) };
         };
         let v = v.to_str().map_err(|_| AuthError::Malformed)?;
-        let (scheme, tok) = v.split_once(' ').ok_or(AuthError::Malformed)?;
-        if !scheme.eq_ignore_ascii_case("bearer") {
+        let (scheme, rest) = v.split_once(' ').ok_or(AuthError::Malformed)?;
+        let decoded;
+        let tok = if scheme.eq_ignore_ascii_case("bearer") {
+            rest.trim()
+        } else if scheme.eq_ignore_ascii_case("basic") {
+            // `docker login` / oras: any username, the token as password.
+            use base64::Engine as _;
+            let raw =
+                base64::engine::general_purpose::STANDARD.decode(rest.trim()).map_err(|_| AuthError::Malformed)?;
+            decoded = String::from_utf8(raw).map_err(|_| AuthError::Malformed)?;
+            decoded.split_once(':').ok_or(AuthError::Malformed)?.1
+        } else {
             return Err(AuthError::Malformed);
-        }
-        let tok = tok.trim();
+        };
         if tok.is_empty() {
             return Err(AuthError::Malformed);
         }
@@ -160,7 +170,12 @@ mod tests {
         assert_eq!(a.check(&hdr("Bearer s3cret")).unwrap().name, "ci");
         assert_eq!(a.check(&hdr("bearer  s3cret ")).unwrap().name, "ci");
         assert_eq!(a.check(&hdr("Bearer nope")), Err(AuthError::Invalid));
-        assert_eq!(a.check(&hdr("Basic xyz")), Err(AuthError::Malformed));
+        assert_eq!(a.check(&hdr("Basic xyz!")), Err(AuthError::Malformed));
+        // base64("anyone:s3cret")
+        assert_eq!(a.check(&hdr("Basic YW55b25lOnMzY3JldA==")).unwrap().name, "ci");
+        // base64("anyone:wrong")
+        assert_eq!(a.check(&hdr("Basic YW55b25lOndyb25n")), Err(AuthError::Invalid));
+        assert_eq!(a.check(&hdr("Digest abc")), Err(AuthError::Malformed));
         assert_eq!(a.check(&hdr("Bearer")), Err(AuthError::Malformed));
         assert_eq!(a.check(&HeaderMap::new()), Err(AuthError::Missing));
         let anon = TokenAuthenticator::new(&[], true);

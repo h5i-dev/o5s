@@ -9,14 +9,20 @@
 //! | `GET` | `/v1/refs/{name}` | [`RefJson`] or 404 |
 //! | `GET` | `/v1/refs?prefix=p` | [`RefList`] (only names the caller may read) |
 //! | `POST` | `/v1/replace` | [`ReplaceRequest`] → 200/409 [`ReplaceResponse`] |
+//! | `POST` | `/v1/replace_many` | [`ReplaceManyRequest`] → 200/409 [`ReplaceManyResponse`] (atomic) |
 //! | `GET` | `/v1/namespaces` | [`RuleList`] |
 //! | `PUT` | `/v1/namespaces/{prefix}` | [`SetRuleRequest`] (admin) |
 //! | `GET` | `/v1/whoami` | [`WhoAmI`] |
+//! | `POST` | `/v1/admin/gc?dry_run=bool` | [`GcReportJson`] (admin on `""`); 409 if a GC is running |
+//!
+//! **Operation lease:** GC reclaims objects that no ref reaches once the GC grace
+//! period (default 1 h) has passed. A client must `replace` a ref to point at a
+//! newly put object within that period, or put it again.
 //!
 //! Errors are `4xx/5xx` with an [`ErrorBody`]; `error.code` is
 //! `pico2peta_core::Error::code()` or one of the HTTP-only codes in [`codes`].
 
-use pico2peta_core::{Error, Hash, Name, Observed, RefValue, ReplaceOutcome, Rule};
+use pico2peta_core::{Error, Hash, Name, Observed, RefValue, ReplaceManyOutcome, ReplaceOutcome, Rule};
 use serde::{Deserialize, Serialize};
 
 /// API version prefix.
@@ -37,6 +43,7 @@ pub mod codes {
     pub const SHUTTING_DOWN: &str = "shutting_down";
     pub const OVERLOADED: &str = "overloaded";
     pub const INTERNAL: &str = "internal";
+    pub const GC_RUNNING: &str = "gc_running";
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +86,66 @@ pub enum ReplaceResponse {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateJson {
+    pub name: String,
+    pub new: String,
+}
+
+/// Atomic multi-name update: every update target must be in `read_set`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReplaceManyRequest {
+    pub updates: Vec<UpdateJson>,
+    pub read_set: Vec<ReadSetEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum ReplaceManyResponse {
+    Ok { versions: Vec<u64> },
+    Conflict { stale: Vec<ReadSetEntry> },
+}
+
+/// `(updates, read_set)` of a parsed [`ReplaceManyRequest`].
+pub type ParsedReplaceMany = (Vec<(Name, Hash)>, Vec<(Name, Observed)>);
+
+impl ReplaceManyRequest {
+    pub fn from_core(updates: &[(Name, Hash)], read_set: &[(Name, Observed)]) -> Self {
+        ReplaceManyRequest {
+            updates: updates.iter().map(|(n, h)| UpdateJson { name: n.to_string(), new: h.to_hex() }).collect(),
+            read_set: read_set.iter().map(|(n, o)| ReadSetEntry::from_core(n, *o)).collect(),
+        }
+    }
+    pub fn to_core(&self) -> Result<ParsedReplaceMany, Error> {
+        let u = self
+            .updates
+            .iter()
+            .map(|u| Ok((Name::new(&u.name)?, u.new.parse()?)))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let rs = self.read_set.iter().map(ReadSetEntry::to_core).collect::<Result<Vec<_>, _>>()?;
+        Ok((u, rs))
+    }
+}
+
+impl ReplaceManyResponse {
+    pub fn from_core(o: &ReplaceManyOutcome) -> Self {
+        match o {
+            ReplaceManyOutcome::Ok { versions } => ReplaceManyResponse::Ok { versions: versions.clone() },
+            ReplaceManyOutcome::Conflict { stale } => ReplaceManyResponse::Conflict {
+                stale: stale.iter().map(|(n, o)| ReadSetEntry::from_core(n, *o)).collect(),
+            },
+        }
+    }
+    pub fn to_core(&self) -> Result<ReplaceManyOutcome, Error> {
+        Ok(match self {
+            ReplaceManyResponse::Ok { versions } => ReplaceManyOutcome::Ok { versions: versions.clone() },
+            ReplaceManyResponse::Conflict { stale } => ReplaceManyOutcome::Conflict {
+                stale: stale.iter().map(ReadSetEntry::to_core).collect::<Result<Vec<_>, _>>()?,
+            },
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuleJson {
     pub prefix: String,
     pub rule: String,
@@ -98,6 +165,21 @@ pub struct SetRuleRequest {
 pub struct WhoAmI {
     pub principal: String,
     pub authenticated: bool,
+}
+
+/// Result of one GC invocation (see `pico2peta_repo::GcReport`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GcReportJson {
+    pub dry_run: bool,
+    pub planned: Option<String>,
+    pub swept: Vec<String>,
+    pub condemned_packs: usize,
+    pub copied_records: usize,
+    pub rescued_records: usize,
+    pub deleted_packs: usize,
+    pub deleted_bytes: u64,
+    pub live_hashes: usize,
+    pub dangling_refs: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
