@@ -341,22 +341,23 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 }
                 ProvCmd::Why { hash } => {
                     let p = pico2peta_prov::Provenance::load(r, &log)?;
-                    for (rh, rec) in p.producers(&hash) {
+                    let producers = p.producers(&hash)?;
+                    for (rh, rec) in &producers {
                         writeln!(out, "record {rh} op={}", rec.op)?;
                         for (role, h) in &rec.inputs {
                             writeln!(out, "  in  {role:<12} {h}")?;
                         }
                     }
-                    for h in p.lineage(&hash) {
+                    for h in p.lineage(&hash)? {
                         writeln!(out, "lineage {h}")?;
                     }
-                    if p.producers(&hash).is_empty() {
+                    if producers.is_empty() {
                         return Ok(Outcome::Absent);
                     }
                 }
                 ProvCmd::Impact { hash } => {
                     let p = pico2peta_prov::Provenance::load(r, &log)?;
-                    for h in p.impact(&hash) {
+                    for h in p.impact(&hash)? {
                         writeln!(out, "{h}")?;
                     }
                 }
