@@ -148,9 +148,18 @@ pub struct PackStats {
     pub logical_blob_bytes: u64,
 }
 
+/// A large sealed pack whose index is memory-mapped instead of loaded.
+struct BigPack {
+    pid: u32,
+    view: IdxV3View<memmap2::Mmap>,
+}
+
 #[derive(Default)]
 struct Index {
+    /// Locations from small sealed packs and from this handle's open pack.
     map: HashMap<Hash, Loc>,
+    /// Large sealed packs, searched through their mapped v3 indexes.
+    big: Vec<BigPack>,
     /// Sealed pack names (hex), indexed by `PackRef::Sealed`.
     sealed: Vec<String>,
     known: HashSet<String>,
@@ -159,6 +168,41 @@ struct Index {
     /// Parsed `gc/*.condemned` records, by key.
     condemned_records: HashMap<String, Vec<String>>,
     last_refresh: Option<std::time::Instant>,
+}
+
+fn loc_of(pid: u32, e: &IdxEntry) -> Loc {
+    Loc {
+        pack: PackRef::Sealed(pid),
+        offset: e.offset,
+        stored_len: e.stored_len,
+        raw_len: e.raw_len,
+        kind: e.kind,
+        frame: e.frame,
+    }
+}
+
+impl Index {
+    /// The best location of `hash` (see [`rank`]) across the map and the
+    /// mapped large-pack indexes.
+    fn get(&self, hash: &Hash) -> Option<Loc> {
+        let mut best = self.map.get(hash).copied();
+        if best.as_ref().is_some_and(|l| rank(self, l) == 0) {
+            return best;
+        }
+        for b in &self.big {
+            if let Ok(Some(e)) = b.view.find(hash) {
+                let l = loc_of(b.pid, &e);
+                let better = best.as_ref().is_none_or(|old| rank(self, &l) < rank(self, old));
+                if better {
+                    best = Some(l);
+                    if rank(self, &l) == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+        best
+    }
 }
 
 /// Location preference: live sealed < own open pack < condemned sealed.
@@ -171,8 +215,8 @@ fn rank(idx: &Index, l: &Loc) -> u8 {
 }
 
 fn insert_loc(idx: &mut Index, hash: Hash, loc: Loc) {
-    let better = match idx.map.get(&hash) {
-        Some(old) => rank(idx, &loc) < rank(idx, old),
+    let better = match idx.get(&hash) {
+        Some(old) => rank(idx, &loc) < rank(idx, &old),
         None => true,
     };
     if better {
@@ -205,6 +249,8 @@ struct Inner {
     writer: Mutex<Option<OpenPack>>,
     generation: AtomicU64,
     dedup_refresh_ms: AtomicU64,
+    /// See [`PackStore::set_mmap_index_threshold`].
+    mmap_index_bytes: AtomicU64,
     /// Recently decompressed frames: `((frame hash, record offset), bodies)`.
     frame_cache: Mutex<Vec<FrameCacheEntry>>,
     /// Recently used manifest nodes (immutable, so they can be cached freely).
@@ -299,6 +345,10 @@ impl PackStore {
                 writer: Mutex::new(None),
                 generation: AtomicU64::new(1),
                 dedup_refresh_ms: AtomicU64::new(DEDUP_REFRESH_INTERVAL.as_millis() as u64),
+                // P2P_MMAP_INDEX_BYTES overrides the default (tests use 0 to map every index).
+                mmap_index_bytes: AtomicU64::new(
+                    std::env::var("P2P_MMAP_INDEX_BYTES").ok().and_then(|v| v.parse().ok()).unwrap_or(4 << 20),
+                ),
                 frame_cache: Mutex::new(Vec::new()),
                 manifest_cache: Mutex::new(Vec::new()),
             }),
@@ -373,13 +423,30 @@ impl PackStore {
             live_idx.iter().filter(|n| !idx.known.contains(*n)).cloned().collect()
         };
         let mut loaded = Vec::new();
+        let mut big_loaded = Vec::new();
+        let threshold = self.inner.mmap_index_bytes.load(Ordering::Relaxed);
         for name in to_load {
+            let key = format!("packs/{name}.idx");
+            let size = match self.inner.backend.head(&key)? {
+                Some(m) => m.len,
+                None => continue, // deleted by GC between list and read
+            };
+            if size >= threshold {
+                match self.map_index(&name, &key) {
+                    Ok(view) => {
+                        big_loaded.push((name, view));
+                        continue;
+                    }
+                    Err(Error::KeyNotFound(_)) => continue,
+                    Err(e) => return Err(e),
+                }
+            }
             let mut buf = Vec::new();
-            match self.inner.backend.open(&format!("packs/{name}.idx")) {
+            match self.inner.backend.open(&key) {
                 Ok(mut r) => {
                     r.read_to_end(&mut buf)?;
                 }
-                Err(Error::KeyNotFound(_)) => continue, // deleted by GC between list and read
+                Err(Error::KeyNotFound(_)) => continue,
                 Err(e) => return Err(e),
             }
             loaded.push((name, decode_index(&buf)?));
@@ -392,6 +459,16 @@ impl PackStore {
             // readers stays valid: positions are never reused or reordered.
             let sealed = std::mem::take(&mut idx.sealed);
             *idx = Index { condemned, condemned_records: records, sealed, ..Index::default() };
+            // Drop cached indexes of packs that no longer exist (deleted by GC).
+            let live: HashSet<String> = live_idx.iter().map(|n| format!("{n}.idx3")).collect();
+            if let Ok(rd) = fs::read_dir(self.inner.staging_dir.with_file_name("idx-cache")) {
+                for ent in rd.flatten() {
+                    let fname = ent.file_name().to_string_lossy().to_string();
+                    if fname.ends_with(".idx3") && !live.contains(&fname) {
+                        let _ = fs::remove_file(ent.path());
+                    }
+                }
+            }
             for (h, l) in open {
                 idx.map.insert(h, l);
             }
@@ -399,6 +476,20 @@ impl PackStore {
             idx.condemned_records = records;
         }
         let mut n = 0;
+        for (name, view) in big_loaded {
+            if !idx.known.insert(name.clone()) {
+                continue;
+            }
+            n += 1;
+            let pid = match idx.sealed.iter().position(|x| *x == name) {
+                Some(p) => p as u32,
+                None => {
+                    idx.sealed.push(name);
+                    (idx.sealed.len() - 1) as u32
+                }
+            };
+            idx.big.push(BigPack { pid, view });
+        }
         for (name, entries) in loaded {
             if !idx.known.insert(name.clone()) {
                 continue;
@@ -427,6 +518,55 @@ impl PackStore {
         Ok(n)
     }
 
+    /// Fetches a (large) pack index into the local index cache, verifying it
+    /// on the way, and memory-maps it. Non-v3 indexes are converted to v3.
+    fn map_index(&self, name: &str, key: &str) -> Result<IdxV3View<memmap2::Mmap>> {
+        let dir = self.inner.staging_dir.with_file_name("idx-cache");
+        fs::create_dir_all(&dir)?;
+        let path = dir.join(format!("{name}.idx3"));
+        if !path.exists() {
+            let tmp = dir.join(format!(".{name}.{}.tmp", unique_id()));
+            {
+                let mut src = self.inner.backend.open(key)?;
+                let mut head = [0u8; 8];
+                src.read_exact(&mut head)?;
+                let mut f = File::create(&tmp)?;
+                if &head == IDX_MAGIC_V3 {
+                    f.write_all(&head)?;
+                    std::io::copy(&mut src, &mut f)?;
+                } else {
+                    // Old format: decode in memory once, rewrite as v3.
+                    let mut buf = head.to_vec();
+                    src.read_to_end(&mut buf)?;
+                    let mut entries = decode_index(&buf)?;
+                    f.write_all(&encode_index(&mut entries))?;
+                }
+                f.sync_all()?;
+            }
+            fs::rename(&tmp, &path)?;
+            fsync_dir(&dir)?;
+        }
+        let f = File::open(&path)?;
+        // SAFETY: cache files are written once (temp file + rename) and never
+        // modified or truncated while mapped. A file damaged by external means
+        // fails the checksum in `IdxV3View::new`.
+        let map = unsafe { memmap2::Mmap::map(&f)? };
+        match IdxV3View::new(map) {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                // A corrupt cache entry: drop it so the next refresh refetches.
+                let _ = fs::remove_file(&path);
+                Err(e)
+            }
+        }
+    }
+
+    /// Indexes at least this large (bytes) are memory-mapped rather than
+    /// loaded into the heap (default 4 MiB, about 95k entries). Mainly for tests.
+    pub fn set_mmap_index_threshold(&self, bytes: u64) {
+        self.inner.mmap_index_bytes.store(bytes, Ordering::Relaxed);
+    }
+
     /// Lookup for write-side deduplication: refreshes if the local view is
     /// older than [`DEDUP_REFRESH_INTERVAL`], and ignores copies that live
     /// only in condemned packs (those are about to be deleted).
@@ -440,7 +580,7 @@ impl PackStore {
             self.refresh()?;
         }
         let idx = self.inner.index.read().map_err(poisoned)?;
-        Ok(idx.map.get(hash).is_some_and(|l| rank(&idx, l) < 2))
+        Ok(idx.get(hash).is_some_and(|l| rank(&idx, &l) < 2))
     }
 
     /// Seals every staging file whose owner is gone.
@@ -658,7 +798,7 @@ impl PackStore {
     }
 
     fn lookup_local(&self, hash: &Hash) -> Result<Option<Loc>> {
-        Ok(self.inner.index.read().map_err(poisoned)?.map.get(hash).copied())
+        Ok(self.inner.index.read().map_err(poisoned)?.get(hash))
     }
 
     /// Looks `hash` up, re-listing the backend once on a miss.
@@ -916,16 +1056,27 @@ impl PackStore {
             open_bytes: w.as_ref().map(|o| o.len).unwrap_or(0),
             ..Default::default()
         };
+        let mut count = |kind: Kind, raw: u64| match kind {
+            Kind::Frame | Kind::Frame2 => {}
+            Kind::Blob => {
+                s.blobs += 1;
+                s.logical_blob_bytes += raw;
+            }
+            Kind::Manifest => s.manifests += 1,
+        };
         for l in idx.map.values() {
-            match l.kind {
-                Kind::Frame | Kind::Frame2 => {}
-                Kind::Blob => {
-                    s.blobs += 1;
-                    s.logical_blob_bytes += l.raw_len;
-                }
-                Kind::Manifest => s.manifests += 1,
+            count(l.kind, l.raw_len);
+        }
+        // Mapped packs: counted per entry (an object present in several packs counts more than once).
+        let mut big_entries = 0;
+        for b in &idx.big {
+            for i in 0..b.view.len() {
+                let e = b.view.entry(i)?;
+                count(e.kind, e.raw_len);
+                big_entries += 1;
             }
         }
+        s.objects += big_entries;
         Ok(s)
     }
 
@@ -1098,7 +1249,7 @@ impl PackStore {
         }
         let condemned_only = {
             let idx = self.inner.index.read().map_err(poisoned)?;
-            idx.map.get(hash).is_some_and(|l| rank(&idx, l) == 2)
+            idx.get(hash).is_some_and(|l| rank(&idx, &l) == 2)
         };
         if condemned_only {
             self.copy_record(hash)?;
@@ -1110,7 +1261,7 @@ impl PackStore {
     /// comes from this handle's open pack, or isn't present).
     pub fn serving_pack(&self, hash: &Hash) -> Result<Option<String>> {
         let idx = self.inner.index.read().map_err(poisoned)?;
-        Ok(idx.map.get(hash).and_then(|l| match l.pack {
+        Ok(idx.get(hash).and_then(|l| match l.pack {
             PackRef::Sealed(pid) => idx.sealed.get(pid as usize).cloned(),
             PackRef::Open(_) => None,
         }))
@@ -1118,8 +1269,15 @@ impl PackStore {
 
     /// Every hash addressable through `get` (objects and chunks), sorted.
     pub fn hashes(&self) -> Result<Vec<Hash>> {
-        let mut v: Vec<Hash> = self.inner.index.read().map_err(poisoned)?.map.keys().copied().collect();
+        let idx = self.inner.index.read().map_err(poisoned)?;
+        let mut v: Vec<Hash> = idx.map.keys().copied().collect();
+        for b in &idx.big {
+            for i in 0..b.view.len() {
+                v.push(b.view.entry(i)?.hash);
+            }
+        }
         v.sort();
+        v.dedup();
         Ok(v)
     }
 

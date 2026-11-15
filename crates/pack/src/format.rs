@@ -430,6 +430,107 @@ pub fn encode_index(entries: &mut [IdxEntry]) -> Vec<u8> {
     v
 }
 
+/// Zero-copy view over a v3 index (for example, a memory-mapped file). Lookups
+/// binary-search the sorted entry table, so memory use is the OS page cache, not
+/// the process heap.
+pub struct IdxV3View<T: AsRef<[u8]>> {
+    data: T,
+    nr: usize,
+    ne: usize,
+}
+
+impl<T: AsRef<[u8]>> IdxV3View<T> {
+    /// Validates the header, sizes and BLAKE3 trailer of a v3 index.
+    pub fn new(data: T) -> Result<Self> {
+        let b = data.as_ref();
+        if b.len() < 24 + 32 || &b[..8] != IDX_MAGIC_V3 {
+            return Err(Error::Corrupt("not a v3 index".into()));
+        }
+        let (body, sum) = b.split_at(b.len() - 32);
+        if blake3::hash(body).as_bytes() != sum {
+            return Err(Error::Corrupt("index checksum mismatch".into()));
+        }
+        let (nr, ne) = (rd_u64(&body[8..16]), rd_u64(&body[16..24]));
+        let size = usize::try_from(nr)
+            .ok()
+            .and_then(|r| r.checked_mul(IDX3_REC))
+            .zip(usize::try_from(ne).ok().and_then(|e| e.checked_mul(IDX3_ENT)))
+            .and_then(|(a, b)| a.checked_add(b))
+            .and_then(|x| x.checked_add(24));
+        if size != Some(body.len()) {
+            return Err(Error::Corrupt("index length mismatch".into()));
+        }
+        Ok(IdxV3View { nr: nr as usize, ne: ne as usize, data })
+    }
+
+    /// Number of entries.
+    pub fn len(&self) -> usize {
+        self.ne
+    }
+
+    /// True if there are no entries.
+    pub fn is_empty(&self) -> bool {
+        self.ne == 0
+    }
+
+    fn entry_hash(&self, i: usize) -> &[u8] {
+        let base = 24 + self.nr * IDX3_REC + i * IDX3_ENT;
+        &self.data.as_ref()[base..base + 32]
+    }
+
+    /// Decodes entry `i` (`i < len()`).
+    pub fn entry(&self, i: usize) -> Result<IdxEntry> {
+        let body = self.data.as_ref();
+        decode_v3_entry(
+            &body[24..24 + self.nr * IDX3_REC],
+            &body[24 + self.nr * IDX3_REC + i * IDX3_ENT..][..IDX3_ENT],
+            self.nr,
+        )
+    }
+
+    /// Binary search by hash.
+    pub fn find(&self, h: &Hash) -> Result<Option<IdxEntry>> {
+        let (mut lo, mut hi) = (0usize, self.ne);
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            match self.entry_hash(mid).cmp(h.as_bytes().as_slice()) {
+                std::cmp::Ordering::Less => lo = mid + 1,
+                std::cmp::Ordering::Greater => hi = mid,
+                std::cmp::Ordering::Equal => return self.entry(mid).map(Some),
+            }
+        }
+        Ok(None)
+    }
+}
+
+fn decode_v3_entry(recs: &[u8], e: &[u8], nr: usize) -> Result<IdxEntry> {
+    let id = rd_u32(&e[32..36]) as usize;
+    if id >= nr {
+        return Err(Error::Corrupt("index entry references a missing record".into()));
+    }
+    let r = &recs[id * IDX3_REC..(id + 1) * IDX3_REC];
+    let (offset, stored_len, raw) = (rd_u64(&r[0..8]), rd_u32(&r[8..12]), rd_u64(&r[12..20]));
+    let kind = Kind::from_u8(r[20])?;
+    let codec = Codec::from_u8(r[21])?;
+    let (inner, len) = (rd_u32(&e[36..40]), rd_u32(&e[40..44]));
+    if kind.is_frame() {
+        if raw > MAX_FRAME || inner as u64 + len as u64 > raw {
+            return Err(Error::Corrupt("frame member out of bounds in index".into()));
+        }
+        Ok(IdxEntry {
+            hash: rd_hash(&e[0..32]),
+            offset,
+            stored_len,
+            raw_len: len as u64,
+            kind: Kind::Blob,
+            codec,
+            frame: Some((inner, raw as u32)),
+        })
+    } else {
+        Ok(IdxEntry { hash: rd_hash(&e[0..32]), offset, stored_len, raw_len: raw, kind, codec, frame: None })
+    }
+}
+
 fn decode_index_v3(body: &[u8]) -> Result<Vec<IdxEntry>> {
     if body.len() < 24 {
         return Err(Error::Corrupt("short v3 index".into()));
@@ -447,37 +548,8 @@ fn decode_index_v3(body: &[u8]) -> Result<Vec<IdxEntry>> {
     }
     let (nr, ne) = (nr as usize, ne as usize);
     let recs = &body[24..24 + nr * IDX3_REC];
-    let mut out = Vec::with_capacity(ne);
-    for i in 0..ne {
-        let e = &body[24 + nr * IDX3_REC + i * IDX3_ENT..24 + nr * IDX3_REC + (i + 1) * IDX3_ENT];
-        let id = rd_u32(&e[32..36]) as usize;
-        if id >= nr {
-            return Err(Error::Corrupt("index entry references a missing record".into()));
-        }
-        let r = &recs[id * IDX3_REC..(id + 1) * IDX3_REC];
-        let (offset, stored_len, raw) = (rd_u64(&r[0..8]), rd_u32(&r[8..12]), rd_u64(&r[12..20]));
-        let kind = Kind::from_u8(r[20])?;
-        let codec = Codec::from_u8(r[21])?;
-        let (inner, len) = (rd_u32(&e[36..40]), rd_u32(&e[40..44]));
-        let entry = if kind.is_frame() {
-            if raw > MAX_FRAME || inner as u64 + len as u64 > raw {
-                return Err(Error::Corrupt("frame member out of bounds in index".into()));
-            }
-            IdxEntry {
-                hash: rd_hash(&e[0..32]),
-                offset,
-                stored_len,
-                raw_len: len as u64,
-                kind: Kind::Blob,
-                codec,
-                frame: Some((inner, raw as u32)),
-            }
-        } else {
-            IdxEntry { hash: rd_hash(&e[0..32]), offset, stored_len, raw_len: raw, kind, codec, frame: None }
-        };
-        out.push(entry);
-    }
-    Ok(out)
+    let ents = &body[24 + nr * IDX3_REC..];
+    (0..ne).map(|i| decode_v3_entry(recs, &ents[i * IDX3_ENT..(i + 1) * IDX3_ENT], nr)).collect()
 }
 
 /// Decodes and verifies an index (format v1, v2 or v3).
