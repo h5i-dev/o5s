@@ -15,8 +15,10 @@
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod fsck;
 pub mod gc;
 
+pub use fsck::FsckReport;
 pub use gc::{GcOptions, GcReport, GroupKey, Grouper, OpaqueObjects, Tracer};
 use pico2peta_core::backend::{Backend, LocalDisk};
 use pico2peta_core::{Error, Hash, Name, ObjectStore, Observed, RefValue, ReplaceOutcome, Repository, Result, Rule};

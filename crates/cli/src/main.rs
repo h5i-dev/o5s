@@ -101,6 +101,8 @@ enum Cmd {
     Flush,
     /// Repository statistics.
     Stat,
+    /// Verify every stored object (CRC + content hash) and every ref. Exit 1 on problems.
+    Fsck,
     /// Provenance: record derivations, query lineage and impact.
     Prov {
         #[command(subcommand)]
@@ -385,6 +387,20 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             for d in &rep.dangling_refs {
                 writeln!(out, "DANGLING REF   {d}")?;
             }
+        }
+        Cmd::Fsck => {
+            let repo = local_only("fsck is only available for local repositories (run it on the server host)")?;
+            let rep = repo.fsck()?;
+            writeln!(out, "objects   {} ({} bytes verified)", rep.objects_checked, rep.bytes_checked)?;
+            writeln!(out, "refs      {}", rep.refs_checked)?;
+            for e in &rep.errors {
+                writeln!(out, "ERROR     {e}")?;
+            }
+            if !rep.ok() {
+                out.flush()?;
+                return Err(Error::Corrupt(format!("fsck found {} problem(s)", rep.errors.len())));
+            }
+            writeln!(out, "ok")?;
         }
         Cmd::Stat => {
             let repo = local_only("stat is only available for local repositories (run it on the server host)")?;
