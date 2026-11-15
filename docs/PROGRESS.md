@@ -44,7 +44,7 @@
 
 ## Production gaps
 - **Index in memory.** Every handle loads all `.idx` files into a HashMap, about 100 B/object, which is fine up to ~10^7–10^8 objects. Billions need a fan-out/on-disk index or a PostgreSQL index (an open question in the brief).
-- **GC assumes an operation lease.** A `put` → `replace` must finish within the grace period (default 1 h). There's no enforcement yet; an epoch/lease token on `replace` would make it checkable.
+- **GC timing assumption (narrowed).** Since `replace` calls `ensure_live`, a slow put→replace is safe: the object is rewritten if condemned, or the replace fails with `MissingObject` if it's gone. What's left to assume is that ensure_live→commit (milliseconds) plus the 60 s dedup refresh interval are far shorter than the grace period (≥ 10 min, enforced). Adapters must `ensure_live` indirectly referenced children (Git and OCI do).
 - **GC tracer.** GC treats objects as opaque, so only ref targets and their chunks are roots. Structured objects (directories, snapshots) need a `Tracer` once those formats exist.
 - **Provenance index scale.** `Provenance::load` walks the whole log, O(records). Large deployments need persisted forward and backward index segments.
 - **Ref store scale.** All refs live in memory (~150 B each), and compaction rewrites a full snapshot. That's fine to ~10^6 names, strained at 10^7. Scaling needs a sharded journal per prefix, or an LSM. Net was advised to keep per-blob OCI links in segment maps, not refs.

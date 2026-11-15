@@ -254,3 +254,28 @@ fn grouped_repack_shrinks_versioned_history() {
         assert_eq!(&fresh.get(h, None).unwrap(), data);
     }
 }
+
+/// A slow writer: puts (dedup-hits an object that is about to be condemned),
+/// then replaces only after the condemned pack was deleted. The replace must
+/// fail cleanly (MissingObject), never leave a dangling ref.
+#[test]
+fn slow_writer_after_delete_fails_cleanly() {
+    let d = tempfile::tempdir().unwrap();
+    let r = LocalRepo::init(d.path(), &PackConfig::tiny()).unwrap();
+    let x = r.put(b"soon to be collected").unwrap();
+    set(&r, "anchor", r.put(b"anchor").unwrap());
+    r.flush().unwrap();
+    // The slow writer has x in its index from before the GC cycle.
+    let w = LocalRepo::open(d.path()).unwrap();
+    assert!(w.contains(&x).unwrap());
+    for _ in 0..3 {
+        r.gc(&opts(), &OpaqueObjects).unwrap();
+    }
+    assert!(!LocalRepo::open(d.path()).unwrap().contains(&x).unwrap(), "x was collected");
+    // Force the stale handle to re-list (its refresh interval has not elapsed).
+    w.packs().set_dedup_refresh_interval(Duration::ZERO);
+    let n = Name::new("late").unwrap();
+    let res = w.replace(&n, &[(n.clone(), pico2peta_core::Observed::Absent)], x);
+    assert!(matches!(res, Err(pico2peta_core::Error::MissingObject(_))), "{res:?}");
+    assert_eq!(w.resolve(&n).unwrap(), None);
+}
