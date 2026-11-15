@@ -32,17 +32,19 @@ The goal is a production-grade storage system that teams can run for real data, 
 - No shortcuts that would need a rewrite to productionize. If you must defer something, record it in `docs/PROGRESS.md` under "Production gaps" with what is missing.
 - Branch name `demo` is historical; treat the code as the real product.
 
-## Team (two Claude sessions)
-- **You (session `pico2peta`, worktree `/home/ec2-user/Dev/pico2peta`, branch `demo`) = implementation lead.** You own everything except the paths below.
-- **Session `pico2peta-verify` (worktree `/home/ec2-user/Dev/pico2peta-verify`, branch `verify`) = verification & hardening.** It owns `lean/`, `crates/model/`, `crates/difftest/`, `fuzz/`, and fault-injection / crash-consistency test suites under `tests/`. It also reviews your commits and files findings in `docs/REVIEW.md` on its branch.
-- Protocol: at the end of every milestone (and at least every ~2 hours), run `git merge verify` into `demo`, address every open item in `docs/REVIEW.md` (fix, or reply inline why not), and commit. Do not edit the verify-owned paths except to resolve merge conflicts; ask for changes via a "Requests for verify" section in `docs/PROGRESS.md`. Keep public trait/API changes noted in `docs/PROGRESS.md` so the verifier can track them.
-- M5 (reference model + differential tests) and M7 (Lean) are now owned by the verifier — drop them from your plan, but keep the code testable through public traits.
+## Team (two Claude sessions, both implementers)
+This is the build-out phase: both sessions write product code. Formal verification (Lean, differential testing) is deferred until the core APIs settle.
+- **You (session `pico2peta`, worktree `/home/ec2-user/Dev/pico2peta`, branch `demo`) = core lead.** You own `crates/core`, `crates/pack`, `crates/refs`, `crates/repo`, `crates/cli`, `bench/`, and the core traits (`Backend`, `ObjectStore`, ref store). Priorities: M1–M4 at production quality (durability, crash recovery, multi-process safety, streaming), then Experiment 1, then GC/repack.
+- **Session `pico2peta-net` (worktree `/home/ec2-user/Dev/pico2peta-net`, branch `net`) = backends & server.** Owns `crates/backend-s3`, `crates/server`, `crates/client`, `deploy/`, `.github/workflows/`. Builds a real S3 backend and the network service on top of your traits.
+- **Interfaces:** you own the trait definitions. Stabilize `Backend` and the repo-level API (`put/get/resolve/replace`) early and note every breaking change under "API changes" in `docs/PROGRESS.md`. The net session requests trait changes under "Requests for core" in its `docs/NET_PROGRESS.md`, not by editing your crates.
+- **Integration:** `git merge net` into `demo` at each milestone (at least every ~2 hours); keep the workspace building. Add the net crates to the workspace `members` when merging.
+- Lean proofs and the model/difftest (M5, M7) are deferred. Keep a lightweight in-crate reference model + proptests where they find bugs cheaply.
 
 ## Goals (in order)
 1. **Plan:** Write `docs/PLAN.md` — milestones, crate layout (Cargo workspace), and the *pre-registered* numeric pass thresholds for experiment 1, before running it.
 2. **Core (Rust workspace):**
    - Object layer: content hashing (BLAKE3), `put/get(range)`.
-   - Physical layer: append-only packs + index, small-object bundling, FastCDC chunking for large objects, local-disk backend (S3 behind a trait, stub OK).
+   - Physical layer: append-only packs + index, small-object bundling, FastCDC chunking for large objects, local-disk backend (S3 implemented by the net session behind your `Backend` trait).
    - Name layer: refs with `replace(name, read_set, new_hash) → Ok | Conflict`, per-namespace update rules (mutable / immutable-after-publish / head-mutable-release-immutable).
    - A small CLI to exercise it.
    - Executable reference model (ShardStore/Cedar style) + property/differential tests (proptest) of the implementation against it.
