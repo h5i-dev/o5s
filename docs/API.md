@@ -73,6 +73,7 @@ curl -H "Authorization: Bearer $T" -r 0-1023 $S/v1/objects/<hash>
 # make earlier puts durable without a replace
 curl -X POST -H "Authorization: Bearer $T" $S/v1/flush
 ```
+- `PUT /v1/objects?delta_base=<hash>` stores the new object as an XOR delta against `<hash>` (for versions of model weights). Its identity is still the content hash, and reads are unchanged.
 - Objects are immutable. The ETag is the hash, and responses are `Cache-Control: private, immutable`.
 - **Lease:** a newly put object that no name references is reclaimed by GC after `gc.grace_secs` (default 1 h). Point a name at it within that time, or put it again.
 

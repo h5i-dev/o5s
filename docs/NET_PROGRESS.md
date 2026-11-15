@@ -230,6 +230,7 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 ## Requests for core
 - 2026-11-15: a streaming put, a backend error variant, and committing early. All three were delivered in API v1.
 - `Error::Unauthorized` (v1.1), `replace_many` (v1.2), `ensure_live` (v1.3), the `Grouper` trait and `delete_ref` (v1.5) were delivered, and all are adopted. `DELETE /v1/refs/<name>` exists and `RemoteRepo::delete_ref` overrides the default.
+- `put_delta` (v1.7) was delivered and adopted: `PUT /v1/objects?delta_base=<hash>` and `RemoteRepo::put_delta`. A 4 MiB object with sparse edits costs well under 1 MiB over the network API (`tests/server.rs`).
 - `update_many` (v1.6) was delivered and adopted: `POST /v1/update_many`, `RemoteRepo::update_many`, and atomic git pushes with deletes.
 - Resolved by `ensure_live` (v1.3). The original question was whether `ObjectStore::contains` (or `size`) reports `false` for an object served **only** from a condemned pack? The OCI adapter accepts a manifest when `contains(blob)` is true, without re-putting the blob. If a condemned-only copy counts as present, a manifest pushed between GC's delete-phase mark and the pack deletion could reference a blob that then disappears. If the answer is yes, I need a `touch`/`ensure_live(hash)` primitive (rewrite if condemned-only), or `contains` must ignore condemned copies.
 - (none open)

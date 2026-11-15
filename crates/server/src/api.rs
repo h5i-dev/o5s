@@ -395,13 +395,28 @@ impl Read for ChannelReader {
 // Objects
 // ---------------------------------------------------------------------------
 
+#[derive(serde::Deserialize)]
+struct PutQuery {
+    /// Store as an XOR delta against this object (API v1.7, model weights).
+    #[serde(default)]
+    delta_base: Option<String>,
+}
+
 async fn put_object(
     State(st): St,
     Extension(p): Extension<Principal>,
     Extension(c): Extension<Caller>,
+    Query(q): Query<PutQuery>,
     headers: HeaderMap,
     body: Body,
 ) -> ApiResult<Response> {
+    let delta_base = match &q.delta_base {
+        Some(b) => {
+            st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &c, "get", "objects")?;
+            Some(parse_hash(b)?)
+        }
+        None => None,
+    };
     st.require(st.authz.allows_somewhere(&p, Access::Write), &p, &c, "put", "objects")?;
     st.require_audit_healthy()?;
     let max = st.max_upload_bytes;
@@ -452,7 +467,10 @@ async fn put_object(
     let repo = st.repo.clone();
     let res = blocking(move || {
         let mut r = ChannelReader { rx, cur: Bytes::new() };
-        repo.put_stream(&mut r)
+        match delta_base {
+            Some(b) => repo.put_delta(&b, &mut r),
+            None => repo.put_stream(&mut r),
+        }
     })
     .await;
     pump.abort();
@@ -482,7 +500,10 @@ async fn put_object(
         action: "put",
         target: hash.to_hex(),
         outcome: "ok".into(),
-        detail: Some(format!("size={size}")),
+        detail: Some(match &q.delta_base {
+            Some(b) => format!("size={size} delta_base={b}"),
+            None => format!("size={size}"),
+        }),
         remote: c.remote.clone(),
     })
     .await?;

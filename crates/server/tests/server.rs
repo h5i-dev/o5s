@@ -495,3 +495,43 @@ fn separate_metrics_listener() {
     assert_eq!(r.status(), 200);
     assert!(r.text().unwrap().contains("p2p_http_requests_total"));
 }
+
+fn tree_bytes(p: &std::path::Path) -> u64 {
+    std::fs::read_dir(p)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| {
+                    let m = e.metadata().unwrap();
+                    if m.is_dir() { tree_bytes(&e.path()) } else { m.len() }
+                })
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+#[test]
+fn put_delta_over_http() {
+    let s = TestServer::start(|_| {});
+    let c = s.client(ALICE);
+    let base = data(4 << 20, 11);
+    let hb = c.put(&base).unwrap();
+    c.flush().unwrap();
+    let repo_dir = s.dir.path().join("repo");
+    let before = tree_bytes(&repo_dir);
+    // A "fine-tune": a few scattered byte changes at the same offsets.
+    let mut v2 = base.clone();
+    for i in (0..v2.len()).step_by(65_537) {
+        v2[i] ^= 0x5a;
+    }
+    let h2 = c.put_delta(&hb, &mut &v2[..]).unwrap();
+    assert_eq!(h2, Hash::of(&v2), "identity is the content hash");
+    c.flush().unwrap();
+    let delta_cost = tree_bytes(&repo_dir) - before;
+    assert!(c.get(&h2, None).unwrap() == v2);
+    assert_eq!(c.get(&h2, Some(65_537..65_540)).unwrap(), &v2[65_537..65_540]);
+    // Random data is incompressible, so a full copy would cost ~4 MiB.
+    assert!(delta_cost < 1 << 20, "delta stored {delta_cost} bytes for a 4 MiB object");
+    // Unknown base is an error, not a silent full store.
+    let missing = Hash::of(b"no such base");
+    assert!(c.put_delta(&missing, &mut &v2[..]).is_err());
+}
