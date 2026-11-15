@@ -98,7 +98,7 @@ User docs are in `docs/API.md` and `deploy/README.md`.
 - `GitGrouper` follows the EXP1 V2 layout:
   - Groups are `blob:<ext>` (or `blob:<basename>`), `tree`, `commit` and `tag`.
   - Order is path, then the time of the oldest commit that contains the object. Every git repo's refs are walked, oldest commits first.
-- Enabled through `[gc] grouped = true` (the default) and `repack_all`, or per call with `POST /v1/admin/gc?repack_all=true`.
+- **Opt-in** through `[gc] grouped = true` (the default is false since Experiment 1 failed its pre-registered verdict: redis is 1.336× git-aggressive, above the 1.30 per-repo maximum; see docs/EXP1.md) and `repack_all`, or per call with `POST /v1/admin/gc?repack_all=true`.
 - **Measured on ripgrep** (heads + tags, 14,190 objects), with `cargo test --release -p pico2peta-server --test git grouped_repack -- --ignored`:
 
   | | bytes | vs git `--aggressive` |

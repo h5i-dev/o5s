@@ -74,6 +74,7 @@ interval_secs = 1800               # 0 = no background GC (POST /v1/admin/gc sti
 grace_secs = 3600
 min_garbage_ratio = 0.2
 small_pack_bytes = 16777216
+grouped = false                    # opt-in grouped repack of git content (EXP1 FAIL; see docs/EXP1.md)
 
 [log]
 format = "json"

@@ -100,7 +100,7 @@ curl -X PUT -H "Authorization: Bearer $T" $S/v1/namespaces/pkgs -d '{"rule":"imm
 The rules are `mutable`, `immutable` (create-once) and `head-release`, where `<ns>/heads/*` is mutable, `<ns>/releases/*` is create-once, and anything else is refused. A rule can only be set while no names exist under the prefix.
 
 ### Admin
-- `POST /v1/admin/gc?dry_run=true&repack_all=false` returns a GC report. It advances the plan → sweep → delete protocol. With `repack_all=true`, git content is regrouped (EXP1 layout).
+- `POST /v1/admin/gc?dry_run=true&repack_all=false` returns a GC report. It advances the plan → sweep → delete protocol. With `repack_all=true` and `[gc] grouped = true` (opt-in), git content is regrouped in the Experiment 1 layout.
 - `GET /v1/whoami` returns `{"principal","authenticated"}`.
 - Token management (admin on `""`; needs `auth.token_file`):
   - `POST /v1/admin/tokens {"principal":"ci"}` returns `{"token","sha256"}`. The token is shown once and only its hash is stored.

@@ -49,7 +49,7 @@
 //! [gc]
 //! interval_secs = 0                  # background GC period; 0 = off
 //! grace_secs = 3600                  # >= 600; also the put->replace lease
-//! grouped = true                     # similarity-grouped repack of git content
+//! grouped = false                    # opt-in similarity-grouped repack (EXP1 did not pass)
 //! repack_all = false                 # regroup fully-live packs too (aggressive)
 //!
 //! [log]
@@ -128,6 +128,8 @@ pub struct GcSection {
     pub min_garbage_ratio: f64,
     pub small_pack_bytes: u64,
     /// Similarity-grouped repack of git content (Experiment 1 V2 layout).
+    /// Off by default: Experiment 1 failed its pre-registered thresholds
+    /// (redis 1.336x git --aggressive > 1.30), see docs/EXP1.md.
     pub grouped: bool,
     /// Regroup even fully-live packs (like `git gc --aggressive`). Expensive.
     pub repack_all: bool,
@@ -141,7 +143,7 @@ impl Default for GcSection {
             grace_secs: d.grace.as_secs(),
             min_garbage_ratio: d.min_garbage_ratio,
             small_pack_bytes: d.small_pack_bytes,
-            grouped: true,
+            grouped: false,
             repack_all: false,
         }
     }
