@@ -164,7 +164,7 @@ struct Index {
 /// Location preference: live sealed < own open pack < condemned sealed.
 fn rank(idx: &Index, l: &Loc) -> u8 {
     match l.pack {
-        PackRef::Sealed(pid) if idx.condemned.contains(&idx.sealed[pid as usize]) => 2,
+        PackRef::Sealed(pid) if idx.sealed.get(pid as usize).is_none_or(|n| idx.condemned.contains(n)) => 2,
         PackRef::Sealed(_) => 0,
         PackRef::Open(_) => 1,
     }
@@ -388,7 +388,10 @@ impl PackStore {
         if rebuild {
             let open: Vec<(Hash, Loc)> =
                 idx.map.iter().filter(|(_, l)| matches!(l.pack, PackRef::Open(_))).map(|(h, l)| (*h, *l)).collect();
-            *idx = Index { condemned, condemned_records: records, ..Index::default() };
+            // `sealed` is append-only, so `PackRef::Sealed(pid)` held by concurrent
+            // readers stays valid: positions are never reused or reordered.
+            let sealed = std::mem::take(&mut idx.sealed);
+            *idx = Index { condemned, condemned_records: records, sealed, ..Index::default() };
             for (h, l) in open {
                 idx.map.insert(h, l);
             }
@@ -401,8 +404,13 @@ impl PackStore {
                 continue;
             }
             n += 1;
-            let pid = idx.sealed.len() as u32;
-            idx.sealed.push(name);
+            let pid = match idx.sealed.iter().position(|x| *x == name) {
+                Some(p) => p as u32,
+                None => {
+                    idx.sealed.push(name);
+                    (idx.sealed.len() - 1) as u32
+                }
+            };
             for e in entries {
                 let loc = Loc {
                     pack: PackRef::Sealed(pid),
@@ -611,10 +619,10 @@ impl PackStore {
         // Re-point our records at the sealed pack directly. This doesn't
         // depend on a refresh, which may race with GC condemning the pack.
         let mut idx = self.inner.index.write().map_err(poisoned)?;
+        idx.known.insert(name.clone());
         let pid = match idx.sealed.iter().position(|n| *n == name) {
             Some(p) => p as u32,
             None => {
-                idx.known.insert(name.clone());
                 idx.sealed.push(name);
                 (idx.sealed.len() - 1) as u32
             }
@@ -668,7 +676,8 @@ impl PackStore {
             let total = (REC_HEADER + loc.stored_len as usize + REC_TRAILER) as u64;
             let raw = match loc.pack {
                 PackRef::Sealed(pid) => {
-                    let name = self.inner.index.read().map_err(poisoned)?.sealed[pid as usize].clone();
+                    let name = self.inner.index.read().map_err(poisoned)?.sealed.get(pid as usize).cloned();
+                    let Some(name) = name else { return Err(Error::Corrupt(format!("unknown pack id {pid}"))) };
                     match self.inner.backend.get_range(&format!("packs/{name}.pack"), loc.offset..loc.offset + total) {
                         Ok(b) => b,
                         Err(Error::KeyNotFound(_)) => {
@@ -902,7 +911,7 @@ impl PackStore {
         let idx = self.inner.index.read().map_err(poisoned)?;
         let w = self.inner.writer.lock().map_err(poisoned)?;
         let mut s = PackStats {
-            sealed_packs: idx.sealed.len(),
+            sealed_packs: idx.known.len(),
             objects: idx.map.len(),
             open_bytes: w.as_ref().map(|o| o.len).unwrap_or(0),
             ..Default::default()
@@ -937,7 +946,8 @@ impl PackStore {
     pub fn live_packs(&self) -> Result<Vec<String>> {
         self.refresh()?;
         let idx = self.inner.index.read().map_err(poisoned)?;
-        let mut v: Vec<String> = idx.sealed.iter().filter(|n| !idx.condemned.contains(*n)).cloned().collect();
+        let mut v: Vec<String> =
+            idx.sealed.iter().filter(|n| idx.known.contains(*n) && !idx.condemned.contains(*n)).cloned().collect();
         v.sort();
         Ok(v)
     }
@@ -1096,7 +1106,7 @@ impl PackStore {
     pub fn serving_pack(&self, hash: &Hash) -> Result<Option<String>> {
         let idx = self.inner.index.read().map_err(poisoned)?;
         Ok(idx.map.get(hash).and_then(|l| match l.pack {
-            PackRef::Sealed(pid) => Some(idx.sealed[pid as usize].clone()),
+            PackRef::Sealed(pid) => idx.sealed.get(pid as usize).cloned(),
             PackRef::Open(_) => None,
         }))
     }
