@@ -305,6 +305,22 @@ impl RemoteRepo {
         self.put_stream_to(format!("/v1/objects?for_name={name}&group_width={width}"), src)
     }
 
+    /// Same contract as `LocalRepo::put_named`: the server applies the profile of `name`'s
+    /// namespace (front encoding plan, chunker, `derive = "previous"` against the object `name`
+    /// points at now). Write access on `name` is required. The name itself is not moved.
+    pub fn put_named(&self, name: &Name, src: &mut dyn Read) -> Result<Hash> {
+        self.put_stream_for(name, src)
+    }
+
+    /// [`Self::put_named`] with a byte-grouping width hint, used when the name's front doesn't
+    /// choose one (same as `LocalRepo::put_named_hinted`).
+    pub fn put_named_hinted(&self, name: &Name, src: &mut dyn Read, width: Option<u8>) -> Result<Hash> {
+        match width {
+            Some(w) => self.put_stream_for_grouped(name, src, w),
+            None => self.put_stream_for(name, src),
+        }
+    }
+
     /// Base URL of the server.
     pub fn url(&self) -> &str {
         &self.inner.base

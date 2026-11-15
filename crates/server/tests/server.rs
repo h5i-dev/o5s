@@ -824,3 +824,31 @@ fn slow_headers_and_idle_connections_are_closed() {
     let e = started.elapsed();
     assert!(e >= std::time::Duration::from_secs(25) && e < std::time::Duration::from_secs(40), "{e:?}");
 }
+
+/// `PUT /v1/objects?for_name=` applies the namespace's full profile (here `derive = "previous"`),
+/// the same contract as `LocalRepo::put_named`; `RemoteRepo::put_named` sends it.
+#[test]
+fn put_named_applies_the_profile_remotely() {
+    use pico2peta_core::{Name, ObjectStore, Observed, Repository};
+    let s = TestServer::start(|cfg| {
+        let mut rc = pico2peta_repo::RepoConfig::default();
+        rc.profiles.insert(
+            "ckpt".into(),
+            pico2peta_repo::Profile { derive: pico2peta_repo::DerivePolicy::Previous, ..Default::default() },
+        );
+        rc.namespaces.insert("alice/ckpt".into(), "ckpt".into());
+        pico2peta_repo::LocalRepo::init_config(&cfg.repo.path, &rc).unwrap();
+    });
+    let c = s.client(ALICE);
+    let n = Name::new("alice/ckpt/model").unwrap();
+    let v1: Vec<u8> = (0..2_000_000u32).map(|i| (i % 251) as u8).collect();
+    let h1 = c.put_named(&n, &mut &v1[..]).unwrap();
+    c.replace(&n, &[(n.clone(), Observed::Absent)], h1).unwrap();
+    let mut v2 = v1.clone();
+    v2[1_000_000] ^= 0xff;
+    let h2 = c.put_named(&n, &mut &v2[..]).unwrap();
+    assert_eq!(h2, pico2peta_core::Hash::of(&v2), "identity is the content hash");
+    assert_eq!(c.get(&h2, None).unwrap(), v2);
+    // No write access on the name: refused.
+    assert!(s.client(READER).put_named(&n, &mut &v2[..]).is_err());
+}
