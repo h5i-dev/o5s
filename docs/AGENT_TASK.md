@@ -53,7 +53,7 @@ This is the build-out phase: both sessions write product code. Formal verificati
 5. Later layers (provenance, Git/OCI adapters, GC) only after the above are solid.
 
 ## Working rules
-- Commit early and often on branch `demo` with clear messages (end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`). Do **not** push or open PRs unless asked.
+- Commit early and often on branch `demo` with clear messages. **Do not add any Claude / Claude Code attribution** (no `Co-Authored-By: Claude…` trailer, no "Generated with Claude Code"). A commit-msg hook strips them anyway. **Push `demo` to `origin` yourself** after each milestone or meaningful batch, once `scripts/check.sh` passes (`git push origin demo`; never force-push, never push `main`). Don't open PRs unless asked.
 - Keep `docs/PROGRESS.md` updated after each milestone (what's done, what's next, blockers) — this is how the human catches up after reconnecting.
 - Run `cargo test` before each commit. Keep `cargo build` warnings at zero where practical.
 - If you hit a genuine decision only the human can make, write it under "Questions for human" in `docs/PROGRESS.md` and continue with the most reasonable default.
