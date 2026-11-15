@@ -473,6 +473,12 @@ impl<T: AsRef<[u8]>> IdxV3View<T> {
         self.ne == 0
     }
 
+    fn entry_hash_array(&self, i: usize) -> [u8; 32] {
+        let mut a = [0u8; 32];
+        a.copy_from_slice(self.entry_hash(i));
+        a
+    }
+
     fn entry_hash(&self, i: usize) -> &[u8] {
         let base = 24 + self.nr * IDX3_REC + i * IDX3_ENT;
         &self.data.as_ref()[base..base + 32]
@@ -500,6 +506,130 @@ impl<T: AsRef<[u8]>> IdxV3View<T> {
             }
         }
         Ok(None)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Multi-pack index (derived, local): one sorted table across many packs.
+//   "P2PMIDX1" | n_packs u32 | n_packs * name[64 hex] | n u64 |
+//   n * (hash[32] | pack u32 | entry u32) | blake3[32]
+// ---------------------------------------------------------------------------
+
+/// Multi-pack index magic.
+pub const MIDX_MAGIC: &[u8; 8] = b"P2PMIDX1";
+const MIDX_ENT: usize = 40;
+
+/// Writes a multi-pack index over `packs` (name, v3 view) to `w` by k-way
+/// merging their sorted entry tables. Memory is O(#packs).
+pub fn write_midx<T: AsRef<[u8]>, W: std::io::Write>(packs: &[(&str, &IdxV3View<T>)], w: W) -> Result<()> {
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    use std::io::Write;
+    let mut w = std::io::BufWriter::with_capacity(1 << 20, w);
+    let mut hasher = blake3::Hasher::new();
+    let mut put = |b: &[u8], w: &mut std::io::BufWriter<W>| -> Result<()> {
+        hasher.update(b);
+        w.write_all(b)?;
+        Ok(())
+    };
+    put(MIDX_MAGIC, &mut w)?;
+    put(&(packs.len() as u32).to_le_bytes(), &mut w)?;
+    for (name, _) in packs {
+        if name.len() != 64 {
+            return Err(Error::Parse("pack names must be 64 hex chars".into()));
+        }
+        put(name.as_bytes(), &mut w)?;
+    }
+    let total: u64 = packs.iter().map(|(_, v)| v.len() as u64).sum();
+    put(&total.to_le_bytes(), &mut w)?;
+    let mut heap = BinaryHeap::new();
+    for (p, (_, v)) in packs.iter().enumerate() {
+        if !v.is_empty() {
+            heap.push(Reverse((v.entry_hash_array(0), p as u32, 0u32)));
+        }
+    }
+    while let Some(Reverse((h, p, i))) = heap.pop() {
+        let mut e = [0u8; MIDX_ENT];
+        e[..32].copy_from_slice(&h);
+        e[32..36].copy_from_slice(&p.to_le_bytes());
+        e[36..40].copy_from_slice(&i.to_le_bytes());
+        put(&e, &mut w)?;
+        let v = packs[p as usize].1;
+        if (i as usize) + 1 < v.len() {
+            heap.push(Reverse((v.entry_hash_array(i as usize + 1), p, i + 1)));
+        }
+    }
+    let sum = hasher.finalize();
+    w.write_all(sum.as_bytes())?;
+    w.flush()?;
+    Ok(())
+}
+
+/// Zero-copy view over a multi-pack index.
+pub struct MidxView<T: AsRef<[u8]>> {
+    data: T,
+    names: Vec<String>,
+    n: usize,
+    base: usize,
+}
+
+impl<T: AsRef<[u8]>> MidxView<T> {
+    /// Validates the header, sizes and checksum.
+    pub fn new(data: T) -> Result<Self> {
+        let b = data.as_ref();
+        let bad = || Error::Corrupt("bad multi-pack index".into());
+        if b.len() < 12 + 8 + 32 || &b[..8] != MIDX_MAGIC {
+            return Err(bad());
+        }
+        let (body, sum) = b.split_at(b.len() - 32);
+        if blake3::hash(body).as_bytes() != sum {
+            return Err(Error::Corrupt("multi-pack index checksum mismatch".into()));
+        }
+        let np = rd_u32(&body[8..12]) as usize;
+        let names_end =
+            np.checked_mul(64).and_then(|x| x.checked_add(12)).filter(|e| e + 8 <= body.len()).ok_or_else(bad)?;
+        let names: Vec<String> = (0..np)
+            .map(|i| String::from_utf8(body[12 + i * 64..12 + (i + 1) * 64].to_vec()).map_err(|_| bad()))
+            .collect::<Result<_>>()?;
+        let n = rd_u64(&body[names_end..names_end + 8]);
+        let base = names_end + 8;
+        let expect = usize::try_from(n).ok().and_then(|n| n.checked_mul(MIDX_ENT)).and_then(|x| x.checked_add(base));
+        if expect != Some(body.len()) {
+            return Err(bad());
+        }
+        Ok(MidxView { n: n as usize, names, base, data })
+    }
+
+    /// Pack names, indexed by the `pack` field of entries.
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+
+    fn hash_at(&self, i: usize) -> &[u8] {
+        let o = self.base + i * MIDX_ENT;
+        &self.data.as_ref()[o..o + 32]
+    }
+
+    fn at(&self, i: usize) -> (u32, u32) {
+        let o = self.base + i * MIDX_ENT;
+        let b = self.data.as_ref();
+        (rd_u32(&b[o + 32..o + 36]), rd_u32(&b[o + 36..o + 40]))
+    }
+
+    /// Every `(pack ordinal, entry index)` holding `h` (an object may be in several packs).
+    pub fn find_all(&self, h: &Hash) -> Vec<(u32, u32)> {
+        let key = h.as_bytes().as_slice();
+        let (mut lo, mut hi) = (0usize, self.n);
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if self.hash_at(mid) < key { lo = mid + 1 } else { hi = mid }
+        }
+        let mut out = Vec::new();
+        while lo < self.n && self.hash_at(lo) == key {
+            out.push(self.at(lo));
+            lo += 1;
+        }
+        out
     }
 }
 

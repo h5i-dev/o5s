@@ -177,6 +177,7 @@ impl LocalRepo {
     }
 
     fn write_record(&self, kind: &str, id: &str, packs: &[String]) -> Result<String> {
+        self.fault("gc.write-record")?;
         let key = format!("{GC_PREFIX}{:012}-{id}.{kind}", now_secs());
         let mut body = packs.join("\n");
         body.push('\n');
@@ -267,13 +268,17 @@ impl LocalRepo {
             for p in &rec.packs {
                 report.deleted_bytes += self.packs.pack_bytes(p)?;
                 // Index first, so no new reader picks the pack up.
+                self.fault("gc.delete-idx")?;
                 b.delete(&format!("packs/{p}.idx"))?;
+                self.fault("gc.delete-pack")?;
                 b.delete(&format!("packs/{p}.pack"))?;
                 report.deleted_packs += 1;
             }
             for plan in plans.iter().filter(|p| p.id == rec.id) {
+                self.fault("gc.delete-plan")?;
                 b.delete(&plan.key)?;
             }
+            self.fault("gc.delete-condemned")?;
             b.delete(&rec.key)?;
             self.packs.refresh()?;
         }
@@ -319,6 +324,7 @@ impl LocalRepo {
                     self.write_record("condemned", &plan.id, &names)?;
                 } else {
                     // Nothing to do. Retire the plan so a new one can be made.
+                    self.fault("gc.retire-plan")?;
                     self.packs.backend().delete(&plan.key)?;
                 }
                 self.packs.refresh()?;

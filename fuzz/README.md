@@ -10,6 +10,7 @@ Every on-disk decoder and every input parser has a target:
 | `ref_journal` | ref journal records, plus a full `RefStore::open` on arbitrary journal bytes |
 | `staging_recovery` | open-pack crash recovery on arbitrary staging bytes |
 | `names` | ref names, hashes, rules, backend keys |
+| `midx` | multi-pack index and mapped v3 index views |
 | `git_push` | the full git receive-pack path (pkt-line commands, pack trailer, entry headers, zlib, OFS/REF/thin deltas, connectivity, ref CAS) against a temp repo |
 | `git_parsers` | git object headers, tree/commit/tag parsing, delta application, upload-pack requests, pkt-lines |
 | `oci_parsers` | OCI manifest validation, `/v2` routing, repo/tag/digest grammar |

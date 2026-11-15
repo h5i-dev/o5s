@@ -24,7 +24,7 @@ impl Read for Gen {
 
 fn bytes(seed: u64, n: usize) -> Vec<u8> {
     let mut v = vec![0u8; n];
-    let _ = Gen(seed | 1).read(&mut v);
+    let _ = Gen(seed.wrapping_mul(2).wrapping_add(1)).read(&mut v); // distinct odd seed per input
     v
 }
 
@@ -38,8 +38,87 @@ fn hwm_mb() -> f64 {
         / 1024.0
 }
 
+/// Model-weights versioning: a synthetic safetensors-like checkpoint
+/// (8-byte header length + JSON header + f16 tensors), stored in successive
+/// versions. Compares repository growth to full copies (Git LFS / plain
+/// object storage store every version whole).
+fn weights(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
+    let root = std::path::Path::new(dir).join(format!("weights-{}", std::process::id()));
+    let repo = LocalRepo::init(&root, &PackConfig::default())?;
+    let tensors = 64usize;
+    let tsize = (mib << 20) / tensors;
+    let mut ts: Vec<Vec<u8>> = (0..tensors).map(|i| bytes(1000 + i as u64, tsize)).collect();
+    let build = |ts: &Vec<Vec<u8>>| -> Vec<u8> {
+        let header = format!("{{\"tensors\":{},\"size\":{}}}", ts.len(), tsize).into_bytes();
+        let mut v = (header.len() as u64).to_le_bytes().to_vec();
+        v.extend_from_slice(&header);
+        for t in ts {
+            v.extend_from_slice(t);
+        }
+        v
+    };
+    let disk = |p: &std::path::Path| -> u64 {
+        fn walk(p: &std::path::Path) -> u64 {
+            std::fs::read_dir(p).map_or(0, |rd| {
+                rd.flatten()
+                    .map(|e| if e.path().is_dir() { walk(&e.path()) } else { e.metadata().map_or(0, |m| m.len()) })
+                    .sum()
+            })
+        }
+        walk(&p.join("objects"))
+    };
+    println!("| version | change | logical MiB | full copies MiB | pico2peta MiB | ratio |");
+    println!("|---|---|---|---|---|---|");
+    let mut full = 0u64;
+    let steps: [(&str, &dyn Fn(&mut Vec<Vec<u8>>)); 5] = [
+        ("v1", &|_| {}),
+        ("v2: 4 of 64 tensors retrained", &|ts| {
+            for (i, t) in ts.iter_mut().enumerate().take(4) {
+                *t = bytes(2000 + i as u64, tsize);
+            }
+        }),
+        ("v3: one tensor resized (+1 KiB, shifts later bytes)", &|ts| {
+            ts[10].extend_from_slice(&[7u8; 1024]);
+        }),
+        ("v4: metadata/header edit only", &|_| {}),
+        ("v5: full fine-tune (every tensor perturbed)", &|ts| {
+            for t in ts.iter_mut() {
+                for b in t.iter_mut().step_by(97) {
+                    *b ^= 1;
+                }
+            }
+        }),
+    ];
+    for (k, (name, f)) in steps.iter().enumerate() {
+        f(&mut ts);
+        let mut blob = build(&ts);
+        if k == 3 {
+            blob[9] ^= 1; // touch the header
+        }
+        full += blob.len() as u64;
+        repo.put_stream(&mut &blob[..])?;
+        repo.flush()?;
+        let used = disk(&root);
+        println!(
+            "| {} | {name} | {:.0} | {:.0} | {:.0} | {:.2} |",
+            k + 1,
+            blob.len() as f64 / 1048576.0,
+            full as f64 / 1048576.0,
+            used as f64 / 1048576.0,
+            used as f64 / full as f64
+        );
+    }
+    std::fs::remove_dir_all(&root)?;
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let dir = std::env::args().nth(1).ok_or("usage: p2p-bench <scratch-dir> [large-MiB]")?;
+    if std::env::args().nth(1).as_deref() == Some("weights") {
+        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench weights <scratch-dir> [MiB]")?;
+        let mib = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(256);
+        return weights(&dir, mib);
+    }
+    let dir = std::env::args().nth(1).ok_or("usage: p2p-bench <scratch-dir> [large-MiB] | weights <dir> [MiB]")?;
     let large_mib: usize = std::env::args().nth(2).and_then(|s| s.parse().ok()).unwrap_or(1024);
     let root = std::path::Path::new(&dir).join(format!("bench-{}", std::process::id()));
     let repo = LocalRepo::init(&root, &PackConfig::default())?;

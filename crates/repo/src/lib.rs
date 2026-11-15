@@ -101,6 +101,7 @@ pub struct LocalRepo {
     packs: PackStore,
     refs: Arc<RefStore>,
     backend: Arc<dyn Backend>,
+    faults: pico2peta_core::fault::FaultHandle,
 }
 
 impl LocalRepo {
@@ -143,11 +144,22 @@ impl LocalRepo {
     /// Opens an existing repository whose sealed packs live on `backend`.
     /// Staging and refs stay under `root`.
     pub fn open_with_backend(root: impl AsRef<Path>, backend: Arc<dyn Backend>) -> Result<Self> {
+        Self::open_with_faults(root, backend, pico2peta_core::fault::Faults::disarmed())
+    }
+
+    /// Like [`LocalRepo::open_with_backend`], with fault injection shared by
+    /// the pack store, the ref store and GC (crash-consistency tests).
+    pub fn open_with_faults(
+        root: impl AsRef<Path>,
+        backend: Arc<dyn Backend>,
+        faults: pico2peta_core::fault::FaultHandle,
+    ) -> Result<Self> {
         let root = root.as_ref().to_path_buf();
         let cfg = Self::read_config(&root)?;
-        let packs = PackStore::open(root.join("staging"), backend.clone(), (&cfg.pack).into())?;
-        let refs = Arc::new(RefStore::open(root.join("refs"))?);
-        Ok(LocalRepo { root, packs, refs, backend })
+        let packs =
+            PackStore::open_with_faults(root.join("staging"), backend.clone(), (&cfg.pack).into(), faults.clone())?;
+        let refs = Arc::new(RefStore::open_with_faults(root.join("refs"), faults.clone())?);
+        Ok(LocalRepo { root, packs, refs, backend, faults })
     }
 
     /// Reads and validates `config.toml`.
@@ -182,6 +194,11 @@ impl LocalRepo {
     pub fn pack_stats(&self) -> Result<PackStats> {
         self.packs.refresh()?;
         self.packs.stats()
+    }
+
+    /// Fault point (no-op unless armed by `open_with_faults`).
+    pub(crate) fn fault(&self, point: &'static str) -> Result<()> {
+        Ok(self.faults.hit(point)?)
     }
 
     /// Direct access to the pack store (GC, repack, benchmarks).

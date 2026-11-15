@@ -410,3 +410,45 @@ fn frames_roundtrip_and_survive_crash_recovery() {
     }
     assert!(s.put_frame(&[&vec![0u8; 5000][..]], 3).is_err(), "members must be below the chunk threshold");
 }
+
+#[test]
+fn multi_pack_index_covers_many_mapped_packs() {
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { pack_cap: 4096, ..PackConfig::tiny() };
+    let mut objs = Vec::new();
+    {
+        let s = open(d.path(), cfg.clone());
+        for i in 0..400u64 {
+            let o = pseudo(300 + (i as usize % 7) * 100, i);
+            s.put(&o).unwrap();
+            objs.push(o);
+        }
+        s.flush().unwrap();
+    }
+    let s = PackStore::open(d.path().join("staging"), backend(d.path()), cfg.clone()).unwrap();
+    s.set_mmap_index_threshold(0);
+    // Force a rebuild path: a fresh handle with the low threshold maps every index.
+    drop(s);
+    unsafe_env_threshold_zero(|| {
+        let s = open(d.path(), cfg.clone());
+        assert!(s.stats().unwrap().sealed_packs >= 8);
+        let midx = std::fs::read_dir(d.path().join("idx-cache"))
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with("midx-"))
+            .count();
+        assert_eq!(midx, 1, "one multi-pack index built");
+        for o in &objs {
+            assert_eq!(&s.get(&Hash::of(o), None).unwrap(), o);
+        }
+        assert!(!s.contains(&Hash::of(b"absent")).unwrap());
+    });
+}
+
+/// Runs `f` with every index memory-mapped (threshold 0) for handles opened inside it.
+fn unsafe_env_threshold_zero(f: impl FnOnce()) {
+    // SAFETY: test-only; the variable is read at PackStore::open. Other tests
+    // may observe it, which only switches them to the (equally correct) mmap path.
+    unsafe { std::env::set_var("P2P_MMAP_INDEX_BYTES", "0") };
+    f();
+    unsafe { std::env::remove_var("P2P_MMAP_INDEX_BYTES") };
+}
