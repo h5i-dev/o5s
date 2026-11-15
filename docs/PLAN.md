@@ -196,6 +196,69 @@ unchanged. The only changes are the candidate variants and their index model:
   storage as the recommended configuration for source code (net's Git adapter plus grouped repack, opt-in).
   Don't add further variants after seeing 1b results.
 
+### 4.9 Experiment 1c: pre-registered 2026-11-15, before any 1c code (net session)
+
+**Why a new experiment.** Experiment 1 and 1b both FAILED. §4.8 says "don't add further variants after
+seeing 1b results", and that rule is honoured: **the 1 and 1b verdicts stand unchanged**. 1c is a *separate*
+experiment commissioned by the human (docs/RESEARCH_SPEEDUP.md §3), with its own pre-registration.
+Disclosed up front: its design was informed by the 1b failure analysis (1b only ever deltas against the
+same path's previous version, while Git searches 250 candidate bases).
+
+**Unchanged from §4.1–§4.5.** The corpus (ripgrep, jq, redis, git.git mirrors in
+`$BENCH_DATA/mirrors`), the object set, the partitioning and in-partition order (§4.4), canonical payloads,
+SHA-1 verification of every sampled read, warm-cache latency, threads = 4, and **all thresholds in §4.5**.
+The baseline B for the verdict is still Exp1's measured `git gc --aggressive` (Git 2.50.1) size, reused from
+`results.jsonl` as 1b did. The build-time threshold uses Exp1's measured `git gc --aggressive` wall time.
+If a build ratio falls within ±20 % of 1.0 (the host noise seen in Exp1), both sides are re-timed back to
+back under the bench lock, and the re-timed pair decides.
+
+**Candidates** (both are reported, and V\* is the lower geomean R of the two):
+- **V6: resemblance-selected base, patch-from delta, max chain depth 50.**
+  - *Features (Odess-style content-defined sampling).*
+    - Rolling Gear hash `h = (h << 1) + G[byte]` over the object, where G is 256 u64 values from
+      splitmix64 seeded with `0x0DE55_5EED`.
+    - A position is sampled when `h >> 57 == 0` (rate 1/128).
+    - For each sample, 12 linear transforms `t_i = m_i·h + a_i (mod 2^64)`, with odd m_i and a_i from the
+      same splitmix64 stream; feature `f_i` = the maximum of `t_i` over all samples.
+    - 3 super-features `SF_j = FNV-1a-64(f_{4j} ‖ … ‖ f_{4j+3})`.
+    - Objects with no sample (in practice < ~256 B) have no SFs.
+  - *Candidates.* Within the object's partition, among the previous **W = 250** objects in partition order
+    (bounded like Git's window), those whose base chain depth is < 50 and whose size is within 1/2–2× of
+    the object.
+  - *Score.* The number of super-features shared (0–3), plus 0.5 if the candidate has the same path. The
+    best score wins, ties go to the nearest candidate, and a score of 0 means no delta (compress alone).
+    With no SFs, the same-path predecessor (1b's base) is used if it is within W and depth < 50.
+  - *Encoding.* Exactly as V4 (§4.8): zstd level 19 with the base's canonical bytes as reference prefix,
+    `window_log = clamp(ceil(log2(base + object)), 23, 27)`, one individually addressable record per object.
+- **V7: as V6, but trial-encoded.** The top **K = 3** candidates by score (any score ≥ 0.5, plus "no base")
+  are each trial-compressed at zstd level 3. The smallest result's base is chosen and then encoded at
+  level 19. This approximates Git's try-the-candidates search at bounded cost.
+- **Size model:** payload + 52 B/object, as in §4.8. Features are build-time only and are not stored.
+- **Read latency:** decode the whole chain, as in §4.8, with the same thresholds.
+
+**Extra baselines** (reported, *not* judged). With **Git 2.56.1** (built from source; 2.50.1 lacks
+`--path-walk`), on a fresh copy of each mirror:
+- `git repack -adf --window=250 --depth=50 --path-walk`
+- `git repack -adf --window=250 --depth=50 --name-hash-version=2`
+
+Each is reported as R' = S(V\*)/B' next to the frozen R, with B' = `.pack` + `.idx`. If R passes but R'
+does not, the text says so plainly.
+
+**Verdict:** §4.5's table for V\*, unchanged.
+
+**Consequences:**
+- PASS: resemblance-selected delta becomes the recommended repack strategy for the source-code kind. The
+  core lead decides on integration; `store.rs` is not touched by this experiment.
+- FAIL: report honestly. Git-compatible storage stays the recommendation, and no further variants are
+  added after 1c.
+
+**Threats to validity (in addition to §4.6):**
+- The design was informed by the 1b results.
+- 4 repos remain a small sample.
+- The extra baselines use a newer Git than the frozen baseline.
+- Partitions are processed in parallel (4 threads), but candidate search inside a partition is sequential,
+  which may make the build-time threshold hard to meet on the largest partitions.
+
 ## 5. Lean 4 properties (M8, done; see lean/README.md)
 
 Pure model, structurally mirroring `pico2peta-model`:
