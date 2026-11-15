@@ -10,11 +10,13 @@ use std::time::Instant;
 struct Gen(u64);
 impl Read for Gen {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        for b in buf.iter_mut() {
+        // 8 bytes per xorshift step, so the generator never bottlenecks a run.
+        for c in buf.chunks_mut(8) {
             self.0 ^= self.0 << 13;
             self.0 ^= self.0 >> 7;
             self.0 ^= self.0 << 17;
-            *b = (self.0 >> 24) as u8;
+            let b = self.0.to_le_bytes();
+            c.copy_from_slice(&b[..c.len()]);
         }
         Ok(buf.len())
     }

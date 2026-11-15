@@ -42,8 +42,9 @@ use std::path::Path;
 #[derive(Clone, Copy, Debug)]
 pub enum PutSource<'a> {
     Bytes(&'a [u8]),
-    /// A local file. It doesn't change during the call (core seals the file
-    /// before uploading it).
+    /// A local file, complete and fsynced. It must not change during the
+    /// call or afterwards. Backends may publish it by reference (e.g. a hard
+    /// link) instead of copying it.
     File(&'a Path),
 }
 
@@ -266,6 +267,19 @@ impl Backend for LocalDisk {
         }
         let dir = path.parent().ok_or_else(|| Error::Parse(format!("bad key {key}")))?.to_path_buf();
         std::fs::create_dir_all(&dir)?;
+        if let PutSource::File(src_path) = src {
+            // Same filesystem: publish by hard link. That's atomic and
+            // create-only, with no copy. The caller guarantees the file is
+            // complete, fsynced and never modified again.
+            match std::fs::hard_link(src_path, &path) {
+                Ok(()) => {
+                    fsync_dir(&dir)?;
+                    return Ok(PutOutcome::Created);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(PutOutcome::AlreadyExists),
+                Err(_) => {} // e.g. EXDEV (cross-device): fall back to copying
+            }
+        }
         let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let tmp = dir.join(format!(".tmp-{}-{seq}", std::process::id()));
         let res = (|| -> Result<PutOutcome> {
