@@ -1951,12 +1951,38 @@ fn compress_with_probe(level: i32, probe: bool, raw: &[u8]) -> Option<Vec<u8>> {
     }
     if probe && raw.len() >= PROBE_MIN {
         let sample = &raw[..PROBE_SAMPLE];
-        let small = zstd::bulk::compress(sample, 1).ok()?;
+        let small = zstd_compress(sample, 1)?;
         if small.len() * 100 >= sample.len() * 97 {
             return None;
         }
     }
-    zstd::bulk::compress(raw, level).ok().filter(|c| c.len() < raw.len())
+    zstd_compress(raw, level).filter(|c| c.len() < raw.len())
+}
+
+thread_local! {
+    /// Per-thread zstd contexts, keyed by level (in practice two: the probe's
+    /// level 1 and the configured level). Creating a context per chunk costs an
+    /// allocation and a table reset each time.
+    static ZSTD_CTX: std::cell::RefCell<Vec<(i32, zstd::bulk::Compressor<'static>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// `zstd::bulk::compress`, with a reused per-thread context. Output is the
+/// same bytes: the context's parameters are just the level.
+fn zstd_compress(raw: &[u8], level: i32) -> Option<Vec<u8>> {
+    ZSTD_CTX.with(|cell| {
+        let Ok(mut ctxs) = cell.try_borrow_mut() else {
+            return zstd::bulk::compress(raw, level).ok();
+        };
+        let i = match ctxs.iter().position(|(l, _)| *l == level) {
+            Some(i) => i,
+            None => {
+                ctxs.push((level, zstd::bulk::Compressor::new(level).ok()?));
+                ctxs.len() - 1
+            }
+        };
+        ctxs[i].1.compress(raw).ok()
+    })
 }
 
 /// Maximum length of a delta chain followed on reads.
