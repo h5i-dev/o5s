@@ -27,7 +27,7 @@
 //! That keeps O(log n) segments with O(n log n) total merge work.
 //!
 //! # GC
-//! Map values are **weak**: [`MapTracer`] keeps the root and the segments alive,
+//! Map values are **weak**: [`map_children`] keeps the root and the segments alive,
 //! but not the mapped objects. Liveness of mapped objects comes from whatever
 //! references them (OCI manifests, git commits and trees). A lookup whose
 //! target has been collected is a miss (`get_live`), and re-inserting it heals

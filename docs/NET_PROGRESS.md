@@ -176,7 +176,7 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - (none open)
 
 ## Small fixes made to core crates
-- (none)
+- `crates/cli/src/main.rs`: wrapped a bare URL in a doc comment in `<…>` so that `cargo doc -D warnings` (CI docs job) passes.
 
 ## Questions for human
 - (none yet)
