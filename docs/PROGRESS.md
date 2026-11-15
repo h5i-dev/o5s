@@ -5,14 +5,14 @@
 | milestone | state | where |
 |---|---|---|
 | M0 Plan | done; Exp1 thresholds frozen | `docs/PLAN.md` |
-| M1 Core API | done; v1.7 now, all additive since v1 (see API changes) | `crates/core` |
+| M1 Core API | done; v1.9 now, all additive since v1 (see API changes) | `crates/core` |
 | M2 Pack store | done | `crates/pack` |
-| M3 Ref store | done | `crates/refs` |
+| M3 Ref store | done: local journal engine plus a multi-host log engine on any Backend | `crates/refs` |
 | M4 Local repo + CLI | done; local and `--remote` | `crates/repo`, `crates/cli` |
 | M5 Experiment 1 | **FAIL** by the pre-registered rules: redis V2 = 1.336× > 1.30 (ripgrep 0.85×, jq 0.93×; the V3 ceiling is 0.71–0.84×). git.git is still running for completeness. **Exp1b** (delta vs previous version, §4.8) is registered and queued after it | `docs/EXP1.md`, `scripts/exp1-report.py`, `scripts/exp1b.sh` |
 | M6 GC / repack | done, including grouped repack | `crates/repo/src/gc.rs` |
 | N1–N5 (net) | done: S3, server, client, CI, deploy, Git + OCI adapters | `docs/NET_PROGRESS.md`, `docs/API.md` |
-| M7 Hardening | done except quiet-host benchmark numbers | `fuzz/`, `docs/BENCH.md` |
+| M7 Hardening | done (two independent code reviews, all findings fixed) except quiet-host benchmark numbers | `fuzz/`, `docs/BENCH.md`, `scripts/check.sh` |
 | M8 Verification | done: Lean P1–P5 and a Lean↔Rust difftest | `lean/` |
 | M9 Later layers | provenance (core) done; Git/OCI adapters done (net) | `crates/prov` |
 
@@ -25,6 +25,7 @@
 
 **Names**
 - An OCC journal with an exclusive-flock commit point, snapshot/rotation compaction, rules whose immutability can't be retracted, deletes with tombstoned versions, and atomic multi-name transactions.
+- Optionally (`[refs] store = "backend"`), a create-only log on S3 with per-attempt nonces, so several servers can share one repository. The net session verified it with two servers on MinIO.
 
 **GC**
 - Phases: plan → sweep (optionally grouped repack) → delete. The phases are separated by grace periods, and copies are rescued before deletion.
