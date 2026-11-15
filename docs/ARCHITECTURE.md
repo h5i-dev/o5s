@@ -44,14 +44,21 @@ XOR deltas when the writer passes a width hint). `kind`:
 | 2 Frame (v1, read-only) | `n u32 | (hash[32], len u32)* | bodies` | BLAKE3 of concatenated bodies |
 | 3 Frame2 | `n u32 | len u32* | bodies` | BLAKE3 of concatenated bodies |
 | 4 Delta | `base[32] | xor[32] [| n u32 | (dst, src, len u64)*]` | object hash / length |
+| 5 Frame3 | `ref[32] | n u32 | len u32* | bodies`, bodies zstd-compressed with object `ref`'s bytes as reference prefix | BLAKE3 of concatenated bodies |
 
 - **Large objects** (≥ `chunk_threshold`) are content-defined chunks stored as blobs, under a tree of manifests
   with at most `manifest_fanout` entries per node. Every node is keyed by the content hash of its range.
   The chunker is FastCDC v2020 (`cdc_min/avg/max`) by default, or byte-exact Hugging Face Xet (8/64/128 KiB)
   per name prefix (`[chunking]` in config.toml, used by `put_stream_for`). The format doesn't record which
   chunker cut an object; reads never depend on it.
-- **Frames** hold many small objects compressed together (similarity-grouped repack). Members are indexed
-  individually. A frame isn't itself addressable.
+- **Frames** hold many small objects compressed together. Members are indexed individually; a frame isn't
+  itself addressable. A grouped repack lays them out by content similarity (`crates/order`, docs/ORDERING.md):
+  - features, then a similarity order (front hints only break ties), then frames of up to 6 MiB;
+  - a frame cut inside a similar run is written as a **Frame3**, compressed against its most similar earlier
+    object (reference depth ≤ 2);
+  - a Frame3's reference is a GC child of every member, and its members keep kind 5 in the index, so GC,
+    `ensure_live` and recovery follow it. Recovery resolves a reference from earlier records of the same staging
+    file.
 - **Deltas**: object = (aligned base) XOR `xor`, where `xor` is an ordinary object. With segments, object
   bytes `[dst, dst+len)` align with base bytes `[src, src+len)`. Uncovered bytes are XORed with zero.
 

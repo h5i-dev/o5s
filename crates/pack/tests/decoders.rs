@@ -104,8 +104,10 @@ proptest! {
     #[test]
     fn frame_decoder_total(raw in proptest::collection::vec(any::<u8>(), 0..400)) {
         if let Ok(h) = parse_header(&raw) {
-            let _ = decode_frame_bodies(&h, &raw);
-            let _ = frame_members(&h, &raw);
+            let _ = decode_frame_bodies(&h, &raw, None);
+            let _ = decode_frame_bodies(&h, &raw, Some(&raw[..raw.len().min(100)]));
+            let _ = frame_members(&h, &raw, &|_| Ok(b"some reference bytes".to_vec()));
+            let _ = frame_ref(&h, &raw);
         }
     }
 }
@@ -227,4 +229,27 @@ fn grouped_codec_golden_and_malformed() {
     let mut short = vec![2u8];
     short.extend(zstd::bulk::compress(&raw, 3).unwrap());
     bad(Kind::Blob, &short, 10); // raw_len smaller than the content
+}
+
+/// Index round trip keeps Frame3 members' kind (their reference is a GC
+/// child), while Frame2 members still decode as plain blobs.
+#[test]
+fn index_keeps_frame3_member_kind() {
+    let e = |h: &[u8], off: u64, kind: Kind| IdxEntry {
+        hash: Hash::of(h),
+        offset: off,
+        stored_len: 100,
+        raw_len: 10,
+        kind,
+        codec: Codec::Zstd,
+        frame: Some((0, 20)),
+    };
+    let mut es = vec![e(b"f2-a", 8, Kind::Blob), e(b"f3-a", 200, Kind::Frame3), e(b"f3-b", 200, Kind::Frame3)];
+    let idx = encode_index(&mut es);
+    let back = decode_index(&idx).unwrap();
+    for b in back {
+        let want = if b.offset == 200 { Kind::Frame3 } else { Kind::Blob };
+        assert_eq!(b.kind, want, "{b:?}");
+        assert!(b.frame.is_some());
+    }
 }

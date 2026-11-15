@@ -63,9 +63,10 @@ impl Tracer for OpaqueObjects {
     }
 }
 
-/// Where an object should be placed in a similarity-grouped repack: objects
-/// with the same `group` are compressed together in frames, in `order`.
-/// Example (Git): group = file extension, order = path + commit time.
+/// A front's ordering hint for one object in a grouped repack. The layout is
+/// decided by content similarity (`pico2peta_order`, docs/ORDERING.md); hints
+/// only break ties between equally similar objects. Example (Git): group =
+/// file extension, order = path + commit time.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GroupKey {
     /// Objects with the same group are compressed together.
@@ -74,10 +75,11 @@ pub struct GroupKey {
     pub order: String,
 }
 
-/// Supplies grouping hints for repack (Experiment 1, V2 layout). It's called
-/// once per sweep with the live objects being repacked and returns keys for
-/// those it knows; unknown objects are copied verbatim. Adapters implement it
-/// (e.g. the Git adapter by walking trees: paths are known only from trees).
+/// Supplies ordering hints for a grouped repack. It's called once per sweep
+/// with the live objects being repacked and returns hints for those it knows.
+/// Every small object is reordered by content similarity whether it has a hint
+/// or not. Fronts implement it (e.g. Git by walking trees: paths are known only
+/// from trees).
 pub trait Grouper: Send + Sync {
     /// Group keys for (some of) `live`. Objects without a key are copied verbatim.
     fn assign(&self, repo: &dyn Repository, live: &HashSet<Hash>) -> Result<HashMap<Hash, GroupKey>>;
@@ -101,7 +103,8 @@ pub struct GcOptions {
     pub repack_all: bool,
     /// zstd level for frames written by a grouped repack (Exp1: 19).
     pub frame_level: i32,
-    /// Maximum uncompressed frame size for a grouped repack (Exp1: 4 MiB).
+    /// Maximum uncompressed frame size for a grouped repack (default 6 MiB, the
+    /// value frozen for Experiment 3; Exp1 V2 used 4 MiB).
     pub frame_cap: usize,
 }
 
@@ -115,7 +118,7 @@ impl Default for GcOptions {
             dry_run: false,
             repack_all: false,
             frame_level: 19,
-            frame_cap: 4 << 20,
+            frame_cap: pico2peta_order::frame::DEFAULT_CAP as usize,
         }
     }
 }
@@ -205,7 +208,9 @@ impl LocalRepo {
                 Err(e) => return Err(e),
             };
             for e in entries {
-                if e.frame.is_none() && matches!(e.kind, Kind::Manifest | Kind::Delta) {
+                // Manifests and deltas, plus members of frames with a reference
+                // prefix (the reference is their child).
+                if (e.frame.is_none() && matches!(e.kind, Kind::Manifest | Kind::Delta)) || e.kind == Kind::Frame3 {
                     queue.push_back(e.hash);
                 }
             }
@@ -425,62 +430,92 @@ impl LocalRepo {
 }
 
 impl LocalRepo {
-    /// Writes the grouper-assigned small blobs of `set` as frames, grouped and
-    /// ordered (Exp1 V2). Returns the hashes written.
+    /// Writes the small leaf objects of `set` as frames in content-similarity
+    /// order (docs/ORDERING.md): features, similarity order (the grouper's
+    /// keys only break ties), similarity-aware frames with reference prefixes.
+    /// Returns the hashes written.
     fn write_grouped(&self, g: &dyn Grouper, set: &HashSet<Hash>, opts: &GcOptions) -> Result<HashSet<Hash>> {
+        use pico2peta_order::{FrameConfig, Hint, Item, features, frames, order};
         let keys = g.assign(self, set)?;
         let thr = self.packs.config().chunk_threshold as u64;
-        let mut items: Vec<(&GroupKey, Hash)> = Vec::new();
-        for (h, k) in &keys {
-            if set.contains(h) && self.packs.chunks(h)?.is_none() && self.packs.size(h)? < thr {
-                items.push((k, *h));
+        let mut hs: Vec<Hash> = Vec::new();
+        for h in set {
+            if self.packs.is_leaf(h)? && self.packs.size(h)? < thr {
+                hs.push(*h);
             }
         }
-        items.sort();
+        hs.sort(); // deterministic
+        if hs.is_empty() {
+            return Ok(HashSet::new());
+        }
+        // Hints: the grouper's keys, ranked.
+        let mut ranked: Vec<(&GroupKey, Hash)> = keys.iter().map(|(h, k)| (k, *h)).collect();
+        ranked.sort();
+        let rank: HashMap<Hash, (String, u64)> = ranked
+            .iter()
+            .enumerate()
+            .map(|(i, (k, h))| (*h, (format!("{}\0{}", k.group, k.order), i as u64)))
+            .collect();
         let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 8);
+        // Features, in parallel (each object is read once here and once when framed).
+        let per = hs.len().div_ceil(workers);
+        type FeatList = Vec<(u64, Option<pico2peta_order::Features>)>;
+        let feats: Vec<Result<FeatList>> = std::thread::scope(|sc| {
+            let hsr = &hs;
+            let handles: Vec<_> = hsr
+                .chunks(per.max(1))
+                .map(|part| {
+                    sc.spawn(move || {
+                        part.iter()
+                            .map(|h| self.packs.get(h, None).map(|d| (d.len() as u64, features(&d))))
+                            .collect::<Result<Vec<_>>>()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap_or_else(|_| Err(Error::Corrupt("feature worker panicked".into()))))
+                .collect()
+        });
+        let mut items: Vec<Item> = Vec::with_capacity(hs.len());
+        for part in feats {
+            for (len, f) in part? {
+                items.push(Item { len, feats: f, hint: None });
+            }
+        }
+        for (it, h) in items.iter_mut().zip(&hs) {
+            it.hint = rank.get(h).map(|(key, pos)| Hint { key: key.clone(), pos: *pos });
+        }
+        let ord = order(&items, !rank.is_empty());
+        let cfg = FrameConfig { min: opts.frame_cap as u64, cap: opts.frame_cap as u64, ..FrameConfig::default() };
+        let plan = frames(&items, &ord, &cfg, &|_, _| false);
+        // Write frames in waves; each wave's frames are compressed in parallel
+        // (put_frame_ref compresses before taking the writer lock).
         let mut done = HashSet::new();
-        let mut wave: Vec<Vec<Vec<u8>>> = Vec::new();
-        let flush_wave = |wave: &mut Vec<Vec<Vec<u8>>>| -> Result<()> {
-            // Compress the frames of a wave in parallel (put_frame compresses before
-            // taking the writer lock), bounded at 2 frames per core in memory.
+        for wave in plan.chunks(workers * 2) {
             let results: Vec<Result<Vec<Hash>>> = std::thread::scope(|sc| {
-                let hs: Vec<_> = wave
+                let handles: Vec<_> = wave
                     .iter()
                     .map(|f| {
+                        let hsr = &hs;
                         sc.spawn(move || {
-                            let refs: Vec<&[u8]> = f.iter().map(|v| v.as_slice()).collect();
-                            self.packs.put_frame(&refs, opts.frame_level)
+                            let data: Vec<Vec<u8>> =
+                                f.members.iter().map(|&m| self.packs.get(&hsr[m], None)).collect::<Result<_>>()?;
+                            let refs: Vec<&[u8]> = data.iter().map(|v| v.as_slice()).collect();
+                            let reference = f.reference.map(|r| hsr[r]);
+                            self.packs.put_frame_ref(&refs, opts.frame_level, reference.as_ref())
                         })
                     })
                     .collect();
-                hs.into_iter()
+                handles
+                    .into_iter()
                     .map(|h| h.join().unwrap_or_else(|_| Err(Error::Corrupt("frame worker panicked".into()))))
                     .collect()
             });
-            wave.clear();
-            results.into_iter().try_for_each(|r| r.map(|_| ()))
-        };
-        let mut i = 0;
-        while i < items.len() {
-            let group = &items[i].0.group;
-            let mut frame: Vec<Vec<u8>> = Vec::new();
-            let mut bytes = 0usize;
-            while i < items.len() && &items[i].0.group == group {
-                let d = self.packs.get(&items[i].1, None)?;
-                if !frame.is_empty() && bytes + d.len() > opts.frame_cap {
-                    break;
-                }
-                bytes += d.len();
-                frame.push(d);
-                done.insert(items[i].1);
-                i += 1;
-            }
-            wave.push(frame);
-            if wave.len() >= workers * 2 {
-                flush_wave(&mut wave)?;
+            for r in results {
+                done.extend(r?);
             }
         }
-        flush_wave(&mut wave)?;
         Ok(done)
     }
 }

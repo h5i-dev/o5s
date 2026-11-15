@@ -1286,6 +1286,7 @@ version = "0.1.0"
 dependencies = [
  "pico2peta-chunk",
  "pico2peta-core",
+ "pico2peta-order",
  "pico2peta-pack",
  "pico2peta-refs",
  "serde",
