@@ -179,7 +179,101 @@ fn weights(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Deterministic code-like text (compresses roughly like source code, ratio ~0.3 at zstd-3).
+struct TextGen {
+    x: u64,
+    pending: Vec<u8>,
+    pos: usize,
+}
+impl Read for TextGen {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        const WORDS: &[&str] = &[
+            "fn", "let", "mut", "self", "return", "if", "else", "match", "for", "in", "while", "struct", "impl", "pub",
+            "use", "Result", "Option", "Some", "None", "Ok", "Err", "Vec", "String", "u64", "usize", "&", "->", "=>",
+            "{", "}", "(", ")", ";", ",", ".", "::", "+=", "==", "0", "1", "len", "buf", "data", "hash", "store",
+            "index", "offset", "write", "read", "chunk", "manifest", "repo", "name", "value",
+        ];
+        // Refill in large blocks and serve by offset (no per-read shifting).
+        if self.pos == self.pending.len() {
+            self.pending.clear();
+            self.pos = 0;
+            while self.pending.len() < (1 << 20) {
+                self.x ^= self.x << 13;
+                self.x ^= self.x >> 7;
+                self.x ^= self.x << 17;
+                let w = WORDS[(self.x % WORDS.len() as u64) as usize];
+                self.pending.extend_from_slice(w.as_bytes());
+                self.pending.push(if self.x.is_multiple_of(11) { b'\n' } else { b' ' });
+            }
+        }
+        let n = buf.len().min(self.pending.len() - self.pos);
+        buf[..n].copy_from_slice(&self.pending[self.pos..self.pos + n]);
+        self.pos += n;
+        Ok(n)
+    }
+}
+
+/// `p2p-bench stream <dir> <MiB>`: put_stream throughput only, on incompressible
+/// and code-like input (for profiling the put pipeline).
+fn stream(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
+    let total = (mib << 20) as u64;
+    // Inputs are generated once into files in tmpfs (P2P_BENCH_INPUTS, default
+    // /dev/shm) and streamed back, like a real `put` of a cached file: the
+    // source then costs about a memcpy, doesn't count toward peak RSS, and its
+    // writeback can't compete with the repo's writes.
+    let base = std::env::var("P2P_BENCH_INPUTS").unwrap_or_else(|_| "/dev/shm".into());
+    let inputs = std::path::Path::new(&base).join(format!("p2p-inputs-{}", std::process::id()));
+    std::fs::create_dir_all(&inputs)?;
+    let cfg = PackConfig {
+        compress_probe: std::env::var_os("P2P_BENCH_NO_PROBE").is_none(), // ablation
+        ..PackConfig::default()
+    };
+    println!("| input | put_stream {mib} MiB | re-put (dedup) | open+read (verified) |");
+    println!("|---|---|---|---|");
+    let only = std::env::var("P2P_BENCH_ONLY").ok(); // "random" or "text", for profiling
+    for (label, text) in [("incompressible", false), ("code-like text", true)] {
+        if only.as_deref().is_some_and(|o| o != if text { "text" } else { "random" }) {
+            continue;
+        }
+        let input = inputs.join(if text { "text" } else { "random" });
+        {
+            let mut g: Box<dyn Read> = if text {
+                Box::new(TextGen { x: 7, pending: Vec::new(), pos: 0 }.take(total))
+            } else {
+                Box::new(Gen(42).take(total))
+            };
+            std::io::copy(&mut g, &mut std::io::BufWriter::new(std::fs::File::create(&input)?))?;
+        }
+        let root = std::path::Path::new(dir).join(format!("stream-{}-{text}", std::process::id()));
+        let repo = LocalRepo::init(&root, &cfg)?;
+        let src = || std::fs::File::open(&input);
+        let t = Instant::now();
+        let h = repo.put_stream(&mut src()?)?;
+        repo.flush()?;
+        let put = total as f64 / t.elapsed().as_secs_f64() / 1e6;
+        let t = Instant::now();
+        repo.put_stream(&mut src()?)?;
+        let reput = total as f64 / t.elapsed().as_secs_f64() / 1e6;
+        let t = Instant::now();
+        let mut r = repo.open(&h, None)?;
+        let mut b = vec![0u8; 1 << 20];
+        while r.read(&mut b)? > 0 {}
+        let read = total as f64 / t.elapsed().as_secs_f64() / 1e6;
+        println!("| {label} | {put:.0} MB/s | {reput:.0} MB/s | {read:.0} MB/s |");
+        std::fs::remove_dir_all(&root)?;
+        std::fs::remove_file(&input)?;
+    }
+    std::fs::remove_dir_all(&inputs)?;
+    println!("\npeak RSS: {:.0} MB", hwm_mb());
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("stream") {
+        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench stream <dir> [MiB]")?;
+        let mib = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(1024);
+        return stream(&dir, mib);
+    }
     if std::env::args().nth(1).as_deref() == Some("weights") {
         let dir = std::env::args().nth(2).ok_or("usage: p2p-bench weights <scratch-dir> [MiB]")?;
         let mib = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(256);

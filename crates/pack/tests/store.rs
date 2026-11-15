@@ -637,3 +637,93 @@ fn bad_orphans_are_quarantined_and_missing_packs_skipped() {
     assert!(!s2.contains(&h).unwrap());
     assert_eq!(s2.orphan_indexes().unwrap().len(), 1);
 }
+
+/// A reader that yields `data` and then fails.
+struct FailAfter {
+    data: Vec<u8>,
+    pos: usize,
+}
+
+impl Read for FailAfter {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.pos == self.data.len() {
+            return Err(std::io::Error::other("source died"));
+        }
+        let n = buf.len().min(self.data.len() - self.pos).min(777);
+        buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+        self.pos += n;
+        Ok(n)
+    }
+}
+
+/// The put pipeline: a source that fails mid-stream fails the put (never a
+/// truncated object), and the store stays usable; a full multi-level stream
+/// still hashes and reads back exactly.
+#[test]
+fn put_stream_pipeline_errors_and_large_trees() {
+    let d = tempfile::tempdir().unwrap();
+    let s = open(d.path(), PackConfig::tiny());
+    let data = pseudo(300_000, 9);
+    let mut src = FailAfter { data: data.clone(), pos: 0 };
+    let err = s.put_stream(&mut src).unwrap_err();
+    assert!(matches!(err, Error::Io(_)), "{err:?}");
+    // The prefix that was read must not have become an object.
+    assert!(!s.contains(&Hash::of(&data)).unwrap());
+    // Several manifest levels (fanout 4, ~1000 chunks), interleaved with other writers.
+    let h = std::thread::scope(|sc| {
+        let t = sc.spawn(|| {
+            for i in 0..50u64 {
+                s.put(&pseudo(3000, 100 + i)).unwrap();
+            }
+        });
+        let h = s.put_stream(&mut &data[..]).unwrap();
+        t.join().unwrap();
+        h
+    });
+    assert_eq!(h, Hash::of(&data));
+    assert_eq!(s.get(&h, None).unwrap(), data);
+    assert_eq!(s.get(&h, Some(1234..250_001)).unwrap(), data[1234..250_001]);
+    s.flush().unwrap();
+    let s2 = open(d.path(), PackConfig::tiny());
+    assert_eq!(s2.get(&h, None).unwrap(), data);
+}
+
+/// The compressibility probe: incompressible chunks are stored raw without
+/// trying, compressible ones are still compressed, and the result is
+/// byte-identical in content either way.
+#[test]
+fn compressibility_probe_picks_raw_or_zstd() {
+    let cfg = |probe| PackConfig {
+        chunk_threshold: 1 << 20,
+        cdc_min: 16 << 10,
+        cdc_avg: 64 << 10,
+        cdc_max: 256 << 10,
+        pack_cap: 64 << 20,
+        zstd_level: 3,
+        manifest_fanout: 64,
+        compress_probe: probe,
+    };
+    let text: Vec<u8> = (0..4_000_000u32).map(|i| b"fn main() { let x = 42; }\n"[(i % 26) as usize]).collect();
+    // Random head, zeros after: the probe sees only the head and stores raw;
+    // that's the documented trade-off of sampling.
+    let mut tricky = pseudo(4096, 3);
+    tricky.resize(20_000, 0);
+    let rand = pseudo(4_000_000, 7);
+    let mut sizes = Vec::new();
+    for probe in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let s = open(d.path(), cfg(probe));
+        let ht = s.put_stream(&mut &text[..]).unwrap();
+        let hr = s.put_stream(&mut &rand[..]).unwrap();
+        let hk = s.put(&tricky).unwrap();
+        s.flush().unwrap();
+        for (h, v) in [(ht, &text), (hr, &rand), (hk, &tricky)] {
+            assert_eq!(&s.get(&h, None).unwrap(), v);
+        }
+        sizes.push(dir_bytes(&d.path().join("objects")));
+    }
+    // Text compresses either way; random data is ~raw either way; only the
+    // tricky 20 KB object differs (raw with the probe).
+    assert!(sizes[0] < 4_000_000 + 4_000_000 / 10, "{sizes:?}");
+    assert!(sizes[0] > sizes[1] && sizes[0] - sizes[1] < 20_000, "{sizes:?}");
+}

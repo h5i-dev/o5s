@@ -87,6 +87,13 @@ pub struct PackSection {
     /// Added after format 1 shipped; defaults keep old configs readable.
     #[serde(default = "default_fanout")]
     pub manifest_fanout: usize,
+    /// See [`PackConfig::compress_probe`] (optional; default on).
+    #[serde(default = "default_true")]
+    pub compress_probe: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_fanout() -> usize {
@@ -103,6 +110,7 @@ impl From<&PackConfig> for PackSection {
             pack_cap: c.pack_cap,
             zstd_level: c.zstd_level,
             manifest_fanout: c.manifest_fanout,
+            compress_probe: c.compress_probe,
         }
     }
 }
@@ -117,6 +125,7 @@ impl From<&PackSection> for PackConfig {
             pack_cap: c.pack_cap,
             zstd_level: c.zstd_level,
             manifest_fanout: c.manifest_fanout,
+            compress_probe: c.compress_probe,
         }
     }
 }

@@ -63,6 +63,10 @@ pub struct PackConfig {
     /// Maximum entries per manifest node. Larger objects get a tree of
     /// manifests, so no manifest grows without bound.
     pub manifest_fanout: usize,
+    /// Before compressing a record of at least 8 KiB, try zstd-1 on its first
+    /// 4 KiB. If that saves less than 3%, store the record raw and skip the full
+    /// compression. Deterministic; affects only the codec, never identity.
+    pub compress_probe: bool,
 }
 
 impl Default for PackConfig {
@@ -75,6 +79,7 @@ impl Default for PackConfig {
             pack_cap: 256 << 20,
             zstd_level: 3,
             manifest_fanout: DEFAULT_MANIFEST_FANOUT,
+            compress_probe: true,
         }
     }
 }
@@ -90,6 +95,7 @@ impl PackConfig {
             pack_cap: 16 << 10,
             zstd_level: 1,
             manifest_fanout: 4,
+            compress_probe: true,
         }
     }
 
@@ -271,6 +277,9 @@ struct OpenPack {
     generation: u64,
     len: u64,
     entries: Vec<IdxEntry>,
+    /// BLAKE3 of bytes `[0, len)`, updated on every append (appends are serialized
+    /// and contiguous), so sealing needn't read the pack back.
+    hasher: blake3::Hasher,
 }
 
 struct Inner {
@@ -311,19 +320,42 @@ impl Inner {
 
     /// Seals a fully written, locked staging file: fsync, upload pack, upload
     /// index, unlink. Idempotent and crash-safe at every step.
-    fn seal_file(&self, path: &Path, f: &File, len: u64, mut entries: Vec<IdxEntry>) -> Result<String> {
+    fn seal_file(&self, path: &Path, f: &File, len: u64, entries: Vec<IdxEntry>) -> Result<String> {
+        self.seal_file_named(path, f, len, entries, None)
+    }
+
+    /// Like `seal_file`. `name` is the pack's BLAKE3 if the caller already
+    /// computed it incrementally while appending; otherwise the file is read back.
+    fn seal_file_named(
+        &self,
+        path: &Path,
+        f: &File,
+        len: u64,
+        mut entries: Vec<IdxEntry>,
+        name: Option<String>,
+    ) -> Result<String> {
+        // Drop anything past the last complete record (e.g. a write that failed
+        // halfway), so the published file is exactly the hashed bytes.
+        if f.metadata()?.len() > len {
+            f.set_len(len)?;
+        }
         self.fault("seal.fsync")?;
         f.sync_all()?;
-        let mut hasher = blake3::Hasher::new();
-        let mut buf = vec![0u8; 1 << 20];
-        let mut off = 0u64;
-        while off < len {
-            let n = buf.len().min((len - off) as usize);
-            f.read_exact_at(&mut buf[..n], off)?;
-            hasher.update(&buf[..n]);
-            off += n as u64;
-        }
-        let name = hasher.finalize().to_hex().to_string();
+        let name = match name {
+            Some(n) => n,
+            None => {
+                let mut hasher = blake3::Hasher::new();
+                let mut buf = vec![0u8; 1 << 20];
+                let mut off = 0u64;
+                while off < len {
+                    let n = buf.len().min((len - off) as usize);
+                    f.read_exact_at(&mut buf[..n], off)?;
+                    hasher.update(&buf[..n]);
+                    off += n as u64;
+                }
+                hasher.finalize().to_hex().to_string()
+            }
+        };
         // Each step is skipped if an earlier attempt already did it, so a seal
         // that failed halfway can be retried (even after the staging file is gone).
         let pack_key = format!("packs/{name}.pack");
@@ -857,11 +889,14 @@ impl PackStore {
         let nonce = blake3::hash(format!("{id}-{}-{:?}", std::process::id(), std::time::SystemTime::now()).as_bytes());
         header.extend_from_slice(&nonce.as_bytes()[..16]);
         f.write_all(&header)?;
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&header);
         // Rename while holding the lock. Recovery only considers `*.pack`,
         // so a staging file is never adopted before its lock is held.
         fs::rename(&tmp, &path)?;
         fsync_dir(&self.inner.staging_dir)?;
         Ok(OpenPack {
+            hasher,
             file: Arc::new(f),
             path,
             generation: self.inner.generation.fetch_add(1, Ordering::Relaxed),
@@ -872,7 +907,7 @@ impl PackStore {
 
     /// Compresses (if useful) and appends one record to the open pack.
     fn append(&self, w: &mut Option<OpenPack>, kind: Kind, hash: Hash, raw_len: u64, raw: &[u8]) -> Result<()> {
-        let compressed = compress(self.inner.cfg.zstd_level, raw);
+        let compressed = compress_with_probe(self.inner.cfg.zstd_level, self.inner.cfg.compress_probe, raw);
         let (codec, payload): (Codec, &[u8]) = match &compressed {
             Some(c) => (Codec::Zstd, c),
             None => (Codec::Raw, raw),
@@ -891,6 +926,20 @@ impl PackStore {
         payload: &[u8],
     ) -> Result<()> {
         let rec = encode_record(kind, codec, &hash, raw_len, payload);
+        self.append_record(w, kind, hash, raw_len, codec, &rec)
+    }
+
+    /// Appends a record already built by [`encode_record`] (so its encoding and
+    /// CRC can be computed off the writer lock).
+    fn append_record(
+        &self,
+        w: &mut Option<OpenPack>,
+        kind: Kind,
+        hash: Hash,
+        raw_len: u64,
+        codec: Codec,
+        rec: &[u8],
+    ) -> Result<()> {
         if w.is_none() {
             *w = Some(self.new_open_pack()?);
         }
@@ -901,9 +950,10 @@ impl PackStore {
             let _ = op.file.write_all_at(&rec[..rec.len() / 2], offset);
             return Err(e.into());
         }
-        op.file.write_all_at(&rec, offset)?;
+        op.file.write_all_at(rec, offset)?;
+        op.hasher.update(rec);
         op.len += rec.len() as u64;
-        let stored_len = payload.len() as u32;
+        let stored_len = (rec.len() - REC_HEADER - REC_TRAILER) as u32;
         op.entries.push(IdxEntry { hash, offset, stored_len, raw_len, kind, codec, frame: None });
         let loc = Loc { pack: PackRef::Open(op.generation), offset, stored_len, raw_len, kind, frame: None };
         insert_loc(&mut *self.inner.index.write().map_err(poisoned)?, hash, loc);
@@ -922,11 +972,12 @@ impl PackStore {
     }
 
     fn seal_one(&self, op: OpenPack, w: &mut Option<OpenPack>, was_pending: bool) -> Result<()> {
-        let OpenPack { file, path, generation, len, entries } = op;
-        let name = match self.inner.seal_file(&path, &file, len, entries.clone()) {
+        let OpenPack { file, path, generation, len, entries, hasher } = op;
+        let known = hasher.finalize().to_hex().to_string();
+        let name = match self.inner.seal_file_named(&path, &file, len, entries.clone(), Some(known)) {
             Ok(n) => n,
             Err(e) => {
-                let op = OpenPack { file, path, generation, len, entries };
+                let op = OpenPack { file, path, generation, len, entries, hasher };
                 // If the pack is already published (on local disk it's a hard link to this
                 // very file), the file must never be appended to again: freeze it in the
                 // pending list (still readable, retried on the next flush) and let new
@@ -1144,40 +1195,127 @@ impl PackStore {
         // A tree of manifests. Every node is the manifest of a contiguous range
         // of the object and is keyed by the BLAKE3 of that range, so every
         // index key is still the content hash of what `get` returns for it.
-        let fanout = self.inner.cfg.manifest_fanout;
-        let mut whole = blake3::Hasher::new();
-        let mut levels: Vec<Level> = vec![Level { hasher: blake3::Hasher::new(), entries: Vec::new(), len: 0 }];
-        let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 8);
+        //
+        // Streaming pipeline: this thread runs the chunker; workers hash each
+        // chunk, check dedup and compress; one committer takes results in
+        // chunk order, hashes the object and its tree nodes, and appends. A
+        // credit channel bounds how far the chunker can run ahead of the
+        // committer (memory: at most `credits` chunks in flight).
+        use std::sync::mpsc;
+        let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).saturating_sub(1).clamp(1, 8);
+        let credits = PIPELINE_CREDITS_PER_WORKER * workers;
         let level = self.inner.cfg.zstd_level;
-        let mut chunks = chunks.peekable();
-        while chunks.peek().is_some() {
-            // Read a batch, then hash and compress its chunks in parallel.
-            let mut batch: Vec<Vec<u8>> = Vec::with_capacity(CHUNK_BATCH);
-            while batch.len() < CHUNK_BATCH {
-                match chunks.next() {
-                    Some(c) => batch.push(c?),
-                    None => break,
-                }
-            }
-            let mut enc: Vec<(Hash, Option<Vec<u8>>)> = vec![(Hash([0; 32]), None); batch.len()];
-            let per = batch.len().div_ceil(workers);
-            std::thread::scope(|sc| {
-                for (bs, es) in batch.chunks(per.max(1)).zip(enc.chunks_mut(per.max(1))) {
-                    sc.spawn(move || {
-                        for (b, e) in bs.iter().zip(es.iter_mut()) {
-                            let h = Hash::of(b);
-                            // Skip compressing chunks we already have (dedup).
-                            let known = matches!(self.lookup_local(&h), Ok(Some(_)));
-                            *e = (h, if known { None } else { compress(level, b) });
-                        }
-                    });
-                }
-            });
-            for (c, (ch, z)) in batch.iter().zip(enc) {
-                self.add_chunk(c, ch, z, &mut whole, &mut levels, fanout)?;
-            }
+        let probe = self.inner.cfg.compress_probe;
+        let fanout = self.inner.cfg.manifest_fanout;
+        type Chunk = Arc<Vec<u8>>;
+        let (work_tx, work_rx) = mpsc::sync_channel::<(u64, Chunk)>(credits);
+        let work_rx = Mutex::new(work_rx);
+        let (done_tx, done_rx) = mpsc::channel::<Result<(u64, Encoded)>>();
+        let (whole_tx, whole_rx) = mpsc::sync_channel::<Chunk>(credits);
+        let (snap_tx, snap_rx) = mpsc::channel::<Hash>();
+        let (credit_tx, credit_rx) = mpsc::sync_channel::<()>(credits);
+        for _ in 0..credits {
+            let _ = credit_tx.send(());
         }
-        let hash = Hash(*whole.finalize().as_bytes());
+        let (fed, whole, tree) = std::thread::scope(|sc| {
+            for _ in 0..workers {
+                let done_tx = done_tx.clone();
+                let work_rx = &work_rx;
+                sc.spawn(move || {
+                    loop {
+                        let next = match work_rx.lock() {
+                            Ok(rx) => rx.recv(),
+                            Err(_) => return,
+                        };
+                        let Ok((seq, c)) = next else { return };
+                        let hash = Hash::of(&c);
+                        // Skip encoding chunks we already have (dedup); the
+                        // committer re-checks before appending.
+                        let r = self.lookup_local(&hash).map(|known| {
+                            let rec = known.is_none().then(|| match compress_with_probe(level, probe, &c) {
+                                Some(z) => {
+                                    (Codec::Zstd, encode_record(Kind::Blob, Codec::Zstd, &hash, c.len() as u64, &z))
+                                }
+                                None => (Codec::Raw, encode_record(Kind::Blob, Codec::Raw, &hash, c.len() as u64, &c)),
+                            });
+                            (seq, Encoded { data: c, hash, rec })
+                        });
+                        let failed = r.is_err();
+                        if done_tx.send(r).is_err() || failed {
+                            return;
+                        }
+                    }
+                });
+            }
+            drop(done_tx);
+            // The whole-object hash runs on its own thread, in chunk order. The
+            // tree needs it mid-stream only when the top level fills, i.e. after
+            // exactly fanout^k chunks; it publishes those snapshots.
+            let whole = sc.spawn(move || {
+                let mut h = blake3::Hasher::new();
+                let (mut n, mut next_snap) = (0u64, fanout as u64);
+                for c in whole_rx {
+                    h.update(&c);
+                    n += 1;
+                    if n == next_snap {
+                        let _ = snap_tx.send(Hash(*h.finalize().as_bytes()));
+                        next_snap = next_snap.saturating_mul(fanout as u64);
+                    }
+                }
+                h
+            });
+            let committer = sc.spawn(move || -> Result<Vec<Level>> {
+                let mut levels: Vec<Level> = vec![Level { hasher: blake3::Hasher::new(), entries: Vec::new(), len: 0 }];
+                let mut top_hash =
+                    || snap_rx.recv().map_err(|_| Error::Corrupt("put pipeline: hasher ended early".into()));
+                let mut pending = std::collections::BTreeMap::new();
+                let mut next = 0u64;
+                for r in done_rx {
+                    let (seq, e) = r?;
+                    pending.insert(seq, e);
+                    while let Some(e) = pending.remove(&next) {
+                        self.add_chunk(e, &mut levels, fanout, &mut top_hash)?;
+                        next += 1;
+                        let _ = credit_tx.send(());
+                    }
+                }
+                if !pending.is_empty() {
+                    return Err(Error::Corrupt("put pipeline: chunk results out of sequence".into()));
+                }
+                Ok(levels)
+            });
+            // Feed the chunker's output. Stops early if the committer failed
+            // (its credit sender is gone).
+            let mut fed: Result<()> = Ok(());
+            for (seq, c) in (0u64..).zip(chunks) {
+                match c {
+                    Ok(c) => {
+                        let c = Arc::new(c);
+                        if credit_rx.recv().is_err()
+                            || whole_tx.send(c.clone()).is_err()
+                            || work_tx.send((seq, c)).is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        fed = Err(e);
+                        break;
+                    }
+                }
+            }
+            drop(work_tx);
+            drop(whole_tx);
+            drop(credit_rx);
+            let panicked = || Error::Corrupt("put pipeline: thread panicked".into());
+            let tree = committer.join().unwrap_or_else(|_| Err(panicked()));
+            let whole = whole.join().map_err(|_| panicked());
+            (fed, whole, tree)
+        });
+        // A chunker error wins: the committer may have seen a clean (truncated) end.
+        fed?;
+        let mut levels = tree?;
+        let hash = Hash(*whole?.finalize().as_bytes());
         // Close partial nodes below the top.
         let top = levels.len() - 1;
         for i in 0..top {
@@ -1200,40 +1338,48 @@ impl PackStore {
         Ok(hash)
     }
 
-    /// Adds one chunk (already hashed and maybe compressed) to the tree.
+    /// Adds one chunk (hashed, and encoded unless already known) to the tree.
+    ///
+    /// The top level's open node always starts at offset 0, so its hash is the
+    /// whole-object hash so far, which `top_hash` supplies when the top fills.
+    /// Only the levels below the top keep their own hashers (for objects under
+    /// `fanout` chunks, none at all).
     fn add_chunk(
         &self,
-        c: &[u8],
-        ch: Hash,
-        z: Option<Vec<u8>>,
-        whole: &mut blake3::Hasher,
+        e: Encoded,
         levels: &mut Vec<Level>,
         fanout: usize,
+        top_hash: &mut dyn FnMut() -> Result<Hash>,
     ) -> Result<()> {
-        whole.update(c);
-        for l in levels.iter_mut() {
+        let c = &e.data[..];
+        let top = levels.len() - 1;
+        for l in levels[..top].iter_mut() {
             l.hasher.update(c);
         }
-        if !self.dedup_hit(&ch)? {
+        if !self.dedup_hit(&e.hash)? {
             let mut w = self.inner.writer.lock().map_err(poisoned)?;
-            match &z {
-                Some(z) => self.append_encoded(&mut w, Kind::Blob, ch, c.len() as u64, Codec::Zstd, z)?,
-                None => self.append_encoded(&mut w, Kind::Blob, ch, c.len() as u64, Codec::Raw, c)?,
+            match &e.rec {
+                Some((codec, rec)) => self.append_record(&mut w, Kind::Blob, e.hash, c.len() as u64, *codec, rec)?,
+                None => self.append(&mut w, Kind::Blob, e.hash, c.len() as u64, c)?,
             }
             self.maybe_seal(&mut w)?;
         }
-        levels[0].entries.push((ch, c.len() as u64));
+        levels[0].entries.push((e.hash, c.len() as u64));
         levels[0].len += c.len() as u64;
         // Carry full nodes upward.
         let mut i = 0;
         while levels[i].entries.len() == fanout {
-            if i + 1 == levels.len() {
-                // The new parent's first node so far is exactly this node's bytes.
-                let h = levels[i].hasher.clone();
-                levels.push(Level { hasher: h, entries: Vec::new(), len: 0 });
-            }
-            let lv = &mut levels[i];
-            let node = self.emit_node(&mut lv.hasher, &mut lv.entries, &mut lv.len)?;
+            let node = if i + 1 == levels.len() {
+                // Level i was the top: its node is the object so far. A new top
+                // starts above it, and level i gets its own (fresh) hasher.
+                levels.push(Level { hasher: blake3::Hasher::new(), entries: Vec::new(), len: 0 });
+                let h = top_hash()?;
+                let lv = &mut levels[i];
+                self.write_node(h, &mut lv.entries, &mut lv.len)?
+            } else {
+                let lv = &mut levels[i];
+                self.emit_node(&mut lv.hasher, &mut lv.entries, &mut lv.len)?
+            };
             levels[i + 1].entries.push(node);
             levels[i + 1].len += node.1;
             i += 1;
@@ -1249,13 +1395,18 @@ impl PackStore {
         len: &mut u64,
     ) -> Result<(Hash, u64)> {
         let h = Hash(*hasher.finalize().as_bytes());
+        *hasher = blake3::Hasher::new();
+        self.write_node(h, entries, len)
+    }
+
+    /// Writes one interior manifest node with a known hash and resets the level.
+    fn write_node(&self, h: Hash, entries: &mut Vec<(Hash, u64)>, len: &mut u64) -> Result<(Hash, u64)> {
         let l = *len;
         if !self.dedup_hit(&h)? {
             let mut w = self.inner.writer.lock().map_err(poisoned)?;
             self.append(&mut w, Kind::Manifest, h, l, &encode_manifest(entries))?;
             self.maybe_seal(&mut w)?;
         }
-        *hasher = blake3::Hasher::new();
         entries.clear();
         *len = 0;
         Ok((h, l))
@@ -1457,6 +1608,7 @@ impl PackStore {
         let offset = op.len;
         self.inner.faults.hit("copy.write")?;
         op.file.write_all_at(&raw, offset)?;
+        op.hasher.update(&raw);
         op.len += raw.len() as u64;
         op.entries.push(IdxEntry {
             hash: h.hash,
@@ -1501,6 +1653,7 @@ impl PackStore {
             return Err(e.into());
         }
         op.file.write_all_at(&rec, offset)?;
+        op.hasher.update(&rec);
         op.len += rec.len() as u64;
         let stored_len = payload.len() as u32;
         let mut dir = Vec::with_capacity(members.len());
@@ -1775,13 +1928,35 @@ struct Level {
     len: u64,
 }
 
+/// One chunk out of a `put_chunks` worker: its bytes, hash and, unless it was
+/// already stored, its encoded record.
+struct Encoded {
+    data: Arc<Vec<u8>>,
+    hash: Hash,
+    rec: Option<(Codec, Vec<u8>)>,
+}
+
 /// zstd-compresses `raw` at `level`, or returns `None` when that doesn't help (or level 0).
-fn compress(level: i32, raw: &[u8]) -> Option<Vec<u8>> {
-    if level != 0 && raw.len() >= 64 {
-        zstd::bulk::compress(raw, level).ok().filter(|c| c.len() < raw.len())
-    } else {
-        None
+/// Minimum record size at which the compressibility probe runs.
+const PROBE_MIN: usize = 8 << 10;
+/// Probe sample size.
+const PROBE_SAMPLE: usize = 4 << 10;
+
+/// zstd at `level`, or `None` (store raw) if it doesn't help. With `probe`,
+/// records of at least `PROBE_MIN` bytes whose first 4 KiB shrink by less than 3%
+/// under zstd-1 are stored raw without running the full compression.
+fn compress_with_probe(level: i32, probe: bool, raw: &[u8]) -> Option<Vec<u8>> {
+    if level == 0 || raw.len() < 64 {
+        return None;
     }
+    if probe && raw.len() >= PROBE_MIN {
+        let sample = &raw[..PROBE_SAMPLE];
+        let small = zstd::bulk::compress(sample, 1).ok()?;
+        if small.len() * 100 >= sample.len() * 97 {
+            return None;
+        }
+    }
+    zstd::bulk::compress(raw, level).ok().filter(|c| c.len() < raw.len())
 }
 
 /// Maximum length of a delta chain followed on reads.
@@ -1869,8 +2044,8 @@ impl Read for XorReader {
     }
 }
 
-/// Chunks hashed and compressed in parallel per batch in `put_chunks`.
-const CHUNK_BATCH: usize = 64;
+/// Chunks the `put_chunks` pipeline may hold in flight, per worker.
+const PIPELINE_CREDITS_PER_WORKER: usize = 8;
 
 /// Converts the `io::Error` wrapping of a core error back into it.
 fn unwrap_io(e: std::io::Error) -> Error {
