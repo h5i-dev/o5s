@@ -497,5 +497,6 @@ Options:
       --unsafe-short-grace    Allow a grace period under 10 minutes. Only safe with no active writers
       --dry-run               Report what would happen without changing anything
       --no-similarity-repack  Copy live records verbatim instead of laying them out by content similarity (the default, also settable with `[gc] similarity_repack`)
+      --repack-all            Repack every pack, even fully live ones (recompresses records written at a fast ingest level, e.g. `init --zstd-level 1`, into similarity frames)
   -h, --help                  Print help
 ```

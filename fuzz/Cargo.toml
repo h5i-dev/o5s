@@ -155,3 +155,10 @@ path = "fuzz_targets/delta_config.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "search_index"
+path = "fuzz_targets/search_index.rs"
+test = false
+doc = false
+bench = false

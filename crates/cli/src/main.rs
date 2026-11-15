@@ -214,6 +214,10 @@ enum Cmd {
         /// similarity (the default, also settable with `[gc] similarity_repack`).
         #[arg(long)]
         no_similarity_repack: bool,
+        /// Repack every pack, even fully live ones (recompresses records written
+        /// at a fast ingest level, e.g. `init --zstd-level 1`, into similarity frames).
+        #[arg(long)]
+        repack_all: bool,
     },
 }
 
@@ -794,7 +798,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 }
             }
         }
-        Cmd::Gc { grace, unsafe_short_grace, dry_run, no_similarity_repack } => {
+        Cmd::Gc { grace, unsafe_short_grace, dry_run, no_similarity_repack, repack_all } => {
             let repo = local_only("gc is only available for local repositories (run it on the server host)")?;
             let base = repo.gc_options();
             let opts = pico2peta_repo::GcOptions {
@@ -802,6 +806,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 allow_short_grace: unsafe_short_grace,
                 dry_run,
                 similarity_repack: base.similarity_repack && !no_similarity_repack,
+                repack_all,
                 ..base
             };
             // Provenance records keep their inputs alive (but not their outputs).

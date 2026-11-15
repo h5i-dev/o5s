@@ -14,6 +14,63 @@ Other modes: `p2p-bench stream <dir> [MiB]` (put_stream only; `P2P_BENCH_NO_PROB
 
 Comparisons against Git storage size are in `docs/EXP1.md` (Experiment 1).
 
+## 2026-11-15: put/get pass for the fronts (human priority), part 1: small-object ingest
+
+**Workload.** The empty-store git push from net's repro: redis heads and tags, 274,683 objects, 9.0 GB of
+canonical object bytes; the real `git push` into a fresh `pico2peta-server`. Under the bench lock, load 2–4 from
+other users. git daemon: 11–12 s (net's measurement).
+
+**Profile (before).** 39.1–41.0 s per push (3 runs; `perf record -e cpu-clock:u`, no call graphs at
+`perf_event_paranoid=2`):
+- **97 % of samples are on one thread**: the request thread calls `repo.put` once per object.
+- zstd compression is about 52 % of all samples (`ZSTD_compressBlock_doubleFast` 35 %, sequence encoding 8 %).
+- The git front's own parsing is the rest: zlib inflate 18 %, SHA-1 6 %, BLAKE3 4 %, memmove 5 %.
+- The per-object compressibility probe is 0.3 %, so skipping it for tiny objects would gain nothing. Not changed.
+
+**Change (core, API v1.19): `ObjectStore::put_many`.**
+- Items are hashed, dedup-checked under one index read lock, and compressed on up to 4 threads (an atomic
+  work counter, so uneven sizes balance).
+- They are then appended in order in one writer-lock pass. Duplicates within a batch are stored once.
+- Batches under 256 KiB stay on the calling thread.
+
+| ingest of 1 GiB of real redis objects (44,911 objects, `p2p-bench ingest`) | time | MB/s | objects/s | load |
+|---|---|---|---|---|
+| `put` per object (before) | 8.18 s | 131 | 5,492 | 3.4 |
+| `put_many`, 64 MiB batches | 4.13 s | **260 (2.0×)** | 10,868 | 3.6 |
+
+**End to end (measurement only).** The git front is net's code, so these call-site changes stay local and
+uncommitted; net takes them over. Same push, same host:
+
+| git push, redis, empty store | push s (runs) |
+|---|---|
+| before | 39.7, 39.1, 41.0 |
+| `put_many` in 64 MiB batches at the call site | 23.5, 23.6 (**1.68×**) |
+| plus a second thread storing 8 MiB batches while the request thread re-resolves | 21.7, 21.8 |
+
+**Where the time goes now** (per-second sample counts of the 21.7 s variant):
+- **0–10 s:** the request thread alone parses the pack (inflate, delta resolution, SHA-1) at about 0.85 core.
+  Nothing else runs.
+- **11–22 s:** the core compresses at about 2 cores while the request thread mostly waits.
+- The two phases do not overlap. The remaining levers are front-side: parallel pack parsing (as `git
+  index-pack` threads it), or starting storage while parsing. Both are handed to net.
+
+**Ingest zstd level** (the same 1 GiB; single-thread compression, then `put_many` and a full similarity
+repack, `gc` with `repack_all`, zero grace):
+
+| zstd level | compress MB/s (1 core) | stored / raw | `put_many` s (3 runs) | stored after ingest | after full repack |
+|---|---|---|---|---|---|
+| −1 | 269–311 | 0.332 | | | |
+| 1 | 268–292 | 0.283 | 2.80, 2.57, 2.53 | 309.6 MB | 22.1 MB |
+| 2 | 218–263 | 0.276 | | | |
+| 3 (default) | 168–222 | 0.266 | 2.93, 3.06, 2.62 | 291.3 MB | 22.1 MB |
+
+- Level 1 is about 12 % faster end to end in `put_many` (median of 3) for +6.3 % bytes until GC. A full
+  similarity repack erases the difference (level-19 frames).
+- A *normal* GC doesn't rewrite fully live packs, so the default stays 3.
+- The opt-in recipe is `init --zstd-level 1` plus a periodic `gc --repack-all` (new in the CLI). Making it the
+  default is a question for the human (PROGRESS.md).
+- Level −1 is not faster than 1 on these objects.
+
 ## 2026-11-15: scale tests (PLAN §6.7), window 1
 
 `p2p-bench scale`, local NVMe, under the bench lock, load 1.9–2.5, 64-byte distinct objects, `flush` every 10⁵.

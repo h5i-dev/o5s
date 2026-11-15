@@ -24,7 +24,7 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
 | Generic front (§6.4) | **harness written** (`p2p-bench generic`), not yet run at the pre-registered 1 GiB. The 64 MiB smoke run suggests storage passes (1.06× / 1.16× one copy), while the verified-read ratio may fail (see Questions). |
 | Perf pass (a)–(e) | (a) put is CPU-bound by host contention (schedstat), no change; (b) verified read 870 → 1,880 MB/s; (c) 1 KiB put 75k → 129k/s, get 97k → 286k/s; (d) group commit 1.76× at 4 threads, 2.04× at 8; (e) net (clone wire bytes 0.98× git-daemon in their smoke run). Plus: frame prefix decoding and a per-thread zstd decompression context (net's profile). |
 | Chunk-anchored XOR deltas | **done** (v1.16): generic derived objects for edits and insertions. |
-| P5 cross-domain (ROADMAP item 3) | **in progress.** Done:
+| P5 cross-domain (ROADMAP item 3) | **done** (core; net added the server endpoints, and the CLI's `--remote` uses them):
   - **attestations and promotion** (`crates/attest`: in-toto Statement v1 in DSSE envelopes, Ed25519 behind `Signer`/`Verifier` traits, stored as provenance records; `promote(src → dst, policy)` as one OCC transaction with required signatures and provenance, audited as a `promote` record);
   - **search** (`pico2peta_prov::search`: exact, prefix and full text over names and metadata, incremental from the append-only log);
   - **retention** (`keep_versions` / `only_if_regenerable` per profile, `pico2peta_prov::retention::apply`, rules respected, dry run exact);
@@ -33,6 +33,8 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
   - **cross-domain provenance by name** (`lineage_named` / `impact_named`, tested on a git → pypi → oci → hf chain) and the CLI commands `search`, `lineage`, `impact` and `retention [--dry-run]` (`init --profile ...,keep_versions:N`).
 
   **Item 3 is done on the core side.** Server endpoints for promote, attest and search are net's ROADMAP item 3. |
+| Scale (ROADMAP item 4) | **in progress.** Window 1 (10⁶–10⁷ objects, 10⁶–10⁷ names, GC at 10⁷, provenance at 10⁶) is recorded in BENCH.md: every target met except RSS per object (110 B vs 64 B at 10⁷, mostly mapped index pages). Two bottlenecks fixed (quadratic `replace_many`, idmap ranged lookups). Next: the 10⁸-object window with the RssAnon/RssFile split. |
+| Security review, core (ROADMAP item 6) | **in progress.** Notes and fixed findings: `docs/SECURITY.md` (bounded manifest/delta decoding, envelope size checked before the read, fd-cache deleted-pack check, group-commit deadlock). New fuzz targets (`frames`, `attestations`, `provenance`, `delta_config`, `search_index`) ran clean: FUZZRESULTS. |
 
 **Speed-up work (`docs/RESEARCH_SPEEDUP.md`, from the human; split with net on 2026-11-15)**
 - **§1 (core): done.** Streaming put pipeline, compressibility probe, incremental pack hash. On tmpfs (CPU-bound), incompressible `put_stream` went from 331 to **739 MB/s** (2.2×; median of 5 interleaved reps on a loaded host, load 2.9–5.2), text from 228 to 328 MB/s, dedup re-put from ~630 to ~900 MB/s. On NVMe, incompressible stays at the device's ~200 MB/s fsync ceiling. **§1a's ≥ 800 MB/s target was not met** (best run 791 MB/s); text is compression-bound in the workers. The probe gave no measurable gain (zstd already bails out fast on random data). Details, profiles and the ablation: `docs/BENCH.md`.
@@ -76,7 +78,7 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
 | milestone | state | where |
 |---|---|---|
 | M0 Plan | done; Exp1 thresholds frozen | `docs/PLAN.md` |
-| M1 Core API | done; v1.18 now, all additive since v1 (see API changes) | `crates/core` |
+| M1 Core API | done; v1.19 now, all additive since v1 (see API changes) | `crates/core` |
 | M2 Pack store | done | `crates/pack` |
 | M3 Ref store | done: local journal engine plus a multi-host log engine on any Backend | `crates/refs` |
 | M4 Local repo + CLI | done; local and `--remote` | `crates/repo`, `crates/cli` |
@@ -159,6 +161,7 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
   - **`GcOptions::frame_cap` default:** 4 → 6 MiB.
 - **v1.16 (2026-11-15), additive:** `PatchFormat::XorAnchored` and `PackStore::put_delta_anchored(base, src, opts)`, a derived object whose XOR alignment is discovered while streaming. FastCDC chunks of the new content that also occur in the base anchor the alignment at their base offset; other chunks keep the last anchor's shift. When the base has no stored chunks (a delta, a frame member), its content is chunked first. It handles in-place edits and insertions or deletions alike, without knowing the format, and is stored as an ordinary `Delta` record with explicit segments (the read path is unchanged). **Behaviour change:** a profile with `derive = "previous"` now uses it (before: offset-aligned XOR); the `safetensors` front still passes explicit tensor segments. The `ObjectStore` default falls back to `put_delta`.
 - **v1.17 (2026-11-15), additive:** `ReadVerify { Strict (default), Eof }` and `ObjectStore::open_verified(hash, range, mode)` (default: `open`); repo `[read] verify` / `allow_eof` (`ReadSection`), `LocalRepo::read_policy()`; `LocalRepo::open` follows `[read] verify`. `RepoConfig` gained a `read` field; it now implements `Default`, so prefer `RepoConfig { .., ..Default::default() }` to full literals. **For net:** the server can pass a per-request mode with `open_verified`. `LocalRepo` already refuses `eof` unless the repository enables it, so a server default of strict needs no extra logic.
+- **v1.19 (2026-11-15), additive:** `ObjectStore::put_many(&[&[u8]]) -> Vec<Hash>` (default: one `put` per item; `PackStore`, `LocalRepo` and `FrontHandle` batch: parallel hash/compress, one writer-lock pass). CLI `gc --repack-all`.
 - **v1.18 (2026-11-15), additive:** new crate `pico2peta-attest` (Statement, Envelope, Signer/Verifier, Ed25519, `attest`, `attestations`, `promote` with `Policy`/`PromoteOutcome`); `pico2peta_prov::search` (`SearchIndex`, `attach_meta`, `lineage_named`, `impact_named`) and `pico2peta_prov::retention` (`apply`, `version_cmp`); `Profile::{keep_versions, only_if_regenerable}`; `LocalRepo::namespace_profiles`; `RefState::rules_allow_delete`. CLI: `search`, `lineage`, `impact`, `retention`.
 
 ## Production gaps
@@ -192,3 +195,4 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
 - **Disk budget:** `/mnt/scratch` has much less headroom than the ~31 GB in AGENT_TASK.md (24 GB → 13 GB → 0 during this session, partly from other directories). Could you free or extend space, or say which of these may be deleted: the Exp1 mirrors and spill (`bench-data`, ~1.5 GB), the fuzz build cache, the nightly toolchain (`rustup-nightly`)?
 - **Disk headroom** is still tight: it has dipped below 8 GB twice. Both sessions now clean their build caches regularly.
 - **Exp1 failed**, so grouped repack stays opt-in (`[gc] grouped = false` by default, per the pre-registered rule), and Exp1b is queued. Nothing is needed from you unless you want to override the pre-registered consequences.
+- **Fast ingest level by default? (safe default: no, level 3 stays.)** On 1 GiB of real redis git objects, `put_many` at zstd level 1 is about 12 % faster than at level 3 (medians 2.57 s vs 2.93 s), and stores 6.3 % more until GC (310 vs 291 MB). A full similarity repack (`gc --repack-all`) brings both to the same 22.1 MB. A normal GC, though, never rewrites fully live packs, so level-1 records in them keep the extra 6 % indefinitely. Making level 1 the default safely needs GC to recognize "ingest packs not yet similarity-repacked" (a pack marker: an on-disk format addition). Until you decide, the recipe is opt-in: `init --zstd-level 1` plus a periodic `gc --repack-all` (BENCH.md, 2026-11-15 put/get pass).

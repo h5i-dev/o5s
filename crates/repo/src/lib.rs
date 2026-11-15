@@ -726,6 +726,9 @@ impl ObjectStore for LocalRepo {
     fn put(&self, data: &[u8]) -> Result<Hash> {
         self.packs.put(data)
     }
+    fn put_many(&self, items: &[&[u8]]) -> Result<Vec<Hash>> {
+        self.packs.put_many(items)
+    }
     fn put_stream(&self, src: &mut dyn Read) -> Result<Hash> {
         self.packs.put_stream_with(self.chunking.default.into(), src)
     }
@@ -854,6 +857,9 @@ impl FrontHandle {
 impl ObjectStore for FrontHandle {
     fn put(&self, data: &[u8]) -> Result<Hash> {
         self.repo.put(data)
+    }
+    fn put_many(&self, items: &[&[u8]]) -> Result<Vec<Hash>> {
+        self.repo.put_many(items)
     }
     fn put_stream(&self, src: &mut dyn Read) -> Result<Hash> {
         self.repo.put_stream(src)
