@@ -711,3 +711,34 @@ fn put_for_name_uses_namespace_chunker() {
     // Writing for a name needs write access to that name.
     assert!(matches!(s.client(READER).put_stream_for(&n("shared/x"), &mut &b"x"[..]), Err(Error::Unauthorized(_))));
 }
+
+/// `group_width` stores chunks byte-grouped (API v1.12): bf16-like data takes less space
+/// than the same kind of data stored plain, and reads back exactly.
+#[test]
+fn grouped_upload_saves_space_on_bf16_like_data() {
+    let s = TestServer::start(|_| {});
+    let c = s.client(ALICE);
+    // bf16-like: low-entropy high bytes (sign/exponent), random low bytes.
+    let bf16 = |seed: u64| -> Vec<u8> {
+        let r = data(4 << 20, seed);
+        r.chunks(2).flat_map(|p| [p[0], 0x3c + (p[1] & 0x03)]).collect()
+    };
+    let size = || tree_bytes(&s.dir.path().join("repo"));
+    let (a, b) = (bf16(31), bf16(32));
+    c.flush().unwrap();
+    let t0 = size();
+    let ha = c.put_stream(&mut &a[..]).unwrap();
+    c.flush().unwrap();
+    let plain = size() - t0;
+    let hb = pico2peta_core::ObjectStore::put_stream_grouped(&c, &mut &b[..], 2).unwrap();
+    c.flush().unwrap();
+    let grouped = size() - t0 - plain;
+    eprintln!("plain {plain} B, grouped {grouped} B");
+    // Deterministic data: ~7.5% measured; assert a margin that proves the codec ran.
+    assert!(grouped < plain * 96 / 100, "grouping should save > 4% here: plain {plain}, grouped {grouped}");
+    assert!(c.get(&ha, None).unwrap() == a && c.get(&hb, None).unwrap() == b);
+    assert_eq!(hb, Hash::of(&b), "identity unaffected by the codec");
+    // Bad widths are rejected.
+    let r = http().put(format!("{}/v1/objects?group_width=0", s.url())).bearer_auth(ALICE).body("x").send().unwrap();
+    assert_eq!(r.status(), 400);
+}

@@ -407,6 +407,9 @@ struct PutQuery {
     /// The name the object is for: selects that namespace's chunker (API v1.11).
     #[serde(default)]
     for_name: Option<String>,
+    /// Byte-group chunks of `width`-byte elements before zstd (bf16 2, f32 4; API v1.12).
+    #[serde(default)]
+    group_width: Option<u8>,
 }
 
 async fn put_object(
@@ -417,6 +420,11 @@ async fn put_object(
     headers: HeaderMap,
     body: Body,
 ) -> ApiResult<Response> {
+    let group = match q.group_width {
+        Some(w) if (1..=16).contains(&w) => Some(w),
+        Some(w) => return Err(ApiError::bad_request(format!("group_width {w} not in 1..=16"))),
+        None => None,
+    };
     let delta_base = match &q.delta_base {
         Some(b) => {
             st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &c, "get", "objects")?;
@@ -485,9 +493,10 @@ async fn put_object(
     let local = st.local.clone();
     let res = blocking(move || {
         let mut r = ChannelReader { rx, cur: Bytes::new() };
-        match (delta_base, for_name, local) {
-            (Some(b), _, _) => repo.put_delta(&b, &mut r),
-            (None, Some(n), Some(l)) => l.put_stream_for(&n, &mut r),
+        match (delta_base, for_name, local, group) {
+            (Some(b), _, _, _) => repo.put_delta(&b, &mut r),
+            (None, Some(n), Some(l), g) => l.put_stream_for_grouped(&n, &mut r, g),
+            (None, _, _, Some(w)) => repo.put_stream_grouped(&mut r, w),
             _ => repo.put_stream(&mut r),
         }
     })
