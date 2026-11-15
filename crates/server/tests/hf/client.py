@@ -90,6 +90,15 @@ assert "config.json" not in api.list_repo_files(repo)
 p = hf_hub_download(repo, "config.json", revision=first, cache_dir=os.path.join(work, "cache3"))
 assert open(p, "rb").read() == small
 
+# Dataset and space repos: same machinery under /datasets/ and /spaces/.
+for rtype in ("dataset", "space"):
+    rid = repo + "-" + rtype
+    api.create_repo(rid, repo_type=rtype, exist_ok=True, **({"space_sdk": "static"} if rtype == "space" else {}))
+    api.upload_file(path_or_fileobj=b"a,b\n1,2\n", path_in_repo="data/train.csv", repo_id=rid, repo_type=rtype)
+    assert "data/train.csv" in api.list_repo_files(rid, repo_type=rtype)
+    p = hf_hub_download(rid, "data/train.csv", repo_type=rtype, cache_dir=os.path.join(work, "cache-" + rtype))
+    assert open(p, "rb").read() == b"a,b\n1,2\n"
+
 # Re-uploading identical LFS content must not transfer it again (the batch API says we have it).
 api.upload_file(path_or_fileobj=big, path_in_repo="copy.safetensors", repo_id=repo)
 p = hf_hub_download(repo, "copy.safetensors", cache_dir=os.path.join(work, "cache4"))
