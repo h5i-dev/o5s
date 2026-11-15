@@ -1,7 +1,7 @@
 # Lean 4 model of the pico2peta core
 
 `Pico2peta/Model.lean` is a pure model of the object layer (`put`), the name
-layer (`replace` with OCC read sets, `setRule`) and namespace rules
+layer (`replace` and `deleteRef` with OCC read sets and tombstoned versions, `setRule`) and namespace rules
 (longest-prefix governance, `mobilityOf`). It mirrors `crates/core::mobility`
 and `crates/refs::RefState::{decide_replace, decide_set_rule}`.
 

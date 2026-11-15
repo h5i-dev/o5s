@@ -71,6 +71,13 @@ enum Cmd {
         #[arg(long = "read")]
         reads: Vec<String>,
     },
+    /// Delete a name (OCC). Immutable/released names can't be deleted.
+    Delete {
+        name: Name,
+        /// Observed state of NAME: `absent` or a version number.
+        #[arg(long)]
+        expect: String,
+    },
     /// List refs under a prefix.
     Refs {
         #[arg(default_value = "")]
@@ -263,6 +270,15 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 }
             }
         }
+        Cmd::Delete { name, expect } => match r.delete_ref(&name, &[(name.clone(), parse_observed(&expect)?)])? {
+            ReplaceOutcome::Ok { version } => writeln!(out, "deleted {version}")?,
+            ReplaceOutcome::Conflict { stale } => {
+                for (n, o) in stale {
+                    writeln!(out, "conflict {n} {o:?}")?;
+                }
+                return Ok(Outcome::Conflict);
+            }
+        },
         Cmd::Refs { prefix } => {
             for (n, v) in r.list_refs(&prefix)? {
                 writeln!(out, "{} {} {}", v.hash, v.version, n)?;

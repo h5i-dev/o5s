@@ -210,6 +210,13 @@ pub trait Repository: ObjectStore {
             _ => Err(Error::Unsupported("replace_many is not supported by this repository")),
         }
     }
+    /// OCC delete of a ref (API v1.5). It obeys namespace rules: create-once
+    /// names can't be deleted. Re-creating a deleted name continues its
+    /// version sequence. Deleting an absent name is `Ok { version: 0 }`.
+    fn delete_ref(&self, name: &Name, read_set: &[(Name, Observed)]) -> Result<ReplaceOutcome> {
+        let _ = (name, read_set);
+        Err(Error::Unsupported("delete_ref is not supported by this repository"))
+    }
     /// All refs under `prefix` ("" = all), sorted by name.
     fn list_refs(&self, prefix: &str) -> Result<Vec<(Name, RefValue)>>;
     /// Sets the rule for namespace `prefix`. Fails with

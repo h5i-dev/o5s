@@ -39,9 +39,14 @@ fn put_get_replace_roundtrip() {
     assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "conflict main 1");
     assert!(ok(&repo, &["resolve", "main"]).starts_with(&h));
 
+    ok(&repo, &["replace", "tmp", &h, "--expect", "absent"]);
+    assert_eq!(run(&repo, &["delete", "tmp", "--expect", "absent"]).status.code(), Some(3));
+    assert_eq!(ok(&repo, &["delete", "tmp", "--expect", "1"]).trim(), "deleted 1");
+    assert_eq!(run(&repo, &["resolve", "tmp"]).status.code(), Some(2));
     ok(&repo, &["ns", "set", "pkg", "immutable"]);
     ok(&repo, &["replace", "pkg/a", &h, "--expect", "absent"]);
     assert_eq!(run(&repo, &["replace", "pkg/a", &h, "--expect", "1"]).status.code(), Some(4));
+    assert_eq!(run(&repo, &["delete", "pkg/a", "--expect", "1"]).status.code(), Some(4));
     assert!(ok(&repo, &["refs"]).contains("pkg/a"));
     assert!(ok(&repo, &["stat"]).contains("sealed_packs"));
     // Provenance.

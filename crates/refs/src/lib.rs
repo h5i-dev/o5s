@@ -42,6 +42,9 @@ pub struct RefState {
     pub refs: BTreeMap<Name, RefValue>,
     /// Namespace rules by prefix.
     pub rules: BTreeMap<String, Rule>,
+    /// Last version of deleted names, so a re-created name continues its
+    /// version sequence instead of restarting at 1.
+    pub tombstones: BTreeMap<Name, u64>,
 }
 
 /// The effect of a mutation that passed every check.
@@ -56,6 +59,8 @@ pub enum Mutation {
     Rotated(u64),
     /// Several `Set`s committed atomically (one record, one commit point).
     Batch(Vec<(Name, RefValue)>),
+    /// Remove a name, remembering its last version (tombstone).
+    Delete(Name, u64),
 }
 
 impl RefState {
@@ -93,8 +98,39 @@ impl RefState {
             }
             Mobility::Forbidden(why) => return Err(Error::Forbidden { name: name.clone(), rule, why }),
         }
-        let version = current.map_or(1, |v| v.version + 1);
+        let version = match current {
+            Some(v) => v.version + 1,
+            None => self.tombstones.get(name).map_or(1, |t| t + 1),
+        };
         Ok(Ok(Mutation::Set(name.clone(), RefValue { hash: new, version })))
+    }
+
+    /// Decides an OCC delete (pure). Deleting an absent name is a no-op
+    /// (`Ok(None)`). Create-once and forbidden names can't be deleted.
+    pub fn decide_delete(
+        &self,
+        name: &Name,
+        read_set: &[(Name, Observed)],
+    ) -> Result<std::result::Result<Option<Mutation>, ReplaceOutcome>> {
+        if !read_set.iter().any(|(n, _)| n == name) {
+            return Err(Error::TargetNotInReadSet(name.clone()));
+        }
+        let mut stale: Vec<(Name, Observed)> =
+            read_set.iter().filter(|(n, o)| self.observe(n) != *o).map(|(n, _)| (n.clone(), self.observe(n))).collect();
+        if !stale.is_empty() {
+            stale.sort();
+            stale.dedup();
+            return Ok(Err(ReplaceOutcome::Conflict { stale }));
+        }
+        let Some(cur) = self.refs.get(name) else { return Ok(Ok(None)) };
+        let (rule, prefix) = governing(self.rules.iter(), Rule::Mutable, name);
+        match mobility(rule, &prefix, name) {
+            Mobility::Mutable => Ok(Ok(Some(Mutation::Delete(name.clone(), cur.version)))),
+            Mobility::CreateOnce => {
+                Err(Error::Forbidden { name: name.clone(), rule, why: "immutable names can't be deleted" })
+            }
+            Mobility::Forbidden(why) => Err(Error::Forbidden { name: name.clone(), rule, why }),
+        }
     }
 
     /// Decides a `set_rule` (pure). Returns `None` when it's a no-op.
@@ -113,7 +149,12 @@ impl RefState {
     pub fn apply(&mut self, m: Mutation) {
         match m {
             Mutation::Set(n, v) => {
+                self.tombstones.remove(&n);
                 self.refs.insert(n, v);
+            }
+            Mutation::Delete(n, v) => {
+                self.refs.remove(&n);
+                self.tombstones.insert(n, v);
             }
             Mutation::Rule(p, r) => {
                 self.rules.insert(p, r);
@@ -121,6 +162,7 @@ impl RefState {
             Mutation::Rotated(_) => {}
             Mutation::Batch(v) => {
                 for (n, val) in v {
+                    self.tombstones.remove(&n);
                     self.refs.insert(n, val);
                 }
             }
@@ -189,6 +231,12 @@ fn encode(m: &Mutation) -> Vec<u8> {
         Mutation::Rotated(g) => {
             p.push(3);
             p.extend_from_slice(&g.to_le_bytes());
+        }
+        Mutation::Delete(n, ver) => {
+            p.push(5);
+            p.extend_from_slice(&(n.as_str().len() as u16).to_le_bytes());
+            p.extend_from_slice(n.as_str().as_bytes());
+            p.extend_from_slice(&ver.to_le_bytes());
         }
         Mutation::Batch(v) => {
             p.push(4);
@@ -268,6 +316,10 @@ pub fn decode_payload(p: &[u8]) -> Result<Mutation> {
             validate_path(s)?;
             let r = Rule::from_code(rest[0]).ok_or_else(|| bad("unknown rule"))?;
             Ok(Mutation::Rule(s.to_string(), r))
+        }
+        5 => {
+            let v: [u8; 8] = rest.try_into().map_err(|_| bad("bad delete record length"))?;
+            Ok(Mutation::Delete(Name::new(s)?, u64::from_le_bytes(v)))
         }
         _ => Err(bad("unknown record tag")),
     }
@@ -377,6 +429,9 @@ fn encode_snapshot(st: &RefState) -> Vec<u8> {
     }
     for (n, val) in &st.refs {
         v.extend_from_slice(&encode(&Mutation::Set(n.clone(), *val)));
+    }
+    for (n, ver) in &st.tombstones {
+        v.extend_from_slice(&encode(&Mutation::Delete(n.clone(), *ver)));
     }
     let crc = crc32fast::hash(&v);
     v.extend_from_slice(&crc.to_le_bytes());
@@ -642,7 +697,7 @@ impl RefStore {
             Ok(m) => {
                 let version = match &m {
                     Mutation::Set(_, v) => v.version,
-                    Mutation::Rule(..) | Mutation::Rotated(_) | Mutation::Batch(_) => 0,
+                    Mutation::Rule(..) | Mutation::Rotated(_) | Mutation::Batch(_) | Mutation::Delete(..) => 0,
                 };
                 Ok((Some(m), ReplaceOutcome::Ok { version }))
             }
@@ -674,6 +729,22 @@ impl RefStore {
                 };
                 Ok((Some(m), ReplaceManyOutcome::Ok { versions }))
             }
+            Err(c) => Ok((None, c)),
+        })
+    }
+
+    /// OCC delete (see [`RefState::decide_delete`]). `Ok { version }` carries
+    /// the deleted version (0 if the name was already absent).
+    pub fn delete(&self, name: &Name, read_set: &[(Name, Observed)]) -> Result<ReplaceOutcome> {
+        self.commit(|s| match s.decide_delete(name, read_set)? {
+            Ok(Some(m)) => {
+                let version = match &m {
+                    Mutation::Delete(_, v) => *v,
+                    _ => 0,
+                };
+                Ok((Some(m), ReplaceOutcome::Ok { version }))
+            }
+            Ok(None) => Ok((None, ReplaceOutcome::Ok { version: 0 })),
             Err(c) => Ok((None, c)),
         })
     }

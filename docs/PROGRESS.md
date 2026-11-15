@@ -39,6 +39,7 @@
 - **v1.3 (2026-11-15), additive:** `ObjectStore::ensure_live(hash) -> bool`, the existence check to use before *referencing* an object without putting it again. If GC has condemned the only copy, it rewrites the object (recursively through its manifest tree) into live storage. The default impl is `contains`. `LocalRepo::replace`/`replace_many` use it, and OCI/Git adapters should too (requested by net).
 - **Pack format v2 (`P2PPACK2`):** a 16-byte random nonce after the magic. This fixes a real aliasing bug: a pack holding exactly the same records as a condemned pack got the same content-derived name, so `put_if_absent` returned AlreadyExists and GC then deleted the "new" copy. v1 packs and staging files are still read.
 - **v1.4 (2026-11-15), additive (repo crate):** `Grouper`/`GroupKey`, `LocalRepo::gc_with`, and new `GcOptions` fields (build it with `..Default::default()`).
+- **v1.5 (2026-11-15), additive:** `Repository::delete_ref(name, read_set) -> ReplaceOutcome`. It's OCC and obeys rules: create-once and `releases/*` names can't be deleted. Tombstones keep the version sequence, so a re-create continues at v+1. The default impl returns `Unsupported`; `LocalRepo` implements it. The CLI has `pico2peta delete NAME --expect V`. It's covered by the Lean model (proofs re-checked) and by the Lean↔Rust difftest.
 - **Hierarchical manifests:** `PackConfig::manifest_fanout` (default 4096; repo config key `pack.manifest_fanout`, optional). Every interior node is keyed by the content hash of its byte range, and reads expand the tree lazily.
 
 ## Production gaps
@@ -47,7 +48,6 @@
 - **GC tracer.** GC treats objects as opaque, so only ref targets and their chunks are roots. Structured objects (directories, snapshots) need a `Tracer` once those formats exist.
 - **Provenance index scale.** `Provenance::load` walks the whole log, O(records). Large deployments need persisted forward and backward index segments.
 - **Ref store scale.** All refs live in memory (~150 B each), and compaction rewrites a full snapshot. That's fine to ~10^6 names, strained at 10^7. Scaling needs a sharded journal per prefix, or an LSM. Net was advised to keep per-blob OCI links in segment maps, not refs.
-- **No ref deletion.** `Repository` has no `delete(name)` yet, so the only way to drop a root is to move a ref.
 - **Small packs.** `replace` and `flush` seal the writer's open pack, so chatty writers make many small packs. Repack (M6) is the planned fix.
 - **Ambiguous outcome on I/O error.** If an fsync fails during `replace`, the record may still be durable. The caller must re-`resolve` to find out (documented, as in most databases).
 

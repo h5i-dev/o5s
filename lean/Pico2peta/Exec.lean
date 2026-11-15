@@ -13,6 +13,7 @@ Hashes and data are both strings (`hashOf := id`).
 ```
 P <hash>                                   put
 R <target> <new> <name> <obs> [<name> <obs>]...   replace; obs = "-" (absent) or version
+D <target> <name> <obs> [<name> <obs>]...         delete
 S <prefix> <m|i|h>                         set rule (mutable/immutable/head-release)
 ```
 Outputs: `ok <v>`, `conflict`, or `err <code>`, using the Rust `Error::code()` strings.
@@ -49,7 +50,7 @@ structure ExecState where
   s : State String String
   keys : List Name
 
-def ExecState.empty : ExecState := ⟨⟨fun _ => none, fun _ => none, []⟩, []⟩
+def ExecState.empty : ExecState := ⟨⟨fun _ => none, fun _ => none, [], fun _ => none⟩, []⟩
 
 def errCode : Err → String
   | .targetNotInReadSet => "target_not_in_read_set"
@@ -85,6 +86,12 @@ def execLine (st : ExecState) (line : String) : ExecState × String :=
       let (o, s') := replace st.s (parseName t) rs new
       let keys := if o.isOk then parseName t :: st.keys else st.keys
       ({ s := s', keys := keys }, showOutcome o)
+  | "D" :: t :: rest =>
+    match parseReadSet rest with
+    | none => (st, "parse_error")
+    | some rs =>
+      let (o, s') := deleteRef st.s (parseName t) rs
+      ({ st with s := s' }, showOutcome o)
   | ["S", p, r] =>
     let rule := if r == "i" then Rule.immutable else if r == "h" then Rule.headRelease else Rule.mutable
     let (o, s') := setRuleC st.s st.keys (parseName p) rule

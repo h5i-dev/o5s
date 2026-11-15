@@ -16,6 +16,7 @@ const PREFIXES: &[&str] = &["a", "p", "p/y", "m", "m/heads"];
 #[derive(Debug, Clone)]
 enum Op {
     Put(u8),
+    Delete(usize, Option<u8>, bool),
     Replace(usize, u8, Vec<(usize, Option<u8>)>),
     Rule(usize, u8),
 }
@@ -26,6 +27,7 @@ fn op() -> impl Strategy<Value = Op> {
         6 => (0..NAMES.len(), 0u8..5, proptest::collection::vec((0..NAMES.len(), proptest::option::of(0u8..4)), 0..3))
             .prop_map(|(t, h, rs)| Op::Replace(t, h, rs)),
         2 => (0..PREFIXES.len(), 0u8..3).prop_map(|(p, r)| Op::Rule(p, r)),
+        2 => (0..NAMES.len(), proptest::option::of(0u8..4), any::<bool>()).prop_map(|(t, o, f)| Op::Delete(t, o, f)),
     ]
 }
 
@@ -86,6 +88,17 @@ proptest! {
                     let objs = &objects;
                     let res = r.replace(&target, &rs, tok(*h), &|x| Ok(objs.contains(x)));
                     rust_out.push(match res {
+                        Ok(ReplaceOutcome::Ok { version }) => format!("ok {version}"),
+                        Ok(ReplaceOutcome::Conflict { .. }) => "conflict".into(),
+                        Err(e) => format!("err {}", e.code()),
+                    });
+                }
+                Op::Delete(t, guess, fresh) => {
+                    let target = Name::new(NAMES[*t]).unwrap();
+                    let ob = if *fresh { r.resolve(&target).unwrap().map(|v| v.version as u8) } else { *guess };
+                    let rs = vec![(target.clone(), ob.map_or(Observed::Absent, |v| Observed::Version(v as u64)))];
+                    script.push_str(&format!("D {} {} {}\n", NAMES[*t], NAMES[*t], obs_str(ob)));
+                    rust_out.push(match r.delete(&target, &rs) {
                         Ok(ReplaceOutcome::Ok { version }) => format!("ok {version}"),
                         Ok(ReplaceOutcome::Conflict { .. }) => "conflict".into(),
                         Err(e) => format!("err {}", e.code()),

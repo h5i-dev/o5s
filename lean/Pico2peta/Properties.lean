@@ -43,6 +43,16 @@ theorem replace_objects (s : State H B) n rs new : (replace s n rs new).2.object
   · rfl
   split <;> rfl
 
+theorem deleteRef_objects (s : State H B) n rs : (deleteRef s n rs).2.objects = s.objects := by
+  unfold deleteRef
+  split
+  · rfl
+  split
+  · rfl
+  split
+  · rfl
+  · split <;> rfl
+
 theorem setRule_objects (s : State H B) p r : (setRule s p r).2.objects = s.objects := by
   unfold setRule; split
   · rfl
@@ -53,6 +63,7 @@ theorem objects_stable (hashOf : B → H) (s : State H B) (op : Op H B) (h : H) 
   cases op with
   | put d => exact put_objects_stable hashOf s d h x hx
   | replace n rs new => simp only [step, replace_objects]; exact hx
+  | deleteRef n rs => simp only [step, deleteRef_objects]; exact hx
   | setRule p r => simp only [step, setRule_objects]; exact hx
 
 theorem objects_stable_run (hashOf : B → H) (s : State H B) (ops : List (Op H B)) (h : H) (x : B)
@@ -77,6 +88,7 @@ theorem wf_step (hashOf : B → H) (s : State H B) (op : Op H B) (hw : WF hashOf
       · rename_i heq; cases hx; exact heq.symm
       · exact hw h x hx
   | replace n rs new => simp only [step, replace_objects] at hx; exact hw h x hx
+  | deleteRef n rs => simp only [step, deleteRef_objects] at hx; exact hw h x hx
   | setRule p r => simp only [step, setRule_objects] at hx; exact hw h x hx
 
 theorem wf_run (hashOf : B → H) (s : State H B) (ops : List (Op H B)) (hw : WF hashOf s) :
@@ -92,8 +104,9 @@ theorem replace_ok_spec (s : State H B) n rs new v s'
     (h : replace s n rs new = (.ok v, s')) :
     (rs.any fun x => decide (x.1 = n)) = true ∧
     (rs.any fun x => decide (observe s x.1 ≠ x.2)) = false ∧
-    v = nextVersion (s.refs n) ∧
-    s' = { s with refs := update s.refs n (some ⟨new, nextVersion (s.refs n)⟩) } := by
+    v = nextVersion (s.refs n) (s.tombs n) ∧
+    s' = { s with refs := update s.refs n (some ⟨new, nextVersion (s.refs n) (s.tombs n)⟩),
+                  tombs := update s.tombs n none } := by
   unfold replace at h
   cases h1 : (rs.any fun x => decide (x.1 = n)) <;> simp only [h1, Bool.not_false, Bool.not_true] at h
   · cases h
@@ -115,7 +128,7 @@ theorem replace_ok_validated (s : State H B) n rs new v s'
   simpa using this
 
 theorem replace_ok_observe (s : State H B) n rs new v s'
-    (h : replace s n rs new = (.ok v, s')) : observe s' n = .version (nextVersion (s.refs n)) := by
+    (h : replace s n rs new = (.ok v, s')) : observe s' n = .version (nextVersion (s.refs n) (s.tombs n)) := by
   obtain ⟨_, _, _, rfl⟩ := replace_ok_spec s n rs new v s' h
   simp [observe, update]
 
@@ -130,7 +143,7 @@ theorem no_lost_update (s : State H B) n rs₁ new₁ v s₁ rs₂ new₂ (o : O
   have hne : observe s₁ n ≠ o := by
     rw [hobs, ← ho]
     unfold observe nextVersion
-    cases s.refs n <;> simp
+    cases s.refs n <;> cases s.tombs n <;> simp
   unfold replace
   split
   · rfl
@@ -165,6 +178,40 @@ theorem mobility_setRule (rules : List (Name × Rule)) (p n : Name) (r : Rule)
   unfold mobilityOf governing
   rw [filter_setRule rules p n r hp]
 
+theorem deleteRef_rules (s : State H B) m rs : (deleteRef s m rs).2.rules = s.rules := by
+  unfold deleteRef
+  split
+  · rfl
+  split
+  · rfl
+  split
+  · rfl
+  · split <;> rfl
+
+theorem deleteRef_other (s : State H B) m rs n (hmn : m ≠ n) : (deleteRef s m rs).2.refs n = s.refs n := by
+  unfold deleteRef
+  split
+  · rfl
+  split
+  · rfl
+  split
+  · rfl
+  · split
+    · simp [update, Ne.symm hmn]
+    · rfl
+
+theorem deleteRef_frozen (s : State H B) n rs v (hv : s.refs n = some v)
+    (hm : mobilityOf s.rules n = .createOnce ∨ mobilityOf s.rules n = .forbidden) :
+    (deleteRef s n rs).2.refs n = some v := by
+  unfold deleteRef
+  split
+  · exact hv
+  split
+  · exact hv
+  rw [hv]
+  simp only
+  rcases hm with hm | hm <;> rw [hm] <;> exact hv
+
 theorem frozen_step (hashOf : B → H) (s : State H B) (op : Op H B) n v
     (hf : Frozen s n v) : Frozen (step hashOf s op).2 n v := by
   obtain ⟨hv, hm⟩ := hf
@@ -187,6 +234,12 @@ theorem frozen_step (hashOf : B → H) (s : State H B) (op : Op H B) n v
       simp only
       rw [mobility_setRule s.rules p n r hp]
       exact hm
+  | deleteRef m rs =>
+    simp only [step]
+    refine ⟨?_, by rw [deleteRef_rules]; exact hm⟩
+    by_cases hmn : m = n
+    · subst hmn; exact deleteRef_frozen s m rs v hv hm
+    · rw [deleteRef_other s m rs n hmn]; exact hv
   | replace m rs new =>
     simp only [step]
     by_cases hmn : m = n

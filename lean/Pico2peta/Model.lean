@@ -66,6 +66,8 @@ structure State (H B : Type) where
   objects : H → Option B
   refs : Name → Option (RefVal H)
   rules : List (Name × Rule)
+  /-- Last version of deleted names (`RefState::tombstones`). -/
+  tombs : Name → Option Nat
 
 variable {H B : Type} [DecidableEq H]
 
@@ -101,9 +103,12 @@ def mobilityOf (rules : List (Name × Rule)) (n : Name) : Mobility :=
     | "releases" :: _ :: _ => .createOnce
     | _ => .forbidden
 
-def nextVersion : Option (RefVal H) → Nat
-  | none => 1
-  | some r => r.version + 1
+/-- Next version for a name: continues after the current value, or after its
+tombstone if it was deleted, or starts at 1. -/
+def nextVersion : Option (RefVal H) → Option Nat → Nat
+  | some r, _ => r.version + 1
+  | none, some t => t + 1
+  | none, none => 1
 
 /-- The object layer's `put`: idempotent, never overwrites. -/
 def put (hashOf : B → H) (s : State H B) (d : B) : State H B :=
@@ -124,8 +129,23 @@ def replace (s : State H B) (n : Name) (rs : List (Name × Observed)) (new : H) 
     | .forbidden, _ => (.err .forbidden, s)
     | .createOnce, some _ => (.err .forbidden, s)
     | _, cur =>
-      (.ok (nextVersion cur),
-        { s with refs := update s.refs n (some ⟨new, nextVersion cur⟩) })
+      (.ok (nextVersion cur (s.tombs n)),
+        { s with refs := update s.refs n (some ⟨new, nextVersion cur (s.tombs n)⟩),
+                 tombs := update s.tombs n none })
+
+/-- OCC delete (mirrors `RefState::decide_delete`). Only names whose
+effective rule is mutable can be deleted. Deleting an absent name is a no-op. -/
+def deleteRef (s : State H B) (n : Name) (rs : List (Name × Observed)) : Outcome × State H B :=
+  if !(rs.any fun x => decide (x.1 = n)) then (.err .targetNotInReadSet, s)
+  else if rs.any (fun x => decide (observe s x.1 ≠ x.2)) then (.conflict, s)
+  else
+    match s.refs n with
+    | none => (.ok 0, s)
+    | some cur =>
+      match mobilityOf s.rules n with
+      | .mutable =>
+        (.ok cur.version, { s with refs := update s.refs n none, tombs := update s.tombs n (some cur.version) })
+      | _ => (.err .forbidden, s)
 
 open Classical in
 /-- Sets a namespace rule. Refused if any ref lies under the prefix, so a
@@ -138,11 +158,13 @@ noncomputable def setRule (s : State H B) (p : Name) (r : Rule) : Outcome × Sta
 inductive Op (H B : Type) where
   | put (d : B)
   | replace (n : Name) (rs : List (Name × Observed)) (new : H)
+  | deleteRef (n : Name) (rs : List (Name × Observed))
   | setRule (p : Name) (r : Rule)
 
 noncomputable def step (hashOf : B → H) (s : State H B) : Op H B → Outcome × State H B
   | .put d => (.ok 0, put hashOf s d)
   | .replace n rs new => replace s n rs new
+  | .deleteRef n rs => deleteRef s n rs
   | .setRule p r => setRule s p r
 
 noncomputable def run (hashOf : B → H) : State H B → List (Op H B) → State H B

@@ -239,6 +239,10 @@ impl Repository for LocalRepo {
         self.refs.replace_many(updates, read_set, &|h| Ok(missing != Some(*h)))
     }
 
+    fn delete_ref(&self, name: &Name, read_set: &[(Name, Observed)]) -> Result<ReplaceOutcome> {
+        self.refs.delete(name, read_set)
+    }
+
     fn list_refs(&self, prefix: &str) -> Result<Vec<(Name, RefValue)>> {
         self.refs.list(prefix)
     }
