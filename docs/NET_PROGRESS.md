@@ -267,7 +267,22 @@ The contended run checks that no update is lost: the final version equals the nu
     - PyPI timing uses pip (uv is covered functionally in `tests/pypi.rs`).
     - Maven's "per file" is per artifact (`dependency:get -Dtransitive=false` fetches the jar, its pom and parent poms), and its one-fetch check is "hot requests cause no upstream fetch".
 - Segmap → idmap swap: DONE (see the Front API port above). The Git front no longer re-puts pushed objects whose oid is already mapped (it checks `ensure_live` first).
-- Next: the Git front's clone path (served-pack cache and/or parallel encoding; redis clone ~28× git daemon), then the OCI conformance re-run on the merged tree.
+- **Fix: connection reuse after early rejections (all routes).** A handler that answers before reading the request body (an auth or authz rejection, a bad digest...) leaves unread bytes, so hyper closes the HTTP/1 connection. A client reusing it saw EOF or a reset. This made OCI conformance flaky (4 of 15 runs failed on the merged tree, with `Put ...: EOF` cascading into later specs), and earlier the HF test.
+  - The middleware `close_if_body_unread` (api.rs) tracks whether the body was read to the end and, if not, answers HTTP/1.x with `Connection: close`. The per-handler workarounds are removed.
+  - Results: OCI conformance 15/15 runs at 73/0; test `early_rejection_closes_the_connection`.
+- **Git front clone path: about 2× faster.**
+  - Changes in `write_pack`:
+    - it works in windows of up to 256 objects / 64 MiB, and loading, delta encoding and zlib run in parallel across cores;
+    - base choice and pack offsets stay sequential, so the pack layout is deterministic;
+    - zlib level 3 → 1;
+    - the delta index uses an identity hasher instead of SipHash.
+  - Development check (not a benchmark result): 3 jq clones took 8.4 s before and 5.0 s after; git daemon takes ~0.84 s per clone.
+  - Remaining profile (perf, cpu-clock:u):
+    - ~40% is the core read path: zstd decompress ~24%, `ZSTD_createDCtx` per read ~3%, BLAKE3 verify ~8%, zero-filled output buffers ~6%. Reported under "Requests for core".
+    - 19% is `encode_delta`.
+    - The core's `Index::get` is 0.4%, so lookups are not the cost, as the core lead measured.
+  - Not done: a served-pack cache (it would double Git storage, so I'm not doing it without a decision).
+- Next: the PyPI/npm/Maven/HF follow-ups listed under each front.
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
@@ -332,6 +347,13 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **Large listings:** `list()` buffers all keys in memory. The trait returns a `Vec`, so a paginated or streaming list would need a trait change if a prefix grows to millions of keys.
 
 ## Requests for core
+- **Read path cost per object (2026-11-15, from a profile of the git front serving jq clones).** Every `get` of a small object pays:
+  - a fresh zstd decompression context (`ZSTD_createDCtx`, ~3% of server CPU);
+  - zero-filled output buffers (`memset`, ~6%);
+  - BLAKE3 verification (~8%);
+  - the decompression itself (~24%).
+
+  Ask: reuse a decompression context per thread, and decode into uninitialized or reused buffers. Verification is by design; noting its share only. Front-side work is reported separately (the delta encoder, now parallel).
 - **Bug (perf): repeat pushes into a large store get 6× slower** (2026-11-15, found by the §6.5 Git benchmark; cause not yet confirmed by a profile).
   - Evidence, from `git push` of heads+tags into a fresh, empty repo name on the same server each run (`bench/fronts/git_bench.py`; results in `/mnt/scratch/pico2peta/bench-fronts-results.jsonl`; host load average ~1.1, so not contention):
 

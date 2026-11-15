@@ -219,9 +219,7 @@ pub async fn dispatch(
     let head = method == Method::HEAD;
     match (method, &parts[1..]) {
         (Method::POST, []) => {
-            if let Err(mut r) = check(&st, &p, &c, index, Access::Write) {
-                // Refused before reading the upload: the connection can't be reused safely.
-                r.headers_mut().insert(header::CONNECTION, HeaderValue::from_static("close"));
+            if let Err(r) = check(&st, &p, &c, index, Access::Write) {
                 return r;
             }
             let mp = match Multipart::from_request(req, &()).await {

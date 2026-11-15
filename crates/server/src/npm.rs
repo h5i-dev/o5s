@@ -210,7 +210,7 @@ fn check(st: &AppState, p: &Principal, c: &Caller, reg: &str, need: Access) -> s
         detail: None,
         remote: c.remote.clone(),
     });
-    let mut r = if p.name == crate::auth::ANONYMOUS {
+    let r = if p.name == crate::auth::ANONYMOUS {
         npm_err(StatusCode::UNAUTHORIZED, "authentication required")
     } else {
         npm_err(
@@ -218,7 +218,6 @@ fn check(st: &AppState, p: &Principal, c: &Caller, reg: &str, need: Access) -> s
             format!("{} may not {} {ns}", p.name, if need == Access::Read { "read" } else { "write" }),
         )
     };
-    r.headers_mut().insert(header::CONNECTION, HeaderValue::from_static("close"));
     Err(r)
 }
 

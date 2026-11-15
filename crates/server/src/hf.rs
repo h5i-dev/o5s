@@ -812,14 +812,7 @@ pub async fn lfs_capability(
 ) -> Response {
     let Some(hf) = st.hf.clone() else { return hf_err(StatusCode::NOT_FOUND, None, "HF front disabled") };
     match (method, op.as_str()) {
-        (Method::PUT, "upload") => {
-            let mut r = lfs_upload(&st, &hf, &token, body).await;
-            // Rejected before the body was read: the connection can't be reused safely.
-            if r.status().is_client_error() {
-                r.headers_mut().insert(header::CONNECTION, HeaderValue::from_static("close"));
-            }
-            r
-        }
+        (Method::PUT, "upload") => lfs_upload(&st, &hf, &token, body).await,
         (Method::POST, "verify") => lfs_verify(&hf, &token).await,
         (Method::GET | Method::HEAD, "download") => lfs_download(&st, &hf, &token, &headers).await,
         _ => hf_err(StatusCode::METHOD_NOT_ALLOWED, None, "unsupported LFS operation"),

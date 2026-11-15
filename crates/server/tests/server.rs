@@ -744,3 +744,18 @@ fn grouped_upload_saves_space_on_bf16_like_data() {
     let r = http().put(format!("{}/v1/objects?group_width=0", s.url())).bearer_auth(ALICE).body("x").send().unwrap();
     assert_eq!(r.status(), 400);
 }
+
+/// An early rejection (here: authentication, before the body is read) must tell HTTP/1
+/// clients not to reuse the connection: hyper closes it because of the unread body.
+#[test]
+fn early_rejection_closes_the_connection() {
+    let s = TestServer::start(|_| {});
+    let http = reqwest::blocking::Client::new();
+    let r = http.put(format!("{}/v1/objects", s.url())).bearer_auth("wrong").body(vec![7u8; 4 << 20]).send().unwrap();
+    assert_eq!(r.status(), 401);
+    assert_eq!(r.headers().get("connection").map(|v| v.to_str().unwrap()), Some("close"));
+    // A request whose body was read keeps the connection.
+    let r = http.put(format!("{}/v1/objects", s.url())).bearer_auth(ADMIN).body(vec![7u8; 1 << 16]).send().unwrap();
+    assert!(r.status().is_success());
+    assert!(r.headers().get("connection").is_none());
+}

@@ -156,7 +156,7 @@ fn check(st: &AppState, p: &Principal, c: &Caller, repo: &str, need: Access) -> 
         detail: None,
         remote: c.remote.clone(),
     });
-    let mut r = if p.name == crate::auth::ANONYMOUS {
+    let r = if p.name == crate::auth::ANONYMOUS {
         let mut r = err(StatusCode::UNAUTHORIZED, "authentication required");
         r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"pico2peta\""));
         r
@@ -166,7 +166,6 @@ fn check(st: &AppState, p: &Principal, c: &Caller, repo: &str, need: Access) -> 
             format!("{} may not {} {ns}", p.name, if need == Access::Read { "read" } else { "write" }),
         )
     };
-    r.headers_mut().insert(header::CONNECTION, HeaderValue::from_static("close"));
     Err(r)
 }
 
