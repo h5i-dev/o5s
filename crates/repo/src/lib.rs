@@ -487,11 +487,11 @@ impl LocalRepo {
     /// A handle that may move names under the prefixes front `id` owns (and
     /// any unowned name). The plain [`Repository`] impl may move unowned
     /// names only.
-    pub fn front(&self, id: &str) -> Result<FrontHandle<'_>> {
+    pub fn front(&self, id: &str) -> Result<FrontHandle> {
         if self.fronts.get(id).is_none() {
             return Err(Error::Parse(format!("front {id:?} is not registered")));
         }
-        Ok(FrontHandle { repo: self, id: id.to_string() })
+        Ok(FrontHandle { repo: self.clone(), id: id.to_string() })
     }
 
     /// Refuses a write to `name` unless `who` owns it (or nobody does).
@@ -707,14 +707,15 @@ impl Repository for LocalRepo {
 }
 
 /// A [`LocalRepo`] acting as one front: it may also move names under that
-/// front's claimed prefixes (see [`LocalRepo::front`]).
+/// front's claimed prefixes (see [`LocalRepo::front`]). Owns a (cheap) clone
+/// of the repository, so it can live in an `Arc<dyn Repository>`.
 #[derive(Clone)]
-pub struct FrontHandle<'a> {
-    repo: &'a LocalRepo,
+pub struct FrontHandle {
+    repo: LocalRepo,
     id: String,
 }
 
-impl FrontHandle<'_> {
+impl FrontHandle {
     /// The front this handle acts as.
     pub fn id(&self) -> &str {
         &self.id
@@ -722,11 +723,11 @@ impl FrontHandle<'_> {
 
     /// The repository.
     pub fn repo(&self) -> &LocalRepo {
-        self.repo
+        &self.repo
     }
 }
 
-impl ObjectStore for FrontHandle<'_> {
+impl ObjectStore for FrontHandle {
     fn put(&self, data: &[u8]) -> Result<Hash> {
         self.repo.put(data)
     }
@@ -774,7 +775,7 @@ impl ObjectStore for FrontHandle<'_> {
     }
 }
 
-impl Repository for FrontHandle<'_> {
+impl Repository for FrontHandle {
     fn resolve(&self, name: &Name) -> Result<Option<RefValue>> {
         self.repo.resolve(name)
     }

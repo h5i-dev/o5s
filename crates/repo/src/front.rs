@@ -56,6 +56,15 @@ pub trait Front: Send + Sync {
         Ok((Vec::new(), ctx.default.clone()))
     }
 
+    /// A tracer for one GC run, built once at its start (e.g. over a snapshot
+    /// of the front's id-index roots taken now, which is what makes it safe
+    /// with short grace periods). `None` (the default) = use
+    /// [`Front::children`].
+    fn gc_tracer(&self, repo: &dyn Repository) -> Result<Option<Box<dyn Tracer>>> {
+        let _ = repo;
+        Ok(None)
+    }
+
     /// Children of `hash` this front knows about (GC). Every front sees every
     /// object; the registry takes the union.
     fn children(&self, hash: &Hash, store: &dyn ObjectStore) -> Result<Vec<Hash>> {
@@ -124,9 +133,18 @@ impl FrontRegistry {
             .map(|(_, id)| id)
     }
 
-    /// A GC tracer over every front (union of their children).
-    pub fn tracer(&self) -> FrontsTracer {
-        FrontsTracer { fronts: self.fronts.clone() }
+    /// A GC tracer over every front (union of their children). Fronts with
+    /// a [`Front::gc_tracer`] contribute that instead, built now, so call this
+    /// once per GC run.
+    pub fn tracer(&self, repo: &dyn Repository) -> Result<FrontsTracer> {
+        let mut parts: Vec<Part> = Vec::new();
+        for f in &self.fronts {
+            parts.push(match f.gc_tracer(repo)? {
+                Some(t) => Part::Snapshot(t),
+                None => Part::Front(f.clone()),
+            });
+        }
+        Ok(FrontsTracer { parts })
     }
 
     /// A repack grouper over every front (the first front to key an object wins,
@@ -138,14 +156,23 @@ impl FrontRegistry {
 
 /// [`Tracer`] that asks every front and takes the union.
 pub struct FrontsTracer {
-    fronts: Vec<Arc<dyn Front>>,
+    parts: Vec<Part>,
+}
+
+enum Part {
+    Front(Arc<dyn Front>),
+    Snapshot(Box<dyn Tracer>),
 }
 
 impl Tracer for FrontsTracer {
     fn children(&self, hash: &Hash, store: &dyn ObjectStore) -> Result<Vec<Hash>> {
         let mut out: Vec<Hash> = Vec::new();
-        for f in &self.fronts {
-            for c in f.children(hash, store)? {
+        for p in &self.parts {
+            let cs = match p {
+                Part::Front(f) => f.children(hash, store)?,
+                Part::Snapshot(t) => t.children(hash, store)?,
+            };
+            for c in cs {
                 if !out.contains(&c) {
                     out.push(c);
                 }

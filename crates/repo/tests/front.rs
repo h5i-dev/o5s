@@ -187,3 +187,51 @@ fn config_validation() {
     LocalRepo::init_config(d.path().join("e"), &c).unwrap();
     assert_eq!(LocalRepo::read_config(&d.path().join("e")).unwrap(), c);
 }
+
+/// `Front::gc_tracer` is built once per GC run and replaces `children`; and
+/// a front handle is 'static (fits in `Arc<dyn Repository>`).
+#[test]
+fn gc_snapshot_tracer_and_owned_handles() {
+    use pico2peta_repo::gc::Tracer;
+    struct Snap {
+        root: Hash,
+        leaf: Hash,
+        built: Mutex<u32>,
+    }
+    struct Fixed(Hash, Hash);
+    impl Tracer for Fixed {
+        fn children(&self, h: &Hash, _: &dyn ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+            Ok(if *h == self.0 { vec![self.1] } else { Vec::new() })
+        }
+    }
+    impl Front for Snap {
+        fn id(&self) -> &str {
+            "snap"
+        }
+        fn prefixes(&self) -> Vec<String> {
+            vec!["snap/".into()]
+        }
+        fn gc_tracer(&self, _: &dyn Repository) -> pico2peta_core::Result<Option<Box<dyn Tracer>>> {
+            *self.built.lock().unwrap() += 1;
+            Ok(Some(Box::new(Fixed(self.root, self.leaf))))
+        }
+        fn children(&self, _: &Hash, _: &dyn ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+            Ok(Vec::new()) // only the snapshot tracer knows the link
+        }
+    }
+    let d = tempfile::tempdir().unwrap();
+    let r0 = LocalRepo::init(d.path(), &PackConfig::tiny()).unwrap();
+    let root = r0.put(b"root").unwrap();
+    let leaf = r0.put(b"leaf reachable only via the snapshot").unwrap();
+    let snap = Arc::new(Snap { root, leaf, built: Mutex::new(0) });
+    let r = r0.with_fronts(FrontRegistry::new().with(snap.clone()).unwrap()).unwrap();
+    let handle: Arc<dyn Repository> = Arc::new(r.front("snap").unwrap());
+    assert!(matches!(set(handle.as_ref(), "snap/root", root).unwrap(), ReplaceOutcome::Ok { .. }));
+    r.flush().unwrap();
+    let opts = GcOptions { grace: Duration::ZERO, allow_short_grace: true, repack_all: true, ..GcOptions::default() };
+    for _ in 0..3 {
+        r.gc_with_fronts(&opts, None, false).unwrap();
+    }
+    assert!(r.contains(&leaf).unwrap());
+    assert!(*snap.built.lock().unwrap() >= 3, "built once per GC run");
+}

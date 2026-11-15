@@ -127,6 +127,7 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
   - **`RepoConfig` gained `profiles` and `namespaces`:** full struct literals must add them; use the new `RepoConfig::new(&pack)` instead. I fixed the one literal in net's `crates/server/tests/server.rs`.
   - **repo, `idmap` module:** net's SegMap moved into the core as the generic external-id index (`IdMap` = `SegMap`, same on-disk format, sync API; the async wrappers stay in the server).
   - **pack:** `bytegroup` moved here from weights (it is on-disk format); `pico2peta_weights::bytegroup` re-exports it. `ChunkerKind::from_id`/`id`.
+  - **Follow-up (net's requests):** `FrontHandle` owns a `LocalRepo` clone (no lifetime, so it fits in `Arc<dyn Repository>`). `Front::gc_tracer(repo)` is built once per GC run (e.g. over id-index roots snapshotted at GC start) and replaces `children` for that front. `FrontRegistry::tracer(repo)` now returns `Result`.
   - **weights:** the `safetensors` front (`SafetensorsFront`, `SAFETENSORS_FRONT`) and `plan_weights`. `put_checkpoint` and `put_weights` are now thin wrappers over the same plan.
 
 ## Production gaps
