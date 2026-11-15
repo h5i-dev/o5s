@@ -251,6 +251,49 @@ impl RemoteRepo {
         })
     }
 
+    /// Streams `src` to `path` (PUT), hashing as it goes.
+    fn put_stream_to(&self, path: String, src: &mut dyn Read) -> Result<Hash> {
+        let rt = self.inner.rt.as_ref().ok_or(Error::Unsupported("client runtime is shut down"))?;
+        let (tx, rx) = tokio::sync::mpsc::channel::<std::io::Result<Bytes>>(4);
+        let body = reqwest::Body::wrap_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|i| (i, rx))
+        }));
+        let rb = self.request(Method::PUT, &path).header("content-type", "application/octet-stream").body(body);
+        let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
+        rt.spawn(async move {
+            let _ = done_tx.send(rb.send().await);
+        });
+        // Read on the caller's thread; a full channel blocks us (backpressure).
+        let mut hasher = blake3::Hasher::new();
+        let mut buf = vec![0u8; 256 * 1024];
+        let mut read_err = None;
+        loop {
+            let n = match src.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => {
+                    let _ = tx.blocking_send(Err(std::io::Error::new(e.kind(), e.to_string())));
+                    read_err = Some(e);
+                    break;
+                }
+            };
+            hasher.update(&buf[..n]);
+            if tx.blocking_send(Ok(Bytes::copy_from_slice(&buf[..n]))).is_err() {
+                break; // request ended early (rejected); its response explains why
+            }
+        }
+        drop(tx);
+        let local = Hash(*hasher.finalize().as_bytes());
+        let resp =
+            done_rx.recv().map_err(|_| Error::Backend { transient: true, msg: "client runtime stopped".into() })?;
+        if let Some(e) = read_err {
+            return Err(Error::Io(e));
+        }
+        let resp = resp.map_err(transport)?;
+        self.block(put_result(resp, local))
+    }
+
     /// Base URL of the server.
     pub fn url(&self) -> &str {
         &self.inner.base
@@ -355,47 +398,12 @@ impl ObjectStore for RemoteRepo {
     }
 
     fn put_stream(&self, src: &mut dyn Read) -> Result<Hash> {
-        let rt = self.inner.rt.as_ref().ok_or(Error::Unsupported("client runtime is shut down"))?;
-        let (tx, rx) = tokio::sync::mpsc::channel::<std::io::Result<Bytes>>(4);
-        let body = reqwest::Body::wrap_stream(futures_util::stream::unfold(rx, |mut rx| async move {
-            rx.recv().await.map(|i| (i, rx))
-        }));
-        let rb = self.request(Method::PUT, "/v1/objects").header("content-type", "application/octet-stream").body(body);
-        let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
-        rt.spawn(async move {
-            let _ = done_tx.send(rb.send().await);
-        });
-        // Read on the caller's thread; a full channel blocks us (backpressure).
-        let mut hasher = blake3::Hasher::new();
-        let mut buf = vec![0u8; 256 * 1024];
-        let mut read_err = None;
-        loop {
-            let n = match src.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => n,
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) => {
-                    let _ = tx.blocking_send(Err(std::io::Error::new(e.kind(), e.to_string())));
-                    read_err = Some(e);
-                    break;
-                }
-            };
-            hasher.update(&buf[..n]);
-            if tx.blocking_send(Ok(Bytes::copy_from_slice(&buf[..n]))).is_err() {
-                break; // request ended early (rejected); its response explains why
-            }
-        }
-        drop(tx);
-        let local = Hash(*hasher.finalize().as_bytes());
-        let resp =
-            done_rx.recv().map_err(|_| Error::Backend { transient: true, msg: "client runtime stopped".into() })?;
-        if let Some(e) = read_err {
-            return Err(Error::Io(e));
-        }
-        let resp = resp.map_err(transport)?;
-        self.block(put_result(resp, local))
+        self.put_stream_to("/v1/objects".to_string(), src)
     }
 
+    fn put_delta(&self, base: &Hash, src: &mut dyn Read) -> Result<Hash> {
+        self.put_stream_to(format!("/v1/objects?delta_base={}", base.to_hex()), src)
+    }
     fn get(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Vec<u8>> {
         let mut r = self.open(hash, range)?;
         let mut v = Vec::new();

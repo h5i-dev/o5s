@@ -9,20 +9,17 @@ fn have_git() -> bool {
     Command::new("git").arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
-/// Runs git in `dir`; returns (success, combined output).
+/// Runs git in `dir`; returns (success, combined output). Protocol version from
+/// `P2P_GIT_PROTOCOL` (default 2, git's default; pushes always use v0/v1).
 fn git(dir: &Path, args: &[&str]) -> (bool, String) {
+    git_v(dir, args, &std::env::var("P2P_GIT_PROTOCOL").unwrap_or_else(|_| "2".into()))
+}
+
+fn git_v(dir: &Path, args: &[&str], version: &str) -> (bool, String) {
+    let pv = format!("protocol.version={version}");
     let o = Command::new("git")
         .current_dir(dir)
-        .args([
-            "-c",
-            "user.email=t@example.com",
-            "-c",
-            "user.name=t",
-            "-c",
-            "protocol.version=0",
-            "-c",
-            "init.defaultBranch=main",
-        ])
+        .args(["-c", "user.email=t@example.com", "-c", "user.name=t", "-c", &pv, "-c", "init.defaultBranch=main"])
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -327,4 +324,53 @@ fn branch_deletion() {
     ok(&a, &["push", "-q", "--atomic", &u, "main", ":tmp"]);
     assert!(s.client(ALICE).resolve(&n("git/team/del/refs/heads/tmp")).unwrap().is_none());
     assert_eq!(oid_of_ref(&s, "git/team/del/refs/heads/main"), head(&a), "main moved in the same atomic update");
+}
+
+#[test]
+fn protocol_v0_and_v2_agree() {
+    if !have_git() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let s = git_server();
+    let w = tempfile::tempdir().unwrap();
+    let a = w.path().join("a");
+    std::fs::create_dir(&a).unwrap();
+    ok(&a, &["init", "-q"]);
+    commit(&a, "f.txt", "one", "c1");
+    ok(&a, &["tag", "-a", "-m", "annotated", "v1"]);
+    commit(&a, "f.txt", "two", "c2");
+    ok(&a, &["branch", "feature"]);
+    let u = url(&s, ALICE, "team/v2");
+    ok(&a, &["push", "-q", &u, "main", "feature", "v1"]);
+    for v in ["0", "2"] {
+        let dir = format!("c{v}");
+        let (cloned, out) = git_v(w.path(), &["clone", "-q", &u, &dir], v);
+        assert!(cloned, "v{v} clone: {out}");
+        let c = w.path().join(&dir);
+        assert_eq!(head(&a), head(&c));
+        ok(&c, &["fsck", "--full"]);
+        // Incremental fetch over the same protocol.
+        commit(&a, "f.txt", &format!("three-{v}"), &format!("c3-{v}"));
+        ok(&a, &["push", "-q", &u, "main"]);
+        let (pulled, out) = git_v(&c, &["pull", "-q", "--ff-only"], v);
+        assert!(pulled, "v{v} pull: {out}");
+        assert_eq!(head(&a), head(&c));
+    }
+    // ls-remote with ref-prefix filtering (v2) and peeled tags.
+    let (okk, out) = git_v(w.path(), &["ls-remote", &u, "refs/tags/*"], "2");
+    assert!(okk, "{out}");
+    assert!(out.contains("refs/tags/v1") && out.contains("refs/tags/v1^{}"), "{out}");
+    assert!(!out.contains("refs/heads/"), "ref-prefix must filter: {out}");
+    // Prove the server really spoke v2.
+    let o = Command::new("git")
+        .current_dir(w.path())
+        .args(["-c", "protocol.version=2", "ls-remote", &u, "refs/tags/*"])
+        .env("GIT_TRACE_PACKET", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap();
+    let trace = String::from_utf8_lossy(&o.stderr);
+    assert!(trace.contains("version 2"), "no v2 advertisement:\n{trace}");
+    assert!(trace.contains("command=ls-refs"), "{trace}");
 }

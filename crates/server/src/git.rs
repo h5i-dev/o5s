@@ -1,4 +1,5 @@
-//! Git smart HTTP (protocol v0/v1) on top of the repository.
+//! Git smart HTTP on top of the repository: protocol v2 for fetch (`ls-refs`,
+//! `fetch`), v0/v1 for fetch and push.
 //!
 //! Endpoints, for `<repo>` a path such as `team/project`:
 //! * `GET  /git/<repo>.git/info/refs?service=git-upload-pack|git-receive-pack`
@@ -19,7 +20,7 @@
 //!   only from refs.
 //!
 //! Limits of this version (also in the production gaps): SHA-1 repositories
-//! only, no shallow clones, no protocol v2, full objects
+//! only, no shallow clones, deltified
 //! (no deltas) in served packs, and delta bases resolved in a bounded
 //! in-memory cache.
 
@@ -1095,7 +1096,12 @@ pub async fn dispatch(
             let g = git.clone();
             let r = repo.clone();
             let s2 = service.clone();
-            match tokio::task::spawn_blocking(move || advertisement(&g, &r, &s2)).await {
+            let v2 = service == "git-upload-pack" && wants_v2(&headers);
+            match tokio::task::spawn_blocking(
+                move || if v2 { Ok(v2_capabilities()) } else { advertisement(&g, &r, &s2) },
+            )
+            .await
+            {
                 Ok(Ok(body)) => {
                     let mut resp = Response::new(Body::from(body));
                     if let Ok(v) = HeaderValue::from_str(&format!("application/x-{service}-advertisement")) {
@@ -1191,6 +1197,11 @@ fn parse_upload_request(body: &[u8]) -> Result<UploadRequest> {
     Ok(req)
 }
 
+/// The client asked for protocol v2 (`Git-Protocol: version=2`).
+fn wants_v2(h: &HeaderMap) -> bool {
+    h.get("git-protocol").and_then(|v| v.to_str().ok()).is_some_and(|v| v.split(':').any(|p| p.trim() == "version=2"))
+}
+
 async fn upload_pack(
     st: &Arc<AppState>,
     git: Arc<GitState>,
@@ -1202,6 +1213,34 @@ async fn upload_pack(
         Ok(b) => b,
         Err((status, msg)) => return git_error(status, msg),
     };
+    if wants_v2(headers) {
+        let req = match parse_v2_request(&body) {
+            Ok(r) => r,
+            Err(e) => return git_error(StatusCode::BAD_REQUEST, e.to_string()),
+        };
+        let (tx, rx) = mpsc::channel::<std::result::Result<Bytes, std::io::Error>>(8);
+        let metrics = st.metrics.clone();
+        tokio::task::spawn_blocking(move || {
+            let res = match req.command.as_str() {
+                "ls-refs" => v2_ls_refs(&git, &repo, &req.args).and_then(|out| send(&tx, out)),
+                "fetch" => v2_fetch(&git, &repo, &req.args, &tx, &metrics),
+                other => Err(Error::Parse(format!("unknown v2 command {other:?}"))),
+            };
+            if let Err(e) = res {
+                warn!(repo, error = %e, "upload-pack v2 failed");
+                let mut out = Vec::new();
+                sideband(&mut out, 3, format!("ERR {e}\n").as_bytes(), true);
+                let _ = tx.blocking_send(Ok(Bytes::from(out)));
+            }
+        });
+        let mut resp = Response::new(Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|i| (i, rx))
+        })));
+        resp.headers_mut()
+            .insert(header::CONTENT_TYPE, HeaderValue::from_static("application/x-git-upload-pack-result"));
+        no_cache(resp.headers_mut());
+        return resp;
+    }
     let req = match parse_upload_request(&body) {
         Ok(r) => r,
         Err(e) => return git_error(StatusCode::BAD_REQUEST, e.to_string()),
@@ -1250,27 +1289,21 @@ fn send(tx: &mpsc::Sender<std::result::Result<Bytes, std::io::Error>>, data: Vec
     }
 }
 
-fn serve_upload(
-    git: &GitState,
-    repo: &str,
-    req: &UploadRequest,
-    tx: &mpsc::Sender<std::result::Result<Bytes, std::io::Error>>,
-    metrics: &crate::metrics::Metrics,
-) -> Result<()> {
-    let view = View::new(git)?;
+/// Validates wants (must be tips of `repo`'s refs) and finds the common commits:
+/// haves reachable from this repository (never other repos' objects).
+fn negotiate(view: &View<'_>, git: &GitState, repo: &str, wants: &[Oid], haves: &[Oid]) -> Result<Vec<Oid>> {
     let refs = list_refs(git, repo)?;
     let tips: HashSet<Oid> = refs.iter().map(|r| r.1).collect();
-    for w in &req.wants {
+    for w in wants {
         if !tips.contains(w) {
             return Err(Error::Parse(format!("not our ref {}", hex(w))));
         }
     }
-    // Common commits: haves that are reachable from this repository's refs.
     let mut common: Vec<Oid> = Vec::new();
-    if !req.haves.is_empty() {
+    if !haves.is_empty() {
         let mut repo_commits: HashSet<Oid> = HashSet::new();
         let mut stack: Vec<Oid> = tips.iter().copied().collect();
-        let haves: HashSet<Oid> = req.haves.iter().copied().collect();
+        let haves: HashSet<Oid> = haves.iter().copied().collect();
         while let Some(o) = stack.pop() {
             if !repo_commits.insert(o) {
                 continue;
@@ -1297,6 +1330,158 @@ fn serve_upload(
         common.sort();
         common.dedup();
     }
+    Ok(common)
+}
+
+// ---------------------------------------------------------------------------
+// Protocol v2 (upload-pack only; pushes use v0/v1, as git itself does)
+// ---------------------------------------------------------------------------
+
+/// The v2 capability advertisement (no `# service` line in v2).
+fn v2_capabilities() -> Vec<u8> {
+    let mut out = Vec::new();
+    for l in ["version 2\n", &format!("{AGENT}\n"), "ls-refs=unborn\n", "fetch\n", "object-format=sha1\n"] {
+        out.extend_from_slice(&pkt(l.as_bytes()));
+    }
+    out.extend_from_slice(FLUSH);
+    out
+}
+
+struct V2Request {
+    command: String,
+    args: Vec<Vec<u8>>,
+}
+
+fn parse_v2_request(body: &[u8]) -> Result<V2Request> {
+    let mut r = body;
+    let mut command = None;
+    let mut args = Vec::new();
+    let mut in_args = false;
+    loop {
+        match read_pkt(&mut r)? {
+            None => break,                             // flush ends the request
+            Some(l) if l.is_empty() => in_args = true, // delim
+            Some(l) => {
+                let l = trim_nl(&l).to_vec();
+                if in_args {
+                    args.push(l);
+                } else if let Some(c) = l.strip_prefix(b"command=") {
+                    command = Some(String::from_utf8_lossy(c).to_string());
+                } else if l.starts_with(b"object-format=") && l != b"object-format=sha1" {
+                    return Err(Error::Unsupported("only sha1 repositories are supported"));
+                }
+            }
+        }
+    }
+    Ok(V2Request { command: command.ok_or_else(|| Error::Parse("v2 request without command".into()))?, args })
+}
+
+fn v2_ls_refs(git: &GitState, repo: &str, args: &[Vec<u8>]) -> Result<Vec<u8>> {
+    let view = View::new(git)?;
+    let refs = list_refs(git, repo)?;
+    let has = |a: &[u8]| args.iter().any(|x| x == a);
+    let (peel, symrefs, unborn) = (has(b"peel"), has(b"symrefs"), has(b"unborn"));
+    let prefixes: Vec<&[u8]> = args.iter().filter_map(|a| a.strip_prefix(b"ref-prefix ")).collect();
+    let wanted = |name: &str| prefixes.is_empty() || prefixes.iter().any(|p| name.as_bytes().starts_with(p));
+    let mut out = Vec::new();
+    match head_target(&refs) {
+        Some(h) if wanted("HEAD") => {
+            let mut l = format!("{} HEAD", hex(&h.1));
+            if symrefs {
+                l.push_str(&format!(" symref-target:{}", h.0));
+            }
+            out.extend_from_slice(&pkt(format!("{l}\n").as_bytes()));
+        }
+        None if unborn && wanted("HEAD") => {
+            out.extend_from_slice(&pkt(b"unborn HEAD symref-target:refs/heads/main\n"));
+        }
+        _ => {}
+    }
+    for (name, oid, _) in &refs {
+        if !wanted(name) {
+            continue;
+        }
+        let mut l = format!("{} {name}", hex(oid));
+        if peel && let Some((Kind::Tag, body)) = view.load(oid)? {
+            // Peel through nested tags to the final object.
+            let mut target = refs_of(Kind::Tag, &body)?.first().copied();
+            for _ in 0..16 {
+                match target.map(|t| view.load(&t)).transpose()?.flatten() {
+                    Some((Kind::Tag, b)) => target = refs_of(Kind::Tag, &b)?.first().copied(),
+                    _ => break,
+                }
+            }
+            if let Some(t) = target {
+                l.push_str(&format!(" peeled:{}", hex(&t)));
+            }
+        }
+        out.extend_from_slice(&pkt(format!("{l}\n").as_bytes()));
+    }
+    out.extend_from_slice(FLUSH);
+    Ok(out)
+}
+
+fn v2_fetch(
+    git: &GitState,
+    repo: &str,
+    args: &[Vec<u8>],
+    tx: &mpsc::Sender<std::result::Result<Bytes, std::io::Error>>,
+    metrics: &crate::metrics::Metrics,
+) -> Result<()> {
+    let mut wants = Vec::new();
+    let mut haves = Vec::new();
+    let mut done = false;
+    for a in args {
+        if let Some(o) = a.strip_prefix(b"want ") {
+            wants.push(parse_oid(o.get(..40).unwrap_or_default()).ok_or_else(|| Error::Parse("bad want".into()))?);
+        } else if let Some(o) = a.strip_prefix(b"have ") {
+            haves.push(parse_oid(o.get(..40).unwrap_or_default()).ok_or_else(|| Error::Parse("bad have".into()))?);
+        } else if a == b"done" {
+            done = true;
+        } else if a.starts_with(b"shallow ")
+            || a.starts_with(b"deepen")
+            || a.starts_with(b"filter ")
+            || a.starts_with(b"want-ref ")
+        {
+            return Err(Error::Unsupported("shallow, partial and want-ref fetches are not supported"));
+        }
+    }
+    if wants.is_empty() {
+        return Err(Error::Parse("fetch without wants".into()));
+    }
+    let view = View::new(git)?;
+    let common = negotiate(&view, git, repo, &wants, &haves)?;
+    if !done {
+        let mut out = pkt(b"acknowledgments\n");
+        if common.is_empty() {
+            out.extend_from_slice(&pkt(b"NAK\n"));
+        }
+        for c in &common {
+            out.extend_from_slice(&pkt(format!("ACK {}\n", hex(c)).as_bytes()));
+        }
+        if common.is_empty() {
+            out.extend_from_slice(FLUSH);
+            return send(tx, out);
+        }
+        // We have enough to build a pack: say so and send it right away.
+        out.extend_from_slice(&pkt(b"ready\n"));
+        out.extend_from_slice(b"0001");
+        send(tx, out)?;
+    }
+    send(tx, pkt(b"packfile\n"))?;
+    write_pack(&view, repo, &wants, &common, true, tx, metrics)?;
+    send(tx, FLUSH.to_vec())
+}
+
+fn serve_upload(
+    git: &GitState,
+    repo: &str,
+    req: &UploadRequest,
+    tx: &mpsc::Sender<std::result::Result<Bytes, std::io::Error>>,
+    metrics: &crate::metrics::Metrics,
+) -> Result<()> {
+    let view = View::new(git)?;
+    let common = negotiate(&view, git, repo, &req.wants, &req.haves)?;
     let mut out = Vec::new();
     if let Some(first) = common.first() {
         out.extend_from_slice(&pkt(format!("ACK {}\n", hex(first)).as_bytes()));
@@ -1311,9 +1496,26 @@ fn serve_upload(
         out.extend_from_slice(&pkt(b"NAK\n"));
     }
     send(tx, out)?;
+    write_pack(&view, repo, &req.wants, &common, req.sideband, tx, metrics)?;
+    if req.sideband {
+        send(tx, FLUSH.to_vec())?;
+    }
+    Ok(())
+}
+
+/// Streams a pack of everything reachable from `wants` but not from `common`.
+fn write_pack(
+    view: &View<'_>,
+    repo: &str,
+    wants: &[Oid],
+    common: &[Oid],
+    sideband_on: bool,
+    tx: &mpsc::Sender<std::result::Result<Bytes, std::io::Error>>,
+    metrics: &crate::metrics::Metrics,
+) -> Result<()> {
     // Objects to send: reachable from wants minus reachable from common.
-    let exclude = if common.is_empty() { HashSet::new() } else { boundary_exclude(&view, &common)? };
-    let objs = walk_paths(&view, &req.wants, &exclude)?;
+    let exclude = if common.is_empty() { HashSet::new() } else { boundary_exclude(view, common)? };
+    let objs = walk_paths(view, wants, &exclude)?;
     // Stream the pack. Blobs and trees are deltified against the previously
     // sent version at the same path (newest first, so older versions are deltas).
     let mut h = Sha1::new();
@@ -1327,7 +1529,7 @@ fn serve_upload(
     let flush = |buf: &mut Vec<u8>, force: bool| -> Result<()> {
         if buf.len() >= 1 << 16 || (force && !buf.is_empty()) {
             let mut framed = Vec::with_capacity(buf.len() + 64);
-            sideband(&mut framed, 1, buf, req.sideband);
+            sideband(&mut framed, 1, buf, sideband_on);
             metrics.bytes_out.inc_by(buf.len() as u64);
             buf.clear();
             send(tx, framed)?;
@@ -1389,9 +1591,6 @@ fn serve_upload(
     let trailer: [u8; 20] = h.finalize().into();
     buf.extend_from_slice(&trailer);
     flush(&mut buf, true)?;
-    if req.sideband {
-        send(tx, FLUSH.to_vec())?;
-    }
     info!(repo, objects = objs.len(), deltas, bytes = offset + 20, "upload-pack served");
     Ok(())
 }
