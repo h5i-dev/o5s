@@ -29,9 +29,10 @@ for r in repos:
     pw = e.get("git-2.56-path-walk", {}).get("bytes")
     nh = e.get("git-2.56-name-hash-version=2", {}).get("bytes")
     vs = res[r].get(vstar)
-    rp = lambda b: f"{vs['total_bytes'] / b:.3f}" if b and vs else "–"
+    rp = lambda b: f"{vs['total_bytes'] / b:.3f}" if b and vs else ("not run" if r == "git" else "–")
     cell = lambda v: f"{R(r, v):.3f}" if v in res[r] else "–"
-    num = lambda x: f"{x:,}" if x else "–"
+    stopped = "not run (stopped by the human to prioritise implementation)"
+    num = lambda x: f"{x:,}" if x else (stopped if r == "git" else "–")
     print(f"| {r} | {base[r]['objects']:,} | {base[r]['total_bytes']:,} | {cell('v6')} | {cell('v7')} | {num(pw)} | {num(nh)} | {rp(pw)} / {rp(nh)} |")
 print()
 print("| repo | V\\* build s | git --aggressive s | ratio | V\\* read p50 / p99 (ms) | mean / max depth | peak RSS | verified reads |")

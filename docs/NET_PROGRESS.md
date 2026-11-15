@@ -170,7 +170,7 @@ The contended run checks that no update is lost: the final version equals the nu
 - Running the git adapter against git.git/redis-sized repos. Not done yet because of the scratch disk budget, which Exp1 needs.
 
 ## Phase 2 (2026-11-15): speed-up backlog shared with the core (AGENT_TASK_NET.md "Phase 2")
-- **A. Experiment 1c:** pre-registered as PLAN §4.9 (52443e5, committed before any 1c code). Harness: `bench/exp1c`, `scripts/exp1c.sh`. Git 2.56.1 for the extra baselines is built in `/mnt/scratch/pico2peta/git-2.56`. Running under the bench lock; results go in EXP1.md.
+- **A. Experiment 1c: DONE, verdict FAIL** (docs/EXP1.md, "Experiment 1c"). V\* = V7, with R 1.41–2.27× (the per-repo limit is 1.30) and build 2.1–3.7× Git. The cause is the pre-registered depth rule forcing long-distance deltas; resemblance picks beat the same-path predecessor when it is eligible. The git.git Git 2.56 baselines were not run (stopped by the human). Harness: `bench/exp1c`, `scripts/exp1c.sh`, `scripts/exp1c-report.py`.
 - **B. Xet chunker: DONE.** `crates/chunk`.
   - Byte-exact Xet chunking that **matches all 796 published reference boundaries** (`xet-team/xet-spec-reference-files`), plus FastCDC v2020 identical to the pack store's chunking, behind a streaming `Chunker` trait.
   - The core wired it in as a per-namespace option (API v1.11), and the server uses it for named uploads.
