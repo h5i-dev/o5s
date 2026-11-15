@@ -228,3 +228,19 @@ implementation**, and they are not re-run.
 
 **Consequence (pre-registered):** FAIL. Git-compatible storage stays the recommendation for source code,
 and no further 1c variants are added.
+
+## Experiment 3: generic similarity ordering and framing (PLAN §6.6)
+
+**Frozen before the official run (recorded 2026-11-15, before any redis or git.git measurement).**
+- **Code:** commit `55901dd` (the `crates/order`, `bench/exp3` and `scripts/exp3.sh` contents at that commit; the last
+  change to them is listed by `git log -1 -- crates/order bench/exp3 scripts/exp3.sh`).
+- **Algorithm:** §6.6 plus its dated dev-set amendment:
+  - SimHash chain starts;
+  - natural cuts off, 6 MiB cap, lookback 8, reference depth ≤ 2;
+  - early-stop reads.
+- **Tuning data:** dev set ripgrep and jq only (and the generalization corpora, smoke runs).
+- **Official run:** `scripts/exp3.sh repos` (all four repos, once, on this commit, under the bench lock), then
+  `scripts/exp3.sh general`. Every result line carries `"commit"`.
+- **Verdict:** `EXP1_ELIGIBLE=a3,a4 scripts/exp1-report.py $BENCH_DATA/exp1/results.jsonl,$BENCH_DATA/exp3/results.jsonl`.
+
+*(Results follow below once the run completes.)*
