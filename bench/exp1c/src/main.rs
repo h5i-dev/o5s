@@ -557,6 +557,36 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
                                         }
                                         best.1
                                     };
+                                    if std::env::var_os("EXP1C_DIAG").is_some() {
+                                        let same_prev = win
+                                            .back()
+                                            .filter(|e| p.paths.get(i) == p.paths.get(e.idx))
+                                            .map(|_| win.len() - 1);
+                                        let kind = match (chosen, same_prev) {
+                                            (None, _) => "none",
+                                            (Some(w), Some(sp)) if w == sp => "same-path-prev",
+                                            (Some(w), _) if p.paths.get(i) == p.paths.get(win[w].idx) => {
+                                                "same-path-older"
+                                            }
+                                            (Some(_), _) => "other-path",
+                                        };
+                                        let alt = match same_prev {
+                                            Some(sp) if win[sp].depth < MAX_DEPTH => {
+                                                patch_from(&win[sp].data, b, TRIAL_LEVEL)?.len()
+                                            }
+                                            _ => 0,
+                                        };
+                                        let got = match chosen {
+                                            Some(w) => patch_from(&win[w].data, b, TRIAL_LEVEL)?.len(),
+                                            None => ct.compress(b)?.len(),
+                                        };
+                                        eprintln!(
+                                            "DIAG {kind} len={} got={got} samepath_prev={alt} sfs={} ncand={}",
+                                            b.len(),
+                                            sfs.is_some(),
+                                            cands.len()
+                                        );
+                                    }
                                     let (z, depth, pred) = match chosen {
                                         Some(w) => {
                                             let e = &win[w];
