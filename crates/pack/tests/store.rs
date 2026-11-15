@@ -817,3 +817,56 @@ fn byte_grouped_records_roundtrip_and_shrink() {
     assert!(matches!(s.put_stream_grouped(&mut &data[..], 17), Err(Error::Parse(_))));
     assert_eq!(s.put_stream_grouped(&mut &data[..], 1).unwrap(), Hash::of(&data));
 }
+
+/// Read-ahead (reads ≥ 2 MiB): a corrupt chunk in the middle fails a whole
+/// read, and fails a ranged read only if the range covers it. Dropping a
+/// reader mid-object neither hangs nor leaks state, and results are
+/// returned strictly in order.
+#[test]
+fn readahead_reads_detect_corruption_and_stay_ordered() {
+    let d = tempfile::tempdir().unwrap();
+    let cfg = || PackConfig { chunk_threshold: 1 << 20, zstd_level: 0, pack_cap: 1 << 30, ..PackConfig::default() };
+    let data = pseudo(12_000_000, 21);
+    let h = {
+        let s = open(d.path(), cfg());
+        let h = s.put_stream(&mut &data[..]).unwrap();
+        s.flush().unwrap();
+        // In order and complete, with small and odd-sized reads.
+        let mut r = s.open(&h, None).unwrap();
+        let mut out = Vec::new();
+        let mut buf = vec![0u8; 7777];
+        loop {
+            let n = r.read(&mut buf).unwrap();
+            if n == 0 {
+                break;
+            }
+            out.extend_from_slice(&buf[..n]);
+        }
+        assert_eq!(out, data);
+        // Early drop.
+        let mut r = s.open(&h, None).unwrap();
+        let mut one = vec![0u8; 1 << 20];
+        r.read_exact(&mut one).unwrap();
+        drop(r);
+        h
+    };
+    // Corrupt one byte at the middle of the pack (inside a chunk record).
+    let dir = d.path().join("objects/packs");
+    let pack = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "pack"))
+        .unwrap();
+    let mut b = std::fs::read(&pack).unwrap();
+    let mid = b.len() / 2;
+    b[mid] ^= 0x01;
+    std::fs::write(&pack, b).unwrap();
+    let s = open(d.path(), cfg());
+    let mut out = Vec::new();
+    let err = s.open(&h, None).unwrap().read_to_end(&mut out).unwrap_err();
+    assert!(err.to_string().contains("mismatch") || err.to_string().contains("crc"), "{err}");
+    // The first 2 MiB (well before the corrupt middle) still read fine.
+    assert_eq!(s.get(&h, Some(0..2_500_000)).unwrap(), data[..2_500_000]);
+    // A range over the corrupt middle fails.
+    assert!(s.get(&h, Some(4_000_000..8_000_000)).is_err());
+}

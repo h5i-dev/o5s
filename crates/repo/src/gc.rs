@@ -280,7 +280,7 @@ impl LocalRepo {
                 Ok(c)
             }
         }
-        let tracer = self.fronts().tracer();
+        let tracer = self.fronts().tracer(self)?;
         let grouper = self.fronts().grouper();
         let both = Both(&tracer, extra);
         self.gc_with(opts, &both, if grouped { Some(&grouper) } else { None })

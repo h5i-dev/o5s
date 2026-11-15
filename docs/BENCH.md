@@ -14,6 +14,34 @@ Other modes: `p2p-bench stream <dir> [MiB]` (put_stream only; `P2P_BENCH_NO_PROB
 
 Comparisons against Git storage size are in `docs/EXP1.md` (Experiment 1).
 
+## 2026-11-15: performance pass (Phase 3, items a–e)
+
+Short runs under `bench.lock`, on `/dev/shm` unless stated. The host is shared (load 1.3–2.9).
+
+**(a) put_stream on code-like text (328 MB/s): the host is CPU-bound, not the pipeline.**
+- *Ceiling for this input.* The benchmark's generated text is hard for zstd. Single-core `zstd -b3 -B64KiB` on
+  it does **182–188 MB/s** (zstd-1: 210 MB/s), not the ~570 MB/s of RESEARCH_SPEEDUP §0's code-like sample. With 3
+  workers the compression ceiling is therefore about 560 MB/s.
+- *Where the time goes.* Per-thread `/proc/<tid>/schedstat` during a put shows each of the three workers
+  **running 40–41 %** of its lifetime and **runnable but waiting for a CPU 51–52 %**. The whole-object hasher ran
+  9 % and waited 42 %. The workers are almost never blocked on the pipeline (credits or ordering): the 4 vCPUs are
+  oversubscribed by our threads plus other load.
+- *Consequence.* The only lever is less CPU per byte, and zstd dominates. No change was made. Real source code
+  compresses faster than this generator's output, so a realistic input is planned for the final batch.
+
+**(b) Verified read: 870 → ~1,880 MB/s (2.2×), incompressible 512 MiB.**
+
+| change | open + read, verified |
+|---|---|
+| before (serial: pread, CRC, decompress, chunk BLAKE3, whole BLAKE3, two copies) | 855–924 MB/s |
+| read-ahead: up to 3 workers fetch + decompress + verify the next chunks (4 in flight each), in order | 1,777–1,843 MB/s |
+| plus the whole-object hash on its own thread; full chunks moved, not copied | **1,866–1,900 MB/s** |
+
+- Reads under 2 MiB stay serial (no thread setup).
+- Errors are returned in order, as before.
+- A new test covers read-ahead specifically: corruption in the middle of a 12 MB object, ranged reads on either
+  side of it, an early drop, and odd-sized reads.
+
 ## 2026-11-15: streaming put pipeline (RESEARCH_SPEEDUP §1), before/after
 
 `p2p-bench stream <dir> 512` puts 512 MiB twice (the second put is all dedup hits) and reads it back with

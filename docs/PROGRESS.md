@@ -12,6 +12,8 @@
 
 Milestones M0–M9 are complete. `scripts/check.sh` passes.
 
+**Process slip (2026-11-15, fixed):** commit `40e4194` (read-ahead) was pushed with a failing gate (one clippy `type_complexity` error). I had piped `scripts/check.sh` into `tail`, which hid its exit status. It was fixed and pushed in the next commit, with the gate's exit status checked directly. No test failed; it was a lint.
+
 **Speed-up work (`docs/RESEARCH_SPEEDUP.md`, from the human; split with net on 2026-11-15)**
 - **§1 (core): done.** Streaming put pipeline, compressibility probe, incremental pack hash. On tmpfs (CPU-bound), incompressible `put_stream` went from 331 to **739 MB/s** (2.2×; median of 5 interleaved reps on a loaded host, load 2.9–5.2), text from 228 to 328 MB/s, dedup re-put from ~630 to ~900 MB/s. On NVMe, incompressible stays at the device's ~200 MB/s fsync ceiling. **§1a's ≥ 800 MB/s target was not met** (best run 791 MB/s); text is compression-bound in the workers. The probe gave no measurable gain (zstd already bails out fast on random data). Details, profiles and the ablation: `docs/BENCH.md`.
 - **§2 byte grouping: done.** Net built the transform (`crates/weights/src/bytegroup.rs`) and measured it; the core added record codec 2 `GroupedZstd` (`width | zstd(group(chunk))`), the hint plumbing (API v1.12) and `pack.grouped_zstd_level` (default 6). Measured end to end through the CLI on SmolLM2-135M → -Instruct (real bf16, 269 MB each; byte-exact round trip, fsck clean, identical hashes in every mode):
@@ -127,6 +129,7 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
   - **`RepoConfig` gained `profiles` and `namespaces`:** full struct literals must add them; use the new `RepoConfig::new(&pack)` instead. I fixed the one literal in net's `crates/server/tests/server.rs`.
   - **repo, `idmap` module:** net's SegMap moved into the core as the generic external-id index (`IdMap` = `SegMap`, same on-disk format, sync API; the async wrappers stay in the server).
   - **pack:** `bytegroup` moved here from weights (it is on-disk format); `pico2peta_weights::bytegroup` re-exports it. `ChunkerKind::from_id`/`id`.
+  - **Follow-up (net's requests):** `FrontHandle` owns a `LocalRepo` clone (no lifetime, so it fits in `Arc<dyn Repository>`). `Front::gc_tracer(repo)` is built once per GC run (e.g. over id-index roots snapshotted at GC start) and replaces `children` for that front. `FrontRegistry::tracer(repo)` now returns `Result`.
   - **weights:** the `safetensors` front (`SafetensorsFront`, `SAFETENSORS_FRONT`) and `plan_weights`. `put_checkpoint` and `put_weights` are now thin wrappers over the same plan.
 
 ## Production gaps

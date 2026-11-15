@@ -2018,13 +2018,7 @@ impl PackStore {
             }
             Kind::Manifest => {
                 let pieces = overlapping(self.read_manifest(hash, loc)?, r.start, r.end);
-                Ok(Box::new(ChunkReader {
-                    store: self.clone(),
-                    stack: vec![pieces.into_iter()],
-                    cur: std::io::Cursor::new(Vec::new()),
-                    verify: whole.then(|| (blake3::Hasher::new(), *hash)),
-                    depth_limit: 16,
-                }))
+                Ok(Box::new(ChunkReader::new(self.clone(), pieces, whole.then_some(*hash), r.end - r.start)))
             }
         }
     }
@@ -2324,28 +2318,98 @@ fn overlapping(m: Vec<(Hash, u64)>, start: u64, end: u64) -> Vec<(Hash, u64, u64
 }
 
 /// Streams a chunked object, expanding the manifest tree lazily, so memory
-/// is bounded by tree depth times fanout, whatever the object's size.
+/// is bounded by tree depth times fanout (plus the read-ahead window),
+/// whatever the object's size.
+///
+/// Large reads use read-ahead: a few worker threads fetch, decompress and
+/// verify the next chunks in parallel, while the reader returns them strictly
+/// in order and hashes the whole object.
 struct ChunkReader {
     store: PackStore,
     /// One iterator per tree level: `(hash, start, end)` local to that entry.
     stack: Vec<std::vec::IntoIter<(Hash, u64, u64)>>,
-    cur: std::io::Cursor<Vec<u8>>,
+    /// The chunk being returned and the read position in it.
+    cur: (Arc<Vec<u8>>, usize),
     /// Whole-object reads also verify the reassembled hash at EOF.
     verify: Option<(blake3::Hasher, Hash)>,
+    /// Large whole reads hash on a separate thread instead.
+    hasher: Option<VerifyThread>,
     depth_limit: usize,
+    /// Chunks requested but not yet returned, in order.
+    pending: std::collections::VecDeque<std::sync::mpsc::Receiver<Result<Vec<u8>>>>,
+    /// Read-ahead pool (started lazily for large reads) and its size.
+    pool: Option<(std::sync::mpsc::Sender<ChunkJob>, usize)>,
+    /// Bytes this reader will return (decides whether read-ahead pays off).
+    span: u64,
 }
 
-fn io_err(e: Error) -> std::io::Error {
-    std::io::Error::other(e)
+/// A whole-object hash running on its own thread: chunk sender, the thread,
+/// and the expected hash.
+type VerifyThread = (std::sync::mpsc::SyncSender<Arc<Vec<u8>>>, std::thread::JoinHandle<blake3::Hasher>, Hash);
+
+/// One read-ahead job: fetch and verify chunk `hash`, return bytes `[a, b)`.
+struct ChunkJob {
+    hash: Hash,
+    loc: Loc,
+    a: u64,
+    b: u64,
+    reply: std::sync::mpsc::SyncSender<Result<Vec<u8>>>,
 }
 
-impl Read for ChunkReader {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+/// Reads at least this large use read-ahead workers.
+const READAHEAD_MIN: u64 = 2 << 20;
+/// Chunks in flight per read-ahead worker.
+const READAHEAD_PER_WORKER: usize = 4;
+
+impl PackStore {
+    /// Fetches chunk `hash` (verifying it) and returns bytes `[a, b)`, moving
+    /// the buffer when the whole chunk is wanted.
+    fn chunk_slice(&self, hash: &Hash, loc: Loc, a: u64, b: u64) -> Result<Vec<u8>> {
+        let mut d = self.read_blob(hash, loc)?;
+        if a == 0 && b as usize == d.len() {
+            return Ok(d);
+        }
+        if a > b || b as usize > d.len() {
+            return Err(Error::Corrupt("chunk shorter than manifest".into()));
+        }
+        d.truncate(b as usize);
+        Ok(d.split_off(a as usize))
+    }
+}
+
+impl ChunkReader {
+    fn new(store: PackStore, pieces: Vec<(Hash, u64, u64)>, verify: Option<Hash>, span: u64) -> Self {
+        // Large whole reads: hash on a separate thread, fed the same buffers.
+        let hasher = verify.filter(|_| span >= READAHEAD_MIN).and_then(|want| {
+            let (tx, rx) = std::sync::mpsc::sync_channel::<Arc<Vec<u8>>>(READAHEAD_PER_WORKER * 4);
+            std::thread::Builder::new()
+                .name("p2p-verify".into())
+                .spawn(move || {
+                    let mut h = blake3::Hasher::new();
+                    for c in rx {
+                        h.update(&c);
+                    }
+                    h
+                })
+                .ok()
+                .map(|j| (tx, j, want))
+        });
+        ChunkReader {
+            store,
+            stack: vec![pieces.into_iter()],
+            cur: (Arc::new(Vec::new()), 0),
+            verify: if hasher.is_some() { None } else { verify.map(|h| (blake3::Hasher::new(), h)) },
+            hasher,
+            depth_limit: 16,
+            pending: Default::default(),
+            pool: None,
+            span,
+        }
+    }
+
+    /// Next leaf chunk `(hash, loc, a, b)`, expanding manifests on the way.
+    fn next_leaf(&mut self) -> Result<Option<(Hash, Loc, u64, u64)>> {
         loop {
-            let n = self.cur.read(buf)?;
-            if n > 0 || buf.is_empty() {
-                return Ok(n);
-            }
             let next = loop {
                 match self.stack.last_mut() {
                     None => break None,
@@ -2357,39 +2421,130 @@ impl Read for ChunkReader {
                     },
                 }
             };
-            let Some((h, a, b)) = next else {
-                if let Some((hs, want)) = self.verify.take()
-                    && Hash(*hs.finalize().as_bytes()) != want
-                {
-                    return Err(io_err(Error::Corrupt(format!("reassembled hash mismatch for {want}"))));
-                }
-                return Ok(0);
-            };
-            let loc = self
-                .store
-                .lookup(&h)
-                .map_err(io_err)?
-                .ok_or_else(|| io_err(Error::Corrupt(format!("missing chunk {h}"))))?;
+            let Some((h, a, b)) = next else { return Ok(None) };
+            let loc = self.store.lookup(&h)?.ok_or_else(|| Error::Corrupt(format!("missing chunk {h}")))?;
             match loc.kind {
                 Kind::Frame | Kind::Frame2 | Kind::Delta => {
-                    return Err(io_err(Error::Corrupt("unexpected record kind inside a manifest".into())));
+                    return Err(Error::Corrupt("unexpected record kind inside a manifest".into()));
                 }
                 Kind::Manifest => {
                     if self.stack.len() >= self.depth_limit {
-                        return Err(io_err(Error::Corrupt("manifest tree too deep".into())));
+                        return Err(Error::Corrupt("manifest tree too deep".into()));
                     }
-                    let m = self.store.read_manifest(&h, loc).map_err(io_err)?;
+                    let m = self.store.read_manifest(&h, loc)?;
                     self.stack.push(overlapping(m, a, b).into_iter());
                 }
-                Kind::Blob => {
-                    let d = self.store.read_blob(&h, loc).map_err(io_err)?;
+                Kind::Blob => return Ok(Some((h, loc, a, b))),
+            }
+        }
+    }
+
+    fn start_pool(&mut self) -> usize {
+        let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).saturating_sub(1).clamp(1, 4);
+        let (tx, rx) = std::sync::mpsc::channel::<ChunkJob>();
+        let rx = Arc::new(Mutex::new(rx));
+        let mut spawned_n = 0;
+        for _ in 0..workers {
+            let rx = rx.clone();
+            let store = self.store.clone();
+            let spawned = std::thread::Builder::new().name("p2p-readahead".into()).spawn(move || {
+                loop {
+                    let job = match rx.lock() {
+                        Ok(r) => r.recv(),
+                        Err(_) => return,
+                    };
+                    let Ok(j) = job else { return };
+                    let _ = j.reply.send(store.chunk_slice(&j.hash, j.loc, j.a, j.b));
+                }
+            });
+            if spawned.is_err() {
+                break; // fewer workers (or none: the reader then works inline)
+            }
+            spawned_n += 1;
+        }
+        self.pool = Some((tx, spawned_n.max(1)));
+        spawned_n.max(1)
+    }
+
+    /// The next chunk's bytes, in order (`None` at the end).
+    fn next_chunk(&mut self) -> Result<Option<Vec<u8>>> {
+        if self.span < READAHEAD_MIN {
+            return match self.next_leaf()? {
+                Some((h, loc, a, b)) => self.store.chunk_slice(&h, loc, a, b).map(Some),
+                None => Ok(None),
+            };
+        }
+        let window = READAHEAD_PER_WORKER
+            * match &self.pool {
+                Some((_, n)) => *n,
+                None => self.start_pool(),
+            };
+        while self.pending.len() < window {
+            let Some((hash, loc, a, b)) = self.next_leaf()? else { break };
+            let (reply, rx) = std::sync::mpsc::sync_channel(1);
+            let job = ChunkJob { hash, loc, a, b, reply };
+            let job = match &self.pool {
+                Some((p, _)) => match p.send(job) {
+                    Ok(()) => {
+                        self.pending.push_back(rx);
+                        continue;
+                    }
+                    Err(std::sync::mpsc::SendError(j)) => j,
+                },
+                None => job,
+            };
+            // No workers: do it here (the reply channel has room for one).
+            let _ = job.reply.send(self.store.chunk_slice(&job.hash, job.loc, job.a, job.b));
+            self.pending.push_back(rx);
+        }
+        match self.pending.pop_front() {
+            None => Ok(None),
+            Some(rx) => rx.recv().map_err(|_| Error::Corrupt("read-ahead worker died".into()))?.map(Some),
+        }
+    }
+}
+
+fn io_err(e: Error) -> std::io::Error {
+    std::io::Error::other(e)
+}
+
+impl Read for ChunkReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            let (data, pos) = &mut self.cur;
+            let n = buf.len().min(data.len() - *pos);
+            if n > 0 || buf.is_empty() {
+                buf[..n].copy_from_slice(&data[*pos..*pos + n]);
+                *pos += n;
+                return Ok(n);
+            }
+            match self.next_chunk().map_err(io_err)? {
+                None => {
+                    if let Some((hs, want)) = self.verify.take()
+                        && Hash(*hs.finalize().as_bytes()) != want
+                    {
+                        return Err(io_err(Error::Corrupt(format!("reassembled hash mismatch for {want}"))));
+                    }
+                    if let Some((tx, join, want)) = self.hasher.take() {
+                        drop(tx);
+                        let hs = join.join().map_err(|_| io_err(Error::Corrupt("verify thread panicked".into())))?;
+                        if Hash(*hs.finalize().as_bytes()) != want {
+                            return Err(io_err(Error::Corrupt(format!("reassembled hash mismatch for {want}"))));
+                        }
+                    }
+                    return Ok(0);
+                }
+                Some(d) => {
+                    let d = Arc::new(d);
                     if let Some((hs, _)) = self.verify.as_mut() {
                         hs.update(&d);
                     }
-                    let slice = d
-                        .get(a as usize..b as usize)
-                        .ok_or_else(|| io_err(Error::Corrupt("chunk shorter than manifest".into())))?;
-                    self.cur = std::io::Cursor::new(slice.to_vec());
+                    if let Some((tx, _, _)) = &self.hasher
+                        && tx.send(d.clone()).is_err()
+                    {
+                        return Err(io_err(Error::Corrupt("verify thread died".into())));
+                    }
+                    self.cur = (d, 0);
                 }
             }
         }
