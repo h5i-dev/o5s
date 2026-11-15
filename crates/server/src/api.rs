@@ -43,6 +43,8 @@ pub struct AppState {
     pub repo: Arc<dyn Repository>,
     pub authn: Arc<dyn Authenticator>,
     pub authz: Authorizer,
+    /// The token authenticator, if that is what `authn` is (for SIGHUP reload).
+    pub tokens: Option<Arc<crate::auth::TokenAuthenticator>>,
     pub audit: AuditLog,
     pub log_reads: bool,
     pub metrics: Arc<Metrics>,
@@ -76,7 +78,23 @@ fn client_addr(req: &Request, trust_forwarded_for: bool) -> Option<String> {
     {
         return Some(first.to_string());
     }
-    req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|ci| ci.0.to_string())
+    req.extensions().get::<axum::extract::ConnectInfo<PeerAddr>>().map(|ci| ci.0.0.to_string())
+}
+
+/// The TCP peer of a connection, for any listener (plain or TLS).
+#[derive(Clone, Copy, Debug)]
+pub struct PeerAddr(pub std::net::SocketAddr);
+
+impl<'a> axum::extract::connect_info::Connected<axum::serve::IncomingStream<'a, tokio::net::TcpListener>> for PeerAddr {
+    fn connect_info(s: axum::serve::IncomingStream<'a, tokio::net::TcpListener>) -> Self {
+        PeerAddr(*s.remote_addr())
+    }
+}
+
+impl<'a> axum::extract::connect_info::Connected<axum::serve::IncomingStream<'a, crate::tls::TlsListener>> for PeerAddr {
+    fn connect_info(s: axum::serve::IncomingStream<'a, crate::tls::TlsListener>) -> Self {
+        PeerAddr(*s.remote_addr())
+    }
 }
 
 /// The request id assigned by the request-id layer.

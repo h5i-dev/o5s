@@ -8,6 +8,7 @@
 //! request_timeout_secs = 3600        # whole request, including body transfer
 //! shutdown_grace_secs = 30
 //! trust_forwarded_for = false      # true only behind a proxy that sets X-Forwarded-For
+//! # tls = { cert = "/etc/pico2peta/tls.crt", key = "/etc/pico2peta/tls.key" }  # native HTTPS
 //!
 //! [repo]
 //! path = "/var/lib/pico2peta/repo"
@@ -153,6 +154,17 @@ pub struct ServerSection {
     /// Take the client address for audit records from `X-Forwarded-For`.
     /// Enable only behind a reverse proxy that sets it.
     pub trust_forwarded_for: bool,
+    /// Serve HTTPS directly (otherwise plain HTTP behind a TLS proxy).
+    pub tls: Option<TlsSection>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TlsSection {
+    /// PEM certificate chain (leaf first). Reloaded on SIGHUP.
+    pub cert: PathBuf,
+    /// PEM private key (PKCS#8, PKCS#1 or SEC1). Reloaded on SIGHUP.
+    pub key: PathBuf,
 }
 
 impl Default for ServerSection {
@@ -164,6 +176,7 @@ impl Default for ServerSection {
             request_timeout_secs: 3600,
             shutdown_grace_secs: 30,
             trust_forwarded_for: false,
+            tls: None,
         }
     }
 }

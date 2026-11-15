@@ -78,6 +78,11 @@
 - A distroless nonroot Dockerfile, sample configs (`server.toml`, `server.docker.toml`, `tokens.example.toml`), a hardened systemd unit (`systemd-analyze verify` clean), and `deploy/README.md` (install, TLS, S3 lifecycle and IAM, observability, audit, capacity).
 - Smoke-tested the real binary with the sample config: gen-token, check-config, put, replace, resolve, ranged get, SIGTERM drain and flush, verify-audit.
 
+### Hardening after goal 6
+- Native TLS (rustls, concurrent handshakes, ALPN h2) with SIGHUP hot reload of the cert, tokens and policies (`tests/tls.rs`).
+- Fuzz targets plus never-panic proptests for every net decoder, and allocation caps on untrusted size headers (zlib-bomb-safe pack scanning).
+- `ensure_live` (API v1.3) is used wherever existing objects get referenced without being re-put.
+
 ### Next
 - Goal 6: Git smart-HTTP and OCI distribution adapters. The hash-mapping design proposal is below, waiting for the lead's agreement.
 
@@ -153,9 +158,8 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **GET checksums:** a GET is not checksummed end to end beyond TCP and TLS. Integrity of pack records relies on the core pack CRCs.
 - **Virtual-hosted style and real AWS:** neither has been tested, because no AWS credentials are available here. Only path style against MinIO has run.
 - **Extra copy:** `PutSource::Bytes` is copied once into the runtime, because `Backend` is sync and borrows the bytes.
-- **Server TLS:** none built in; terminate TLS at a reverse proxy (documented). Native rustls listener is a possible addition.
 - **OIDC/JWT authenticator:** not implemented; the `Authenticator` trait is async and ready for it.
-- **Token management:** only via config/token file plus restart. There is no admin API to issue or revoke tokens, and no hot reload (SIGHUP).
+- **Token management:** tokens and policies live in config and reload on SIGHUP (revocation applies to the next request). There is no admin API to issue or revoke tokens.
 - **Audit log rotation and shipping:** manual (stop, move, start). There is no remote sink (syslog, S3).
 - **Unauthenticated `/metrics`:** restrict it at the network level. There is no separate metrics listener yet.
 - **Rate limiting:** only a global concurrency cap. There is no per-principal rate limit or quota.

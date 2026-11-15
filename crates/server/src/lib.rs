@@ -14,6 +14,7 @@ pub mod git;
 pub mod metrics;
 pub mod oci;
 pub mod segmap;
+pub mod tls;
 
 use crate::api::AppState;
 use crate::config::{BackendSection, Config};
@@ -101,10 +102,12 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
     } else {
         None
     };
+    let tokens = Arc::new(auth::TokenAuthenticator::new(&cfg.auth.tokens, cfg.auth.allow_anonymous));
     let audit = audit::AuditLog::open(&cfg.audit.path).map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
     Ok(Arc::new(AppState {
         repo,
-        authn: Arc::new(auth::TokenAuthenticator::new(&cfg.auth.tokens, cfg.auth.allow_anonymous)),
+        authn: tokens.clone(),
+        tokens: Some(tokens),
         authz: auth::Authorizer::new(cfg.policy.clone()),
         audit,
         log_reads: cfg.audit.log_reads,
@@ -158,9 +161,7 @@ pub fn app(state: Arc<AppState>, request_timeout: Duration) -> axum::Router {
         .layer(SetRequestIdLayer::new(rid, RandomRequestId))
 }
 
-/// Serves on `listener` until `shutdown` resolves. Then readiness turns to 503,
-/// new requests get 503, in-flight requests get `grace` to finish, and the
-/// repository and audit log are flushed.
+/// Serves plain HTTP on `listener` until `shutdown` resolves. See [`serve_on`].
 pub async fn serve(
     listener: TcpListener,
     state: Arc<AppState>,
@@ -168,6 +169,23 @@ pub async fn serve(
     grace: Duration,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
+    serve_on(listener, state, request_timeout, grace, shutdown).await
+}
+
+/// Serves on any listener (plain TCP or [`tls::TlsListener`]) until `shutdown`
+/// resolves. Then readiness turns to 503, new requests get 503, in-flight
+/// requests get `grace` to finish, and the repository and audit log are flushed.
+pub async fn serve_on<L>(
+    listener: L,
+    state: Arc<AppState>,
+    request_timeout: Duration,
+    grace: Duration,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()>
+where
+    L: axum::serve::Listener<Addr = std::net::SocketAddr>,
+    api::PeerAddr: for<'a> axum::extract::connect_info::Connected<axum::serve::IncomingStream<'a, L>>,
+{
     let app = app(state.clone(), request_timeout);
     let gc_task = (state.gc.interval_secs > 0).then(|| tokio::spawn(gc_loop(state.clone())));
     let reaper = state.oci.clone().map(|o| {
@@ -186,7 +204,7 @@ pub async fn serve(
         info!("shutdown requested; draining");
         let _ = stopping_tx.send(());
     };
-    let server = axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+    let server = axum::serve(listener, app.into_make_service_with_connect_info::<api::PeerAddr>())
         .with_graceful_shutdown(graceful);
     let server = server.into_future();
     tokio::pin!(server);
@@ -210,6 +228,38 @@ pub async fn serve(
     }
     state.audit.shutdown().await;
     info!("stopped");
+    Ok(())
+}
+
+/// Reloads tokens, policies and (if given) the TLS certificate from the config
+/// file. Other settings need a restart. On any error nothing is changed.
+pub async fn reload(
+    state: &AppState,
+    path: &std::path::Path,
+    cert: Option<&tls::ReloadableCert>,
+) -> Result<(), String> {
+    let p = path.to_path_buf();
+    let cfg = tokio::task::spawn_blocking(move || Config::load(&p))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+    if let Some(c) = cert {
+        c.reload()?;
+    }
+    if let Some(t) = &state.tokens {
+        t.reload(&cfg.auth.tokens, cfg.auth.allow_anonymous);
+    }
+    state.authz.reload(cfg.policy.clone());
+    state.audit.record_nowait(audit::Event {
+        request_id: "-".into(),
+        principal: "system".into(),
+        action: "config_reload",
+        target: path.display().to_string(),
+        outcome: "ok".into(),
+        detail: Some(format!("tokens={} policies={}", cfg.auth.tokens.len(), cfg.policy.len())),
+        remote: None,
+    });
+    info!(tokens = cfg.auth.tokens.len(), policies = cfg.policy.len(), "configuration reloaded");
     Ok(())
 }
 
