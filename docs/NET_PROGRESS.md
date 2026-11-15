@@ -81,6 +81,46 @@
 ### Next
 - Goal 6: Git smart-HTTP and OCI distribution adapters. The hash-mapping design proposal is below, waiting for the lead's agreement.
 
+## Design proposal: Git and OCI hash mapping (goal 6; status: PROPOSED, awaiting core lead)
+
+**Principles**
+1. Internal identity stays BLAKE3-256 of the exact stored bytes. Adapters never invent a second identity scheme inside the core.
+2. Each external id maps to the BLAKE3 of the byte-exact payload, so serving the external protocol is a lookup plus a verbatim read. Nothing is regenerated on the read path.
+3. The mapping is verified on ingest. The external hash is computed while streaming, and a mismatch is rejected before anything becomes visible under a name.
+4. Every external→internal mapping is a pure function of the bytes. Mapping tables can therefore be global and merged by union, without conflicts, and all of them are rebuildable from the objects.
+
+**OCI distribution (`/v2/...`)**
+- Payload: the exact blob or manifest bytes (compressed layers stay compressed). Pulls are byte-identical, so `sha256:` digests hold by construction.
+- Mapping: refs, using core names and rules.
+  - `oci/_digest/sha256/<hex>` → BLAKE3 is a global digest index under `ImmutableAfterPublish`, so a digest can never be repointed.
+  - `oci/<repo>/_blobs/sha256/<hex>` → BLAKE3 is the per-repo link. Registry semantics say a blob is visible in a repo only if it is linked there. Links are create-once.
+  - `oci/<repo>/_manifests/sha256/<hex>` → BLAKE3 holds manifests by digest.
+  - `oci/<repo>/tags/<tag>` → BLAKE3 of the manifest. The tag rule is per-namespace configuration: `Mutable` for dev, `ImmutableAfterPublish` for releases. This is the brief's "per-kind config".
+- GC: links and tags are refs, so `OpaqueObjects` already keeps everything referenced alive. Deleting a tag or manifest doesn't free layers until their links are removed, the same as Docker distribution.
+- Uploads: chunked `PATCH` sessions spool to a local file under `<repo>/staging/oci-uploads/<uuid>` (bounded memory, resumable). The final `PUT ?digest=` hashes the spooled file, calls `put_stream`, then creates the refs.
+- Authz: the namespace is `oci/<repo>`, with pull = read and push = write, through the same Policy engine.
+- Deferred: dedup inside compressed layers (store the uncompressed tar plus recompression parameters, à la DupHunter or zstd:chunked). That needs byte-exact recompression guarantees and should be an experiment first.
+
+**Git smart HTTP (`/git/<repo>.git/info/refs`, `git-upload-pack`, `git-receive-pack`)**
+- Payload: the canonical loose-object bytes `<type> <size>\0<body>`, the same payload Experiment 1 measures. EXP1 compression results therefore transfer directly to the git adapter. The BLAKE3 of this is the internal id. SHA-1 and SHA-256 repositories use the same scheme; the oid length comes from the repo's object format.
+- Mapping (oid → BLAKE3, type, size): a single global oid map, valid because the mapping is a pure function.
+  - It is stored as content-addressed sorted segments: 20/32-byte oid, 32-byte BLAKE3, 1-byte type and varint size, about 60 B per object.
+  - A segment-list manifest object, pointed to by the ref `git/_oidmap`, ties them together. Pushes add a segment, and a compactor merges segments LSM-style.
+  - Updating the map is an OCC `replace` with `read_set = [(git/_oidmap, v)]`. A conflict retries the merge, which always succeeds because it is a union.
+- Refs: `git/<repo>/refs/heads/<b>` → BLAKE3 of the commit. A receive-pack command `old new ref` *is* a compare-and-swap: resolve, check that the current BLAKE3 maps to `old`, then `replace(name, [(name, Version(v))], new)`. A version conflict becomes `ng <ref> fetch first`. `refs/tags/*` can be made immutable by namespace rule.
+- Push: index the received pack (resolve deltas) into canonical objects, put each one, append an oid-map segment, then move refs. Objects become durable before refs move, because core `replace` flushes first.
+- Fetch: upload-pack negotiates against the oid map, walks commits and trees from wants to haves, and streams a pack. v1 sends full objects with no deltas. Delta generation is a later optimization, gated on measurement as the brief prescribes.
+- Implementation: use gitoxide crates (`gix-pack`, `gix-object`, `gix-packetline`) for pack parsing and encoding instead of hand-rolling them.
+- GC: git objects are not individually named, so GC needs a **`GitTracer`** (commit → tree and parents, tree → entries, tag → target). It translates oids through the oid map, and also keeps the oid-map segments alive (`git/_oidmap` manifest → segments).
+
+**Requests and questions for core**
+1. Agree on the payload formats above: canonical git loose-object bytes, and verbatim OCI bytes.
+2. Tracer composition. GC takes one `&dyn Tracer`, and the server would pass a composite (Git + oid-map manifests + opaque). A tracer must be conservative, never treating a non-git blob as git in a way that drops liveness. That's fine, because over-approximation only keeps extra objects. Is `Tracer::children(hash, store)` enough, or should core add a cheap type hint so tracers don't have to read every live object?
+3. Multi-target `replace`, so that `git push --atomic` and OCI manifest+tag can move several names in one commit. Until then, refs move one at a time. Git's non-atomic push semantics already allow that.
+4. Ref store scale. The OCI digest index and links create one ref per blob per repo, possibly millions. Is the journaled RefStore fine at 10^6–10^7 names? If not, the digest index could move into content-addressed segments like the git oid map.
+
+Plan: OCI first (smaller and well specified). It will be validated with the official OCI distribution-spec conformance suite (Go), built locally. Git smart HTTP comes second.
+
 ## Production gaps
 - **S3 credentials:** only static and environment credentials exist. There is no IMDSv2 instance profile, STS web identity or `~/.aws` profile support yet. These can plug into the `CredentialsProvider` trait.
 - **Lost-response detection** relies on the ETag being the MD5 of the body, so it does not work with SSE-KMS or SSE-C. In that case a lost response is reported as `AlreadyExists`. That is still correct for content-addressed keys, but the count is wrong.
