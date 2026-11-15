@@ -535,3 +535,45 @@ fn put_delta_over_http() {
     let missing = Hash::of(b"no such base");
     assert!(c.put_delta(&missing, &mut &v2[..]).is_err());
 }
+
+#[test]
+fn token_admin_api() {
+    let s = TestServer::start(|c| {
+        c.auth.token_file = Some(c.repo.path.parent().unwrap().join("tokens.toml"));
+    });
+    let admin = |m: reqwest::Method, p: &str| http().request(m, format!("{}{p}", s.url())).bearer_auth(ADMIN);
+    // Create.
+    let r = admin(reqwest::Method::POST, "/v1/admin/tokens")
+        .json(&serde_json::json!({"principal": "robot"}))
+        .send()
+        .unwrap();
+    assert_eq!(r.status(), 201);
+    let v: serde_json::Value = r.json().unwrap();
+    let tok = v["token"].as_str().unwrap().to_string();
+    let sha = v["sha256"].as_str().unwrap().to_string();
+    let who = |t: &str| http().get(format!("{}/v1/whoami", s.url())).bearer_auth(t).send().unwrap();
+    assert_eq!(who(&tok).status(), 200, "new token works immediately");
+    assert_eq!(who(ALICE).status(), 200, "inline tokens unaffected");
+    // List shows hashes, never secrets.
+    let list = admin(reqwest::Method::GET, "/v1/admin/tokens").send().unwrap().text().unwrap();
+    assert!(list.contains(&sha) && !list.contains(&tok) && list.contains("\"source\":\"config\""), "{list}");
+    // The file holds only the hash and survives a reload.
+    let file = std::fs::read_to_string(s.dir.path().join("tokens.toml")).unwrap();
+    assert!(file.contains(&sha) && !file.contains(&tok));
+    // Non-admins cannot manage tokens.
+    let r = http()
+        .post(format!("{}/v1/admin/tokens", s.url()))
+        .bearer_auth(ALICE)
+        .json(&serde_json::json!({"principal": "x"}))
+        .send()
+        .unwrap();
+    assert_eq!(r.status(), 403);
+    // Inline tokens cannot be revoked through the API.
+    let alice_sha = hex(&pico2peta_server::auth::sha256(ALICE.as_bytes()));
+    assert_eq!(admin(reqwest::Method::DELETE, &format!("/v1/admin/tokens/{alice_sha}")).send().unwrap().status(), 409);
+    // Revoke.
+    assert_eq!(admin(reqwest::Method::DELETE, &format!("/v1/admin/tokens/{sha}")).send().unwrap().status(), 204);
+    assert_eq!(who(&tok).status(), 401, "revoked token stops working");
+    assert_eq!(admin(reqwest::Method::DELETE, &format!("/v1/admin/tokens/{sha}")).send().unwrap().status(), 404);
+    assert_eq!(who(ALICE).status(), 200);
+}

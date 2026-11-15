@@ -377,6 +377,12 @@ impl Config {
         let mut cfg: Config = toml::from_str(&text).map_err(|e| ConfigError::Parse(path.into(), e.to_string()))?;
         if let Some(tf) = cfg.auth.token_file.clone() {
             let tf = if tf.is_relative() { path.parent().unwrap_or(std::path::Path::new(".")).join(tf) } else { tf };
+            cfg.auth.token_file = Some(tf.clone());
+            if !tf.exists() {
+                // A missing token file is created empty on first use by the admin API.
+                cfg.validate()?;
+                return Ok(cfg);
+            }
             let t = std::fs::read_to_string(&tf).map_err(|e| ConfigError::Read(tf.clone(), e))?;
             let f: TokenFile = toml::from_str(&t).map_err(|e| ConfigError::Parse(tf.clone(), e.to_string()))?;
             cfg.auth.tokens.extend(f.tokens);

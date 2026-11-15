@@ -102,6 +102,10 @@ The rules are `mutable`, `immutable` (create-once) and `head-release`, where `<n
 ### Admin
 - `POST /v1/admin/gc?dry_run=true&repack_all=false` returns a GC report. It advances the plan → sweep → delete protocol. With `repack_all=true`, git content is regrouped (EXP1 layout).
 - `GET /v1/whoami` returns `{"principal","authenticated"}`.
+- Token management (admin on `""`; needs `auth.token_file`):
+  - `POST /v1/admin/tokens {"principal":"ci"}` returns `{"token","sha256"}`. The token is shown once and only its hash is stored.
+  - `GET /v1/admin/tokens` lists principals and hashes.
+  - `DELETE /v1/admin/tokens/<sha256>` revokes a token immediately.
 
 ## OCI distribution (`/v2`)
 ```sh

@@ -119,6 +119,7 @@ User docs are in `docs/API.md` and `deploy/README.md`.
 - S3 default credential chain (env, web identity, IMDSv2) with background refresh.
 - Separate metrics listener, and per-principal rate limiting (429 with `Retry-After`, `p2p_rate_limited_total`).
 - Audit log rotation with a continuous hash chain across files.
+- Token admin API (create, list, revoke) over `auth.token_file`.
 - OIDC/JWT authentication (`tests/oidc.rs` against a mock issuer: valid token, wrong audience, expired, bad signature, tampered token, key rotation, unknown kid, static tokens alongside).
 - Git protocol v2 for fetch (git's default). `tests/git.rs` now runs on v2 by default and checks v0 and v2 for identical results.
 - Git wire deltas: upload-pack deltifies blobs and trees against the previously sent version of the same path. A ripgrep clone (release) transfers 33.8 MB → **6.1 MB**, takes 3.65 s → 2.91 s, refs are identical and fsck is clean.
@@ -162,7 +163,7 @@ The contended run checks that no update is lost: the final version equals the nu
 
 ### Next (candidates, in priority order)
 - Git `object-format=sha256` repositories.
-- An admin API for issuing and revoking tokens, and mapping OIDC groups to policies.
+- Mapping OIDC groups to policies.
 - Per-namespace storage quotas.
 - Running the git adapter against git.git/redis-sized repos. Not done yet because of the scratch disk budget, which Exp1 needs.
 
@@ -214,7 +215,7 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **Virtual-hosted style and real AWS:** neither has been tested, because no AWS credentials are available here. Only path style against MinIO has run.
 - **Extra copy:** `PutSource::Bytes` is copied once into the runtime, because `Backend` is sync and borrows the bytes.
 - **OIDC/JWT:** `[auth.oidc]` validates bearer JWTs (RS/PS/ES algorithms; `iss`, `aud`, `exp` and `nbf` checks; JWKS discovery, caching and rotation), mapping a claim to a principal. Static tokens still work alongside it. Gaps: changes to the OIDC config need a restart (not SIGHUP), groups and roles claims are not mapped to policies, and there is no token introspection for opaque tokens.
-- **Token management:** tokens and policies live in config and reload on SIGHUP (revocation applies to the next request). There is no admin API to issue or revoke tokens.
+- **Token management:** an admin API (`/v1/admin/tokens`) creates, lists and revokes tokens in `auth.token_file`. It rewrites the file atomically, takes effect immediately and is audited. Tokens inline in the main config are read-only through the API. Policies still live in config, with SIGHUP reload.
 - **Audit log shipping:** size-based rotation is built in (`audit.rotate_bytes`). The chain continues across files, and `verify-audit` checks all files, so archiving the oldest ones is allowed but a gap is detected. Shipping to a remote sink (syslog, S3) is left to external tooling, for example tailing the JSONL files.
 - **Metrics and rate limits:** `/metrics` can move to a separate listener (`server.metrics_listen`), but is still unauthenticated there, so bind it to a private interface. Per-principal token-bucket rate limiting exists (`server.rate_limit`; anonymous callers keyed by IP). There are no byte or storage quotas per principal or namespace.
 - **Durability of server puts:** an unreferenced `put` becomes durable at the next replace or flush (core semantics, since the open pack is not fsynced per put). If the server crashes before that, the client's later `replace` gets `MissingObject` and must re-put. Clients needing durability without a replace call `POST /v1/flush`.
