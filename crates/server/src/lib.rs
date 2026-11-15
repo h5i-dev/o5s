@@ -14,8 +14,10 @@ pub mod fronts;
 pub mod git;
 pub mod hf;
 pub mod metrics;
+pub mod npm;
 pub mod oci;
 pub mod oidc;
+pub(crate) mod pkg;
 pub mod pypi;
 pub mod segmap;
 pub mod tls;
@@ -135,6 +137,13 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
     } else {
         None
     };
+    let npm = if cfg.npm.enabled {
+        let st = npm::NpmState::new(fronts.handle("npm")?, Some(local.clone()), cfg.npm.upstream.clone())
+            .map_err(StartError::Hf)?;
+        Some(Arc::new(st))
+    } else {
+        None
+    };
     let tokens = Arc::new(auth::TokenAuthenticator::new(&cfg.auth.tokens, cfg.auth.allow_anonymous));
     let audit = audit::AuditLog::open_with(&cfg.audit.path, cfg.audit.rotate_bytes)
         .map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
@@ -186,6 +195,7 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         git,
         hf,
         pypi,
+        npm,
         fronts: Some(fronts),
     }))
 }

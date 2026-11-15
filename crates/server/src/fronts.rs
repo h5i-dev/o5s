@@ -5,6 +5,7 @@
 //! | `git` | `git/` (Git repos, the HF front's repos, `git/_oidmap`, `git/_lfs*`, `git/_xet`) | [`GitTracer`] | [`GitGrouper`] |
 //! | `oci` | `oci/` (OCI repos, `oci/_digest`) | [`OciTracer`] (also every segment map) | none |
 //! | `pypi` | `pypi/` (index files) | record → content | none |
+//! | `npm` | `npm/` (registry versions, dist-tags) | record → tarball | none |
 //! | `safetensors` | none (built-in, `crates/weights`) | none | none |
 //!
 //! The HF front writes through the `git` front: an HF repo *is* a Git repo, so it has no
@@ -103,6 +104,22 @@ impl Front for PypiFront {
     }
 }
 
+/// npm registry versions under `npm/`: record → tarball (dist-tag blobs are leaves).
+#[derive(Default)]
+pub struct NpmFront;
+
+impl Front for NpmFront {
+    fn id(&self) -> &str {
+        "npm"
+    }
+    fn prefixes(&self) -> Vec<String> {
+        vec!["npm/".into()]
+    }
+    fn children(&self, h: &Hash, store: &dyn ObjectStore) -> Result<Vec<Hash>> {
+        Ok(crate::npm::record_child(h, store)?.into_iter().collect())
+    }
+}
+
 /// Provenance records are a core concept (`_prov/`), not a front; GC passes them as the
 /// extra tracer. Everything it doesn't recognize is a leaf.
 pub struct Leaves;
@@ -126,6 +143,7 @@ impl Fronts {
             .with(git.clone())?
             .with(oci.clone())?
             .with(Arc::new(PypiFront))?
+            .with(Arc::new(NpmFront))?
             .with(Arc::new(pico2peta_weights::SafetensorsFront))?;
         let repo = repo.with_fronts(reg)?;
         let mut handles: HashMap<String, Arc<dyn Repository>> = HashMap::new();
@@ -135,6 +153,7 @@ impl Fronts {
             handles.insert(id.to_string(), h);
         }
         handles.insert("pypi".into(), Arc::new(repo.front("pypi")?));
+        handles.insert("npm".into(), Arc::new(repo.front("npm")?));
         Ok(Fronts { repo, handles })
     }
 

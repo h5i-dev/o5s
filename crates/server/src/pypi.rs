@@ -22,19 +22,16 @@ use crate::api::{AppState, Caller};
 use crate::audit::Event;
 use crate::auth::Principal;
 use crate::config::{Access, Upstream};
-use crate::hf::{ChanRead, HashRead};
+use crate::pkg::{Store, blocking, core_err, err};
 use axum::Extension;
-use axum::body::Bytes;
 use axum::extract::{FromRequest, Multipart, Path, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
-use pico2peta_core::{Error, Hash, Name, ObjectStore, Observed, ReplaceOutcome, Repository, Result};
-use sha2::{Digest, Sha256};
+use pico2peta_core::{Error, Hash, Name, ObjectStore, Repository, Result};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
 
 const RECORD_MAGIC: &[u8; 8] = b"P2PPYPI1";
 const JSON_TYPE: &str = "application/vnd.pypi.simple.v1+json";
@@ -42,7 +39,7 @@ const JSON_TYPE: &str = "application/vnd.pypi.simple.v1+json";
 pub struct PypiState {
     /// The `pypi` front's handle (moves names under `pypi/`).
     repo: Arc<dyn Repository>,
-    local: Option<pico2peta_repo::LocalRepo>,
+    store: Store,
     upstreams: BTreeMap<String, Upstream>,
     http: reqwest::Client,
     /// (index, project) → when fetched, the upstream's files.
@@ -55,12 +52,9 @@ impl PypiState {
         local: Option<pico2peta_repo::LocalRepo>,
         upstreams: BTreeMap<String, Upstream>,
     ) -> std::result::Result<PypiState, String> {
-        let http = reqwest::Client::builder()
-            .user_agent(concat!("pico2peta/", env!("CARGO_PKG_VERSION")))
-            .connect_timeout(Duration::from_secs(10))
-            .build()
-            .map_err(|e| e.to_string())?;
-        Ok(PypiState { repo, local, upstreams, http, pages: Mutex::new(HashMap::new()) })
+        let http = crate::pkg::http_client()?;
+        let store = Store { repo: repo.clone(), local };
+        Ok(PypiState { repo, store, upstreams, http, pages: Mutex::new(HashMap::new()) })
     }
 }
 
@@ -179,25 +173,6 @@ fn authz_ns(index: &str) -> String {
 // ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
-
-fn err(status: StatusCode, msg: impl Into<String>) -> Response {
-    (status, msg.into()).into_response()
-}
-
-fn core_err(e: Error) -> Response {
-    let a = crate::error::ApiError::from(e);
-    err(a.status, a.message)
-}
-
-async fn blocking<T: Send + 'static>(
-    f: impl FnOnce() -> Result<T> + Send + 'static,
-) -> std::result::Result<T, Response> {
-    match tokio::task::spawn_blocking(f).await {
-        Ok(Ok(v)) => Ok(v),
-        Ok(Err(e)) => Err(core_err(e)),
-        Err(e) => Err(err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
-    }
-}
 
 fn check(st: &AppState, p: &Principal, c: &Caller, index: &str, need: Access) -> std::result::Result<(), Response> {
     let ns = authz_ns(index);
@@ -483,86 +458,18 @@ async fn upstream_files(
     Ok(files)
 }
 
-/// Streams a body into a blocking put while hashing it; returns `(content, sha256 hex, size)`.
-async fn store_stream<S, E>(
-    py: &Arc<PypiState>,
-    ns: Name,
-    mut s: S,
-    limit: u64,
-) -> std::result::Result<(Hash, String, u64), Response>
-where
-    S: futures_util::Stream<Item = std::result::Result<Bytes, E>> + Unpin,
-    E: std::fmt::Display,
-{
-    let (tx, rx) = mpsc::channel::<std::io::Result<Bytes>>(8);
-    let py2 = py.clone();
-    let job = tokio::task::spawn_blocking(move || -> Result<(Hash, String, u64)> {
-        let mut r = HashRead { inner: ChanRead { rx, cur: Bytes::new() }, sha: Sha256::new(), n: 0 };
-        let h = match &py2.local {
-            Some(l) => l.put_stream_for(&ns, &mut r)?,
-            None => py2.repo.put_stream(&mut r)?,
-        };
-        Ok((h, crate::git::hex(&r.sha.finalize()), r.n))
-    });
-    let mut n = 0u64;
-    let mut failed = None;
-    while let Some(item) = tokio::time::timeout(crate::api::IDLE_TIMEOUT, s.next()).await.unwrap_or_else(|_| {
-        failed = Some("transfer idle".to_string());
-        None
-    }) {
-        match item {
-            Ok(b) => {
-                n += b.len() as u64;
-                if n > limit {
-                    failed = Some("file too large".into());
-                    break;
-                }
-                if tx.send(Ok(b)).await.is_err() {
-                    break;
-                }
-            }
-            Err(e) => {
-                failed = Some(e.to_string());
-                break;
-            }
-        }
-    }
-    if let Some(m) = &failed {
-        let _ = tx.send(Err(std::io::Error::other(m.clone()))).await;
-    }
-    drop(tx);
-    let res = job.await;
-    if let Some(m) = failed {
-        return Err(err(StatusCode::BAD_REQUEST, m));
-    }
-    match res {
-        Ok(Ok(x)) => Ok(x),
-        Ok(Err(e)) => Err(core_err(e)),
-        Err(e) => Err(err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
-    }
-}
-
-/// Creates `name` → record, create-once. `Ok(true)` if created, `Ok(false)` if an identical
-/// file was already there; a different existing file is a conflict.
+/// Creates `name` → record, create-once (an identical file is fine; other bytes are not).
 fn create_file(
     repo: &dyn Repository,
     name: &Name,
     content: Hash,
     meta: &Meta,
 ) -> Result<std::result::Result<bool, String>> {
-    if let Some(v) = repo.resolve(name)? {
-        let b = repo.get(&v.hash, None)?;
-        return Ok(match decode_record(&b) {
-            Some((_, m)) if m.sha256 == meta.sha256 => Ok(false),
-            _ => Err("File already exists with different content".into()),
-        });
-    }
-    let rec = repo.put(&encode_record(&content, meta))?;
-    match repo.replace(name, &[(name.clone(), Observed::Absent)], rec)? {
-        ReplaceOutcome::Ok { .. } => Ok(Ok(true)),
-        // Lost a race: compare with the winner.
-        ReplaceOutcome::Conflict { .. } => create_file(repo, name, content, meta),
-    }
+    let sha = meta.sha256.clone();
+    crate::pkg::create_once(repo, name, &encode_record(&content, meta), &|b| {
+        decode_record(b).is_some_and(|(_, m)| m.sha256 == sha)
+    })
+    .map(|r| r.map_err(|_| "File already exists with different content".to_string()))
 }
 
 async fn upload(
@@ -600,8 +507,8 @@ async fn upload(
                 return err(StatusCode::BAD_REQUEST, "invalid project");
             };
             let stream = field.map(|r| r.map_err(|e| e.to_string()));
-            match store_stream(py, ns, Box::pin(stream), st.max_upload_bytes).await {
-                Ok((h, sha, n)) => stored = Some((file, h, sha, n)),
+            match py.store.put_stream(ns, Box::pin(stream), st.max_upload_bytes).await {
+                Ok(x) => stored = Some((file, x.hash, x.sha256_hex(), x.size)),
                 Err(r) => return r,
             }
         } else {
@@ -729,7 +636,8 @@ async fn fetch_upstream(
         return Err(err(StatusCode::BAD_GATEWAY, format!("upstream {}: {}", f.url, resp.status())));
     }
     let ns = Name::new(format!("pypi/{index}/{project}")).map_err(core_err)?;
-    let (h, sha, size) = store_stream(py, ns, Box::pin(resp.bytes_stream()), st.max_upload_bytes).await?;
+    let x = py.store.put_stream(ns, Box::pin(resp.bytes_stream()), st.max_upload_bytes).await?;
+    let (h, sha, size) = (x.hash, x.sha256_hex(), x.size);
     if let Some(want) = &f.sha256
         && *want != sha
     {

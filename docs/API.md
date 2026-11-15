@@ -153,5 +153,17 @@ uv pip install --index-url "https://token:$TOKEN@p2p.example.com/pypi/team/simpl
 - Files are create-once: an identical re-upload is a no-op, while different bytes under the same filename get 409.
 - Proxy-cache: `[pypi.upstream.<index>] url = "https://pypi.org/simple"` (optional `token`, `ttl_secs`). Project pages merge local uploads with upstream files. An upstream file is fetched and sha256-checked on first download, then served from the store, including while the upstream is down.
 
+## npm (`/npm/<registry>`)
+```sh
+# ~/.npmrc
+registry=https://p2p.example.com/npm/team/
+//p2p.example.com/npm/team/:_authToken=${TOKEN}
+npm publish            # plain or scoped (@scope/name)
+npm install left-pad
+```
+- Packuments, tarballs, and publish (the JSON body that npm sends). On publish, the tarball's sha512 and sha1 are checked against `dist.integrity` and `dist.shasum`. Versions are create-once (409 on republish with other bytes). Dist-tags come from the publish. Authorization is on `npm/<registry>`.
+- Proxy-cache: `[npm.upstream.<registry>] url = "https://registry.npmjs.org"`. Upstream versions are merged in, and tarballs are fetched and integrity-checked on first install, then served from the store. When the upstream is unreachable, packuments list only cached versions, and `latest` falls back to the newest cached one.
+- Not yet: unpublish, deprecate, `npm dist-tag`, and search.
+
 ## Operations
 See `deploy/README.md` for install, TLS, reload (SIGHUP), S3 credentials and lifecycle rules, metrics, audit verification (`pico2peta-server verify-audit`) and capacity notes.

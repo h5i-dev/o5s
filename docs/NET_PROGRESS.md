@@ -233,7 +233,15 @@ The contended run checks that no update is lost: the final version equals the nu
   - Not done: PEP 658 metadata files, yanking via the API, and the `/pypi/<i>/simple/` root listing of upstream projects (only local projects are listed).
 - Fix: early-rejected uploads (LFS capability, PyPI authz) now send `Connection: close`. Before, a client's pooled connection could be reset mid-body, which made one HF test flaky.
 - Disk hygiene (2026-11-15, asked by the human): `tests/hf/client.py` leaked a 3–9 MB `tmp*` dir per run into `$TMPDIR`. It now removes it at exit, and the HF and PyPI tests give their subprocesses a TMPDIR inside the test's own directory. A whole-workspace test run now leaves nothing in `$TMPDIR`. Pruned the cargo target dir from 8 GB to under 4 GB.
-- Next: npm (registry API + publish + upstream proxy-cache), then Maven.
+- **npm front: DONE** (`crates/server/src/npm.rs`, `tests/npm.rs`).
+  - Tested with the real npm 10.9 and node 22:
+    - publish, plain and scoped (`@team/util`); reader 403; republishing a version 409;
+    - install latest, pinned and scoped.
+  - Proxy-cache, tested with a second server proxying the first: local and upstream packages are merged. After the upstream stops and a zero-grace GC runs, cached versions still install, `latest` falls back to the newest cached version, and a never-fetched version fails.
+  - Storage: `npm/<r>/<seg>/<v>` → `P2PNPMV1` record (manifest + digests) → tarball; dist-tags are `npm/<r>/<seg>/_tags/<t>`. The `npm` front claims `npm/`.
+  - Shared plumbing with PyPI lives in `pkg.rs`: a streaming put with sha1/sha256/sha512, create-once, and the HTTP client.
+  - Not done: unpublish, deprecate, the dist-tag API, and search.
+- Next: Maven (repository layout PUT/GET + checksums + upstream proxy-cache, tested with real `mvn`).
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 

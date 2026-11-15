@@ -87,6 +87,24 @@ pub struct Config {
     pub hf: HfSection,
     #[serde(default)]
     pub pypi: PypiSection,
+    #[serde(default)]
+    pub npm: NpmSection,
+}
+
+/// npm-compatible registries (`/npm/<registry>/`). Every registry accepts publishes; one with
+/// an upstream also proxies and caches it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct NpmSection {
+    pub enabled: bool,
+    /// `[npm.upstream.<registry>]` (e.g. `url = "https://registry.npmjs.org"`)
+    pub upstream: std::collections::BTreeMap<String, Upstream>,
+}
+
+impl Default for NpmSection {
+    fn default() -> Self {
+        NpmSection { enabled: true, upstream: Default::default() }
+    }
 }
 
 /// An upstream registry that a package index proxies and caches.

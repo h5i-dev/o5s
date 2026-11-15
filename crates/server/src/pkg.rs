@@ -26,7 +26,9 @@ pub(crate) fn core_err(e: Error) -> Response {
     err(a.status, a.message)
 }
 
-pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> std::result::Result<T, Response> {
+pub(crate) async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T> + Send + 'static,
+) -> std::result::Result<T, Response> {
     match tokio::task::spawn_blocking(f).await {
         Ok(Ok(v)) => Ok(v),
         Ok(Err(e)) => Err(core_err(e)),
