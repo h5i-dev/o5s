@@ -21,6 +21,7 @@ serde_json = "1"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 [dev-dependencies]
+pico2peta-refs.workspace = true
 proptest.workspace = true
 tempfile.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macros", "time"] }

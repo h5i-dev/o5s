@@ -113,6 +113,9 @@ pub struct FaultProxy {
     pub faults_applied: Arc<AtomicUsize>,
     /// Fault used once the plan is empty.
     default: Arc<Mutex<Fault>>,
+    /// `(substring of the request line, times)`: forwarded requests matching it
+    /// have their response dropped (after the upstream processed them).
+    lose_matching: Arc<Mutex<Option<(String, usize)>>>,
 }
 
 impl FaultProxy {
@@ -125,7 +128,9 @@ impl FaultProxy {
         let default = Arc::new(Mutex::new(Fault::Forward));
         let connections = Arc::new(AtomicUsize::new(0));
         let faults_applied = Arc::new(AtomicUsize::new(0));
-        let (p, d, c, f) = (plan.clone(), default.clone(), connections.clone(), faults_applied.clone());
+        let lose_matching: Arc<Mutex<Option<(String, usize)>>> = Arc::new(Mutex::new(None));
+        let (p, d, c, f, lm) =
+            (plan.clone(), default.clone(), connections.clone(), faults_applied.clone(), lose_matching.clone());
         rt().spawn(async move {
             while let Ok((sock, _)) = listener.accept().await {
                 c.fetch_add(1, Ordering::SeqCst);
@@ -134,12 +139,17 @@ impl FaultProxy {
                     f.fetch_add(1, Ordering::SeqCst);
                 }
                 let up = upstream.clone();
+                let lm = lm.clone();
+                let f = f.clone();
                 tokio::spawn(async move {
-                    let _ = handle(sock, &up, fault).await;
+                    let _ = match fault {
+                        Fault::Forward if lm.lock().unwrap().is_some() => forward_or_lose(sock, &up, &lm, &f).await,
+                        other => handle(sock, &up, other).await,
+                    };
                 });
             }
         });
-        FaultProxy { addr, plan, connections, faults_applied, default }
+        FaultProxy { addr, plan, connections, faults_applied, default, lose_matching }
     }
 
     pub fn endpoint(&self) -> String {
@@ -151,6 +161,11 @@ impl FaultProxy {
         for _ in 0..times {
             p.push_back(f.clone());
         }
+    }
+
+    /// Drop the response of the next `times` requests whose request line contains `pat`.
+    pub fn lose_responses_matching(&self, pat: &str, times: usize) {
+        *self.lose_matching.lock().unwrap() = Some((pat.to_string(), times));
     }
 
     pub fn set_default(&self, f: Fault) {
@@ -243,6 +258,38 @@ async fn handle(mut sock: TcpStream, upstream: &str, fault: Fault) -> std::io::R
             Ok(())
         }
     }
+}
+
+/// Forwards one request, dropping its response if it matches the lose pattern.
+async fn forward_or_lose(
+    mut sock: TcpStream,
+    upstream: &str,
+    lm: &Mutex<Option<(String, usize)>>,
+    applied: &AtomicUsize,
+) -> std::io::Result<()> {
+    let req = read_request(&mut sock).await?;
+    let line = String::from_utf8_lossy(&req[..req.iter().position(|&b| b == b'\n').unwrap_or(req.len())]).to_string();
+    let lose = {
+        let mut g = lm.lock().unwrap();
+        match g.as_mut() {
+            Some((pat, n)) if *n > 0 && line.contains(pat.as_str()) => {
+                *n -= 1;
+                true
+            }
+            _ => false,
+        }
+    };
+    let mut up = TcpStream::connect(upstream).await?;
+    up.write_all(&req).await?;
+    if lose {
+        applied.fetch_add(1, Ordering::SeqCst);
+        let mut tmp = [0u8; 1024];
+        let _ = up.read(&mut tmp).await?;
+        #[allow(deprecated)]
+        let _ = sock.set_linger(Some(Duration::ZERO));
+        return Ok(());
+    }
+    tokio::io::copy_bidirectional(&mut sock, &mut up).await.map(|_| ())
 }
 
 pub fn upstream_hostport(endpoint: &str) -> String {

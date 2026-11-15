@@ -1095,6 +1095,7 @@ dependencies = [
  "hmac",
  "md-5",
  "pico2peta-core",
+ "pico2peta-refs",
  "proptest",
  "quick-xml",
  "reqwest",
