@@ -70,7 +70,9 @@ fn weights(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
     println!("| version | change | logical MiB | full copies MiB | pico2peta MiB | ratio |");
     println!("|---|---|---|---|---|---|");
     let mut full = 0u64;
-    let steps: [(&str, &dyn Fn(&mut Vec<Vec<u8>>)); 5] = [
+    let mut prev_blob: Vec<u8> = Vec::new();
+    type Step<'a> = (&'a str, &'a dyn Fn(&mut Vec<Vec<u8>>));
+    let steps: [Step; 5] = [
         ("v1", &|_| {}),
         ("v2: 4 of 64 tensors retrained", &|ts| {
             for (i, t) in ts.iter_mut().enumerate().take(4) {
@@ -81,14 +83,19 @@ fn weights(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
             ts[10].extend_from_slice(&[7u8; 1024]);
         }),
         ("v4: metadata/header edit only", &|_| {}),
-        ("v5: full fine-tune (every tensor perturbed)", &|ts| {
+        ("v5: full fine-tune (pseudo-random noise in the low 4 mantissa bits of every f16)", &|ts| {
+            let mut x = 0x2545F4914F6CDD1Du64;
             for t in ts.iter_mut() {
-                for b in t.iter_mut().step_by(97) {
-                    *b ^= 1;
+                for b in t.iter_mut().step_by(2) {
+                    x ^= x << 13;
+                    x ^= x >> 7;
+                    x ^= x << 17;
+                    *b ^= (x & 0x0f) as u8; // little-endian f16: low byte = low mantissa bits
                 }
             }
         }),
     ];
+    let steps_len = steps.len();
     for (k, (name, f)) in steps.iter().enumerate() {
         f(&mut ts);
         let mut blob = build(&ts);
@@ -98,6 +105,24 @@ fn weights(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
         full += blob.len() as u64;
         repo.put_stream(&mut &blob[..])?;
         repo.flush()?;
+        if k + 1 == steps_len {
+            // Also store the full fine-tune as an XOR delta against v4, in a second repo.
+            let r2root = root.with_extension("delta");
+            let r2 = LocalRepo::init(&r2root, &PackConfig::default())?;
+            let hb = r2.put_stream(&mut &prev_blob[..])?;
+            r2.flush()?;
+            let base_cost = disk(&r2root);
+            r2.put_delta(&hb, &mut &blob[..])?;
+            r2.flush()?;
+            println!(
+                "| {} | ...same, stored with `put_delta` against v4 | {:.0} | – | +{:.1} (delta only) | – |",
+                k + 1,
+                blob.len() as f64 / 1048576.0,
+                (disk(&r2root) - base_cost) as f64 / 1048576.0
+            );
+            std::fs::remove_dir_all(&r2root)?;
+        }
+        prev_blob = blob.clone();
         let used = disk(&root);
         println!(
             "| {} | {name} | {:.0} | {:.0} | {:.0} | {:.2} |",

@@ -46,6 +46,15 @@ enum Cmd {
     Put {
         #[arg(default_value = "-")]
         file: PathBuf,
+        /// Store as an XOR delta against this object (for new versions of
+        /// model weights with the same layout).
+        #[arg(long, conflicts_with = "delta_from_ref")]
+        delta_base: Option<Hash>,
+        /// Store as an XOR delta against the object NAME currently points at
+        /// (e.g. the previous checkpoint of `models/heads/main`). Falls back to a
+        /// plain put if NAME doesn't exist.
+        #[arg(long)]
+        delta_from_ref: Option<Name>,
     },
     /// Write an object (or a byte range of it) to stdout or a file.
     Get {
@@ -207,11 +216,20 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
     let mut out = std::io::stdout().lock();
     match cli.cmd {
         Cmd::Init { .. } => unreachable!("handled above"),
-        Cmd::Put { file } => {
-            let h = if file.as_os_str() == "-" {
-                r.put_stream(&mut std::io::stdin().lock())?
+        Cmd::Put { file, delta_base, delta_from_ref } => {
+            let delta_base = match (delta_base, delta_from_ref) {
+                (Some(b), _) => Some(b),
+                (None, Some(n)) => r.resolve(&n)?.map(|v| v.hash),
+                (None, None) => None,
+            };
+            let mut src: Box<dyn Read> = if file.as_os_str() == "-" {
+                Box::new(std::io::stdin().lock())
             } else {
-                r.put_stream(&mut std::io::BufReader::new(std::fs::File::open(&file)?))?
+                Box::new(std::io::BufReader::new(std::fs::File::open(&file)?))
+            };
+            let h = match delta_base {
+                Some(b) => r.put_delta(&b, &mut src)?,
+                None => r.put_stream(&mut src)?,
             };
             r.flush()?;
             writeln!(out, "{h}")?;

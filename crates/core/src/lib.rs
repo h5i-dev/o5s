@@ -202,6 +202,16 @@ pub trait ObjectStore: Send + Sync {
     fn put(&self, data: &[u8]) -> Result<Hash>;
     /// Streams an object of unknown length in with bounded memory.
     fn put_stream(&self, src: &mut dyn Read) -> Result<Hash>;
+    /// Streams an object in, stored as a byte-wise XOR delta against `base`
+    /// (API v1.7, the ZipLLM-style storage for versions of model weights). The
+    /// identity is still the content hash of the full object. Reads, ranges
+    /// and GC are unchanged for callers (GC keeps `base` alive). Worth it when
+    /// the new object is a small perturbation of `base` at the same offsets.
+    /// Default: ignores `base` and stores normally.
+    fn put_delta(&self, base: &Hash, src: &mut dyn Read) -> Result<Hash> {
+        let _ = base;
+        self.put_stream(src)
+    }
     /// Returns the bytes of `hash` in `range` (whole object if `None`).
     /// Buffers the result, so use [`ObjectStore::open`] for large objects.
     fn get(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Vec<u8>>;

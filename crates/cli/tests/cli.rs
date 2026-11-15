@@ -49,6 +49,18 @@ fn put_get_replace_roundtrip() {
     assert_eq!(run(&repo, &["delete", "pkg/a", "--expect", "1"]).status.code(), Some(4));
     assert!(ok(&repo, &["refs"]).contains("pkg/a"));
     assert!(ok(&repo, &["stat"]).contains("sealed_packs"));
+    // XOR delta against an existing object round-trips through the CLI.
+    let mut v2 = data.clone();
+    v2[500] ^= 1;
+    let f2 = d.path().join("v2.bin");
+    std::fs::write(&f2, &v2).unwrap();
+    let hd = ok(&repo, &["put", "--delta-base", &h, f2.to_str().unwrap()]).trim().to_string();
+    let out2 = d.path().join("v2.out");
+    ok(&repo, &["get", &hd, "-o", out2.to_str().unwrap()]);
+    assert_eq!(std::fs::read(&out2).unwrap(), v2);
+    // --delta-from-ref uses the ref's current object as the base.
+    let hd2 = ok(&repo, &["put", "--delta-from-ref", "main", f2.to_str().unwrap()]).trim().to_string();
+    assert_eq!(hd2, hd, "same content, same identity regardless of storage");
     // Provenance.
     let h2 = ok(&repo, &["put", f.to_str().unwrap()]).trim().to_string();
     let small = d.path().join("small.txt");

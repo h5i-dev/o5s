@@ -350,3 +350,21 @@ fn gc_crash_at_every_fault_point() {
         }
     }
 }
+
+#[test]
+fn gc_keeps_delta_bases_alive() {
+    let d = tempfile::tempdir().unwrap();
+    let r = LocalRepo::init(d.path(), &PackConfig::tiny()).unwrap();
+    let base = blob(3, 20_000);
+    let hb = r.put(&base).unwrap();
+    let mut v2 = base.clone();
+    v2[100] ^= 0xff;
+    let h2 = r.put_delta(&hb, &mut &v2[..]).unwrap();
+    set(&r, "model/v2", h2); // only the delta is referenced
+    for _ in 0..3 {
+        r.gc(&GcOptions { repack_all: true, ..opts() }, &OpaqueObjects).unwrap();
+    }
+    let fresh = LocalRepo::open(d.path()).unwrap();
+    assert_eq!(fresh.get(&h2, None).unwrap(), v2);
+    assert!(fresh.contains(&hb).unwrap(), "base kept alive through the delta");
+}

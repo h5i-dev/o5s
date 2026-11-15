@@ -452,3 +452,55 @@ fn unsafe_env_threshold_zero(f: impl FnOnce()) {
     f();
     unsafe { std::env::remove_var("P2P_MMAP_INDEX_BYTES") };
 }
+
+#[test]
+fn xor_delta_objects_roundtrip_and_save_space() {
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig::tiny();
+    let s = open(d.path(), cfg.clone());
+    let base = pseudo(60_000, 5);
+    let hb = s.put(&base).unwrap();
+    // "Fine-tune": flip the low bit of every 97th byte, plus a longer tail.
+    let mut v2 = base.clone();
+    for b in v2.iter_mut().step_by(97) {
+        *b ^= 1;
+    }
+    v2.extend_from_slice(b"appended tail beyond the base");
+    s.flush().unwrap();
+    let before = dir_bytes(&d.path().join("objects"));
+    let h2 = s.put_delta(&hb, &mut &v2[..]).unwrap();
+    s.flush().unwrap();
+    let delta_cost = dir_bytes(&d.path().join("objects")) - before;
+    assert_eq!(h2, Hash::of(&v2), "identity is the content hash");
+    assert_eq!(s.stats().unwrap().deltas, 1);
+    assert_eq!(s.get(&h2, None).unwrap(), v2);
+    for (a, b) in [(0u64, 1u64), (59_990, 60_010), (1234, 40_000), (60_000, v2.len() as u64)] {
+        assert_eq!(s.get(&h2, Some(a..b)).unwrap(), &v2[a as usize..b as usize], "range {a}..{b}");
+    }
+    // A shorter object than its base; and a delta chain.
+    let v3: Vec<u8> = v2[..30_000].to_vec();
+    let h3 = s.put_delta(&h2, &mut &v3[..]).unwrap();
+    assert_eq!(s.get(&h3, None).unwrap(), v3);
+    s.flush().unwrap();
+    let s = open(d.path(), cfg);
+    assert_eq!(s.get(&h2, None).unwrap(), v2);
+    assert_eq!(s.get(&h3, Some(100..200)).unwrap(), &v3[100..200]);
+    assert_eq!(s.chunks(&h2).unwrap().map(|c| c.len()), Some(2), "delta children: base + xor");
+    // Compare with storing v2 plainly in a separate store: the mostly-zero XOR
+    // stream compresses far better than v2 itself (incompressible random data).
+    let d2 = tempfile::tempdir().unwrap();
+    let plain = open(d2.path(), PackConfig::tiny());
+    plain.put(&v2).unwrap();
+    plain.flush().unwrap();
+    let plain_cost = dir_bytes(&d2.path().join("objects"));
+    assert!(delta_cost * 4 < plain_cost, "delta {delta_cost} B vs plain {plain_cost} B");
+    assert!(matches!(s.put_delta(&Hash::of(b"no such base"), &mut &b"x"[..]), Err(Error::NotFound(_))));
+}
+
+fn dir_bytes(p: &Path) -> u64 {
+    std::fs::read_dir(p).map_or(0, |rd| {
+        rd.flatten()
+            .map(|e| if e.path().is_dir() { dir_bytes(&e.path()) } else { e.metadata().map_or(0, |m| m.len()) })
+            .sum()
+    })
+}

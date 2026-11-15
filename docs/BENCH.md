@@ -61,10 +61,14 @@ no-dedup baseline and identifies where tensor-aware dedup (ZipLLM, Xet) is neede
 | 2 | 4 of 64 tensors retrained | 512 MiB | 273 MiB | 0.53 |
 | 3 | one tensor resized (+1 KiB, shifts every later byte) | 768 MiB | 273 MiB | 0.36 |
 | 4 | header/metadata edit only | 1024 MiB | 273 MiB | 0.27 |
-| 5 | full fine-tune (every tensor perturbed) | 1280 MiB | 530 MiB | 0.41 |
+| 5 | full fine-tune (pseudo-random noise in the low 4 mantissa bits of every f16) | 1280 MiB | 530 MiB | 0.41 |
+| 5′ | same v5, stored with `put_delta` against v4 (XOR delta, API v1.7) | n/a | **+90 MiB** (vs +257 MiB) | n/a |
 
 - Content-defined chunking stores only what changed for partial retrains (v2 adds 16 MiB = 4 tensors)
   and resynchronizes after insertions that shift offsets (v3 adds ~0).
 - A full fine-tune (v5) defeats byte-level chunk dedup: it adds a whole copy. That's exactly the
-  ZipLLM result that motivates the per-kind configuration in the design brief (tensor-level
-  dedup and XOR-delta against a base model). It's not implemented yet (see Production gaps).
+  ZipLLM result that motivates per-kind configuration.
+- Stored as an **XOR delta** against the previous version (`put_delta`, or `pico2peta put --delta-base`),
+  the same fine-tune costs 90 MiB instead of 257 MiB (−65%). The noise floor is 64 MiB (4 random bits per 16),
+  so zstd gets within 1.4× of it. ZipLLM reports −54% on real models. The noise model is synthetic, so real
+  checkpoints will differ.
