@@ -320,6 +320,11 @@ The contended run checks that no update is lost: the final version equals the nu
   - Partial: `filter blob:none` and `blob:limit=<n>[kmg]`.
   - Non-tip wants (lazy fetches) are allowed only if reachable from this repo's refs, since object ids are global across repos.
   - Real-git test `shallow_and_partial_clone`, including refusing another repo's object.
+- ROADMAP Net 7 (ops), part 1: DONE.
+  - `deploy/grafana-dashboard.json`: 12 panels over every exported metric.
+  - `deploy/prometheus-alerts.yml`: 9 rules, validated YAML.
+  - `deploy/k8s/`: `local.yaml` (1-replica StatefulSet + PV) and `s3.yaml` (N replicas on S3 with backend refs, IRSA ServiceAccount, GC CronJob). Both embedded configs pass `pico2peta-server check-config`.
+  - Remaining: per-namespace quotas (code) and a Helm chart (not planned: plain manifests cover it).
 - **ROADMAP Net 3 (P5, front side): DONE** (`crates/server/src/prov_api.rs`, `tests/p5.rs`).
   - Every front records its publishes as provenance through the core API, with the front's ids in `meta`, which makes them searchable.
   - External-id resolver: `git:`, `pypi:`, `npm:`, `maven:`, `oci:`, `name:` and `blake3:`, with authz per front namespace.

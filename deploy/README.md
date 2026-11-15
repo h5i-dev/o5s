@@ -98,6 +98,13 @@ chunker = "xet"
 "hf/" = "hf"
 ```
 
+## Kubernetes
+`deploy/k8s/` has two shapes:
+- `local.yaml`: one replica on a PersistentVolume.
+- `s3.yaml`: several replicas on S3 with `refs = "backend"`, IRSA, and a GC CronJob.
+
+Both use non-root, read-only-root pods with readiness and liveness probes. See `deploy/k8s/README.md` (ingress body limits, tokens secret).
+
 ## Observability
 - `GET /healthz` is liveness (the process is up). `GET /readyz` is readiness: it is 503 while draining, after an audit-log failure, or when the repository is unreachable. Neither needs credentials.
 - `GET /metrics` serves OpenMetrics text with no credentials. Set `server.metrics_listen` to a private address so it is served only there (the API port then returns 404 for it), or restrict it at the proxy or firewall. Key series:
@@ -107,6 +114,9 @@ chunker = "xet"
   - `p2p_auth_failures_total`, `p2p_authz_denied_total`, `p2p_audit_write_failures_total`
   - `p2p_s3_{requests,retries,throttled,failures}_total`
 - Logs are JSON lines on stderr (journald). Each request logs one INFO line with status and latency, and its span carries `request_id`. The same id is returned in `x-request-id` and stored in audit records.
+
+- Dashboard: `deploy/grafana-dashboard.json` (Grafana 10+; pick the Prometheus data source and the job). It has request and error rates, p50/p99 latency by route, bytes in and out, OCC outcomes, auth failures, authz denials and rate limiting, audit write failures, GC, proxy-cache upstream fetches, and S3 requests/retries/throttling.
+- Alerts: `deploy/prometheus-alerts.yml` covers down, audit write failures (mutations are refused), 5xx rate, slow metadata requests, GC failures, S3 failures and throttling, auth-failure spikes, and saturation.
 
 ## Audit log
 The log is append-only JSON lines at `audit.path`, fsync'd before each mutating call returns. Each record's `prev` field is the BLAKE3 hash of the previous line, so you can check the chain with:
