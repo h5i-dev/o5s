@@ -2248,7 +2248,24 @@ impl ObjectStore for PackStore {
     }
 
     fn get(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Vec<u8>> {
-        let mut out = Vec::new();
+        // Whole-record fast path: the verified bytes are returned as they are
+        // (no reader, no extra copies). Everything else streams into a buffer
+        // sized up front.
+        let loc = self.lookup(hash)?.ok_or(Error::NotFound(*hash))?;
+        if matches!(loc.kind, Kind::Blob | Kind::Frame3) {
+            let r = check_range(range, loc.raw_len)?;
+            let mut d = self.read_blob(hash, loc)?;
+            if d.len() as u64 != loc.raw_len {
+                return Err(Error::Corrupt(format!("index length disagrees with data for {hash}")));
+            }
+            if r.start == 0 && r.end == loc.raw_len {
+                return Ok(d);
+            }
+            d.truncate(r.end as usize);
+            return Ok(d.split_off(r.start as usize));
+        }
+        let len = check_range(range.clone(), loc.raw_len)?;
+        let mut out = Vec::with_capacity((len.end - len.start).min(1 << 30) as usize);
         self.open(hash, range)?.read_to_end(&mut out).map_err(unwrap_io)?;
         Ok(out)
     }
@@ -2356,11 +2373,15 @@ impl PackStore {
             }
             Kind::Frame | Kind::Frame2 => Err(Error::Corrupt("frame record indexed as an object".into())),
             Kind::Blob | Kind::Frame3 => {
-                let d = self.read_blob(hash, loc)?;
-                let slice = d
-                    .get(r.start as usize..r.end as usize)
-                    .ok_or_else(|| Error::Corrupt(format!("index length disagrees with data for {hash}")))?;
-                Ok(Box::new(std::io::Cursor::new(slice.to_vec())))
+                let mut d = self.read_blob(hash, loc)?;
+                if d.len() as u64 != loc.raw_len {
+                    return Err(Error::Corrupt(format!("index length disagrees with data for {hash}")));
+                }
+                if r.start == 0 && r.end == loc.raw_len {
+                    return Ok(Box::new(std::io::Cursor::new(d))); // no copy for whole reads
+                }
+                d.truncate(r.end as usize);
+                Ok(Box::new(std::io::Cursor::new(d.split_off(r.start as usize))))
             }
             Kind::Manifest => {
                 let pieces = overlapping(self.read_manifest(hash, loc)?, r.start, r.end);

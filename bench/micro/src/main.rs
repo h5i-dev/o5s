@@ -1087,7 +1087,76 @@ fn ingest(dump: &str, dir: &str, mib: usize) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
+/// `p2p-bench reads <dir>`: whole-object `get` and streaming `open` + 1 MiB reads,
+/// strict and eof verification, over objects of 4 KiB to 64 MiB (code-like text
+/// and incompressible), warm page cache, one thread. One JSON line per case.
+fn reads(dir: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use pico2peta_core::ReadVerify;
+    let root = std::path::Path::new(dir).join(format!("reads-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let mut cfg = pico2peta_repo::RepoConfig::default();
+    cfg.read.allow_eof = true;
+    let repo = LocalRepo::init_config(&root, &cfg)?;
+    let cases: [(usize, usize); 5] =
+        [(4 << 10, 20_000), (64 << 10, 2_000), (512 << 10, 256), (4 << 20, 32), (64 << 20, 4)];
+    // P2P_READS_ONLY=text:4096 runs one case (for profiling).
+    let only = std::env::var("P2P_READS_ONLY").ok();
+    for text in [true, false] {
+        for &(size, n) in &cases {
+            if only.as_deref().is_some_and(|o| o != format!("{}:{}", if text { "text" } else { "random" }, size >> 10))
+            {
+                continue;
+            }
+            let mut hs = Vec::with_capacity(n);
+            for i in 0..n {
+                let v: Vec<u8> = if text {
+                    let mut v = vec![0u8; size];
+                    TextGen { x: 7 + i as u64, pending: Vec::new(), pos: 0 }.read_exact(&mut v)?;
+                    v
+                } else {
+                    bytes(1000 + i as u64, size)
+                };
+                hs.push(repo.put(&v)?);
+            }
+            repo.flush()?;
+            let total = (size * n) as f64;
+            for h in &hs {
+                let _ = repo.get(h, None)?; // warm
+            }
+            let t = Instant::now();
+            for h in &hs {
+                std::hint::black_box(repo.get(h, None)?);
+            }
+            let get = total / t.elapsed().as_secs_f64() / 1e6;
+            let stream = |mode: ReadVerify| -> Result<f64, Box<dyn std::error::Error>> {
+                let mut b = vec![0u8; 1 << 20];
+                let t = Instant::now();
+                for h in &hs {
+                    let mut r = repo.open_verified(h, None, mode)?;
+                    while r.read(&mut b)? > 0 {}
+                }
+                Ok(total / t.elapsed().as_secs_f64() / 1e6)
+            };
+            let strict = stream(ReadVerify::Strict)?;
+            let eof = stream(ReadVerify::Eof)?;
+            println!(
+                "{{\"mode\":\"reads\",\"input\":\"{}\",\"size_kib\":{},\"n\":{n},\"get_mb_s\":{get:.0},\"open_strict_mb_s\":{strict:.0},\"open_eof_mb_s\":{eof:.0},\"load\":\"{}\"}}",
+                if text { "text" } else { "random" },
+                size >> 10,
+                std::fs::read_to_string("/proc/loadavg").unwrap_or_default().split(' ').next().unwrap_or("")
+            );
+        }
+    }
+    drop(repo);
+    std::fs::remove_dir_all(&root)?;
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("reads") {
+        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench reads <dir>")?;
+        return reads(&dir);
+    }
     if std::env::args().nth(1).as_deref() == Some("ingest") {
         let dump = std::env::args().nth(2).ok_or("usage: p2p-bench ingest <catfile dump> <dir> [MiB]")?;
         let dir = std::env::args().nth(3).ok_or("dir")?;

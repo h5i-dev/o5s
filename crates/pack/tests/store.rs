@@ -1212,3 +1212,29 @@ fn put_many_matches_put_with_duplicates_known_and_large_items() {
     }
     assert!(s.put_many(&[]).unwrap().is_empty());
 }
+
+#[test]
+fn whole_and_ranged_reads_of_small_blobs_agree() {
+    let d = tempfile::tempdir().unwrap();
+    let s = open(d.path(), PackConfig::default());
+    for v in [Vec::new(), b"x".to_vec(), vec![b'a'; 5000], pseudo(70_000, 3)] {
+        let h = s.put(&v).unwrap();
+        for st in [false, true] {
+            if st {
+                s.flush().unwrap();
+            }
+            assert_eq!(s.get(&h, None).unwrap(), v);
+            let mut all = Vec::new();
+            s.open(&h, None).unwrap().read_to_end(&mut all).unwrap();
+            assert_eq!(all, v);
+            let n = v.len() as u64;
+            for r in [0..0, 0..n, n / 3..n, 0..n / 2, n / 4..n / 4 + n / 3, n..n] {
+                assert_eq!(s.get(&h, Some(r.clone())).unwrap(), &v[r.start as usize..r.end as usize]);
+                let mut part = Vec::new();
+                s.open(&h, Some(r.clone())).unwrap().read_to_end(&mut part).unwrap();
+                assert_eq!(part, &v[r.start as usize..r.end as usize]);
+            }
+            assert!(s.get(&h, Some(0..n + 1)).is_err());
+        }
+    }
+}
