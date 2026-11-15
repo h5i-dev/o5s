@@ -8,7 +8,7 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 - **CLI cleanup (plumbing over a domain-agnostic core).**
   - `put`: removed `--delta-base`, `--delta-from-ref` and `--no-byte-group`, and the automatic safetensors detection. Storage choices come from namespace profiles: `put --for-name NAME` applies NAME's profile, also with `--remote` (`PUT /v1/objects?for_name=`). The low-level override is the generic `--encoding KEY=VALUE` (`chunker`, `group-width`, `derive-from`, `patch=xor|xor-anchored`).
   - Provenance is one group: `prov record | lineage | impact | why`, each taking a HASH or a NAME. The top-level `lineage` and `impact` are removed, and `prov why/impact` now also accept names.
-  - New: `update` (atomic multi-name OCC), `attest keygen | create | list | verify`, and `promote SRC DST` (local, policy flags; remote promotion goes through the server endpoint).
+  - New: `update` (atomic multi-name OCC), `attest keygen | create | list | verify`, and `promote SRC DST` (local policy flags; with `--remote` the server's `[[promotion]]` policy applies). With `--remote`, `attest create|list|verify`, `prov lineage|impact` and `search` are answered by the server's endpoints (no full provenance-log download).
   - The reference is generated in `docs/CLI.md` (`scripts/gen-cli-doc.sh`).
 - **GC lays out repacked objects by content similarity by default, for every domain** (`[gc] similarity_repack`, default `true`; `gc --no-similarity-repack`). The human's decision after Experiment 3, whose pre-registered verdict, FAIL on jq's build time, is unchanged in EXP1.md. Before, grouping needed a `Grouper` and was opt-in.
 

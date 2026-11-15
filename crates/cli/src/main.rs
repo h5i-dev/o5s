@@ -177,8 +177,8 @@ enum Cmd {
     },
     /// Promote: move DST to the object SRC names, if the policy given by the flags
     /// holds (one OCC transaction, recorded as a `promote` provenance record).
-    /// Local repositories; with --remote it is refused for now, so the client can
-    /// never bypass the server's `[[promotion]]` policy (use `POST /v1/promote`).
+    /// With --remote, the server's `[[promotion]]` policy applies instead (and the
+    /// policy flags are refused).
     Promote {
         src: Name,
         dst: Name,
@@ -498,6 +498,16 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             }
         }
         Cmd::Size { hash } => writeln!(out, "{}", r.size(&hash)?)?,
+        Cmd::Search { prefix, words } if remote.is_some() => {
+            let Some(rr) = &remote else { unreachable!("guarded") };
+            let q = match prefix {
+                Some(p) => pico2peta_client::Search::Prefix(p),
+                None => pico2peta_client::Search::Text(words.join(" ")),
+            };
+            for hit in rr.search(q)? {
+                writeln!(out, "{} {}", hit.object, hit.names.join(" "))?;
+            }
+        }
         Cmd::Search { prefix, words } => {
             let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
             let idx = pico2peta_prov::search::SearchIndex::build(r, &log)?;
@@ -645,9 +655,18 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 }
                 ProvCmd::Lineage { target } | ProvCmd::Impact { target } => {
                     let lineage = matches!(cmd_kind, "lineage");
-                    let h = resolve_target(r, &target)?;
-                    let p = pico2peta_prov::Provenance::load(r, &log)?;
-                    let set = if lineage { p.lineage(&h)? } else { p.impact(&h)? };
+                    let set: std::collections::BTreeSet<Hash> = match &remote {
+                        // The server answers from its own index (no full log download).
+                        Some(rr) => {
+                            let id = ref_id(&target);
+                            (if lineage { rr.lineage(&id)? } else { rr.impact(&id)? }).into_iter().collect()
+                        }
+                        None => {
+                            let h = resolve_target(r, &target)?;
+                            let p = pico2peta_prov::Provenance::load(r, &log)?;
+                            if lineage { p.lineage(&h)? } else { p.impact(&h)? }
+                        }
+                    };
                     let names = names_by_hash(r)?;
                     for x in set {
                         let ns = names.get(&x).map(|v| v.join(" ")).unwrap_or_default();
@@ -699,23 +718,24 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                     };
                     let signer = pico2peta_attest::Ed25519Signer::from_seed(&seed);
                     let env = pico2peta_attest::Envelope::sign(&st, &[&signer]);
-                    writeln!(out, "{}", pico2peta_attest::attest(r, &log, &env)?)?;
+                    match &remote {
+                        Some(rr) => writeln!(out, "{}", rr.attest(&env)?.0)?,
+                        None => writeln!(out, "{}", pico2peta_attest::attest(r, &log, &env)?)?,
+                    }
                 }
                 AttestCmd::List { target } => {
-                    let h = resolve_target(r, &target)?;
-                    for env in pico2peta_attest::attestations(r, &log, &h)? {
+                    for env in envelopes(r, &remote, &log, &target)? {
                         let pt = env.statement().map(|s| s.predicate_type).unwrap_or_else(|_| "?".into());
                         let ids: Vec<&str> = env.signatures.iter().map(|(k, _)| k.as_str()).collect();
                         writeln!(out, "{pt} {}", ids.join(" "))?;
                     }
                 }
                 AttestCmd::Verify { target, trust } => {
-                    let h = resolve_target(r, &target)?;
                     let verifiers = trust.iter().map(|t| parse_pubkey(t)).collect::<Result<Vec<_>, _>>()?;
                     let vs: Vec<&dyn pico2peta_attest::Verifier> =
                         verifiers.iter().map(|v| v as &dyn pico2peta_attest::Verifier).collect();
                     let mut any = false;
-                    for env in pico2peta_attest::attestations(r, &log, &h)? {
+                    for env in envelopes(r, &remote, &log, &target)? {
                         let ok = env.verified_by(&vs);
                         if !ok.is_empty() {
                             any = true;
@@ -731,23 +751,29 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             }
         }
         Cmd::Promote { src, dst, require_key, predicate_type, require_provenance, actor } => {
-            if remote.is_some() {
-                // The server applies its own [[promotion]] policy; the client must not bypass it.
-                return Err(Error::Unsupported(
-                    "promote with --remote needs the server's promote endpoint (not yet in this client)",
-                ));
-            }
             let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
-            let verifiers = require_key.iter().map(|t| parse_pubkey(t)).collect::<Result<Vec<_>, _>>()?;
-            use pico2peta_attest::Verifier as _;
-            let policy = pico2peta_attest::Policy {
-                required_keys: verifiers.iter().map(|v| v.keyid()).collect(),
-                predicate_type,
-                require_provenance,
+            let outcome = if let Some(rr) = &remote {
+                // The server applies its own [[promotion]] policy; local policy flags would
+                // suggest otherwise, so they are refused here rather than ignored.
+                if !require_key.is_empty() || predicate_type.is_some() || require_provenance {
+                    return Err(Error::Parse(
+                        "with --remote the server's [[promotion]] policy applies; drop --require-key/--predicate-type/--require-provenance".into(),
+                    ));
+                }
+                rr.promote(&src, &dst)?
+            } else {
+                let verifiers = require_key.iter().map(|t| parse_pubkey(t)).collect::<Result<Vec<_>, _>>()?;
+                use pico2peta_attest::Verifier as _;
+                let policy = pico2peta_attest::Policy {
+                    required_keys: verifiers.iter().map(|v| v.keyid()).collect(),
+                    predicate_type,
+                    require_provenance,
+                };
+                let vs: Vec<&dyn pico2peta_attest::Verifier> =
+                    verifiers.iter().map(|v| v as &dyn pico2peta_attest::Verifier).collect();
+                pico2peta_attest::promote(r, &log, &src, &dst, &policy, &vs, &actor)?
             };
-            let vs: Vec<&dyn pico2peta_attest::Verifier> =
-                verifiers.iter().map(|v| v as &dyn pico2peta_attest::Verifier).collect();
-            match pico2peta_attest::promote(r, &log, &src, &dst, &policy, &vs, &actor)? {
+            match outcome {
                 pico2peta_attest::PromoteOutcome::Promoted { object, record } => {
                     writeln!(out, "promoted {object} record {record}")?
                 }
@@ -944,4 +970,22 @@ fn write_secret(p: &std::path::Path, contents: &str) -> Result<(), Error> {
     f.write_all(b"\n")?;
     f.sync_all()?;
     Ok(())
+}
+
+/// A server reference id for TARGET: `blake3:<hex>` for a hash, `name:<name>` otherwise.
+fn ref_id(t: &str) -> String {
+    if t.parse::<Hash>().is_ok() { format!("blake3:{t}") } else { format!("name:{t}") }
+}
+
+/// TARGET's attestation envelopes, locally or from the server.
+fn envelopes(
+    r: &dyn Repository,
+    remote: &Option<pico2peta_client::RemoteRepo>,
+    log: &Name,
+    target: &str,
+) -> Result<Vec<pico2peta_attest::Envelope>, Error> {
+    match remote {
+        Some(rr) => Ok(rr.attestations(&ref_id(target))?.into_iter().map(|(_, e, _)| e).collect()),
+        None => pico2peta_attest::attestations(r, log, &resolve_target(r, target)?),
+    }
 }

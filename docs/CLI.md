@@ -29,7 +29,7 @@ Commands:
   fsck       Verify every stored object (CRC + content hash) and every ref. Exit 1 on problems
   prov       Provenance: record derivations; lineage, impact and why of a HASH or NAME
   attest     Signed attestations (in-toto Statement v1 in DSSE envelopes) about a HASH or NAME
-  promote    Promote: move DST to the object SRC names, if the policy given by the flags holds (one OCC transaction, recorded as a `promote` provenance record). Local repositories; with --remote it is refused for now, so the client can never bypass the server's `[[promotion]]` policy (use `POST /v1/promote`)
+  promote    Promote: move DST to the object SRC names, if the policy given by the flags holds (one OCC transaction, recorded as a `promote` provenance record). With --remote, the server's `[[promotion]]` policy applies instead (and the policy flags are refused)
   gc         Run whichever garbage-collection phases are due (plan → sweep → delete). Safe with concurrent writers. Run it periodically (e.g. from cron). Roots are the current refs; objects are treated as opaque
   help       Print this message or the help of the given subcommand(s)
 
@@ -464,7 +464,7 @@ Options:
 ## `promote`
 
 ```text
-Promote: move DST to the object SRC names, if the policy given by the flags holds (one OCC transaction, recorded as a `promote` provenance record). Local repositories; with --remote it is refused for now, so the client can never bypass the server's `[[promotion]]` policy (use `POST /v1/promote`)
+Promote: move DST to the object SRC names, if the policy given by the flags holds (one OCC transaction, recorded as a `promote` provenance record). With --remote, the server's `[[promotion]]` policy applies instead (and the policy flags are refused)
 
 Usage: pico2peta promote [OPTIONS] <SRC> <DST>
 
