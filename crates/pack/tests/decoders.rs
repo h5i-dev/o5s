@@ -105,7 +105,41 @@ proptest! {
     fn frame_decoder_total(raw in proptest::collection::vec(any::<u8>(), 0..400)) {
         if let Ok(h) = parse_header(&raw) {
             let _ = decode_frame_bodies(&h, &raw);
+            let _ = frame_members(&h, &raw);
         }
-        let _ = decode_frame_dir(&raw);
     }
+}
+
+#[test]
+fn index_v3_is_compact_for_frames() {
+    // 1000 frame members in 10 frames, plus 10 plain blobs.
+    let mut es = Vec::new();
+    for f in 0..10u64 {
+        for m in 0..100u32 {
+            es.push(IdxEntry {
+                hash: Hash::of(&[f as u8, m as u8, (m >> 8) as u8]),
+                offset: 24 + f * 10_000,
+                stored_len: 9_000,
+                raw_len: 50,
+                kind: Kind::Blob,
+                codec: Codec::Zstd,
+                frame: Some((m * 50, 5_000)),
+            });
+        }
+        es.push(IdxEntry {
+            hash: Hash::of(&[f as u8, 255]),
+            offset: 200_000 + f * 100,
+            stored_len: 40,
+            raw_len: 60,
+            kind: Kind::Blob,
+            codec: Codec::Zstd,
+            frame: None,
+        });
+    }
+    let b = encode_index(&mut es);
+    let per = b.len() as f64 / es.len() as f64;
+    assert!(per < 47.0, "index bytes per entry: {per:.1}");
+    let mut back = decode_index(&b).unwrap();
+    back.sort_by_key(|e| e.hash);
+    assert_eq!(back, es);
 }

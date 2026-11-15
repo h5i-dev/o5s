@@ -356,7 +356,29 @@ impl LocalRepo {
             }
         }
         items.sort();
+        let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 8);
         let mut done = HashSet::new();
+        let mut wave: Vec<Vec<Vec<u8>>> = Vec::new();
+        let flush_wave = |wave: &mut Vec<Vec<Vec<u8>>>| -> Result<()> {
+            // Compress the frames of a wave in parallel (put_frame compresses before
+            // taking the writer lock), bounded at 2 frames per core in memory.
+            let results: Vec<Result<Vec<Hash>>> = std::thread::scope(|sc| {
+                let hs: Vec<_> = wave
+                    .iter()
+                    .map(|f| {
+                        sc.spawn(move || {
+                            let refs: Vec<&[u8]> = f.iter().map(|v| v.as_slice()).collect();
+                            self.packs.put_frame(&refs, opts.frame_level)
+                        })
+                    })
+                    .collect();
+                hs.into_iter()
+                    .map(|h| h.join().unwrap_or_else(|_| Err(Error::Corrupt("frame worker panicked".into()))))
+                    .collect()
+            });
+            wave.clear();
+            results.into_iter().try_for_each(|r| r.map(|_| ()))
+        };
         let mut i = 0;
         while i < items.len() {
             let group = &items[i].0.group;
@@ -372,9 +394,12 @@ impl LocalRepo {
                 done.insert(items[i].1);
                 i += 1;
             }
-            let refs: Vec<&[u8]> = frame.iter().map(|v| v.as_slice()).collect();
-            self.packs.put_frame(&refs, opts.frame_level)?;
+            wave.push(frame);
+            if wave.len() >= workers * 2 {
+                flush_wave(&mut wave)?;
+            }
         }
+        flush_wave(&mut wave)?;
         Ok(done)
     }
 }

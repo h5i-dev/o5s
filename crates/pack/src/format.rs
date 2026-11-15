@@ -47,8 +47,17 @@ pub const REC_TRAILER: usize = 4;
 pub const IDX_ENTRY: usize = 32 + 8 + 4 + 8 + 1 + 1;
 /// v2 entries add `frame_inner: u32` and `frame_len: u32` (0 = not framed).
 pub const IDX_ENTRY_V2: usize = IDX_ENTRY + 8;
-/// Index format v2 magic (current). v1 (`P2PIDX01`) is still read.
+/// Index format v2 magic (read-only).
 pub const IDX_MAGIC_V2: &[u8; 8] = b"P2PIDX02";
+/// Index format v3 magic (current). Layout after the magic:
+/// `n_records u64 | n_entries u64 | records | entries | blake3[32]`, where a
+/// record is `offset u64 | stored_len u32 | raw_len u64 | kind u8 | codec u8`
+/// (22 B) and an entry is `hash[32] | record u32 | inner u32 | len u32` (44 B).
+/// Frame members share their frame's record. For non-frame records,
+/// `inner = len = 0` and the length is the record's `raw_len`.
+pub const IDX_MAGIC_V3: &[u8; 8] = b"P2PIDX03";
+const IDX3_REC: usize = 22;
+const IDX3_ENT: usize = 44;
 /// Upper bound on a blob record's logical length (blobs are below the
 /// chunk threshold, which `PackConfig::validate` caps at 2 GiB).
 pub const MAX_BLOB: u64 = 1 << 31;
@@ -90,6 +99,17 @@ pub enum Kind {
     /// concatenated bodies. The frame itself isn't an addressable object;
     /// its members are.
     Frame = 2,
+    /// Frame format v2 (written since 2026-11-15): the directory holds only
+    /// member lengths (4 B each). Member hashes live in the index, and
+    /// recovery recomputes them from the decompressed bodies.
+    Frame2 = 3,
+}
+
+impl Kind {
+    /// True for both frame formats.
+    pub fn is_frame(self) -> bool {
+        matches!(self, Kind::Frame | Kind::Frame2)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +127,7 @@ impl Kind {
             0 => Ok(Kind::Blob),
             1 => Ok(Kind::Manifest),
             2 => Ok(Kind::Frame),
+            3 => Ok(Kind::Frame2),
             _ => Err(Error::Corrupt(format!("bad record kind {b}"))),
         }
     }
@@ -172,9 +193,7 @@ pub fn parse_header(b: &[u8]) -> Result<RecHeader> {
     let hash = rd_hash(&b[8..40]);
     let raw_len = rd_u64(&b[40..48]);
     let stored_len = rd_u32(&b[48..52]);
-    if stored_len > MAX_STORED
-        || (kind == Kind::Blob && raw_len > MAX_BLOB)
-        || (kind == Kind::Frame && raw_len > MAX_FRAME)
+    if stored_len > MAX_STORED || (kind == Kind::Blob && raw_len > MAX_BLOB) || (kind.is_frame() && raw_len > MAX_FRAME)
     {
         return Err(Error::Corrupt("record length out of bounds".into()));
     }
@@ -203,7 +222,9 @@ pub fn unpack_payload(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
         (Codec::Raw, _) => payload.to_vec(),
         (Codec::Zstd, Kind::Blob) => zstd::bulk::decompress(payload, h.raw_len as usize).map_err(zerr)?,
         (Codec::Zstd, Kind::Manifest) => zstd::stream::decode_all(payload).map_err(zerr)?,
-        (Codec::Zstd, Kind::Frame) => return Err(Error::Corrupt("use decode_frame_bodies for frame records".into())),
+        (Codec::Zstd, Kind::Frame | Kind::Frame2) => {
+            return Err(Error::Corrupt("use decode_frame_bodies for frame records".into()));
+        }
     };
     if h.kind == Kind::Blob && out.len() as u64 != h.raw_len {
         return Err(Error::Corrupt(format!("length mismatch for {}", h.hash)));
@@ -244,19 +265,23 @@ pub fn decode_manifest(b: &[u8]) -> Result<Vec<(Hash, u64)>> {
 }
 
 // ---------------------------------------------------------------------------
-// Frames: [count u32][(hash[32], len u32) * count][bodies (codec-compressed)]
+// Frames
+//   v1 (Kind::Frame):  [count u32][(hash[32], len u32) * count][bodies]
+//   v2 (Kind::Frame2): [count u32][len u32 * count][bodies]
+// Bodies are the concatenated members, codec-compressed. The record hash is
+// the BLAKE3 of the concatenated (uncompressed) bodies.
 // ---------------------------------------------------------------------------
 
-/// Builds a frame payload. Returns `(codec, payload, frame_hash, raw_len)`.
-pub fn encode_frame(members: &[(Hash, &[u8])], level: i32) -> Result<(Codec, Vec<u8>, Hash, u64)> {
+/// Builds a v2 frame payload (record kind [`Kind::Frame2`]).
+/// Returns `(codec, payload, frame_hash, raw_len)`.
+pub fn encode_frame(members: &[&[u8]], level: i32) -> Result<(Codec, Vec<u8>, Hash, u64)> {
     if members.is_empty() || members.len() > MAX_FRAME_MEMBERS {
         return Err(Error::Parse("frame needs 1..=2^20 members".into()));
     }
-    let mut dir = Vec::with_capacity(4 + members.len() * 36);
+    let mut dir = Vec::with_capacity(4 + members.len() * 4);
     dir.extend_from_slice(&(members.len() as u32).to_le_bytes());
     let mut bodies = Vec::new();
-    for (h, b) in members {
-        dir.extend_from_slice(h.as_bytes());
+    for b in members {
         dir.extend_from_slice(&(b.len() as u32).to_le_bytes());
         bodies.extend_from_slice(b);
     }
@@ -273,30 +298,37 @@ pub fn encode_frame(members: &[(Hash, &[u8])], level: i32) -> Result<(Codec, Vec
     Ok((codec, dir, fh, raw_len))
 }
 
-/// Parses a frame's member directory: `(members (hash, inner offset, len), bodies offset)`.
 /// A frame member: `(hash, offset in the decompressed frame, length)`.
 pub type FrameMember = (Hash, u32, u32);
 
-/// Parses a frame's member directory and returns the members and the offset where the bodies start.
-pub fn decode_frame_dir(payload: &[u8]) -> Result<(Vec<FrameMember>, usize)> {
+/// Parses a frame directory: `(per-member (hash if v1, offset, len), offset where bodies start)`.
+/// A directory entry: `(hash if stored (v1), offset, length)`.
+type DirEntry = (Option<Hash>, u32, u32);
+
+fn frame_dir(kind: Kind, payload: &[u8]) -> Result<(Vec<DirEntry>, usize)> {
+    let width = match kind {
+        Kind::Frame => 36,
+        Kind::Frame2 => 4,
+        _ => return Err(Error::Corrupt("not a frame record".into())),
+    };
     if payload.len() < 4 {
         return Err(Error::Corrupt("short frame".into()));
     }
     let n = rd_u32(&payload[0..4]) as usize;
     let dir_end = n
-        .checked_mul(36)
+        .checked_mul(width)
         .and_then(|x| x.checked_add(4))
         .filter(|e| *e <= payload.len() && n <= MAX_FRAME_MEMBERS && n > 0);
     let Some(dir_end) = dir_end else { return Err(Error::Corrupt("bad frame directory".into())) };
     let mut out = Vec::with_capacity(n);
     let mut off: u64 = 0;
     for i in 0..n {
-        let e = &payload[4 + i * 36..4 + (i + 1) * 36];
-        let len = rd_u32(&e[32..36]);
+        let e = &payload[4 + i * width..4 + (i + 1) * width];
+        let (h, len) = if width == 36 { (Some(rd_hash(&e[0..32])), rd_u32(&e[32..36])) } else { (None, rd_u32(e)) };
         if off + len as u64 > MAX_FRAME {
             return Err(Error::Corrupt("frame member out of bounds".into()));
         }
-        out.push((rd_hash(&e[0..32]), off as u32, len));
+        out.push((h, off as u32, len));
         off += len as u64;
     }
     Ok((out, dir_end))
@@ -304,7 +336,7 @@ pub fn decode_frame_dir(payload: &[u8]) -> Result<(Vec<FrameMember>, usize)> {
 
 /// Decompresses a frame's bodies and checks them against the record header.
 pub fn decode_frame_bodies(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
-    let (members, start) = decode_frame_dir(payload)?;
+    let (members, start) = frame_dir(h.kind, payload)?;
     let total: u64 = members.iter().map(|m| m.2 as u64).sum();
     if total != h.raw_len {
         return Err(Error::Corrupt("frame directory length mismatch".into()));
@@ -320,6 +352,17 @@ pub fn decode_frame_bodies(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
         return Err(Error::Corrupt("frame body mismatch".into()));
     }
     Ok(out)
+}
+
+/// Members of a frame record with their content hashes. For v2 frames the
+/// hashes are recomputed from the decompressed bodies (used by recovery).
+pub fn frame_members(h: &RecHeader, payload: &[u8]) -> Result<Vec<FrameMember>> {
+    let (dir, _) = frame_dir(h.kind, payload)?;
+    if dir.iter().all(|d| d.0.is_some()) {
+        return Ok(dir.into_iter().filter_map(|(h, o, l)| h.map(|h| (h, o, l))).collect());
+    }
+    let bodies = decode_frame_bodies(h, payload)?;
+    Ok(dir.into_iter().map(|(_, o, l)| (Hash::of(&bodies[o as usize..o as usize + l as usize]), o, l)).collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -350,29 +393,104 @@ pub struct IdxEntry {
 /// Encodes a sorted index (format v2) with a BLAKE3 trailer.
 pub fn encode_index(entries: &mut [IdxEntry]) -> Vec<u8> {
     entries.sort_by_key(|e| e.hash);
-    let mut v = Vec::with_capacity(16 + entries.len() * IDX_ENTRY_V2 + 32);
-    v.extend_from_slice(IDX_MAGIC_V2);
-    v.extend_from_slice(&(entries.len() as u64).to_le_bytes());
+    // One record per distinct record offset (frame members share theirs).
+    let mut recs: Vec<(u64, u32, u64, u8, u8)> = Vec::new();
+    let mut rec_of: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
+    let mut ents: Vec<(Hash, u32, u32, u32)> = Vec::with_capacity(entries.len());
     for e in entries.iter() {
-        v.extend_from_slice(e.hash.as_bytes());
-        v.extend_from_slice(&e.offset.to_le_bytes());
-        v.extend_from_slice(&e.stored_len.to_le_bytes());
-        v.extend_from_slice(&e.raw_len.to_le_bytes());
-        v.push(e.kind as u8);
-        v.push(e.codec as u8);
-        let (inner, flen) = e.frame.unwrap_or((0, 0));
+        let (kind, raw, inner, len) = match e.frame {
+            Some((inner, flen)) => (Kind::Frame2 as u8, flen as u64, inner, e.raw_len as u32),
+            None => (e.kind as u8, e.raw_len, 0, 0),
+        };
+        let id = *rec_of.entry(e.offset).or_insert_with(|| {
+            recs.push((e.offset, e.stored_len, raw, kind, e.codec as u8));
+            (recs.len() - 1) as u32
+        });
+        ents.push((e.hash, id, inner, len));
+    }
+    let mut v = Vec::with_capacity(24 + recs.len() * IDX3_REC + ents.len() * IDX3_ENT + 32);
+    v.extend_from_slice(IDX_MAGIC_V3);
+    v.extend_from_slice(&(recs.len() as u64).to_le_bytes());
+    v.extend_from_slice(&(ents.len() as u64).to_le_bytes());
+    for (off, sl, raw, kind, codec) in recs {
+        v.extend_from_slice(&off.to_le_bytes());
+        v.extend_from_slice(&sl.to_le_bytes());
+        v.extend_from_slice(&raw.to_le_bytes());
+        v.push(kind);
+        v.push(codec);
+    }
+    for (h, id, inner, len) in ents {
+        v.extend_from_slice(h.as_bytes());
+        v.extend_from_slice(&id.to_le_bytes());
         v.extend_from_slice(&inner.to_le_bytes());
-        v.extend_from_slice(&flen.to_le_bytes());
+        v.extend_from_slice(&len.to_le_bytes());
     }
     let sum = blake3::hash(&v);
     v.extend_from_slice(sum.as_bytes());
     v
 }
 
-/// Decodes and verifies an index (format v1 or v2).
+fn decode_index_v3(body: &[u8]) -> Result<Vec<IdxEntry>> {
+    if body.len() < 24 {
+        return Err(Error::Corrupt("short v3 index".into()));
+    }
+    let nr = rd_u64(&body[8..16]);
+    let ne = rd_u64(&body[16..24]);
+    let size = usize::try_from(nr)
+        .ok()
+        .and_then(|r| r.checked_mul(IDX3_REC))
+        .zip(usize::try_from(ne).ok().and_then(|e| e.checked_mul(IDX3_ENT)))
+        .and_then(|(a, b)| a.checked_add(b))
+        .and_then(|x| x.checked_add(24));
+    if size != Some(body.len()) {
+        return Err(Error::Corrupt("index length mismatch".into()));
+    }
+    let (nr, ne) = (nr as usize, ne as usize);
+    let recs = &body[24..24 + nr * IDX3_REC];
+    let mut out = Vec::with_capacity(ne);
+    for i in 0..ne {
+        let e = &body[24 + nr * IDX3_REC + i * IDX3_ENT..24 + nr * IDX3_REC + (i + 1) * IDX3_ENT];
+        let id = rd_u32(&e[32..36]) as usize;
+        if id >= nr {
+            return Err(Error::Corrupt("index entry references a missing record".into()));
+        }
+        let r = &recs[id * IDX3_REC..(id + 1) * IDX3_REC];
+        let (offset, stored_len, raw) = (rd_u64(&r[0..8]), rd_u32(&r[8..12]), rd_u64(&r[12..20]));
+        let kind = Kind::from_u8(r[20])?;
+        let codec = Codec::from_u8(r[21])?;
+        let (inner, len) = (rd_u32(&e[36..40]), rd_u32(&e[40..44]));
+        let entry = if kind.is_frame() {
+            if raw > MAX_FRAME || inner as u64 + len as u64 > raw {
+                return Err(Error::Corrupt("frame member out of bounds in index".into()));
+            }
+            IdxEntry {
+                hash: rd_hash(&e[0..32]),
+                offset,
+                stored_len,
+                raw_len: len as u64,
+                kind: Kind::Blob,
+                codec,
+                frame: Some((inner, raw as u32)),
+            }
+        } else {
+            IdxEntry { hash: rd_hash(&e[0..32]), offset, stored_len, raw_len: raw, kind, codec, frame: None }
+        };
+        out.push(entry);
+    }
+    Ok(out)
+}
+
+/// Decodes and verifies an index (format v1, v2 or v3).
 pub fn decode_index(b: &[u8]) -> Result<Vec<IdxEntry>> {
     if b.len() < 16 + 32 {
         return Err(Error::Corrupt("bad index header".into()));
+    }
+    if &b[..8] == IDX_MAGIC_V3 {
+        let (body, sum) = b.split_at(b.len() - 32);
+        if blake3::hash(body).as_bytes() != sum {
+            return Err(Error::Corrupt("index checksum mismatch".into()));
+        }
+        return decode_index_v3(body);
     }
     let width = if &b[..8] == IDX_MAGIC {
         IDX_ENTRY
@@ -401,7 +519,7 @@ pub fn decode_index(b: &[u8]) -> Result<Vec<IdxEntry>> {
             None
         };
         let kind = Kind::from_u8(e[52])?;
-        if kind == Kind::Frame {
+        if kind.is_frame() {
             return Err(Error::Corrupt("frame records are not indexed".into()));
         }
         out.push(IdxEntry {

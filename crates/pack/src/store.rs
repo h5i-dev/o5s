@@ -502,9 +502,9 @@ impl PackStore {
                 let mut rec = vec![0u8; h.total_len() as usize];
                 f.read_exact_at(&mut rec, good)?;
                 let Ok((_, payload)) = decode_record(&rec) else { break };
-                if h.kind == Kind::Frame {
+                if h.kind.is_frame() {
                     // A CRC-valid frame with a bad directory is corruption, not a torn tail.
-                    let (members, _) = decode_frame_dir(payload)?;
+                    let members = frame_members(&h, payload)?;
                     for (mh, inner, mlen) in members {
                         entries.push(IdxEntry {
                             hash: mh,
@@ -710,7 +710,7 @@ impl PackStore {
             };
             let (h, _) = decode_record(&raw)?;
             let framed = loc.frame.is_some();
-            if framed != (h.kind == Kind::Frame) || (!framed && h.hash != *hash) {
+            if framed != h.kind.is_frame() || (!framed && h.hash != *hash) {
                 return Err(Error::Corrupt(format!("record at index location holds {} not {hash}", h.hash)));
             }
             return Ok((h, raw, loc));
@@ -918,7 +918,7 @@ impl PackStore {
         };
         for l in idx.map.values() {
             match l.kind {
-                Kind::Frame => {}
+                Kind::Frame | Kind::Frame2 => {}
                 Kind::Blob => {
                     s.blobs += 1;
                     s.logical_blob_bytes += l.raw_len;
@@ -978,7 +978,7 @@ impl PackStore {
         match loc.kind {
             Kind::Blob => Ok(None),
             Kind::Manifest => Ok(Some(self.read_manifest(hash, loc)?.into_iter().map(|c| c.0).collect())),
-            Kind::Frame => Err(Error::Corrupt("frame record indexed as an object".into())),
+            Kind::Frame | Kind::Frame2 => Err(Error::Corrupt("frame record indexed as an object".into())),
         }
     }
 
@@ -1034,9 +1034,9 @@ impl PackStore {
         if members.iter().any(|m| m.len() >= self.inner.cfg.chunk_threshold) {
             return Err(Error::Parse("frame members must be smaller than the chunk threshold".into()));
         }
-        let with_hash: Vec<(Hash, &[u8])> = members.iter().map(|m| (Hash::of(m), *m)).collect();
-        let (codec, payload, fh, raw_len) = encode_frame(&with_hash, level)?;
-        let rec = encode_record(Kind::Frame, codec, &fh, raw_len, &payload);
+        let hashes: Vec<Hash> = members.iter().map(|m| Hash::of(m)).collect();
+        let (codec, payload, fh, raw_len) = encode_frame(members, level)?;
+        let rec = encode_record(Kind::Frame2, codec, &fh, raw_len, &payload);
         let mut w = self.inner.writer.lock().map_err(poisoned)?;
         if w.is_none() {
             *w = Some(self.new_open_pack()?);
@@ -1050,7 +1050,12 @@ impl PackStore {
         op.file.write_all_at(&rec, offset)?;
         op.len += rec.len() as u64;
         let stored_len = payload.len() as u32;
-        let (dir, _) = decode_frame_dir(&payload)?;
+        let mut dir = Vec::with_capacity(members.len());
+        let mut off = 0u32;
+        for (h, m) in hashes.iter().zip(members) {
+            dir.push((*h, off, m.len() as u32));
+            off += m.len() as u32;
+        }
         let mut idx = self.inner.index.write().map_err(poisoned)?;
         for (mh, inner, mlen) in dir {
             let frame = Some((inner, raw_len as u32));
@@ -1075,7 +1080,7 @@ impl PackStore {
         }
         drop(idx);
         self.maybe_seal(&mut w)?;
-        Ok(with_hash.into_iter().map(|(h, _)| h).collect())
+        Ok(hashes)
     }
 
     /// See [`ObjectStore::ensure_live`]. Walks manifest trees, so cost is
@@ -1170,7 +1175,7 @@ impl ObjectStore for PackStore {
         let whole = range.is_none();
         let r = check_range(range, loc.raw_len)?;
         match loc.kind {
-            Kind::Frame => Err(Error::Corrupt("frame record indexed as an object".into())),
+            Kind::Frame | Kind::Frame2 => Err(Error::Corrupt("frame record indexed as an object".into())),
             Kind::Blob => {
                 let d = self.read_blob(hash, loc)?;
                 Ok(Box::new(std::io::Cursor::new(d[r.start as usize..r.end as usize].to_vec())))
@@ -1319,7 +1324,9 @@ impl Read for ChunkReader {
                 .map_err(io_err)?
                 .ok_or_else(|| io_err(Error::Corrupt(format!("missing chunk {h}"))))?;
             match loc.kind {
-                Kind::Frame => return Err(io_err(Error::Corrupt("frame record indexed as an object".into()))),
+                Kind::Frame | Kind::Frame2 => {
+                    return Err(io_err(Error::Corrupt("frame record indexed as an object".into())));
+                }
                 Kind::Manifest => {
                     if self.stack.len() >= self.depth_limit {
                         return Err(io_err(Error::Corrupt("manifest tree too deep".into())));
