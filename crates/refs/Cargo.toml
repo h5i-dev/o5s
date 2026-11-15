@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 pico2peta-core.workspace = true
 crc32fast.workspace = true
+blake3.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

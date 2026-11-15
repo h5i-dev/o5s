@@ -230,3 +230,62 @@ fn lost_create_response_is_recognized_as_our_commit() {
     let r2 = RefStore::open_backend(b, "l/").unwrap();
     assert_eq!(r2.resolve(&x).unwrap().unwrap(), RefValue { hash: h(1), version: 1 });
 }
+
+/// Raised by the net session: two writers making the *same* decision (same
+/// name, observed version and target) must not both get Ok. Simulated: just
+/// before our create, "another writer" stores an entry with the identical record
+/// but its own nonce. Ours must then be a Conflict, never a second Ok.
+#[test]
+fn identical_concurrent_decisions_yield_exactly_one_ok() {
+    struct RivalWins {
+        inner: LocalDisk,
+        done: std::sync::atomic::AtomicBool,
+    }
+    impl Backend for RivalWins {
+        fn put_if_absent(
+            &self,
+            k: &str,
+            s: pico2peta_core::backend::PutSource<'_>,
+        ) -> Result<pico2peta_core::backend::PutOutcome> {
+            if k.contains("log/")
+                && !self.done.swap(true, std::sync::atomic::Ordering::SeqCst)
+                && let pico2peta_core::backend::PutSource::Bytes(b) = s
+            {
+                // The rival's entry: same record, different nonce (bytes 8..24).
+                let mut rival = b.to_vec();
+                for x in &mut rival[8..24] {
+                    *x ^= 0xa5;
+                }
+                self.inner.put_if_absent(k, pico2peta_core::backend::PutSource::Bytes(&rival))?;
+            }
+            self.inner.put_if_absent(k, s)
+        }
+        fn get_range(&self, k: &str, r: std::ops::Range<u64>) -> Result<Vec<u8>> {
+            self.inner.get_range(k, r)
+        }
+        fn open(&self, k: &str) -> Result<Box<dyn std::io::Read + Send>> {
+            self.inner.open(k)
+        }
+        fn head(&self, k: &str) -> Result<Option<pico2peta_core::backend::BlobMeta>> {
+            self.inner.head(k)
+        }
+        fn list(&self, p: &str) -> Result<Vec<pico2peta_core::backend::BlobMeta>> {
+            self.inner.list(p)
+        }
+        fn delete(&self, k: &str) -> Result<()> {
+            self.inner.delete(k)
+        }
+        fn describe(&self) -> String {
+            "rival".into()
+        }
+    }
+    let d = tempfile::tempdir().unwrap();
+    let b: Arc<dyn Backend> =
+        Arc::new(RivalWins { inner: LocalDisk::new(d.path()).unwrap(), done: Default::default() });
+    let r = RefStore::open_backend(b.clone(), "c/").unwrap();
+    let x = n("x");
+    // The rival already committed exactly this replace, so ours must conflict.
+    let out = r.replace(&x, &[(x.clone(), Observed::Absent)], h(1), &yes).unwrap();
+    assert!(matches!(out, ReplaceOutcome::Conflict { .. }), "a second Ok for the same observed version: {out:?}");
+    assert_eq!(RefStore::open_backend(b, "c/").unwrap().resolve(&x).unwrap().unwrap().version, 1);
+}
