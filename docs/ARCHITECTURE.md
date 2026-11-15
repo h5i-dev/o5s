@@ -6,7 +6,7 @@ the module that implements it. All integers are little endian.
 ## Repository layout (`LocalRepo`, crates/repo)
 
 ```text
-<root>/config.toml         format = 1, plus [pack] tunables (written once at init, create-only)
+<root>/config.toml         format = 1, plus [pack] tunables, [refs] store, optional [chunking] (written once at init, create-only)
 <root>/staging/<id>.pack   open packs, one per writer handle, each exclusively flock'ed
 <root>/objects/            LocalDisk backend root (another Backend, e.g. S3, may be used instead)
     packs/<P>.pack           sealed packs; P = BLAKE3 of the pack bytes (create-only)
@@ -43,8 +43,11 @@ magic u32 "P2PR" | kind u8 | codec u8 | 0u16 | hash[32] | raw_len u64 | stored_l
 | 3 Frame2 | `n u32 | len u32* | bodies` | BLAKE3 of concatenated bodies |
 | 4 Delta | `base[32] | xor[32] [| n u32 | (dst, src, len u64)*]` | object hash / length |
 
-- **Large objects** (≥ `chunk_threshold`) are FastCDC chunks stored as blobs, under a tree of manifests
+- **Large objects** (≥ `chunk_threshold`) are content-defined chunks stored as blobs, under a tree of manifests
   with at most `manifest_fanout` entries per node. Every node is keyed by the content hash of its range.
+  The chunker is FastCDC v2020 (`cdc_min/avg/max`) by default, or byte-exact Hugging Face Xet (8/64/128 KiB)
+  per name prefix (`[chunking]` in config.toml, used by `put_stream_for`). The format doesn't record which
+  chunker cut an object; reads never depend on it.
 - **Frames** hold many small objects compressed together (similarity-grouped repack). Members are indexed
   individually. A frame isn't itself addressable.
 - **Deltas**: object = (aligned base) XOR `xor`, where `xor` is an ordinary object. With segments, object
@@ -65,6 +68,10 @@ entries) and v2 (`P2PIDX02`, 62 B) are still read.
 ## Write path and concurrency (crates/pack)
 1. A writer appends records to its own staging file (`flock`ed). Small objects are bundled one record
    each. Large ones are chunked, and chunks already present are deduplicated (ignoring condemned copies).
+   `put_stream` is a pipeline: the caller's thread chunks; workers hash, check dedup, compress (after a
+   4 KiB zstd-1 compressibility probe) and encode records; one thread hashes the whole object; one
+   committer appends in chunk order and builds the manifest tree. The open pack's BLAKE3 is kept
+   incrementally, so sealing doesn't read the pack back.
 2. `flush`/seal: fsync, hash the file, `put_if_absent(packs/P.pack)` (hard link on local disk), then
    `put_if_absent(packs/P.idx)`, unlink staging, fsync the directory. Repeated or concurrent seals are
    idempotent.

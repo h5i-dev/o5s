@@ -9,4 +9,5 @@ pub mod format;
 pub mod store;
 
 pub use format::IdxEntry;
-pub use store::{GC_PREFIX, PackConfig, PackStats, PackStore, read_name_list};
+pub use pico2peta_chunk::XET_MAX;
+pub use store::{ChunkerKind, GC_PREFIX, PackConfig, PackStats, PackStore, read_name_list};

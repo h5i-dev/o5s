@@ -45,6 +45,14 @@ enum Cmd {
         /// local journal (lets several hosts write one repository on shared storage).
         #[arg(long)]
         refs_on_backend: bool,
+        /// Chunker for a namespace, as PREFIX=CHUNKER (fastcdc or xet), e.g.
+        /// `--chunk models/=xet`. Repeatable; the longest matching prefix wins.
+        /// Used by `put --for-name`.
+        #[arg(long = "chunk", value_name = "PREFIX=CHUNKER")]
+        chunk: Vec<String>,
+        /// Chunker for everything else (default fastcdc).
+        #[arg(long, value_name = "CHUNKER")]
+        chunk_default: Option<String>,
     },
     /// Store a file (or stdin with `-`), print its hash.
     Put {
@@ -59,6 +67,10 @@ enum Cmd {
         /// plain put if NAME doesn't exist.
         #[arg(long)]
         delta_from_ref: Option<Name>,
+        /// Chunk with the chunker configured for NAME's namespace (`init
+        /// --chunk`). Doesn't create NAME. Local repositories only.
+        #[arg(long, value_name = "NAME", conflicts_with_all = ["delta_base", "delta_from_ref"])]
+        for_name: Option<Name>,
     },
     /// Write an object (or a byte range of it) to stdout or a file.
     Get {
@@ -197,7 +209,7 @@ enum Outcome {
 }
 
 fn run(cli: Cli) -> Result<Outcome, Error> {
-    if let Cmd::Init { chunk_threshold, pack_cap, zstd_level, refs_on_backend } = &cli.cmd {
+    if let Cmd::Init { chunk_threshold, pack_cap, zstd_level, refs_on_backend, chunk, chunk_default } = &cli.cmd {
         if cli.remote.is_some() {
             return Err(Error::Unsupported("init is only available for local repositories"));
         }
@@ -205,7 +217,30 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
         cfg.apply_overrides(*chunk_threshold, *pack_cap, *zstd_level);
         let store =
             if *refs_on_backend { pico2peta_repo::RefsStore::Backend } else { pico2peta_repo::RefsStore::Local };
-        LocalRepo::init_with(&cli.repo, &cfg, store)?;
+        let parse = |c: &str| match c {
+            "fastcdc" => Ok(pico2peta_repo::ChunkerChoice::Fastcdc),
+            "xet" => Ok(pico2peta_repo::ChunkerChoice::Xet),
+            other => Err(Error::Parse(format!("unknown chunker {other:?} (fastcdc or xet)"))),
+        };
+        let mut chunking = pico2peta_repo::ChunkingSection::default();
+        if let Some(c) = chunk_default {
+            chunking.default = parse(c)?;
+        }
+        for spec in chunk {
+            let (prefix, c) = spec
+                .split_once('=')
+                .ok_or_else(|| Error::Parse(format!("--chunk {spec:?}: expected PREFIX=CHUNKER")))?;
+            chunking.prefixes.insert(prefix.to_string(), parse(c)?);
+        }
+        LocalRepo::init_config(
+            &cli.repo,
+            &pico2peta_repo::RepoConfig {
+                format: pico2peta_repo::FORMAT_VERSION,
+                pack: (&cfg).into(),
+                refs: pico2peta_repo::RefsSection { store },
+                chunking,
+            },
+        )?;
         println!("initialized {}", cli.repo.display());
         return Ok(Outcome::Ok);
     }
@@ -224,7 +259,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
     let mut out = std::io::stdout().lock();
     match cli.cmd {
         Cmd::Init { .. } => unreachable!("handled above"),
-        Cmd::Put { file, delta_base, delta_from_ref } => {
+        Cmd::Put { file, delta_base, delta_from_ref, for_name } => {
             let delta_base = match (delta_base, delta_from_ref) {
                 (Some(b), _) => Some(b),
                 (None, Some(n)) => r.resolve(&n)?.map(|v| v.hash),
@@ -238,7 +273,13 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             let h = match delta_base {
                 // Tensor-aligned for safetensors checkpoints; offset-aligned otherwise.
                 Some(b) => pico2peta_weights::put_checkpoint(r, &b, &mut src)?,
-                None => r.put_stream(&mut src)?,
+                None => match (&for_name, &local) {
+                    (Some(n), Some(l)) => l.put_stream_for(n, &mut src)?,
+                    (Some(_), None) => {
+                        return Err(Error::Unsupported("put --for-name is only available for local repositories"));
+                    }
+                    (None, _) => r.put_stream(&mut src)?,
+                },
             };
             r.flush()?;
             writeln!(out, "{h}")?;

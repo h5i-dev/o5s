@@ -5,6 +5,8 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 ## [Unreleased]
 
 ### Added
+- Streaming `put_stream` pipeline (chunker → parallel hash/dedup/compress/encode → in-order committer, with the whole-object hash on its own thread and bounded memory): about 2.3× faster on CPU-bound storage. Compressibility probe (`pack.compress_probe`, default on). Incremental pack hashing, so sealing no longer re-reads the pack.
+- Per-namespace chunking: `[chunking]` in config.toml (`init --chunk PREFIX=xet|fastcdc`, `put --for-name`), with a byte-exact Hugging Face Xet chunker (from `crates/chunk`). FastCDC remains the default; reads are unaffected.
 - Core API v1: `ObjectStore`, `Repository` and `Backend` traits, plus `LocalDisk` and the backend conformance suite.
 - Pack store:
   - per-writer flocked staging files;

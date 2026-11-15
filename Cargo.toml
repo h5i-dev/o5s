@@ -15,6 +15,7 @@ pico2peta-refs = { path = "crates/refs" }
 pico2peta-repo = { path = "crates/repo" }
 pico2peta-prov = { path = "crates/prov" }
 pico2peta-weights = { path = "crates/weights" }
+pico2peta-chunk = { path = "crates/chunk" }
 blake3 = "1"
 memmap2 = "0.9"
 fastcdc = "3"

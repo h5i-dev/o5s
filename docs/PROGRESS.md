@@ -10,12 +10,31 @@
    - Deterministic regression test: `gc_never_deletes_children_of_surviving_records`. It fails on the old GC and passes now.
    - The kill test passes **50/50** (before: ~2/6). The full workspace suite passes **5/5** with `--no-fail-fast`, and no other flaky test was found.
 
-Milestones M0–M9 are complete. `scripts/check.sh` passes. Next: the speed-up research in `docs/RESEARCH_SPEEDUP.md` (§1–§4).
+Milestones M0–M9 are complete. `scripts/check.sh` passes.
+
+**Speed-up work (`docs/RESEARCH_SPEEDUP.md`, from the human; split with net on 2026-11-15)**
+- **§1 (core): done.** Streaming put pipeline, compressibility probe, incremental pack hash. On tmpfs (CPU-bound), incompressible `put_stream` went from 281 to 655 MB/s (median of 5 interleaved runs; best 791) and dedup re-put from ~570 to ~1010 MB/s; on NVMe incompressible stays at the device's ~200 MB/s fsync ceiling, so §1a's ≥ 800 MB/s target only applies to the CPU-bound case and was **not** reached as a median on this shared 4-vCPU host. The probe gave no measurable gain (zstd already bails out fast on random data). Details and profiles: `docs/BENCH.md`.
+- **§2 byte grouping:** the transform is net's (`crates/weights/src/bytegroup.rs`); the core adds the pack codec id once net reports the measured gain (pending).
+- **§3 Experiment 1c:** net's (PLAN §4.9, pre-registered before any 1c code). ripgrep and jq already FAIL; redis and git.git are running.
+- **§4 chunker:** net built `crates/chunk` (byte-exact Xet, conformance-tested on 796 reference boundaries). **The core wired it in as a per-namespace option** (`[chunking]`, API v1.11). FastCDC stays the default and every object stays readable whatever chunker wrote it. Trade-off below.
+
+**§4 trade-off: Xet vs FastCDC chunking (measured 2026-11-15 with `p2p-bench chunkers` on SmolLM2-135M → -Instruct, real bf16 safetensors, 269 MB each; sizes only)**
+
+| chunker | chunks | mean / max chunk | fine-tune deduped vs base | base + 777 B inserted at 1 MiB, deduped | index + manifest overhead |
+|---|---|---|---|---|---|
+| FastCDC 16/64/256K (default) | 3,383 | 77.7 / 256 KiB | 0.01% | 99.98% | 0.106% |
+| Xet 8/64/128K | 4,202 | 62.5 / 128 KiB | 0.00% | 99.98% | 0.131% |
+
+- **For Xet:** chunk boundaries are byte-identical to Hugging Face Xet's, the prerequisite for dedup against HF-hosted content and for a future Xet protocol adapter. Boundaries alone don't make chunk *ids* match: Xet names chunks with its own hash (I believe a keyed BLAKE3, not checked against the spec in this session) and groups them into xorbs, so an adapter would still need a mapping, as the Git/OCI adapters have.
+- **Against Xet:** about 24% more chunks for the same data, so slightly more index and manifest metadata (0.13% vs 0.11% of the bytes here) and more per-chunk work. Shift resistance is the same. Speed: net's `chunk-bench` numbers are pending (queued on the bench lock); both chunkers run well above today's `put_stream` rate (RESEARCH_SPEEDUP §0: FastCDC 2.3 GB/s/core).
+- **Neither** dedups a fine-tune at chunk level (every weight changes); that's what the XOR-delta path (`put --delta-from-ref`) is for, and byte grouping (§2) targets.
+- **Content written with different chunkers doesn't share chunks.** So the choice is per namespace (`[chunking.prefixes]`) and should be made once per kind of data; changing it later is safe (only new writes are affected) but costs dedup against older versions.
+- **Decision:** FastCDC stays the default. Use `--chunk models/=xet` for namespaces that mirror or exchange content with Hugging Face.
 
 | milestone | state | where |
 |---|---|---|
 | M0 Plan | done; Exp1 thresholds frozen | `docs/PLAN.md` |
-| M1 Core API | done; v1.9 now, all additive since v1 (see API changes) | `crates/core` |
+| M1 Core API | done; v1.11 now, all additive since v1 (see API changes) | `crates/core` |
 | M2 Pack store | done | `crates/pack` |
 | M3 Ref store | done: local journal engine plus a multi-host log engine on any Backend | `crates/refs` |
 | M4 Local repo + CLI | done; local and `--remote` | `crates/repo`, `crates/cli` |
@@ -77,6 +96,7 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes. Next: the speed-up r
 - **v1.9 (2026-11-15), additive:** `Backend::atomic_create() -> bool` (default `true`). Backends that emulate create-only with check-then-put (S3 without conditional writes) must return `false`. The ref log engine refuses them.
 - **Hierarchical manifests:** `PackConfig::manifest_fanout` (default 4096; repo config key `pack.manifest_fanout`, optional). Every interior node is keyed by the content hash of its byte range, and reads expand the tree lazily.
 - **v1.10 (2026-11-15), additive:** `PackConfig::compress_probe` (default `true`; repo config key `pack.compress_probe`, optional, so existing config.toml files still load). Records of at least 8 KiB whose first 4 KiB shrink by less than 3% under zstd-1 are stored raw without a full compression attempt. It changes only the codec choice, never identity or the format. Build `PackConfig` with `..Default::default()`/`..PackConfig::tiny()` (all current callers already do).
+- **v1.11 (2026-11-15), additive (pack + repo):** `ChunkerKind { FastCdc, Xet }` and `PackStore::put_stream_with(kind, src)`; repo config `[chunking]` (`default`, `prefixes` = name prefix → `"fastcdc"`/`"xet"`, longest prefix wins; optional) with `ChunkingSection`/`ChunkerChoice`, `LocalRepo::init_config(root, &RepoConfig)`, `LocalRepo::put_stream_for(name, src)` and `LocalRepo::chunking()`. CLI: `init --chunk PREFIX=CHUNKER` (repeatable), `--chunk-default`, `put --for-name NAME`. `RepoConfig` gained a field: build it with all fields (it has no `Default`). `ObjectStore::put_stream` on `LocalRepo` uses `[chunking] default`. The Xet chunker itself is net's `crates/chunk`. **For net:** the server can call `put_stream_for` for named uploads (OCI/Git adapters, `/v1` puts that carry a name).
 
 ## Production gaps
 - **Index scale (largely addressed).** Large pack indexes (≥ 4 MiB, ~95k entries) are memory-mapped from a verified local cache (`idx-cache/*.idx3`) and binary-searched. Small packs and the open pack stay in a HashMap. Per-object heap cost is now zero for big packs; the page cache holds the 44 B/entry. A **multi-pack index** (`P2PMIDX1`) is built locally, by a k-way merge with O(#packs) memory and outside the index lock, once ≥ 8 large packs exist and > 10% are uncovered. Lookups are then one binary search plus the few uncovered packs. That answers the brief's open question with "files alongside packs"; PostgreSQL isn't needed for lookups. Remaining: MIDX rebuilds are O(n) and triggered by the coverage rule; a production deployment at 10^9+ objects would want them scheduled with GC.

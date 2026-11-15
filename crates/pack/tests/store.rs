@@ -727,3 +727,34 @@ fn compressibility_probe_picks_raw_or_zstd() {
     assert!(sizes[0] < 4_000_000 + 4_000_000 / 10, "{sizes:?}");
     assert!(sizes[0] > sizes[1] && sizes[0] - sizes[1] < 20_000, "{sizes:?}");
 }
+
+/// Xet chunking: the store cuts exactly where the reference Xet chunker does
+/// (every chunk is stored as its own object), identity and reads are the same
+/// as with FastCDC, and a too-small chunk threshold is refused.
+#[test]
+fn put_stream_with_xet_chunker() {
+    use pico2peta_pack::ChunkerKind;
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { chunk_threshold: 1 << 20, ..PackConfig::default() };
+    let s = open(d.path(), cfg);
+    let data = pseudo(5_000_000, 11);
+    let h = s.put_stream_with(ChunkerKind::Xet, &mut &data[..]).unwrap();
+    assert_eq!(h, Hash::of(&data));
+    assert_eq!(s.get(&h, None).unwrap(), data);
+    assert_eq!(s.get(&h, Some(70_000..4_100_000)).unwrap(), data[70_000..4_100_000]);
+    let lens = pico2peta_chunk::chunk_lengths(&mut pico2peta_chunk::XetChunker::new(), &data);
+    assert!(lens.len() > 20 && lens.iter().all(|&l| l <= pico2peta_chunk::XET_MAX));
+    let mut off = 0;
+    for l in lens {
+        assert!(s.contains(&Hash::of(&data[off..off + l])).unwrap(), "Xet chunk at {off}+{l} not stored");
+        off += l;
+    }
+    // The same bytes through FastCDC: same object id, (mostly) different chunks.
+    let d2 = tempfile::tempdir().unwrap();
+    let s2 = open(d2.path(), PackConfig { chunk_threshold: 1 << 20, ..PackConfig::default() });
+    assert_eq!(s2.put_stream(&mut &data[..]).unwrap(), h);
+    // A chunk threshold not above the Xet maximum is refused, not silently wrong.
+    let d3 = tempfile::tempdir().unwrap();
+    let s3 = open(d3.path(), PackConfig::tiny());
+    assert!(matches!(s3.put_stream_with(ChunkerKind::Xet, &mut &data[..]), Err(Error::Parse(_))));
+}

@@ -22,6 +22,7 @@ pub use fsck::FsckReport;
 pub use gc::{GcOptions, GcReport, GroupKey, Grouper, OpaqueObjects, Tracer};
 use pico2peta_core::backend::{Backend, LocalDisk};
 use pico2peta_core::{Error, Hash, Name, ObjectStore, Observed, RefValue, ReplaceOutcome, Repository, Result, Rule};
+pub use pico2peta_pack::ChunkerKind;
 use pico2peta_pack::{PackStats, PackStore};
 use pico2peta_refs::RefStore;
 use serde::{Deserialize, Serialize};
@@ -44,6 +45,70 @@ pub struct RepoConfig {
     /// Where refs are stored (added after format 1; defaults to local).
     #[serde(default)]
     pub refs: RefsSection,
+    /// Which chunker large objects use, per name prefix (optional; defaults to
+    /// FastCDC everywhere).
+    #[serde(default, skip_serializing_if = "ChunkingSection::is_default")]
+    pub chunking: ChunkingSection,
+}
+
+/// `[chunking]` section: the content-defined chunker per namespace.
+///
+/// ```toml
+/// [chunking]
+/// default = "fastcdc"
+/// [chunking.prefixes]
+/// "models/" = "xet"
+/// ```
+///
+/// The longest matching prefix wins. It applies to `put_stream_for` (the CLI's
+/// `put --name`); plain `put_stream` uses `default`. Changing it later is safe:
+/// it only affects new writes, and every object reads back the same way
+/// whatever chunker wrote it. Content written with different chunkers doesn't
+/// share chunks, so keep one chunker per kind of data.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChunkingSection {
+    /// Chunker for names no prefix matches (and for unnamed puts).
+    #[serde(default)]
+    pub default: ChunkerChoice,
+    /// Name prefix → chunker.
+    #[serde(default)]
+    pub prefixes: std::collections::BTreeMap<String, ChunkerChoice>,
+}
+
+impl ChunkingSection {
+    fn is_default(&self) -> bool {
+        *self == ChunkingSection::default()
+    }
+
+    /// The chunker for `name` (longest matching prefix, else `default`).
+    pub fn for_name(&self, name: &str) -> ChunkerChoice {
+        self.prefixes
+            .iter()
+            .filter(|(p, _)| name.starts_with(p.as_str()))
+            .max_by_key(|(p, _)| p.len())
+            .map_or(self.default, |(_, c)| *c)
+    }
+}
+
+/// A chunker name in `[chunking]` (see [`ChunkerKind`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChunkerChoice {
+    /// FastCDC v2020 with the `[pack]` cdc sizes.
+    #[default]
+    Fastcdc,
+    /// Byte-exact Hugging Face Xet chunking (8/64/128 KiB).
+    Xet,
+}
+
+impl From<ChunkerChoice> for ChunkerKind {
+    fn from(c: ChunkerChoice) -> Self {
+        match c {
+            ChunkerChoice::Fastcdc => ChunkerKind::FastCdc,
+            ChunkerChoice::Xet => ChunkerKind::Xet,
+        }
+    }
 }
 
 /// `[refs]` section of the config.
@@ -134,6 +199,7 @@ impl From<&PackSection> for PackConfig {
 #[derive(Clone)]
 pub struct LocalRepo {
     root: PathBuf,
+    chunking: ChunkingSection,
     packs: PackStore,
     refs: Arc<RefStore>,
     backend: Arc<dyn Backend>,
@@ -149,11 +215,25 @@ impl LocalRepo {
 
     /// Like [`LocalRepo::init`], choosing the ref store.
     pub fn init_with(root: impl AsRef<Path>, pack: &PackConfig, refs: RefsStore) -> Result<Self> {
+        Self::init_config(
+            root,
+            &RepoConfig {
+                format: FORMAT_VERSION,
+                pack: pack.into(),
+                refs: RefsSection { store: refs },
+                chunking: ChunkingSection::default(),
+            },
+        )
+    }
+
+    /// Creates a repository from a full config (validated first).
+    pub fn init_config(root: impl AsRef<Path>, cfg: &RepoConfig) -> Result<Self> {
+        let pack = PackConfig::from(&cfg.pack);
         pack.validate()?;
+        Self::validate_chunking(&cfg.chunking, &pack)?;
         let root = root.as_ref();
         std::fs::create_dir_all(root)?;
-        let cfg = RepoConfig { format: FORMAT_VERSION, pack: pack.into(), refs: RefsSection { store: refs } };
-        let text = toml::to_string(&cfg).map_err(|e| Error::Parse(e.to_string()))?;
+        let text = toml::to_string(cfg).map_err(|e| Error::Parse(e.to_string()))?;
         let tmp = root.join(".config.toml.tmp");
         {
             use std::io::Write;
@@ -203,7 +283,7 @@ impl LocalRepo {
             RefsStore::Local => RefStore::open_with_faults(root.join("refs"), faults.clone())?,
             RefsStore::Backend => RefStore::open_backend_with_faults(backend.clone(), "refs/", faults.clone())?,
         });
-        Ok(LocalRepo { root, packs, refs, backend, faults })
+        Ok(LocalRepo { root, chunking: cfg.chunking, packs, refs, backend, faults })
     }
 
     /// Reads and validates `config.toml`.
@@ -220,8 +300,34 @@ impl LocalRepo {
         if cfg.format != FORMAT_VERSION {
             return Err(Error::Unsupported("unknown repository format version"));
         }
-        PackConfig::from(&cfg.pack).validate()?;
+        let pack = PackConfig::from(&cfg.pack);
+        pack.validate()?;
+        Self::validate_chunking(&cfg.chunking, &pack)?;
         Ok(cfg)
+    }
+
+    fn validate_chunking(c: &ChunkingSection, pack: &PackConfig) -> Result<()> {
+        let xet = c.default == ChunkerChoice::Xet || c.prefixes.values().any(|v| *v == ChunkerChoice::Xet);
+        if xet && pack.chunk_threshold <= pico2peta_pack::XET_MAX {
+            return Err(Error::Parse(format!(
+                "[chunking] uses xet, which needs pack.chunk_threshold > {} (have {})",
+                pico2peta_pack::XET_MAX,
+                pack.chunk_threshold
+            )));
+        }
+        Ok(())
+    }
+
+    /// The `[chunking]` config in effect.
+    pub fn chunking(&self) -> &ChunkingSection {
+        &self.chunking
+    }
+
+    /// `put_stream` with the chunker configured for `name`'s namespace (see
+    /// [`ChunkingSection`]). Doesn't create the name; it only decides how the
+    /// object's chunks are cut.
+    pub fn put_stream_for(&self, name: &Name, src: &mut dyn Read) -> Result<Hash> {
+        self.packs.put_stream_with(self.chunking.for_name(name.as_str()).into(), src)
     }
 
     /// Repository root.
@@ -256,7 +362,7 @@ impl ObjectStore for LocalRepo {
         self.packs.put(data)
     }
     fn put_stream(&self, src: &mut dyn Read) -> Result<Hash> {
-        self.packs.put_stream(src)
+        self.packs.put_stream_with(self.chunking.default.into(), src)
     }
     fn put_delta(&self, base: &Hash, src: &mut dyn Read) -> Result<Hash> {
         self.packs.put_delta(base, src)
@@ -424,5 +530,56 @@ mod config_compat {
         .unwrap();
         let c = super::LocalRepo::read_config(d.path()).unwrap();
         assert_eq!(c.pack.manifest_fanout, pico2peta_pack::store::DEFAULT_MANIFEST_FANOUT);
+        assert!(c.pack.compress_probe);
+        assert_eq!(c.chunking, super::ChunkingSection::default());
+    }
+
+    /// `[chunking]`: longest prefix wins, the config round-trips through
+    /// config.toml, `put_stream_for` cuts with the namespace's chunker, and
+    /// Xet with a chunk threshold at or below its maximum chunk is refused.
+    #[test]
+    fn per_namespace_chunking() {
+        use super::*;
+        let mut chunking = ChunkingSection::default();
+        chunking.prefixes.insert("models/".into(), ChunkerChoice::Xet);
+        chunking.prefixes.insert("models/legacy/".into(), ChunkerChoice::Fastcdc);
+        assert_eq!(chunking.for_name("models/llama/main"), ChunkerChoice::Xet);
+        assert_eq!(chunking.for_name("models/legacy/x"), ChunkerChoice::Fastcdc);
+        assert_eq!(chunking.for_name("src/heads/main"), ChunkerChoice::Fastcdc);
+        let cfg = |pack: &PackConfig, chunking: &ChunkingSection| RepoConfig {
+            format: FORMAT_VERSION,
+            pack: pack.into(),
+            refs: RefsSection::default(),
+            chunking: chunking.clone(),
+        };
+        let d = tempfile::tempdir().unwrap();
+        let r = LocalRepo::init_config(d.path(), &cfg(&PackConfig::default(), &chunking)).unwrap();
+        drop(r);
+        let r = LocalRepo::open(d.path()).unwrap();
+        assert_eq!(r.chunking(), &chunking);
+        let mut x = 0x9e37_79b9_7f4a_7c15u64;
+        let data: Vec<u8> = (0..3_000_000)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                x as u8
+            })
+            .collect();
+        let h = r.put_stream_for(&Name::new("models/llama/main").unwrap(), &mut &data[..]).unwrap();
+        assert_eq!(h, Hash::of(&data));
+        assert_eq!(r.get(&h, None).unwrap(), data);
+        let lens = pico2peta_chunk::chunk_lengths(&mut pico2peta_chunk::XetChunker::new(), &data);
+        let mut off = 0;
+        for l in lens {
+            assert!(r.contains(&Hash::of(&data[off..off + l])).unwrap());
+            off += l;
+        }
+        // Xet needs chunk_threshold > 128 KiB.
+        let d2 = tempfile::tempdir().unwrap();
+        assert!(matches!(
+            LocalRepo::init_config(d2.path(), &cfg(&PackConfig::tiny(), &chunking)),
+            Err(Error::Parse(_))
+        ));
     }
 }

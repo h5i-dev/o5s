@@ -268,7 +268,65 @@ fn stream(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// `p2p-bench chunkers <A> <B>`: chunk counts, sizes and dedup of B against A
+/// for each chunker (sizes only, no timing). Also reports B' = A with 777
+/// bytes inserted at 1 MiB, the classic boundary-shift case.
+fn chunkers(a: &str, b: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use pico2peta_chunk::{Chunker, FastCdcChunker, XetChunker, chunk_lengths};
+    use std::collections::HashSet;
+    let a = std::fs::read(a)?;
+    let b = std::fs::read(b)?;
+    let mut shifted = a.clone();
+    let at = (1 << 20).min(shifted.len());
+    shifted.splice(at..at, std::iter::repeat_n(0xA5u8, 777));
+    let ids = |data: &[u8], c: &mut dyn Chunker| -> Vec<(blake3::Hash, usize)> {
+        let mut off = 0;
+        chunk_lengths(c, data)
+            .into_iter()
+            .map(|l| {
+                let h = blake3::hash(&data[off..off + l]);
+                off += l;
+                (h, l)
+            })
+            .collect()
+    };
+    println!(
+        "| chunker | chunks in A | mean / max chunk | B bytes deduped vs A | A+777 B bytes deduped vs A | index+manifest overhead for A |"
+    );
+    println!("|---|---|---|---|---|---|");
+    let mut fast = FastCdcChunker::pack_default();
+    let mut xet = XetChunker::new();
+    for (name, c) in [("fastcdc 16/64/256K", &mut fast as &mut dyn Chunker), ("xet 8/64/128K", &mut xet)] {
+        let ca = ids(&a, c);
+        let have: HashSet<_> = ca.iter().map(|(h, _)| *h).collect();
+        let dedup = |d: &[u8], c: &mut dyn Chunker| -> f64 {
+            let v = ids(d, c);
+            let hit: usize = v.iter().filter(|(h, _)| have.contains(h)).map(|(_, l)| l).sum();
+            100.0 * hit as f64 / d.len() as f64
+        };
+        let db = dedup(&b, c);
+        let ds = dedup(&shifted, c);
+        let max = ca.iter().map(|(_, l)| *l).max().unwrap_or(0);
+        // 44 B per index entry + 40 B per manifest entry, per chunk.
+        let over = 84 * ca.len();
+        println!(
+            "| {name} | {} | {:.1} KiB / {} KiB | {db:.2}% | {ds:.2}% | {:.1} KiB ({:.3}%) |",
+            ca.len(),
+            a.len() as f64 / ca.len() as f64 / 1024.0,
+            max / 1024,
+            over as f64 / 1024.0,
+            100.0 * over as f64 / a.len() as f64
+        );
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("chunkers") {
+        let a = std::env::args().nth(2).ok_or("usage: p2p-bench chunkers <A> <B>")?;
+        let b = std::env::args().nth(3).ok_or("usage: p2p-bench chunkers <A> <B>")?;
+        return chunkers(&a, &b);
+    }
     if std::env::args().nth(1).as_deref() == Some("stream") {
         let dir = std::env::args().nth(2).ok_or("usage: p2p-bench stream <dir> [MiB]")?;
         let mib = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(1024);

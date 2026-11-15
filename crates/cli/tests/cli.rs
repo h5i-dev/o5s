@@ -158,3 +158,42 @@ fn contention(init: &[&str]) {
     // The object the final ref points at is visible to a fresh process.
     assert!(ok(&repo, &["get", &h]).starts_with("proc "));
 }
+
+/// `init --chunk PREFIX=CHUNKER` + `put --for-name`: the config is written,
+/// objects round-trip, and bad specs are rejected at init.
+#[test]
+fn per_namespace_chunker_via_cli() {
+    let d = tempfile::tempdir().unwrap();
+    let repo = d.path().join("r");
+    ok(&repo, &["init", "--chunk", "models/=xet", "--chunk", "models/old/=fastcdc"]);
+    let cfg = std::fs::read_to_string(repo.join("config.toml")).unwrap();
+    assert!(cfg.contains("[chunking.prefixes]") && cfg.contains("\"models/\" = \"xet\""), "{cfg}");
+    let f = d.path().join("w.bin");
+    let mut x = 88172645463325252u64;
+    let data: Vec<u8> = (0..3_000_000)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x as u8
+        })
+        .collect();
+    std::fs::write(&f, &data).unwrap();
+    let h1 = ok(&repo, &["put", "--for-name", "models/llama/main", f.to_str().unwrap()]).trim().to_string();
+    let h2 = ok(&repo, &["put", f.to_str().unwrap()]).trim().to_string();
+    assert_eq!(h1, h2, "the chunker never changes object identity");
+    let out = d.path().join("out.bin");
+    ok(&repo, &["get", &h1, "-o", out.to_str().unwrap()]);
+    assert_eq!(std::fs::read(&out).unwrap(), data);
+    ok(&repo, &["fsck"]);
+    // Bad specs fail at init and create nothing.
+    for bad in [
+        &["init", "--chunk", "models/=rabin"][..],
+        &["init", "--chunk", "models"],
+        &["init", "--chunk", "m/=xet", "--chunk-threshold", "65536"],
+    ] {
+        let r2 = d.path().join(format!("bad{}", bad.len() + bad[2].len()));
+        assert!(!run(&r2, bad).status.success(), "{bad:?}");
+        assert!(!r2.join("config.toml").exists(), "{bad:?}");
+    }
+}

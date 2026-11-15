@@ -45,6 +45,22 @@ use std::sync::{Arc, Mutex, RwLock};
 /// Two levels cover 2^24 chunks (~1 TiB at 64 KiB average chunks).
 pub const DEFAULT_MANIFEST_FANOUT: usize = 4096;
 
+/// Content-defined chunker for large objects (see [`PackStore::put_stream_with`]).
+///
+/// The chunker decides chunk boundaries, i.e. dedup granularity and which
+/// other content shares chunks. It never affects object identity (the BLAKE3
+/// of the whole content) or reads: manifests just list chunks, so objects
+/// written with any chunker read back the same way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ChunkerKind {
+    /// FastCDC v2020 with the store's `cdc_min/avg/max` (default 16/64/256 KiB).
+    #[default]
+    FastCdc,
+    /// Byte-exact Hugging Face Xet chunking (Gear hash, 8/64/128 KiB), so
+    /// chunks line up with Xet-hosted copies of the same content.
+    Xet,
+}
+
 /// Tunables for the pack store.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PackConfig {
@@ -1412,6 +1428,40 @@ impl PackStore {
         Ok((h, l))
     }
 
+    /// [`ObjectStore::put_stream`] with an explicit chunker. Objects under
+    /// `chunk_threshold` are stored whole either way.
+    pub fn put_stream_with(&self, chunker: ChunkerKind, src: &mut dyn Read) -> Result<Hash> {
+        let thr = self.inner.cfg.chunk_threshold;
+        if chunker == ChunkerKind::Xet && thr <= pico2peta_chunk::XET_MAX {
+            // Chunks must stay below the threshold (they're stored as blobs).
+            return Err(Error::Parse(format!(
+                "Xet chunking needs pack.chunk_threshold > {} (have {thr})",
+                pico2peta_chunk::XET_MAX
+            )));
+        }
+        let mut head = Vec::with_capacity(thr.min(1 << 16));
+        src.take(thr as u64).read_to_end(&mut head)?;
+        if head.len() < thr {
+            return self.put(&head);
+        }
+        let reader = std::io::Cursor::new(head).chain(src);
+        match chunker {
+            ChunkerKind::FastCdc => {
+                let cfg = &self.inner.cfg;
+                let cdc = fastcdc::v2020::StreamCDC::new(reader, cfg.cdc_min, cfg.cdc_avg, cfg.cdc_max);
+                self.put_chunks(cdc.map(|r| {
+                    r.map(|c| c.data).map_err(|e| match e {
+                        fastcdc::v2020::Error::IoError(io) => Error::Io(io),
+                        other => Error::Corrupt(format!("chunker: {other:?}")),
+                    })
+                }))
+            }
+            ChunkerKind::Xet => {
+                self.put_chunks(LengthChunks::new(reader, Box::new(pico2peta_chunk::XetChunker::new())))
+            }
+        }
+    }
+
     /// Counters (local view, without a refresh).
     pub fn stats(&self) -> Result<PackStats> {
         // Lock order everywhere: writer, then index.
@@ -1796,21 +1846,7 @@ impl ObjectStore for PackStore {
     }
 
     fn put_stream(&self, src: &mut dyn Read) -> Result<Hash> {
-        let thr = self.inner.cfg.chunk_threshold;
-        let mut head = Vec::with_capacity(thr.min(1 << 16));
-        src.take(thr as u64).read_to_end(&mut head)?;
-        if head.len() < thr {
-            return self.put(&head);
-        }
-        let cfg = &self.inner.cfg;
-        let reader = std::io::Cursor::new(head).chain(src);
-        let cdc = fastcdc::v2020::StreamCDC::new(reader, cfg.cdc_min, cfg.cdc_avg, cfg.cdc_max);
-        self.put_chunks(cdc.map(|r| {
-            r.map(|c| c.data).map_err(|e| match e {
-                fastcdc::v2020::Error::IoError(io) => Error::Io(io),
-                other => Error::Corrupt(format!("chunker: {other:?}")),
-            })
-        }))
+        self.put_stream_with(ChunkerKind::FastCdc, src)
     }
 
     fn get(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Vec<u8>> {
@@ -1926,6 +1962,74 @@ struct Level {
     hasher: blake3::Hasher,
     entries: Vec<(Hash, u64)>,
     len: u64,
+}
+
+/// Turns a length-reporting streaming [`pico2peta_chunk::Chunker`] over a
+/// reader into an iterator of owned chunks.
+struct LengthChunks<R> {
+    r: R,
+    c: Box<dyn pico2peta_chunk::Chunker>,
+    buf: Vec<u8>,
+    start: usize,
+    lens: std::collections::VecDeque<usize>,
+    scratch: Vec<usize>,
+    done: bool,
+}
+
+/// Read size for [`LengthChunks`].
+const LENGTH_CHUNKS_BLOCK: usize = 1 << 20;
+
+impl<R: Read> LengthChunks<R> {
+    fn new(r: R, c: Box<dyn pico2peta_chunk::Chunker>) -> Self {
+        LengthChunks { r, c, buf: Vec::new(), start: 0, lens: Default::default(), scratch: Vec::new(), done: false }
+    }
+}
+
+impl<R: Read> Iterator for LengthChunks<R> {
+    type Item = Result<Vec<u8>>;
+
+    fn next(&mut self) -> Option<Result<Vec<u8>>> {
+        loop {
+            if let Some(l) = self.lens.pop_front() {
+                let end = self.start + l;
+                if end > self.buf.len() {
+                    return Some(Err(Error::Corrupt("chunker reported more bytes than it was given".into())));
+                }
+                let v = self.buf[self.start..end].to_vec();
+                self.start = end;
+                return Some(Ok(v));
+            }
+            if self.done {
+                return None;
+            }
+            // Drop emitted bytes (what's left is at most one partial chunk).
+            self.buf.drain(..self.start);
+            self.start = 0;
+            let old = self.buf.len();
+            self.buf.resize(old + LENGTH_CHUNKS_BLOCK, 0);
+            let n = match self.r.read(&mut self.buf[old..]) {
+                Ok(n) => n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                    self.buf.truncate(old);
+                    continue;
+                }
+                Err(e) => {
+                    self.buf.truncate(old);
+                    self.done = true;
+                    return Some(Err(Error::Io(e)));
+                }
+            };
+            self.buf.truncate(old + n);
+            self.scratch.clear();
+            if n == 0 {
+                self.c.finish(&mut self.scratch);
+                self.done = true;
+            } else {
+                self.c.update(&self.buf[old..], &mut self.scratch);
+            }
+            self.lens.extend(self.scratch.iter().copied());
+        }
+    }
 }
 
 /// One chunk out of a `put_chunks` worker: its bytes, hash and, unless it was

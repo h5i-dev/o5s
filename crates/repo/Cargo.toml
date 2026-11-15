@@ -14,3 +14,4 @@ toml.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+pico2peta-chunk.workspace = true
