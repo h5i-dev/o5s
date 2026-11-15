@@ -214,6 +214,9 @@ impl ObjectStore for LocalRepo {
     fn put_stream(&self, src: &mut dyn Read) -> Result<Hash> {
         self.packs.put_stream(src)
     }
+    fn put_delta(&self, base: &Hash, src: &mut dyn Read) -> Result<Hash> {
+        self.packs.put_delta(base, src)
+    }
     fn get(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Vec<u8>> {
         self.packs.get(hash, range)
     }

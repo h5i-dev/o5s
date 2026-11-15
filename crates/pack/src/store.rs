@@ -142,6 +142,8 @@ pub struct PackStats {
     pub blobs: usize,
     /// Of which manifest nodes.
     pub manifests: usize,
+    /// Of which XOR-delta objects.
+    pub deltas: usize,
     /// Bytes in this handle's open (unsealed) pack.
     pub open_bytes: u64,
     /// Sum of blob lengths.
@@ -1166,6 +1168,7 @@ impl PackStore {
                 s.logical_blob_bytes += raw;
             }
             Kind::Manifest => s.manifests += 1,
+            Kind::Delta => s.deltas += 1,
         };
         for l in idx.map.values() {
             count(l.kind, l.raw_len);
@@ -1232,8 +1235,43 @@ impl PackStore {
         match loc.kind {
             Kind::Blob => Ok(None),
             Kind::Manifest => Ok(Some(self.read_manifest(hash, loc)?.into_iter().map(|c| c.0).collect())),
+            Kind::Delta => {
+                let (b, x) = self.read_delta(hash, loc)?;
+                Ok(Some(vec![b, x]))
+            }
             Kind::Frame | Kind::Frame2 => Err(Error::Corrupt("frame record indexed as an object".into())),
         }
+    }
+
+    fn read_delta(&self, hash: &Hash, loc: Loc) -> Result<(Hash, Hash)> {
+        let (_, data) = self.read_record(hash, loc)?;
+        decode_delta(&data)
+    }
+
+    /// See [`ObjectStore::put_delta`].
+    pub fn put_delta_impl(&self, base: &Hash, src: &mut dyn Read) -> Result<Hash> {
+        if !self.ensure_live_impl(base)? {
+            return Err(Error::NotFound(*base));
+        }
+        let base_len = self.size(base)?;
+        let mut xs = XorSource {
+            src,
+            base: self.open(base, None)?,
+            base_left: base_len,
+            hasher: blake3::Hasher::new(),
+            len: 0,
+            tmp: Vec::new(),
+        };
+        let xor = self.put_stream(&mut xs)?;
+        let hash = Hash(*xs.hasher.finalize().as_bytes());
+        let len = xs.len;
+        if self.dedup_hit(&hash)? {
+            return Ok(hash);
+        }
+        let mut w = self.inner.writer.lock().map_err(poisoned)?;
+        self.append(&mut w, Kind::Delta, hash, len, &encode_delta(base, &xor))?;
+        self.maybe_seal(&mut w)?;
+        Ok(hash)
     }
 
     /// Copies `hash`'s record verbatim (no recompression) into this
@@ -1350,6 +1388,14 @@ impl PackStore {
                 }
             }
         }
+        if loc.kind == Kind::Delta {
+            let (b, x) = self.read_delta(hash, loc)?;
+            for child in [b, x] {
+                if !self.ensure_live_impl(&child)? {
+                    return Err(Error::Corrupt(format!("delta {hash} references missing {child}")));
+                }
+            }
+        }
         let condemned_only = {
             let idx = self.inner.index.read().map_err(poisoned)?;
             idx.get(hash).is_some_and(|l| rank(&idx, &l) == 2)
@@ -1432,10 +1478,54 @@ impl ObjectStore for PackStore {
     }
 
     fn open(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Box<dyn Read + Send>> {
+        self.open_depth(hash, range, 0)
+    }
+
+    fn size(&self, hash: &Hash) -> Result<u64> {
+        self.lookup(hash)?.map(|l| l.raw_len).ok_or(Error::NotFound(*hash))
+    }
+
+    fn put_delta(&self, base: &Hash, src: &mut dyn Read) -> Result<Hash> {
+        self.put_delta_impl(base, src)
+    }
+
+    fn contains(&self, hash: &Hash) -> Result<bool> {
+        Ok(self.lookup(hash)?.is_some())
+    }
+
+    fn ensure_live(&self, hash: &Hash) -> Result<bool> {
+        self.ensure_live_impl(hash)
+    }
+
+    fn flush(&self) -> Result<()> {
+        self.seal()
+    }
+}
+
+impl PackStore {
+    fn open_depth(&self, hash: &Hash, range: Option<Range<u64>>, depth: usize) -> Result<Box<dyn Read + Send>> {
+        if depth > MAX_DELTA_DEPTH {
+            return Err(Error::Corrupt(format!("delta chain too deep at {hash}")));
+        }
         let loc = self.lookup(hash)?.ok_or(Error::NotFound(*hash))?;
         let whole = range.is_none();
         let r = check_range(range, loc.raw_len)?;
         match loc.kind {
+            Kind::Delta => {
+                let (base, xor) = self.read_delta(hash, loc)?;
+                let base_len = self.size(&base)?;
+                let (bs, be) = (r.start.min(base_len), r.end.min(base_len));
+                let base_r = self.open_depth(&base, Some(bs..be), depth + 1)?;
+                // Bytes past the end of the base were XORed with zero.
+                let padded = base_r.chain(std::io::repeat(0).take((r.end - r.start) - (be - bs)));
+                let xor_r = self.open_depth(&xor, Some(r.clone()), depth + 1)?;
+                Ok(Box::new(XorReader {
+                    base: Box::new(padded),
+                    xor: xor_r,
+                    tmp: Vec::new(),
+                    verify: whole.then(|| (blake3::Hasher::new(), *hash)),
+                }))
+            }
             Kind::Frame | Kind::Frame2 => Err(Error::Corrupt("frame record indexed as an object".into())),
             Kind::Blob => {
                 let d = self.read_blob(hash, loc)?;
@@ -1452,22 +1542,6 @@ impl ObjectStore for PackStore {
                 }))
             }
         }
-    }
-
-    fn size(&self, hash: &Hash) -> Result<u64> {
-        self.lookup(hash)?.map(|l| l.raw_len).ok_or(Error::NotFound(*hash))
-    }
-
-    fn contains(&self, hash: &Hash) -> Result<bool> {
-        Ok(self.lookup(hash)?.is_some())
-    }
-
-    fn ensure_live(&self, hash: &Hash) -> Result<bool> {
-        self.ensure_live_impl(hash)
-    }
-
-    fn flush(&self) -> Result<()> {
-        self.seal()
     }
 }
 
@@ -1509,6 +1583,68 @@ fn compress(level: i32, raw: &[u8]) -> Option<Vec<u8>> {
         zstd::bulk::compress(raw, level).ok().filter(|c| c.len() < raw.len())
     } else {
         None
+    }
+}
+
+/// Maximum length of a delta chain followed on reads.
+const MAX_DELTA_DEPTH: usize = 32;
+
+/// Reads the new object from `src`, hashes it, and yields `src XOR base`.
+struct XorSource<'a> {
+    src: &'a mut dyn Read,
+    base: Box<dyn Read + Send>,
+    base_left: u64,
+    hasher: blake3::Hasher,
+    len: u64,
+    tmp: Vec<u8>,
+}
+
+impl Read for XorSource<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.src.read(buf)?;
+        self.hasher.update(&buf[..n]);
+        self.len += n as u64;
+        let k = (n as u64).min(self.base_left) as usize;
+        if k > 0 {
+            self.tmp.resize(k, 0);
+            self.base.read_exact(&mut self.tmp[..k])?;
+            for (a, b) in buf[..k].iter_mut().zip(&self.tmp[..k]) {
+                *a ^= b;
+            }
+            self.base_left -= k as u64;
+        }
+        Ok(n)
+    }
+}
+
+/// `base XOR xor`, streamed in lockstep (both cover the same range).
+struct XorReader {
+    base: Box<dyn Read + Send>,
+    xor: Box<dyn Read + Send>,
+    tmp: Vec<u8>,
+    verify: Option<(blake3::Hasher, Hash)>,
+}
+
+impl Read for XorReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.xor.read(buf)?;
+        if n == 0 {
+            if let Some((h, want)) = self.verify.take()
+                && Hash(*h.finalize().as_bytes()) != want
+            {
+                return Err(io_err(Error::Corrupt(format!("delta reassembly hash mismatch for {want}"))));
+            }
+            return Ok(0);
+        }
+        self.tmp.resize(n, 0);
+        self.base.read_exact(&mut self.tmp[..n])?;
+        for (a, b) in buf[..n].iter_mut().zip(&self.tmp[..n]) {
+            *a ^= b;
+        }
+        if let Some((h, _)) = self.verify.as_mut() {
+            h.update(&buf[..n]);
+        }
+        Ok(n)
     }
 }
 
@@ -1585,8 +1721,8 @@ impl Read for ChunkReader {
                 .map_err(io_err)?
                 .ok_or_else(|| io_err(Error::Corrupt(format!("missing chunk {h}"))))?;
             match loc.kind {
-                Kind::Frame | Kind::Frame2 => {
-                    return Err(io_err(Error::Corrupt("frame record indexed as an object".into())));
+                Kind::Frame | Kind::Frame2 | Kind::Delta => {
+                    return Err(io_err(Error::Corrupt("unexpected record kind inside a manifest".into())));
                 }
                 Kind::Manifest => {
                     if self.stack.len() >= self.depth_limit {

@@ -103,6 +103,11 @@ pub enum Kind {
     /// member lengths (4 B each). Member hashes live in the index, and
     /// recovery recomputes them from the decompressed bodies.
     Frame2 = 3,
+    /// An object stored as `base XOR delta` (ZipLLM-style). Payload:
+    /// `base hash[32] | xor hash[32]`, where `xor` is an ordinary (usually chunked)
+    /// object holding the byte-wise XOR of the object with `base`. Bytes past
+    /// the end of `base` are XORed with zero. `raw_len` is the object length.
+    Delta = 4,
 }
 
 impl Kind {
@@ -128,6 +133,7 @@ impl Kind {
             1 => Ok(Kind::Manifest),
             2 => Ok(Kind::Frame),
             3 => Ok(Kind::Frame2),
+            4 => Ok(Kind::Delta),
             _ => Err(Error::Corrupt(format!("bad record kind {b}"))),
         }
     }
@@ -221,7 +227,7 @@ pub fn unpack_payload(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
     let out = match (h.codec, h.kind) {
         (Codec::Raw, _) => payload.to_vec(),
         (Codec::Zstd, Kind::Blob) => zstd::bulk::decompress(payload, h.raw_len as usize).map_err(zerr)?,
-        (Codec::Zstd, Kind::Manifest) => zstd::stream::decode_all(payload).map_err(zerr)?,
+        (Codec::Zstd, Kind::Manifest | Kind::Delta) => zstd::stream::decode_all(payload).map_err(zerr)?,
         (Codec::Zstd, Kind::Frame | Kind::Frame2) => {
             return Err(Error::Corrupt("use decode_frame_bodies for frame records".into()));
         }
@@ -235,6 +241,21 @@ pub fn unpack_payload(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
 // ---------------------------------------------------------------------------
 // Manifest: list of (chunk hash, chunk length)
 // ---------------------------------------------------------------------------
+
+/// Encodes a delta record payload.
+pub fn encode_delta(base: &Hash, xor: &Hash) -> Vec<u8> {
+    let mut v = base.as_bytes().to_vec();
+    v.extend_from_slice(xor.as_bytes());
+    v
+}
+
+/// Decodes a delta record payload into `(base, xor)`.
+pub fn decode_delta(b: &[u8]) -> Result<(Hash, Hash)> {
+    if b.len() != 64 {
+        return Err(Error::Corrupt("bad delta record".into()));
+    }
+    Ok((rd_hash(&b[..32]), rd_hash(&b[32..])))
+}
 
 /// Encodes a manifest node.
 pub fn encode_manifest(chunks: &[(Hash, u64)]) -> Vec<u8> {
