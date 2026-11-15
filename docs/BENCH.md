@@ -27,8 +27,44 @@ Comparisons against Git storage size are in `docs/EXP1.md` (Experiment 1).
 | replace, 4 contending handles | 3.1k/s, 1.6% conflicts | 2.8k/s, 12% | 3.0k/s, 0.6% |
 | peak RSS (whole run, incl. 1 GiB stream) | 208 MB | 212 MB | 210 MB |
 
+**Correction:** runs 1–3 used a generator that mapped seeds `2k` and `2k+1` to the same stream (`seed | 1`), so half of the "1 KiB objects" were duplicates (dedup hits). Their put/get small-object rates are inflated. It was fixed for run 4.
+
 What changed:
 - Run 2: LocalDisk publishes sealed packs by **hard link** instead of copying (the 256 MiB per seal is no longer copied), and decoded **manifest nodes are cached**. Range reads got 3× faster.
 - Run 3: per-chunk BLAKE3 and zstd run in parallel batches. Run-to-run variance on the loaded host (±30%) dominates, so the effect will be judged on an idle host.
 
 Memory stays bounded: streaming 1 GiB in and out peaks at about 210 MB RSS for the whole benchmark process, and the 100k small objects are held in memory by the benchmark itself.
+
+### Run 4 (fixed generator, parallel chunk pipeline; load average ~5.3)
+
+| benchmark | result |
+|---|---|
+| put 1 KiB objects (incl. flush), all distinct | 76k obj/s, 78 MB/s |
+| get 1 KiB random (warm) | 93k obj/s, p50 10 µs, p99 23 µs |
+| put_stream 1 GiB (incompressible) | 153 MB/s (peak RSS 152 MB) |
+| open+read 1 GiB (verified) | 785 MB/s |
+| 4 KiB range read in 1 GiB object | 90 µs |
+| re-put identical 1 GiB (dedup) | 400 MB/s |
+| replace, uncontended (durable, fsync) | 6.2k/s |
+| replace, 4 contending handles | 4.6k commits/s, 40% conflict rate (OCC retries) |
+
+## Model-weights versioning (Xet-style workload): `p2p-bench weights <dir> 256`
+
+A synthetic 256 MiB safetensors-like checkpoint (64 random f16 tensors, so incompressible)
+stored in five successive versions. The baseline is "full copies", which is what plain object storage
+or Git LFS keeps. Xet itself isn't available offline here, so this measures our chunk dedup against the
+no-dedup baseline and identifies where tensor-aware dedup (ZipLLM, Xet) is needed.
+
+| version | change | full copies | pico2peta | ratio |
+|---|---|---|---|---|
+| 1 | initial | 256 MiB | 257 MiB | 1.00 |
+| 2 | 4 of 64 tensors retrained | 512 MiB | 273 MiB | 0.53 |
+| 3 | one tensor resized (+1 KiB, shifts every later byte) | 768 MiB | 273 MiB | 0.36 |
+| 4 | header/metadata edit only | 1024 MiB | 273 MiB | 0.27 |
+| 5 | full fine-tune (every tensor perturbed) | 1280 MiB | 530 MiB | 0.41 |
+
+- Content-defined chunking stores only what changed for partial retrains (v2 adds 16 MiB = 4 tensors)
+  and resynchronizes after insertions that shift offsets (v3 adds ~0).
+- A full fine-tune (v5) defeats byte-level chunk dedup: it adds a whole copy. That's exactly the
+  ZipLLM result that motivates the per-kind configuration in the design brief (tensor-level
+  dedup and XOR-delta against a base model). It's not implemented yet (see Production gaps).
