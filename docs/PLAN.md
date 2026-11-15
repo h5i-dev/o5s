@@ -451,6 +451,33 @@ ablations and are not eligible.
 - *Hints:* path and history position only (the same information V2 uses). They break ties and never decide the
   layout.
 
+**Amendment 2026-11-15 (dev set only, before any redis/git.git run; disclosed).** Dev runs on ripgrep and jq
+(4 reader threads, 2,000 sampled reads, numbers below) changed three things. None was tested on held-out data.
+
+1. *Chain starts.*
+   - **Change:** the next chain no longer starts at "the largest unplaced object". It starts at the unplaced object
+     nearest to the last placed one by a coarse content sketch: a 64-bit SimHash of the byte histogram, searched
+     among the 64 numeric neighbours on each side, by Hamming distance, then size. The first chain still starts at
+     the largest object.
+   - **Why:** super-features only detect near-duplicates, so with size-ordered starts adjacent chains were
+     unrelated.
+   - **Effect (4 MiB frames):** ripgrep A1 1.003 → 0.944, A3 0.924 → 0.863, and A4 0.863.
+2. *Framing constants.*
+   - **Change:** natural cuts are effectively off (`min = cap`). The cap is **6 MiB**, lookback 8, reference depth
+     ≤ 2. These are the frozen values.
+   - **Why:** natural cuts at 64 KiB–1 MiB cost 17–24 % (ripgrep A3 1.179 at 64 KiB, 1.021 at 1 MiB), because
+     different files of one language still compress well together without sharing super-features.
+   - **Effect of the cap:** 16 MiB fails p99 (≈ 33 ms), and 8 MiB fails ripgrep p50 (5.96 ms). 6 MiB gives ripgrep
+     A4 0.847 (p50 4.0, p99 9.7 ms) and jq A4 0.794 (p50 3.6, p99 10.5 ms).
+3. *Reads.*
+   - **Change:** a read decodes its frame (and its reference's frame) only up to the object's end, using zstd
+     streaming.
+   - **Effect:** ripgrep p99 at 4 MiB fell from 18.3 to 6.6 ms.
+   - **Size:** unaffected.
+
+Ablation definitions are unchanged (A1 keeps fixed 4 MiB frames, and A2/A3/A4 use the framing above). Dev-set
+reference for comparison: A0 (V2) = ripgrep 0.850, jq 0.928.
+
 **Thresholds (§4.5, unchanged).** STRONG PASS: geomean R(V\*) ≤ 1.00 and every repo ≤ 1.15. PASS: geomean ≤ 1.15
 and every repo ≤ 1.30. FAIL: anything else. Secondary thresholds, all required for (STRONG) PASS:
 - random reads over 10,000 uniformly random objects, warm, with **4 concurrent reader threads**: p50 ≤ 5 ms,

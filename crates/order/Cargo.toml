@@ -1,0 +1,11 @@
+[package]
+name = "pico2peta-order"
+description = "Domain-agnostic similarity features, ordering and framing (docs/ORDERING.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+proptest.workspace = true
