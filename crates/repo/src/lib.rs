@@ -7,7 +7,7 @@
 //! <root>/config.toml    format version + pack tunables (written once at init)
 //! <root>/staging/       per-writer open packs (always local)
 //! <root>/objects/       LocalDisk backend root (when the backend is local)
-//! <root>/refs/journal   ref journal
+//! <root>/refs/journal   ref journal (or `refs/` on the backend with `[refs] store = "backend"`)
 //! ```
 //! Any number of `LocalRepo` handles, in any number of processes, can use one
 //! root at the same time. See `pico2peta-pack` and `pico2peta-refs` for the
@@ -41,6 +41,31 @@ pub struct RepoConfig {
     pub format: u32,
     /// Pack tunables.
     pub pack: PackSection,
+    /// Where refs are stored (added after format 1; defaults to local).
+    #[serde(default)]
+    pub refs: RefsSection,
+}
+
+/// `[refs]` section of the config.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RefsSection {
+    /// `local` (default): a journal under `<root>/refs`, with all writers on one host.
+    /// `backend`: a create-only log under `refs/` on the pack backend (e.g. S3),
+    /// so several hosts may write the repository.
+    #[serde(default)]
+    pub store: RefsStore,
+}
+
+/// Ref storage engine (see [`RefsSection`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RefsStore {
+    /// Local journal (flock commit point).
+    #[default]
+    Local,
+    /// Create-only log on the backend (conditional-create commit point).
+    Backend,
 }
 
 /// `[pack]` section of the config.
@@ -110,10 +135,15 @@ impl LocalRepo {
     /// Creates a new repository at `root` (which may exist but must not
     /// contain a repository).
     pub fn init(root: impl AsRef<Path>, pack: &PackConfig) -> Result<Self> {
+        Self::init_with(root, pack, RefsStore::Local)
+    }
+
+    /// Like [`LocalRepo::init`], choosing the ref store.
+    pub fn init_with(root: impl AsRef<Path>, pack: &PackConfig, refs: RefsStore) -> Result<Self> {
         pack.validate()?;
         let root = root.as_ref();
         std::fs::create_dir_all(root)?;
-        let cfg = RepoConfig { format: FORMAT_VERSION, pack: pack.into() };
+        let cfg = RepoConfig { format: FORMAT_VERSION, pack: pack.into(), refs: RefsSection { store: refs } };
         let text = toml::to_string(&cfg).map_err(|e| Error::Parse(e.to_string()))?;
         let tmp = root.join(".config.toml.tmp");
         {
@@ -160,7 +190,10 @@ impl LocalRepo {
         let cfg = Self::read_config(&root)?;
         let packs =
             PackStore::open_with_faults(root.join("staging"), backend.clone(), (&cfg.pack).into(), faults.clone())?;
-        let refs = Arc::new(RefStore::open_with_faults(root.join("refs"), faults.clone())?);
+        let refs = Arc::new(match cfg.refs.store {
+            RefsStore::Local => RefStore::open_with_faults(root.join("refs"), faults.clone())?,
+            RefsStore::Backend => RefStore::open_backend_with_faults(backend.clone(), "refs/", faults.clone())?,
+        });
         Ok(LocalRepo { root, packs, refs, backend, faults })
     }
 

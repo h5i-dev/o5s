@@ -293,10 +293,23 @@ fn op() -> impl Strategy<Value = Op> {
 proptest! {
     #![proptest_config(ProptestConfig { cases: 128, ..ProptestConfig::default() })]
     #[test]
-    fn matches_model(ops in proptest::collection::vec(op(), 1..60)) {
+    fn matches_model(ops in proptest::collection::vec(op(), 1..60), use_log in any::<bool>()) {
         let d = tempfile::tempdir().unwrap();
-        let mut r = RefStore::open(d.path()).unwrap();
-        r.set_compact_threshold(300); // rotate every few records
+        // Both engines: the local journal and the create-only log on a Backend.
+        let open = |d: &std::path::Path| -> RefStore {
+            if use_log {
+                let b: std::sync::Arc<dyn pico2peta_core::backend::Backend> =
+                    std::sync::Arc::new(pico2peta_core::backend::LocalDisk::new(d.join("b")).unwrap());
+                let r = RefStore::open_backend(b, "refs/").unwrap();
+                r.set_compact_threshold(4);
+                r
+            } else {
+                let r = RefStore::open(d).unwrap();
+                r.set_compact_threshold(300); // rotate every few records
+                r
+            }
+        };
+        let mut r = open(d.path());
         let mut m = Model::default();
         for o in ops {
             match o {
@@ -371,8 +384,7 @@ proptest! {
                 }
                 Op::Reopen => {
                     drop(r);
-                    r = RefStore::open(d.path()).unwrap();
-                    r.set_compact_threshold(300);
+                    r = open(d.path());
                 }
             }
             let got: Vec<(String, Hash, u64)> = r.list("").unwrap().into_iter().map(|(k, v)| (k.to_string(), v.hash, v.version)).collect();

@@ -454,7 +454,7 @@ struct Inner {
 /// The tombstone is the commit point. Last, it updates `CURRENT`. A handle
 /// that catches up on an old journal and reaches the tombstone switches to the
 /// new generation, so no write is ever made to a rotated journal.
-pub struct RefStore {
+struct Journal {
     dir: PathBuf,
     faults: FaultHandle,
     compact_threshold: std::sync::atomic::AtomicU64,
@@ -551,14 +551,9 @@ fn read_current(dir: &Path) -> Result<u64> {
     }
 }
 
-impl RefStore {
+impl Journal {
     /// Opens or creates the ref store in `dir`.
-    pub fn open(dir: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with_faults(dir, Faults::disarmed())
-    }
-
-    /// Like [`RefStore::open`], with fault injection.
-    pub fn open_with_faults(dir: impl AsRef<Path>, faults: FaultHandle) -> Result<Self> {
+    fn open_with_faults(dir: impl AsRef<Path>, faults: FaultHandle) -> Result<Self> {
         let dir = dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&dir)?;
         let mut last_err = None;
@@ -566,7 +561,7 @@ impl RefStore {
         for _ in 0..8 {
             match Self::load_generation(&dir, read_current(&dir)?) {
                 Ok(inner) => {
-                    let s = RefStore {
+                    let s = Journal {
                         dir,
                         faults,
                         compact_threshold: std::sync::atomic::AtomicU64::new(DEFAULT_COMPACT_THRESHOLD),
@@ -758,10 +753,112 @@ impl RefStore {
     pub fn generation(&self) -> Result<u64> {
         Ok(self.inner.lock().map_err(poisoned)?.generation)
     }
+}
+
+/// The storage engine behind a [`RefStore`]: a consistent read, and a
+/// linearizable commit of a decision. A decision may be evaluated more than
+/// once (engines with optimistic commit retry it against a newer state).
+trait Engine: Send + Sync {
+    fn read(&self, f: &mut dyn FnMut(&RefState)) -> Result<()>;
+    fn commit(&self, decide: &mut dyn FnMut(&RefState) -> Result<Option<Mutation>>) -> Result<()>;
+    fn compact(&self) -> Result<()>;
+    fn generation(&self) -> Result<u64>;
+    fn set_compact_threshold(&self, bytes: u64);
+}
+
+impl Engine for Journal {
+    fn read(&self, f: &mut dyn FnMut(&RefState)) -> Result<()> {
+        self.with_shared(|s| f(s))
+    }
+    fn commit(&self, decide: &mut dyn FnMut(&RefState) -> Result<Option<Mutation>>) -> Result<()> {
+        Journal::commit(self, |s| Ok((decide(s)?, ())))
+    }
+    fn compact(&self) -> Result<()> {
+        Journal::compact(self)
+    }
+    fn generation(&self) -> Result<u64> {
+        Journal::generation(self)
+    }
+    fn set_compact_threshold(&self, bytes: u64) {
+        Journal::set_compact_threshold(self, bytes)
+    }
+}
+
+/// A handle on a ref store. Thread-safe, and any number of handles may share
+/// one store:
+/// * [`RefStore::open`]: a local journal directory. Commits are serialized by an exclusive
+///   `flock`, so all writers must be on one host.
+/// * [`RefStore::open_backend`]: a create-only log on any [`Backend`], e.g. S3. Commits are
+///   linearized by atomic conditional create, so writers may be on many hosts.
+pub struct RefStore {
+    engine: Box<dyn Engine>,
+}
+
+impl RefStore {
+    /// Opens or creates a journal-backed ref store in `dir`.
+    pub fn open(dir: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_faults(dir, Faults::disarmed())
+    }
+
+    /// Like [`RefStore::open`], with fault injection.
+    pub fn open_with_faults(dir: impl AsRef<Path>, faults: FaultHandle) -> Result<Self> {
+        Ok(RefStore { engine: Box::new(Journal::open_with_faults(dir, faults)?) })
+    }
+
+    /// Opens (creating if needed) a ref store stored as a create-only log under
+    /// `prefix` on `backend` (see [`log`]).
+    pub fn open_backend(backend: std::sync::Arc<dyn pico2peta_core::backend::Backend>, prefix: &str) -> Result<Self> {
+        Self::open_backend_with_faults(backend, prefix, Faults::disarmed())
+    }
+
+    /// Like [`RefStore::open_backend`], with fault injection.
+    pub fn open_backend_with_faults(
+        backend: std::sync::Arc<dyn pico2peta_core::backend::Backend>,
+        prefix: &str,
+        faults: FaultHandle,
+    ) -> Result<Self> {
+        Ok(RefStore { engine: Box::new(log::LogEngine::open(backend, prefix, faults)?) })
+    }
+
+    fn read<T>(&self, f: impl FnOnce(&RefState) -> T) -> Result<T> {
+        let mut f = Some(f);
+        let mut out = None;
+        self.engine.read(&mut |s| {
+            if let Some(f) = f.take() {
+                out = Some(f(s));
+            }
+        })?;
+        out.ok_or_else(|| Error::Corrupt("ref engine did not read".into()))
+    }
+
+    fn commit<T>(&self, mut decide: impl FnMut(&RefState) -> Result<(Option<Mutation>, T)>) -> Result<T> {
+        let mut out = None;
+        self.engine.commit(&mut |s| {
+            let (m, t) = decide(s)?;
+            out = Some(t);
+            Ok(m)
+        })?;
+        out.ok_or_else(|| Error::Corrupt("ref engine did not decide".into()))
+    }
+
+    /// Sets the size that triggers compaction (journal engine: bytes; log engine: entries).
+    pub fn set_compact_threshold(&self, n: u64) {
+        self.engine.set_compact_threshold(n)
+    }
+
+    /// Forces a compaction now.
+    pub fn compact(&self) -> Result<()> {
+        self.engine.compact()
+    }
+
+    /// Current journal generation, or log snapshot sequence (diagnostics).
+    pub fn generation(&self) -> Result<u64> {
+        self.engine.generation()
+    }
 
     /// Current value of `name`.
     pub fn resolve(&self, name: &Name) -> Result<Option<RefValue>> {
-        self.with_shared(|s| s.refs.get(name).copied())
+        self.read(|s| s.refs.get(name).copied())
     }
 
     /// OCC replace. `exists` reports whether `new` is a stored object.
@@ -868,21 +965,18 @@ impl RefStore {
 
     /// Refs under `prefix`.
     pub fn list(&self, prefix: &str) -> Result<Vec<(Name, RefValue)>> {
-        self.with_shared(|s| s.list(prefix))
+        self.read(|s| s.list(prefix))
     }
 
     /// Configured rules.
     pub fn rules(&self) -> Result<Vec<(String, Rule)>> {
-        self.with_shared(|s| s.rules.iter().map(|(p, r)| (p.clone(), *r)).collect())
+        self.read(|s| s.rules.iter().map(|(p, r)| (p.clone(), *r)).collect())
     }
 
     /// A snapshot of the whole state (after catching up).
     pub fn snapshot(&self) -> Result<RefState> {
-        self.with_shared(|s| s.clone())
-    }
-
-    /// Directory of this store.
-    pub fn dir(&self) -> &Path {
-        &self.dir
+        self.read(|s| s.clone())
     }
 }
+
+pub mod log;

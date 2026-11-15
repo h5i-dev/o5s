@@ -60,6 +60,7 @@
 - **Frame v2 / index v3 (on-disk):** frame directories hold lengths only (hashes are recomputed on recovery), and the index uses a shared record table (~44 B/entry vs 62). Older formats are still read. On net's real ripgrep import, a grouped repack is now **1.078× git-aggressive total, 1.021× payload** (it was 1.264× / 1.154×).
 - **v1.7 (2026-11-15), additive:** `ObjectStore::put_delta(base, src)` stores an object as `base XOR delta` (record kind `Delta`), keeping content-hash identity. Reads, ranges, GC (base kept alive) and `ensure_live` cover it. The default impl is a plain `put_stream`. The CLI has `put --delta-base HASH`.
 - **v1.8 (2026-11-15), additive:** `ObjectStore::put_delta_mapped(base, segments, src)` is an XOR delta with an explicit `(dst, src, len)` alignment. The default delegates to `put_delta`. The new crate `pico2peta-weights` (`put_checkpoint`) plans the alignment for safetensors.
+- **Refs on a backend (2026-11-15):** `RefStore::open_backend(backend, prefix)` and `LocalRepo` config `[refs] store = "backend"`, plus `pico2peta init --refs-on-backend`. The API is unchanged; this is a new engine.
 - **Hierarchical manifests:** `PackConfig::manifest_fanout` (default 4096; repo config key `pack.manifest_fanout`, optional). Every interior node is keyed by the content hash of its byte range, and reads expand the tree lazily.
 
 ## Production gaps
@@ -70,7 +71,7 @@
 - **Provenance scale (addressed).** Log nodes (`P2PPLOG2`) carry checkpoint indexes (`P2PPIDX1`, sorted forward and backward tables), rebuilt geometrically when recent records reach max(1024, total/8). `Provenance::load` reads only the recent tail. Older lookups are O(log n) ranged reads, and records are fetched on demand. Remaining: checkpoint rebuild is a full rewrite, O(n) at each geometric step, so a level-based LSM would cut write amplification at 10^8+ records.
 - **Ref store scale.** All refs live in memory (~150 B each), and compaction rewrites a full snapshot. That's fine to ~10^6 names, strained at 10^7. Scaling needs a sharded journal per prefix, or an LSM. Net was advised to keep per-blob OCI links in segment maps, not refs.
 - **Small packs.** `replace` and `flush` seal the writer's open pack, so chatty writers make many small packs. GC consolidates packs under 16 MiB (`small_pack_bytes`). Run GC regularly (cron, or the server's background GC).
-- **Single ref authority per repository.** Refs are a local journal, so multi-host writers to one repository's names need a ref store on S3 conditional writes or a database. The decision logic is already pure (`RefState::decide_*`). See ARCHITECTURE.md, "Deployment topology".
+- **Multi-host refs (addressed).** `[refs] store = "backend"` keeps refs as a create-only log on the pack backend (e.g. S3), with commits linearized by conditional create. It's tested against the model and the Lean difftest, plus multi-process contention and a crash sweep. Remaining: per-commit cost is one PUT plus catch-up GETs (fine for refs, slower than the local journal), and log trimming relies on a 1 h grace like GC.
 - **Ambiguous outcome on I/O error.** If an fsync fails during `replace`, the record may still be durable. The caller must re-`resolve` to find out (documented, as in most databases).
 
 ## Environment notes
