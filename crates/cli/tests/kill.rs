@@ -12,14 +12,31 @@ fn bin() -> Command {
 
 fn ok(repo: &Path, args: &[&str]) -> String {
     let o = bin().arg("-C").arg(repo).args(args).output().unwrap();
-    assert!(o.status.success(), "{args:?}: {}", String::from_utf8_lossy(&o.stderr));
+    assert!(
+        o.status.success(),
+        "{args:?} failed\n--- stdout:\n{}\n--- stderr:\n{}",
+        String::from_utf8_lossy(&o.stdout),
+        String::from_utf8_lossy(&o.stderr)
+    );
     String::from_utf8(o.stdout).unwrap()
 }
 
 #[test]
 fn sigkill_at_random_points_keeps_repo_consistent() {
+    // Deterministic inputs (fixed xorshift seed); kill *timing* varies run to run.
     let d = tempfile::tempdir().unwrap();
     let repo = d.path().join("r");
+    if let Ok(keep) = std::env::var("P2P_KILL_KEEP") {
+        // Debug aid: keep the repository for inspection.
+        let _ = std::fs::remove_dir_all(&keep);
+        std::fs::create_dir_all(&keep).unwrap();
+        std::mem::forget(d);
+        return run_kill(Path::new(&keep).join("r"));
+    }
+    run_kill(repo)
+}
+
+fn run_kill(repo: std::path::PathBuf) {
     ok(&repo, &["init", "--chunk-threshold", "65536", "--pack-cap", "262144"]);
     let mut acked: Vec<(String, String)> = Vec::new(); // (name, hash) whose replace returned ok
     let mut x: u64 = 0x9E3779B97F4A7C15;

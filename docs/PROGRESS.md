@@ -2,7 +2,15 @@
 
 ## Status (2026-11-15). Start here.
 
-**All milestones in PLAN.md (M0–M9) are complete and verified.** `scripts/check.sh` (fmt, clippy -D warnings, full test suite) passes on `demo` with `net` merged in. Exp1 and Exp1b are finished: both FAIL under their pre-registered rules, reported in EXP1.md. The remaining items are the production gaps listed below.
+**Correction (2026-11-15).** An earlier "all milestones complete and verified" was wrong. The human's independent check found two problems:
+1. **`scripts/check.sh` was a broken gate.** Under `set -e`, its final `! grep` line never aborted, and `cargo test` stopped at the first failing binary. It printed "check: OK" while a test failed. **Fixed:** it now uses `--no-fail-fast`, checks cargo's exit status explicitly, and greps for failures explicitly. Verified by a deliberately failing probe test, which the gate now rejects (exit 1).
+2. **The SIGKILL test was flaky (about 4 of 6 runs failed), from a real engine bug.**
+   - What happened: GC deleted chunks of an *unreferenced* large object (left by a killed streaming put) while that object's manifest survived in a pack outside the GC cycle. fsck then reported a manifest with a missing chunk, and the index served an object that couldn't be read.
+   - **Root cause fixed in the engine:** GC now protects every child of a manifest or delta record in a surviving pack (sweep copies them, the delete phase rescues them). `ensure_live` reports a broken object as absent (so clients re-upload, which heals it) rather than erroring.
+   - Deterministic regression test: `gc_never_deletes_children_of_surviving_records`. It fails on the old GC and passes now.
+   - The kill test passes **50/50** (before: ~2/6). The full workspace suite passes **5/5** with `--no-fail-fast`, and no other flaky test was found.
+
+Milestones M0–M9 are complete. `scripts/check.sh` passes. Next: the speed-up research in `docs/RESEARCH_SPEEDUP.md` (§1–§4).
 
 | milestone | state | where |
 |---|---|---|
@@ -44,7 +52,7 @@
 
 **Independent code review (2026-11-15).** A fresh-eyes review of pack, refs and GC found 10 confirmed bugs. All are fixed with regression tests (see CHANGELOG). The most severe: acknowledged large batches truncated as torn tails; mid-journal corruption silently truncated; a first-compaction orphan-journal race; stale log-engine handles acknowledging invisible commits; appends to a published pack after a failed seal. The GC protocol itself came out clean.
 
-**Notable bugs found and fixed by the tests**
+**Notable bugs found and fixed by the tests** (the most recent was found by the human: GC partially collecting unreferenced large objects; see the correction above)
 - A seal/condemn index race.
 - Pack-name aliasing with condemned packs.
 - Pack ids invalidated by index rebuilds.

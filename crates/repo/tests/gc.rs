@@ -397,3 +397,42 @@ fn fsck_passes_on_healthy_repo_and_detects_corruption() {
     assert!(!rep.ok());
     assert!(rep.errors.iter().any(|e| e.contains("corrupt")), "{:?}", rep.errors);
 }
+
+/// Root cause of the flaky SIGKILL test (deterministic reproduction): an
+/// unreferenced large object whose chunks were sealed into packs that GC
+/// planned, while its manifest landed in a later pack outside the cycle.
+/// GC deleted the chunks and kept the manifest, so the index served an object
+/// that couldn't be read. GC must keep every child of a surviving record.
+#[test]
+fn gc_never_deletes_children_of_surviving_records() {
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { pack_cap: 4096, ..PackConfig::tiny() };
+    let r = LocalRepo::init(d.path(), &cfg).unwrap();
+    set(&r, "anchor", r.put(b"anchor").unwrap());
+    r.flush().unwrap();
+    // The writer streams a large object: its chunks seal into several small packs as it goes.
+    let w = LocalRepo::open(d.path()).unwrap();
+    let big = blob(42, 60_000);
+    let h = w.put_stream(&mut &big[..]).unwrap();
+    // GC plans now: the chunk packs are in the plan, but the writer's open pack
+    // (holding the last records, including the root manifest) isn't sealed yet.
+    let p = r.gc(&opts(), &OpaqueObjects).unwrap();
+    assert!(p.planned.is_some());
+    w.flush().unwrap(); // the manifest's pack appears after the plan
+    drop(w);
+    // The object is never referenced. Run the rest of the cycle (sweep, then delete).
+    for _ in 0..3 {
+        r.gc(&opts(), &OpaqueObjects).unwrap();
+    }
+    let fresh = LocalRepo::open(d.path()).unwrap();
+    let rep = fresh.fsck().unwrap();
+    assert!(rep.ok(), "GC left a surviving record pointing at deleted children: {:?}", rep.errors);
+    // The object is either fully readable or fully gone, never half there.
+    if fresh.contains(&h).unwrap() {
+        assert_eq!(fresh.get(&h, None).unwrap(), big);
+    }
+    // And putting it again always works (and heals it if it had been broken).
+    assert_eq!(fresh.put(&big).unwrap(), h);
+    fresh.flush().unwrap();
+    assert_eq!(fresh.get(&h, None).unwrap(), big);
+}
