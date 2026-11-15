@@ -374,6 +374,24 @@ The contended run checks that no update is lost: the final version equals the nu
 - **read_verify, server side: DONE** (as agreed with the core: one policy source, the repo's `[read]` config, and no server setting).
   - `GET /v1/objects/<h>?verify=strict|eof` calls `open_verified`. `eof` gets 403 unless the repo allows it, and a bad value gets 400. With no parameter, the plain `open` follows `[read] verify`, so strict is the default by construction.
   - `RemoteRepo::open_verified` sends the parameter. Test `read_verify_parameter_follows_repo_policy`.
+- **Git clone/fetch vs git daemon (human's priority 1): DONE, target met** (≤1.2× on redis, cold and warm). It took three changes, each chosen by measurement:
+  1. **Clone pack cache.** A clone with no haves, no shallow and no filter produces a pack that is a function of (object format, sorted wants). The front keeps the last one per repository as an object (`P2PCPK01` + key + pack) behind `git/_clonepack/<repo>`, and streams it when the key matches. The ref keeps it alive for GC, and a stale one is simply replaced. It is filled when a clone misses, and refreshed in the background after every push (heads+tags wants), so the first clone after a push is a hit too. Config `[git] clone_pack_cache` (default on). Cost: one pack of storage per cloned repository.
+     - Of options (a)–(c), (c) alone gets clones below git daemon. (a)/(b) would cost extra per-object storage for little gain once (c) and the commit graph are in.
+  2. **Commit graph** (`crates/server/src/gitgraph.rs`). Each commit's tree, parents and time, and each tag's target, plus the core hash. Kept in memory (bounded), and persisted per repository behind `git/_commitgraph/<repo>`, rewritten in the background after pushes and loaded once per process.
+     - Negotiation, the "client has" walk, shallow cuts and the commit waves read no commit objects.
+     - `list_refs` no longer reads and SHA-1s every ref's object on every request (556 refs on redis).
+  3. **Edge-only tree exclusion, without blob reads** (it used to load every blob of 16 common trees), and the fix to `get_many`'s dense-scan path (see "Small fixes made to core crates"). That scan used to read whole oid-map segments past the page cache on every wave; it was the top of the warm fetch profile.
+  - Dev check (redis heads+tags, under the bench lock; cold = fresh process + `drop_caches`). Seconds, pico2peta vs git daemon:
+
+    | | before | after | git daemon |
+    |---|---|---|---|
+    | clone, first after a push | 25.3 | 8.8 | 11.1 |
+    | clone, cold | 25.3 | 8.7 | 11.1 |
+    | clone, warm | 21.0 | 8.5 | 11.2 |
+    | fetch10, cold | 1.42 | 0.32–0.35 | 0.29–0.31 |
+    | fetch10, warm | 0.94 | 0.20 | 0.21–0.23 |
+
+    Clone is 0.77–0.79×; fetch is 0.93× warm and ~1.13× cold. The clone pack for redis is built in ~15.6 s in the background after the push. Test `clone_pack_cache` covers v0 and v2 clones from the cache, re-encoding after a push, GC, fetch, and fsck --strict on every clone.
 - **idmap batching (human's request): DONE.** `get_many` is now a merge-join (see "Small fixes made to core crates").
   - Git push: one `get_many` for every pack object plus every outside object the pack references. Canonical bytes are kept up to 256 MiB; beyond that, new objects are re-resolved. REF_DELTA bases are found by an oid map instead of a linear scan.
   - Clone and fetch: the walk looks objects up in batched BFS waves (commit/tag generations, then trees level by level, then all blobs) and no longer reads blob bodies (they used to be read twice). History is still *emitted* depth-first from the tips, first parent first, like git.
