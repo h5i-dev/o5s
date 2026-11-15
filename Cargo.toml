@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/pack", "crates/refs"]
+members = ["crates/core", "crates/pack", "crates/refs", "crates/repo", "crates/cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,14 +10,18 @@ license = "Apache-2.0"
 [workspace.dependencies]
 pico2peta-core = { path = "crates/core" }
 pico2peta-pack = { path = "crates/pack" }
+pico2peta-refs = { path = "crates/refs" }
+pico2peta-repo = { path = "crates/repo" }
 blake3 = "1"
 fastcdc = "3"
 zstd = "0.13"
 thiserror = "2"
 crc32fast = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 proptest = "1"
 tempfile = "3"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 
 [profile.release]
 debug = 1

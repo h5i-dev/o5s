@@ -1,0 +1,18 @@
+[package]
+name = "pico2peta-cli"
+description = "The pico2peta command-line tool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pico2peta"
+path = "src/main.rs"
+
+[dependencies]
+pico2peta-core.workspace = true
+pico2peta-repo.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "pico2peta-repo"
+description = "Local pico2peta repository: pack store + ref store behind the Repository trait"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pico2peta-core.workspace = true
+pico2peta-pack.workspace = true
+pico2peta-refs.workspace = true
+serde.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
