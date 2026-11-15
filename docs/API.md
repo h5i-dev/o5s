@@ -6,7 +6,7 @@ The server (`pico2peta-server`) exposes three interfaces on one listener:
 |---|---|---|
 | `/v1/...` | the native API: objects, names, namespaces, admin | `pico2peta --remote`, `pico2peta_client::RemoteRepo`, curl |
 | `/v2/...` | OCI Distribution v1.1, passing the conformance suite in all four workflows | docker, podman, oras, crane, helm |
-| `/git/<repo>.git/...` | Git smart HTTP (protocol v0/v1) | `git clone` / `fetch` / `push` |
+| `/git/<repo>.git/...` | Git smart HTTP (protocol v2 for fetch, v0/v1 for fetch and push) | `git clone` / `fetch` / `push` |
 
 Ops endpoints `/healthz`, `/readyz` and `/metrics` need no credentials. Move `/metrics` to a private address with `server.metrics_listen`. The wire types live in `crates/client/src/wire.rs`.
 
@@ -121,7 +121,7 @@ git push --atomic origin main v1.0 :old-branch
 - Refs map to names `git/<repo>/refs/...`, so namespace rules apply. For example, make `git/<repo>/refs/tags` immutable to forbid moving or deleting tags.
 - A stale push gets `ng … fetch first`.
 - Served packs are deltified against the previous version of each path.
-- Limits are listed in `docs/NET_PROGRESS.md` under "Production gaps": SHA-1 repos only, no shallow clones, no server-side protocol v2.
+- Limits are listed in `docs/NET_PROGRESS.md` under "Production gaps": SHA-1 repos only, no shallow or partial clones.
 
 ## Operations
 See `deploy/README.md` for install, TLS, reload (SIGHUP), S3 credentials and lifecycle rules, metrics, audit verification (`pico2peta-server verify-audit`) and capacity notes.

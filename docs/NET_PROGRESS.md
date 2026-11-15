@@ -120,6 +120,7 @@ User docs are in `docs/API.md` and `deploy/README.md`.
 - Separate metrics listener, and per-principal rate limiting (429 with `Retry-After`, `p2p_rate_limited_total`).
 - Audit log rotation with a continuous hash chain across files.
 - OIDC/JWT authentication (`tests/oidc.rs` against a mock issuer: valid token, wrong audience, expired, bad signature, tampered token, key rotation, unknown kid, static tokens alongside).
+- Git protocol v2 for fetch (git's default). `tests/git.rs` now runs on v2 by default and checks v0 and v2 for identical results.
 - Git wire deltas: upload-pack deltifies blobs and trees against the previously sent version of the same path. A ripgrep clone (release) transfers 33.8 MB → **6.1 MB**, takes 3.65 s → 2.91 s, refs are identical and fsck is clean.
 
 ### Server load benchmark (`crates/server/tests/load.rs`)
@@ -160,7 +161,6 @@ The contended run checks that no update is lost: the final version equals the nu
 - Automated tests (`tests/git.rs`, real git CLI): push, clone, incremental fetch, stale-push rejection, force-with-lease, reader and stranger authz, immutable tags, atomic all-or-nothing, delete refusal, and GC tracer edges, including BLAKE3 = hash of canonical git bytes.
 
 ### Next (candidates, in priority order)
-- Git protocol v2 on the server (ref-prefix filtering for repos with many refs). v2 clients currently fall back to v0.
 - Git `object-format=sha256` repositories.
 - An admin API for issuing and revoking tokens, and mapping OIDC groups to policies.
 - Per-namespace storage quotas.
@@ -219,7 +219,7 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **Metrics and rate limits:** `/metrics` can move to a separate listener (`server.metrics_listen`), but is still unauthenticated there, so bind it to a private interface. Per-principal token-bucket rate limiting exists (`server.rate_limit`; anonymous callers keyed by IP). There are no byte or storage quotas per principal or namespace.
 - **Durability of server puts:** an unreferenced `put` becomes durable at the next replace or flush (core semantics, since the open pack is not fsynced per put). If the server crashes before that, the client's later `replace` gets `MissingObject` and must re-put. Clients needing durability without a replace call `POST /v1/flush`.
 - **Git adapter limits:**
-  - SHA-1 repos only (no `object-format=sha256`). No protocol v2 server side (clients fall back to v0), and no shallow or partial clones.
+  - SHA-1 repos only (no `object-format=sha256`). No shallow or partial clones. Protocol v2 covers fetch only (`ls-refs` with peel, symrefs, unborn and ref-prefix; `fetch` with ready and packfile); pushes use v0/v1, as with git's own server.
   - Served packs use OFS deltas against the previously sent version at the same path (greedy block matching, depth ≤ 50). They are not as tight as git's sliding-window search: a ripgrep clone transfers 6.1 MB vs git's 3.4 MB aggressive pack. Thin packs against the client's haves are not used.
   - Upload-pack has no bitmaps or commit-graph. Incremental fetches exclude what the client has with git's no-bitmap edge strategy (the commit closure of common commits plus the trees of up to 16 boundary commits), so they cost O(commits) rather than O(objects). A clone still walks every object it sends.
   - Each push object is held in memory (cap 1 GiB per object).
