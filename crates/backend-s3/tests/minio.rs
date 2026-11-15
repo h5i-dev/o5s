@@ -295,3 +295,39 @@ fn wrong_credentials_fail_cleanly() {
     .unwrap();
     assert!(matches!(b.head("a"), Err(Error::Backend { transient: false, .. })));
 }
+
+/// The ref log's commit point is an S3 conditional create. A commit whose PUT
+/// lands but whose response is lost must be reported exactly once (no Conflict,
+/// no duplicate or skipped version), and other hosts must see it.
+#[test]
+fn ref_log_commit_survives_lost_response() {
+    use pico2peta_core::{Hash, Name, Observed, ReplaceOutcome};
+    let env = require_s3!();
+    let (proxy, c) = proxied(&env, "reflog-lost");
+    let b: std::sync::Arc<dyn Backend> = std::sync::Arc::new(backend(&env, c.clone()));
+    assert!(b.atomic_create());
+    let rs = pico2peta_refs::RefStore::open_backend(b.clone(), "refs/").unwrap();
+    let n = Name::new("team/main").unwrap();
+    let yes = |_: &Hash| Ok(true);
+    let (h1, h2, h3) = (Hash::of(b"1"), Hash::of(b"2"), Hash::of(b"3"));
+    assert_eq!(rs.replace(&n, &[(n.clone(), Observed::Absent)], h1, &yes).unwrap(), ReplaceOutcome::Ok { version: 1 });
+    // Lose the response of the next ref-log record PUT.
+    proxy.lose_responses_matching("refs/log/", 1);
+    let r = rs.replace(&n, &[(n.clone(), Observed::Version(1))], h2, &yes).unwrap();
+    assert_eq!(proxy.faults_applied.load(std::sync::atomic::Ordering::SeqCst), 1, "the fault must have hit a log PUT");
+    assert_eq!(r, ReplaceOutcome::Ok { version: 2 }, "a landed commit is reported as committed");
+    assert_eq!(rs.resolve(&n).unwrap().map(|v| (v.hash, v.version)), Some((h2, 2)));
+    // Another host (fresh handle, direct connection) agrees.
+    let other = pico2peta_refs::RefStore::open_backend(
+        std::sync::Arc::new(backend(&env, S3Config { endpoint: env.endpoint.clone(), ..c })),
+        "refs/",
+    )
+    .unwrap();
+    assert_eq!(other.resolve(&n).unwrap().map(|v| (v.hash, v.version)), Some((h2, 2)));
+    // The sequence continues without a gap or duplicate.
+    assert_eq!(
+        other.replace(&n, &[(n.clone(), Observed::Version(2))], h3, &yes).unwrap(),
+        ReplaceOutcome::Ok { version: 3 }
+    );
+    assert_eq!(rs.resolve(&n).unwrap().map(|v| v.version), Some(3));
+}
