@@ -34,7 +34,7 @@ Until the core traits land on `demo`, design against the trait shapes in `docs/P
 
 ## Working rules
 - `git merge demo` into `net` at least every hour. Keep `net` building against the latest `demo`, because the lead merges `net` into `demo` at milestones.
-- Commit often, and don't push. End commit messages with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- Commit often. **Do not add any Claude / Claude Code attribution** (no `Co-Authored-By: Claude…` trailer, no "Generated with Claude Code"). A commit-msg hook strips them anyway. **Push `net` to `origin` yourself** after each goal or meaningful batch, once fmt, clippy and tests pass (`git push origin net`; never force-push, never push `main`).
 - Keep `docs/NET_PROGRESS.md` current: what's done, what's next, production gaps, requests for core, and questions for the human. If a decision belongs to the human, write it down there and carry on with a sensible default.
 
 ## Phase 2 (2026-11-15): share the core's speed-up backlog (from the human)
