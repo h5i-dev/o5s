@@ -21,8 +21,8 @@
 
 use pico2peta_core::fault::{FaultHandle, Faults};
 use pico2peta_core::{
-    Error, Hash, Mobility, Name, Observed, RefValue, ReplaceOutcome, Result, Rule, governing, is_under, mobility,
-    validate_path,
+    Error, Hash, Mobility, Name, Observed, RefValue, ReplaceManyOutcome, ReplaceOutcome, Result, Rule, governing,
+    is_under, mobility, validate_path,
 };
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
@@ -31,7 +31,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 const MAGIC: &[u8; 8] = b"P2PREFJ1";
-const MAX_RECORD: u32 = 4096;
+const MAX_RECORD: u32 = 4 << 20;
+/// Maximum number of names in one atomic `replace_many`.
+pub const MAX_BATCH: usize = 10_000;
 
 /// Pure in-memory ref state, plus the decision logic shared by every handle.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -49,6 +51,11 @@ pub enum Mutation {
     Set(Name, RefValue),
     /// Set the rule for a prefix.
     Rule(String, Rule),
+    /// Journal tombstone: this journal is closed, and state continues in
+    /// generation `n` (snapshot + journal). Written only by compaction.
+    Rotated(u64),
+    /// Several `Set`s committed atomically (one record, one commit point).
+    Batch(Vec<(Name, RefValue)>),
 }
 
 impl RefState {
@@ -111,7 +118,50 @@ impl RefState {
             Mutation::Rule(p, r) => {
                 self.rules.insert(p, r);
             }
+            Mutation::Rotated(_) => {}
+            Mutation::Batch(v) => {
+                for (n, val) in v {
+                    self.refs.insert(n, val);
+                }
+            }
         }
+    }
+
+    /// Decides an atomic multi-name replace (pure). Same order as
+    /// [`RefState::decide_replace`]: input, then read set, then rules (each name).
+    pub fn decide_replace_many(
+        &self,
+        updates: &[(Name, Hash)],
+        read_set: &[(Name, Observed)],
+    ) -> Result<std::result::Result<Mutation, ReplaceManyOutcome>> {
+        if updates.is_empty() || updates.len() > MAX_BATCH {
+            return Err(Error::Parse(format!("replace_many takes 1..={MAX_BATCH} updates")));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for (n, _) in updates {
+            if !seen.insert(n) {
+                return Err(Error::Parse(format!("duplicate target {n} in replace_many")));
+            }
+            if !read_set.iter().any(|(r, _)| r == n) {
+                return Err(Error::TargetNotInReadSet(n.clone()));
+            }
+        }
+        let mut stale: Vec<(Name, Observed)> =
+            read_set.iter().filter(|(n, o)| self.observe(n) != *o).map(|(n, _)| (n.clone(), self.observe(n))).collect();
+        if !stale.is_empty() {
+            stale.sort();
+            stale.dedup();
+            return Ok(Err(ReplaceManyOutcome::Conflict { stale }));
+        }
+        let mut sets = Vec::with_capacity(updates.len());
+        for (name, new) in updates {
+            match self.decide_replace(name, read_set, *new)? {
+                Ok(Mutation::Set(n, v)) => sets.push((n, v)),
+                Ok(_) => return Err(Error::Corrupt("unexpected mutation".into())),
+                Err(_) => return Err(Error::Corrupt("read set changed during decision".into())),
+            }
+        }
+        Ok(Ok(Mutation::Batch(sets)))
     }
 
     /// Refs under `prefix` ("" = all), sorted.
@@ -136,6 +186,20 @@ fn encode(m: &Mutation) -> Vec<u8> {
             p.extend_from_slice(prefix.as_bytes());
             p.push(r.code());
         }
+        Mutation::Rotated(g) => {
+            p.push(3);
+            p.extend_from_slice(&g.to_le_bytes());
+        }
+        Mutation::Batch(v) => {
+            p.push(4);
+            p.extend_from_slice(&(v.len() as u32).to_le_bytes());
+            for (n, val) in v {
+                p.extend_from_slice(&(n.as_str().len() as u16).to_le_bytes());
+                p.extend_from_slice(n.as_str().as_bytes());
+                p.extend_from_slice(val.hash.as_bytes());
+                p.extend_from_slice(&val.version.to_le_bytes());
+            }
+        }
     }
     let mut rec = Vec::with_capacity(8 + p.len());
     rec.extend_from_slice(&(p.len() as u32).to_le_bytes());
@@ -148,6 +212,35 @@ fn encode(m: &Mutation) -> Vec<u8> {
 pub fn decode_payload(p: &[u8]) -> Result<Mutation> {
     let bad = |w: &str| Error::Corrupt(format!("ref journal: {w}"));
     let (&tag, rest) = p.split_first().ok_or_else(|| bad("empty record"))?;
+    if tag == 4 {
+        let cnt: [u8; 4] = rest.get(..4).and_then(|b| b.try_into().ok()).ok_or_else(|| bad("short batch"))?;
+        let cnt = u32::from_le_bytes(cnt) as usize;
+        if cnt == 0 || cnt > MAX_BATCH {
+            return Err(bad("bad batch size"));
+        }
+        let mut rest = &rest[4..];
+        let mut v = Vec::with_capacity(cnt);
+        for _ in 0..cnt {
+            let l = rest.get(..2).ok_or_else(|| bad("short batch entry"))?;
+            let l = u16::from_le_bytes([l[0], l[1]]) as usize;
+            let e = rest.get(2..2 + l + 40).ok_or_else(|| bad("short batch entry"))?;
+            let name = Name::new(std::str::from_utf8(&e[..l]).map_err(|_| bad("non-utf8 name"))?)?;
+            let mut h = [0u8; 32];
+            h.copy_from_slice(&e[l..l + 32]);
+            let mut ver = [0u8; 8];
+            ver.copy_from_slice(&e[l + 32..l + 40]);
+            v.push((name, RefValue { hash: Hash(h), version: u64::from_le_bytes(ver) }));
+            rest = &rest[2 + l + 40..];
+        }
+        if !rest.is_empty() {
+            return Err(bad("trailing bytes in batch"));
+        }
+        return Ok(Mutation::Batch(v));
+    }
+    if tag == 3 {
+        let g: [u8; 8] = rest.try_into().map_err(|_| bad("bad rotation record"))?;
+        return Ok(Mutation::Rotated(u64::from_le_bytes(g)));
+    }
     if rest.len() < 2 {
         return Err(bad("short record"));
     }
@@ -207,15 +300,27 @@ pub fn parse_records(buf: &[u8]) -> (Vec<Mutation>, usize, Option<Error>) {
 
 struct Inner {
     file: File,
+    /// Journal generation of `file` (0 = `journal`, n = `journal.<n>`).
+    generation: u64,
     state: RefState,
     /// Journal offset up to which `state` is applied.
     applied: u64,
 }
 
-/// A handle on a ref journal. Thread-safe. Open one per process (or more).
+/// A handle on a ref store directory. Thread-safe. Any number of handles,
+/// in any number of processes, may share a directory.
+///
+/// # Compaction
+/// When the journal exceeds the compaction threshold, the committer (holding
+/// the exclusive lock) writes `snapshot.<n+1>` (the full state) and an empty
+/// `journal.<n+1>`, then appends a `Rotated(n+1)` tombstone to the old journal.
+/// The tombstone is the commit point. Last, it updates `CURRENT`. A handle
+/// that catches up on an old journal and reaches the tombstone switches to the
+/// new generation, so no write is ever made to a rotated journal.
 pub struct RefStore {
-    path: PathBuf,
+    dir: PathBuf,
     faults: FaultHandle,
+    compact_threshold: std::sync::atomic::AtomicU64,
     inner: Mutex<Inner>,
 }
 
@@ -244,18 +349,112 @@ impl Drop for FlockGuard {
     }
 }
 
+const SNAP_MAGIC: &[u8; 8] = b"P2PREFS1";
+/// Default journal size that triggers compaction.
+pub const DEFAULT_COMPACT_THRESHOLD: u64 = 64 << 20;
+
+fn journal_name(g: u64) -> String {
+    if g == 0 { "journal".into() } else { format!("journal.{g}") }
+}
+
+/// Writes `bytes` to `dir/name` atomically (temp file, fsync, rename, dir fsync).
+fn write_atomic(dir: &Path, name: &str, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let tmp = dir.join(format!(".{name}.tmp-{}", std::process::id()));
+    {
+        let mut f = OpenOptions::new().write(true).create(true).truncate(true).open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, dir.join(name))?;
+    pico2peta_core::backend::fsync_dir(dir)
+}
+
+fn encode_snapshot(st: &RefState) -> Vec<u8> {
+    let mut v = SNAP_MAGIC.to_vec();
+    for (p, r) in &st.rules {
+        v.extend_from_slice(&encode(&Mutation::Rule(p.clone(), *r)));
+    }
+    for (n, val) in &st.refs {
+        v.extend_from_slice(&encode(&Mutation::Set(n.clone(), *val)));
+    }
+    let crc = crc32fast::hash(&v);
+    v.extend_from_slice(&crc.to_le_bytes());
+    v
+}
+
+fn decode_snapshot(b: &[u8]) -> Result<RefState> {
+    let bad = || Error::Corrupt("ref snapshot is corrupt".into());
+    if b.len() < 12 || &b[..8] != SNAP_MAGIC {
+        return Err(bad());
+    }
+    let (body, crc) = b.split_at(b.len() - 4);
+    if crc32fast::hash(body).to_le_bytes() != crc {
+        return Err(bad());
+    }
+    let (muts, used, err) = parse_records(&body[8..]);
+    if err.is_some() || used != body.len() - 8 {
+        return Err(bad());
+    }
+    let mut st = RefState::default();
+    for m in muts {
+        st.apply(m);
+    }
+    Ok(st)
+}
+
+fn read_current(dir: &Path) -> Result<u64> {
+    match std::fs::read_to_string(dir.join("CURRENT")) {
+        Ok(s) => s.trim().parse().map_err(|_| Error::Corrupt("bad refs/CURRENT".into())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(e) => Err(e.into()),
+    }
+}
+
 impl RefStore {
-    /// Opens or creates the journal in `dir`.
+    /// Opens or creates the ref store in `dir`.
     pub fn open(dir: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_faults(dir, Faults::disarmed())
     }
 
     /// Like [`RefStore::open`], with fault injection.
     pub fn open_with_faults(dir: impl AsRef<Path>, faults: FaultHandle) -> Result<Self> {
-        let dir = dir.as_ref();
-        std::fs::create_dir_all(dir)?;
-        let path = dir.join("journal");
-        let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path)?;
+        let dir = dir.as_ref().to_path_buf();
+        std::fs::create_dir_all(&dir)?;
+        let mut last_err = None;
+        // Retry: a concurrent compaction may delete the generation we just read from CURRENT.
+        for _ in 0..8 {
+            match Self::load_generation(&dir, read_current(&dir)?) {
+                Ok(inner) => {
+                    let s = RefStore {
+                        dir,
+                        faults,
+                        compact_threshold: std::sync::atomic::AtomicU64::new(DEFAULT_COMPACT_THRESHOLD),
+                        inner: Mutex::new(inner),
+                    };
+                    s.with_shared(|_| ())?;
+                    return Ok(s);
+                }
+                Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => last_err = Some(Error::Io(e)),
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_err.unwrap_or(Error::Corrupt("could not open ref store".into())))
+    }
+
+    /// Opens generation `g`: its snapshot (none for 0) and its journal.
+    fn load_generation(dir: &Path, g: u64) -> Result<Inner> {
+        let path = dir.join(journal_name(g));
+        let state = if g == 0 {
+            RefState::default()
+        } else {
+            decode_snapshot(&std::fs::read(dir.join(format!("snapshot.{g}")))?)?
+        };
+        let file = if g == 0 {
+            OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path)?
+        } else {
+            OpenOptions::new().read(true).write(true).open(&path)?
+        };
         {
             let _g = FlockGuard::exclusive(&file)?;
             let len = file.metadata()?.len();
@@ -273,32 +472,45 @@ impl RefStore {
                 }
             }
         }
-        let s = RefStore {
-            path,
-            faults,
-            inner: Mutex::new(Inner { file, state: RefState::default(), applied: MAGIC.len() as u64 }),
-        };
-        {
-            let mut g = s.inner.lock().map_err(poisoned)?;
-            let _l = FlockGuard::shared(&g.file)?;
-            Self::catch_up(&mut g, false)?;
-        }
-        Ok(s)
+        Ok(Inner { file, generation: g, state, applied: MAGIC.len() as u64 })
     }
 
-    /// Applies records appended since `applied`. With `exclusive`, a torn tail is truncated.
-    fn catch_up(g: &mut Inner, exclusive: bool) -> Result<()> {
+    /// Switches `g` to generation `next` after reading a tombstone. Falls back
+    /// to `CURRENT` if `next` was itself compacted away already.
+    fn switch(&self, g: &mut Inner, next: u64) -> Result<()> {
+        let fresh = match Self::load_generation(&self.dir, next) {
+            Ok(i) => i,
+            Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                Self::load_generation(&self.dir, read_current(&self.dir)?)?
+            }
+            Err(e) => return Err(e),
+        };
+        if fresh.generation <= g.generation {
+            return Err(Error::Corrupt("ref journal rotation went backwards".into()));
+        }
+        *g = fresh;
+        Ok(())
+    }
+
+    /// Applies records appended since `applied`. With `exclusive`, a torn tail
+    /// is truncated. Returns `true` if it switched generation; the caller
+    /// must then re-lock the new journal and call again.
+    fn catch_up(&self, g: &mut Inner, exclusive: bool) -> Result<bool> {
         let len = g.file.metadata()?.len();
         if len < g.applied {
             return Err(Error::Corrupt("ref journal shrank below applied offset".into()));
         }
         if len == g.applied {
-            return Ok(());
+            return Ok(false);
         }
         let mut buf = vec![0u8; (len - g.applied) as usize];
         g.file.read_exact_at(&mut buf, g.applied)?;
         let (muts, used, err) = parse_records(&buf);
         for m in muts {
+            if let Mutation::Rotated(next) = m {
+                self.switch(g, next)?;
+                return Ok(true);
+            }
             g.state.apply(m);
         }
         g.applied += used as u64;
@@ -310,21 +522,28 @@ impl RefStore {
             g.file.set_len(g.applied)?;
             g.file.sync_all()?;
         }
-        Ok(())
+        Ok(false)
     }
 
     fn with_shared<T>(&self, f: impl FnOnce(&RefState) -> T) -> Result<T> {
         let mut g = self.inner.lock().map_err(poisoned)?;
-        let _l = FlockGuard::shared(&g.file)?;
-        Self::catch_up(&mut g, false)?;
-        Ok(f(&g.state))
+        loop {
+            let _l = FlockGuard::shared(&g.file)?;
+            if !self.catch_up(&mut g, false)? {
+                return Ok(f(&g.state));
+            }
+        }
     }
 
     /// Runs `decide` under the exclusive lock and commits its mutation durably.
     fn commit<T>(&self, decide: impl FnOnce(&RefState) -> Result<(Option<Mutation>, T)>) -> Result<T> {
         let mut g = self.inner.lock().map_err(poisoned)?;
-        let _l = FlockGuard::exclusive(&g.file)?;
-        Self::catch_up(&mut g, true)?;
+        let _l = loop {
+            let l = FlockGuard::exclusive(&g.file)?;
+            if !self.catch_up(&mut g, true)? {
+                break l;
+            }
+        };
         let (m, out) = decide(&g.state)?;
         if let Some(m) = m {
             let rec = encode(&m);
@@ -338,8 +557,66 @@ impl RefStore {
             g.file.sync_data()?;
             g.applied += rec.len() as u64;
             g.state.apply(m);
+            if g.applied > self.compact_threshold.load(std::sync::atomic::Ordering::Relaxed) {
+                // The commit itself is done. A failed compaction is retried on a later commit.
+                let _ = self.rotate_locked(&mut g);
+            }
         }
         Ok(out)
+    }
+
+    /// Compacts while holding the exclusive lock on `g.file`.
+    fn rotate_locked(&self, g: &mut Inner) -> Result<()> {
+        let next = g.generation + 1;
+        self.faults.hit("refs.rotate.snapshot")?;
+        write_atomic(&self.dir, &format!("snapshot.{next}"), &encode_snapshot(&g.state))?;
+        self.faults.hit("refs.rotate.journal")?;
+        write_atomic(&self.dir, &journal_name(next), MAGIC)?;
+        let rec = encode(&Mutation::Rotated(next));
+        if let Err(e) = self.faults.hit("refs.rotate.tombstone") {
+            let _ = g.file.write_all_at(&rec[..rec.len() / 2], g.applied);
+            return Err(e.into());
+        }
+        g.file.write_all_at(&rec, g.applied)?;
+        g.file.sync_data()?;
+        // Committed. From here on, every handle (including this one) moves to `next`.
+        let old = g.generation;
+        let fresh = Self::load_generation(&self.dir, next)?;
+        *g = Inner { state: std::mem::take(&mut g.state), ..fresh };
+        self.faults.hit("refs.rotate.current")?;
+        write_atomic(&self.dir, "CURRENT", format!("{next}\n").as_bytes())?;
+        // Old generations are only needed by handles that haven't caught up.
+        // Those hold open descriptors, and a missing snapshot makes them fall
+        // back to CURRENT.
+        for gen_ in old.saturating_sub(1)..=old {
+            let _ = std::fs::remove_file(self.dir.join(journal_name(gen_)));
+            if gen_ > 0 {
+                let _ = std::fs::remove_file(self.dir.join(format!("snapshot.{gen_}")));
+            }
+        }
+        Ok(())
+    }
+
+    /// Sets the journal size (bytes) that triggers compaction.
+    pub fn set_compact_threshold(&self, bytes: u64) {
+        self.compact_threshold.store(bytes.max(64), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Forces a compaction now.
+    pub fn compact(&self) -> Result<()> {
+        let mut g = self.inner.lock().map_err(poisoned)?;
+        let _l = loop {
+            let l = FlockGuard::exclusive(&g.file)?;
+            if !self.catch_up(&mut g, true)? {
+                break l;
+            }
+        };
+        self.rotate_locked(&mut g)
+    }
+
+    /// Current journal generation (diagnostics).
+    pub fn generation(&self) -> Result<u64> {
+        Ok(self.inner.lock().map_err(poisoned)?.generation)
     }
 
     /// Current value of `name`.
@@ -365,11 +642,39 @@ impl RefStore {
             Ok(m) => {
                 let version = match &m {
                     Mutation::Set(_, v) => v.version,
-                    Mutation::Rule(..) => 0,
+                    Mutation::Rule(..) | Mutation::Rotated(_) | Mutation::Batch(_) => 0,
                 };
                 Ok((Some(m), ReplaceOutcome::Ok { version }))
             }
             Err(conflict) => Ok((None, conflict)),
+        })
+    }
+
+    /// Atomic multi-name OCC replace: either every update commits (in one
+    /// journal record) or none does.
+    pub fn replace_many(
+        &self,
+        updates: &[(Name, Hash)],
+        read_set: &[(Name, Observed)],
+        exists: &dyn Fn(&Hash) -> Result<bool>,
+    ) -> Result<ReplaceManyOutcome> {
+        for (n, h) in updates {
+            if !read_set.iter().any(|(r, _)| r == n) {
+                return Err(Error::TargetNotInReadSet(n.clone()));
+            }
+            if !exists(h)? {
+                return Err(Error::MissingObject(*h));
+            }
+        }
+        self.commit(|s| match s.decide_replace_many(updates, read_set)? {
+            Ok(m) => {
+                let versions = match &m {
+                    Mutation::Batch(v) => v.iter().map(|(_, val)| val.version).collect(),
+                    _ => Vec::new(),
+                };
+                Ok((Some(m), ReplaceManyOutcome::Ok { versions }))
+            }
+            Err(c) => Ok((None, c)),
         })
     }
 
@@ -393,8 +698,8 @@ impl RefStore {
         self.with_shared(|s| s.clone())
     }
 
-    /// Journal path (for diagnostics and tests).
-    pub fn journal_path(&self) -> &Path {
-        &self.path
+    /// Directory of this store.
+    pub fn dir(&self) -> &Path {
+        &self.dir
     }
 }

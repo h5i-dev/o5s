@@ -1,0 +1,9 @@
+name = "pico2peta"
+defaultTargets = ["Pico2peta"]
+
+[[lean_lib]]
+name = "Pico2peta"
+
+[[lean_exe]]
+name = "p2p-model"
+root = "Pico2peta.Exec"

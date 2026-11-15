@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/pack", "crates/refs", "crates/repo", "crates/cli", "crates/backend-s3", "crates/server", "crates/client", "bench/exp1"]
+members = ["crates/core", "crates/pack", "crates/refs", "crates/repo", "crates/cli", "crates/prov", "crates/backend-s3", "crates/server", "crates/client", "bench/exp1", "bench/micro"]
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +13,7 @@ pico2peta-core = { path = "crates/core" }
 pico2peta-pack = { path = "crates/pack" }
 pico2peta-refs = { path = "crates/refs" }
 pico2peta-repo = { path = "crates/repo" }
+pico2peta-prov = { path = "crates/prov" }
 blake3 = "1"
 fastcdc = "3"
 zstd = "0.13"

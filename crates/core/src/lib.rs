@@ -188,6 +188,19 @@ pub trait Repository: ObjectStore {
     /// order: input validation, then the read set (`Conflict`), then the
     /// rule (`Forbidden`). On `Ok`, the new value is durable.
     fn replace(&self, name: &Name, read_set: &[(Name, Observed)], new: Hash) -> Result<ReplaceOutcome>;
+    /// Atomic multi-name OCC replace (API v1.2): every `(name, new)` commits
+    /// together or nothing does. Every target must be in `read_set`. Rules
+    /// are checked per name. Default: single-name updates delegate to
+    /// `replace`, and larger batches are `Unsupported`.
+    fn replace_many(&self, updates: &[(Name, Hash)], read_set: &[(Name, Observed)]) -> Result<ReplaceManyOutcome> {
+        match updates {
+            [(n, h)] => Ok(match self.replace(n, read_set, *h)? {
+                ReplaceOutcome::Ok { version } => ReplaceManyOutcome::Ok { versions: vec![version] },
+                ReplaceOutcome::Conflict { stale } => ReplaceManyOutcome::Conflict { stale },
+            }),
+            _ => Err(Error::Unsupported("replace_many is not supported by this repository")),
+        }
+    }
     /// All refs under `prefix` ("" = all), sorted by name.
     fn list_refs(&self, prefix: &str) -> Result<Vec<(Name, RefValue)>>;
     /// Sets the rule for namespace `prefix`. Fails with
@@ -435,6 +448,15 @@ pub enum ReplaceOutcome {
     /// Committed; the name is now at this version.
     Ok { version: u64 },
     /// Some read-set entries no longer match. Lists `(name, current)`.
+    Conflict { stale: Vec<(Name, Observed)> },
+}
+
+/// Result of a `replace_many` that passed input validation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReplaceManyOutcome {
+    /// All updates committed atomically; new versions in update order.
+    Ok { versions: Vec<u64> },
+    /// Some read-set entries no longer match; nothing was changed.
     Conflict { stale: Vec<(Name, Observed)> },
 }
 

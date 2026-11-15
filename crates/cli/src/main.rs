@@ -85,6 +85,11 @@ enum Cmd {
     Flush,
     /// Repository statistics.
     Stat,
+    /// Provenance: record derivations, query lineage and impact.
+    Prov {
+        #[command(subcommand)]
+        cmd: ProvCmd,
+    },
     /// Run whichever garbage-collection phases are due (plan → sweep → delete).
     /// Safe with concurrent writers. Run it periodically (e.g. from cron).
     /// Roots are the current refs; objects are treated as opaque.
@@ -100,6 +105,28 @@ enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum ProvCmd {
+    /// Record that OP turned inputs into outputs. Roles are given as ROLE=HASH.
+    Record {
+        op: String,
+        #[arg(long = "in")]
+        inputs: Vec<String>,
+        #[arg(long = "out")]
+        outputs: Vec<String>,
+        /// Hash of a parameters object.
+        #[arg(long)]
+        params: Option<Hash>,
+        /// Metadata KEY=VALUE (repeatable).
+        #[arg(long = "meta")]
+        meta: Vec<String>,
+    },
+    /// Show how HASH was made (direct producers), then its full lineage.
+    Why { hash: Hash },
+    /// List everything derived (transitively) from HASH.
+    Impact { hash: Hash },
 }
 
 #[derive(Subcommand)]
@@ -250,6 +277,57 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             }
         }
         Cmd::Flush => r.flush()?,
+        Cmd::Prov { cmd } => {
+            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
+            match cmd {
+                ProvCmd::Record { op, inputs, outputs, params, meta } => {
+                    let roles = |v: Vec<String>| -> Result<std::collections::BTreeMap<String, Hash>, Error> {
+                        v.into_iter()
+                            .map(|e| {
+                                let (k, h) = e
+                                    .split_once('=')
+                                    .ok_or_else(|| Error::Parse(format!("expected ROLE=HASH, got {e:?}")))?;
+                                Ok((k.to_string(), h.parse()?))
+                            })
+                            .collect()
+                    };
+                    let meta = meta
+                        .into_iter()
+                        .map(|e| {
+                            e.split_once('=')
+                                .map(|(k, v)| (k.to_string(), v.to_string()))
+                                .ok_or_else(|| Error::Parse(format!("expected KEY=VALUE, got {e:?}")))
+                        })
+                        .collect::<Result<_, _>>()?;
+                    let rec =
+                        pico2peta_prov::Record { op, params, inputs: roles(inputs)?, outputs: roles(outputs)?, meta };
+                    for h in pico2peta_prov::record(r, &log, &[rec])? {
+                        writeln!(out, "{h}")?;
+                    }
+                }
+                ProvCmd::Why { hash } => {
+                    let p = pico2peta_prov::Provenance::load(r, &log)?;
+                    for (rh, rec) in p.producers(&hash) {
+                        writeln!(out, "record {rh} op={}", rec.op)?;
+                        for (role, h) in &rec.inputs {
+                            writeln!(out, "  in  {role:<12} {h}")?;
+                        }
+                    }
+                    for h in p.lineage(&hash) {
+                        writeln!(out, "lineage {h}")?;
+                    }
+                    if p.producers(&hash).is_empty() {
+                        return Ok(Outcome::Absent);
+                    }
+                }
+                ProvCmd::Impact { hash } => {
+                    let p = pico2peta_prov::Provenance::load(r, &log)?;
+                    for h in p.impact(&hash) {
+                        writeln!(out, "{h}")?;
+                    }
+                }
+            }
+        }
         Cmd::Gc { grace, unsafe_short_grace, dry_run } => {
             let opts = pico2peta_repo::GcOptions {
                 grace: parse_duration(&grace)?,
@@ -258,7 +336,9 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 ..Default::default()
             };
             let repo = local_only("gc is only available for local repositories (run it on the server host)")?;
-            let rep = repo.gc(&opts, &pico2peta_repo::OpaqueObjects)?;
+            // Provenance records keep their inputs alive (but not their outputs).
+            let tracer = pico2peta_prov::ProvTracer { inner: pico2peta_repo::OpaqueObjects };
+            let rep = repo.gc(&opts, &tracer)?;
             if let Some(p) = &rep.planned {
                 writeln!(out, "planned        {p}")?;
             }

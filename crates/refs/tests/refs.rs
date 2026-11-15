@@ -247,6 +247,8 @@ const PREFIXES: &[&str] = &["a", "p", "p/y", "m"];
 
 #[derive(Debug, Clone)]
 enum Op {
+    /// Unique targets (all in the read set, observed truly or by guess) + new values.
+    Many(Vec<(usize, bool)>, u8),
     Replace(usize, Vec<(usize, Option<u8>)>, u8, bool),
     Rule(usize, u8),
     Reopen,
@@ -257,6 +259,7 @@ fn op() -> impl Strategy<Value = Op> {
         6 => (0..NAMES.len(), proptest::collection::vec((0..NAMES.len(), proptest::option::of(0u8..4)), 0..3), any::<u8>(), any::<bool>())
             .prop_map(|(t, rs, v, fresh)| Op::Replace(t, rs, v, fresh)),
         2 => (0..PREFIXES.len(), 0u8..3).prop_map(|(p, r)| Op::Rule(p, r)),
+        2 => (proptest::collection::vec((0..NAMES.len(), any::<bool>()), 1..4), any::<u8>()).prop_map(|(t, v)| Op::Many(t, v)),
         1 => Just(Op::Reopen),
     ]
 }
@@ -267,9 +270,42 @@ proptest! {
     fn matches_model(ops in proptest::collection::vec(op(), 1..60)) {
         let d = tempfile::tempdir().unwrap();
         let mut r = RefStore::open(d.path()).unwrap();
+        r.set_compact_threshold(300); // rotate every few records
         let mut m = Model::default();
         for o in ops {
             match o {
+                Op::Many(mut targets, v) => {
+                    targets.sort_by_key(|t| t.0);
+                    targets.dedup_by_key(|t| t.0);
+                    let rs: Vec<(String, Observed)> = targets.iter().map(|(t, fresh)| {
+                        let nm = NAMES[*t];
+                        (nm.to_string(), if *fresh { m.obs(nm) } else { Observed::Version(7) })
+                    }).collect();
+                    // Model: conflict if any stale; else each rule in order; else apply all.
+                    let expect: std::result::Result<bool, &str> = if rs.iter().any(|(n2, o)| m.obs(n2) != *o) {
+                        Ok(false)
+                    } else {
+                        let mut trial = Model { refs: m.refs.clone(), rules: m.rules.clone() };
+                        let mut res = Ok(true);
+                        for (i, (t, _)) in targets.iter().enumerate() {
+                            // Each update is judged against the pre-state.
+                            let mut probe = Model { refs: m.refs.clone(), rules: m.rules.clone() };
+                            if let Err(e) = probe.replace(NAMES[*t], &rs, h(v as u64 + i as u64)) { res = Err(e); break; }
+                            let ver = m.refs.get(NAMES[*t]).map_or(1, |x| x.1 + 1);
+                            trial.refs.insert(NAMES[*t].to_string(), (h(v as u64 + i as u64), ver));
+                        }
+                        if res == Ok(true) { m.refs = trial.refs; }
+                        res
+                    };
+                    let ups: Vec<(Name, Hash)> = targets.iter().enumerate().map(|(i, (t, _))| (n(NAMES[*t]), h(v as u64 + i as u64))).collect();
+                    let rs2: Vec<(Name, Observed)> = rs.iter().map(|(a, o)| (n(a), *o)).collect();
+                    match (expect, r.replace_many(&ups, &rs2, &yes)) {
+                        (Ok(true), Ok(pico2peta_core::ReplaceManyOutcome::Ok { .. })) => {}
+                        (Ok(false), Ok(pico2peta_core::ReplaceManyOutcome::Conflict { .. })) => {}
+                        (Err(code), Err(e)) => prop_assert_eq!(code, e.code()),
+                        (e, g) => prop_assert!(false, "many: model {:?} vs impl {:?}", e, g),
+                    }
+                }
                 Op::Replace(t, extra, v, fresh) => {
                     let target = NAMES[t];
                     // Usually include the target with its true observation (fresh) or a guess.
@@ -297,6 +333,7 @@ proptest! {
                 Op::Reopen => {
                     drop(r);
                     r = RefStore::open(d.path()).unwrap();
+                    r.set_compact_threshold(300);
                 }
             }
             let got: Vec<(String, Hash, u64)> = r.list("").unwrap().into_iter().map(|(k, v)| (k.to_string(), v.hash, v.version)).collect();
@@ -333,4 +370,149 @@ proptest! {
             let _ = r.replace(&y, &[(y.clone(), Observed::Absent)], h(2), &yes);
         }
     }
+}
+
+#[test]
+fn compaction_preserves_state_and_bounds_files() {
+    let d = tempfile::tempdir().unwrap();
+    let r = RefStore::open(d.path()).unwrap();
+    r.set_compact_threshold(1000);
+    r.set_rule("pkg", Rule::ImmutableAfterPublish).unwrap();
+    let lagging = RefStore::open(d.path()).unwrap(); // never commits; will lag many generations
+    for i in 0..300u64 {
+        let nm = n(&format!("b/{}", i % 7));
+        let obs = RefValue::observed(r.resolve(&nm).unwrap());
+        r.replace(&nm, &[(nm.clone(), obs)], h(i), &yes).unwrap();
+    }
+    let p = n("pkg/x");
+    r.replace(&p, &[(p.clone(), Observed::Absent)], h(1), &yes).unwrap();
+    assert!(r.generation().unwrap() >= 5, "should have rotated several times");
+    let files = std::fs::read_dir(d.path()).unwrap().count();
+    assert!(files <= 6, "old generations are cleaned up ({files} files)");
+    let want = r.snapshot().unwrap();
+    assert_eq!(lagging.snapshot().unwrap(), want, "lagging handle catches up across rotations");
+    assert_eq!(RefStore::open(d.path()).unwrap().snapshot().unwrap(), want);
+    // Rules survive compaction.
+    assert!(matches!(r.replace(&p, &[(p.clone(), Observed::Version(1))], h(2), &yes), Err(Error::Forbidden { .. })));
+    // The lagging handle can commit (on the newest generation).
+    let z = n("z");
+    lagging.replace(&z, &[(z.clone(), Observed::Absent)], h(9), &yes).unwrap();
+    assert_eq!(r.resolve(&z).unwrap().unwrap().hash, h(9));
+}
+
+#[test]
+fn contention_across_rotations() {
+    let d = tempfile::tempdir().unwrap();
+    let c = n("counter");
+    let wins: u64 = std::thread::scope(|sc| {
+        (0..4u64)
+            .map(|t| {
+                let dir = d.path().to_path_buf();
+                let c = c.clone();
+                sc.spawn(move || {
+                    let r = RefStore::open(&dir).unwrap();
+                    r.set_compact_threshold(500);
+                    let mut wins = 0;
+                    while wins < 50 {
+                        let obs = RefValue::observed(r.resolve(&c).unwrap());
+                        if let ReplaceOutcome::Ok { .. } =
+                            r.replace(&c, &[(c.clone(), obs)], h(t * 1000 + wins), &yes).unwrap()
+                        {
+                            wins += 1;
+                        }
+                    }
+                    wins
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|j| j.join().unwrap())
+            .sum()
+    });
+    let r = RefStore::open(d.path()).unwrap();
+    assert_eq!(r.resolve(&c).unwrap().unwrap().version, wins);
+    assert!(r.generation().unwrap() > 3);
+}
+
+#[test]
+fn crash_during_compaction_at_every_point() {
+    for budget in 0..40u64 {
+        let d = tempfile::tempdir().unwrap();
+        let mut committed: BTreeMap<Name, RefValue> = BTreeMap::new();
+        {
+            let r = RefStore::open_with_faults(d.path(), Faults::crash_after(budget)).unwrap();
+            r.set_compact_threshold(200);
+            for i in 0..12u64 {
+                let nm = n(&format!("r/{}", i % 4));
+                let obs = match committed.get(&nm) {
+                    Some(v) => Observed::Version(v.version),
+                    None => Observed::Absent,
+                };
+                match r.replace(&nm, &[(nm.clone(), obs)], h(i), &yes) {
+                    Ok(ReplaceOutcome::Ok { version }) => {
+                        committed.insert(nm, RefValue { hash: h(i), version });
+                    }
+                    Ok(c) => panic!("budget {budget}: unexpected {c:?}"),
+                    Err(_) => break,
+                }
+            }
+        }
+        let r = RefStore::open(d.path()).unwrap_or_else(|e| panic!("budget {budget}: reopen failed: {e}"));
+        let got: BTreeMap<Name, RefValue> = r.list("").unwrap().into_iter().collect();
+        for (k, v) in &committed {
+            let g = got.get(k).unwrap_or_else(|| panic!("budget {budget}: lost {k}"));
+            // At most one unacknowledged later commit may have landed.
+            assert!(g.version == v.version || g.version == v.version + 1, "budget {budget}: {k} {g:?} vs {v:?}");
+        }
+        let z = n("z");
+        r.replace(&z, &[(z.clone(), Observed::Absent)], h(99), &yes).unwrap();
+        assert_eq!(RefStore::open(d.path()).unwrap().resolve(&z).unwrap().unwrap().hash, h(99), "budget {budget}");
+    }
+}
+
+#[test]
+fn replace_many_is_atomic() {
+    let d = tempfile::tempdir().unwrap();
+    let r = RefStore::open(d.path()).unwrap();
+    r.set_rule("pkg", Rule::ImmutableAfterPublish).unwrap();
+    let (a, b, p) = (n("a"), n("b"), n("pkg/x"));
+    let out = r
+        .replace_many(
+            &[(a.clone(), h(1)), (b.clone(), h(2))],
+            &[(a.clone(), Observed::Absent), (b.clone(), Observed::Absent)],
+            &yes,
+        )
+        .unwrap();
+    assert_eq!(out, pico2peta_core::ReplaceManyOutcome::Ok { versions: vec![1, 1] });
+    // One stale entry: nothing changes.
+    let out = r
+        .replace_many(
+            &[(a.clone(), h(3)), (b.clone(), h(4))],
+            &[(a.clone(), Observed::Version(1)), (b.clone(), Observed::Absent)],
+            &yes,
+        )
+        .unwrap();
+    assert!(matches!(out, pico2peta_core::ReplaceManyOutcome::Conflict { .. }));
+    assert_eq!(r.resolve(&a).unwrap().unwrap().hash, h(1));
+    // A rule violation on one name: nothing changes.
+    r.replace(&p, &[(p.clone(), Observed::Absent)], h(5), &yes).unwrap();
+    let e = r.replace_many(
+        &[(a.clone(), h(3)), (p.clone(), h(6))],
+        &[(a.clone(), Observed::Version(1)), (p.clone(), Observed::Version(1))],
+        &yes,
+    );
+    assert!(matches!(e, Err(Error::Forbidden { .. })));
+    assert_eq!(r.resolve(&a).unwrap().unwrap().hash, h(1));
+    // Input validation.
+    assert!(matches!(
+        r.replace_many(&[(a.clone(), h(3))], &[(b.clone(), Observed::Version(1))], &yes),
+        Err(Error::TargetNotInReadSet(_))
+    ));
+    assert!(
+        r.replace_many(&[(a.clone(), h(3)), (a.clone(), h(4))], &[(a.clone(), Observed::Version(1))], &yes).is_err()
+    );
+    // Persisted as one record; survives reopen and compaction.
+    r.compact().unwrap();
+    let r2 = RefStore::open(d.path()).unwrap();
+    assert_eq!(r2.resolve(&b).unwrap().unwrap(), RefValue { hash: h(2), version: 1 });
 }
