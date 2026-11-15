@@ -188,3 +188,43 @@ fn midx_roundtrip_merges_sorted_packs() {
     }
     assert!(m.find_all(&Hash::of(b"absent")).is_empty());
 }
+
+/// Golden vectors for record codec 2 (`GroupedZstd`): the byte-grouping
+/// transform is part of the on-disk format, so its exact output is pinned
+/// here (a change to `pico2peta_weights::bytegroup` that alters bytes must
+/// fail this test, not silently break stored packs).
+#[test]
+fn grouped_codec_golden_and_malformed() {
+    use pico2peta_weights::bytegroup::group;
+    assert_eq!(group(&[0, 1, 2, 3, 4, 5, 6], 2).unwrap(), [0, 2, 4, 1, 3, 5, 6]);
+    assert_eq!(group(&[0, 1, 2, 3, 4, 5, 6, 7, 8], 4).unwrap(), [0, 4, 1, 5, 2, 6, 3, 7, 8]);
+    assert_eq!(group(&[9, 8, 7], 1).unwrap(), [9, 8, 7]);
+
+    // A grouped record built by hand decodes to the original bytes.
+    let raw: Vec<u8> = (0..10_001u32).map(|i| if i % 2 == 0 { (i / 7) as u8 } else { 0x3f }).collect();
+    let mut payload = vec![2u8];
+    payload.extend(zstd::bulk::compress(&group(&raw, 2).unwrap(), 3).unwrap());
+    let rec = encode_record(Kind::Blob, Codec::GroupedZstd, &Hash::of(&raw), raw.len() as u64, &payload);
+    assert_eq!(rec[5], 2, "codec byte on disk");
+    let (h, p) = decode_record(&rec).unwrap();
+    assert_eq!(unpack_payload(&h, p).unwrap(), raw);
+
+    // Malformed: errors, never panics.
+    let bad = |kind: Kind, payload: &[u8], raw_len: u64| {
+        let rec = encode_record(kind, Codec::GroupedZstd, &Hash::of(b"x"), raw_len, payload);
+        let (h, p) = decode_record(&rec).unwrap();
+        assert!(unpack_payload(&h, p).is_err(), "{kind:?} {payload:?}");
+    };
+    bad(Kind::Blob, &[], 0); // no width byte
+    let mut w0 = vec![0u8];
+    w0.extend(zstd::bulk::compress(b"abcd", 3).unwrap());
+    bad(Kind::Blob, &w0, 4); // width 0
+    let mut w99 = vec![99u8];
+    w99.extend(zstd::bulk::compress(b"abcd", 3).unwrap());
+    bad(Kind::Blob, &w99, 4); // width out of range
+    bad(Kind::Blob, &[2, 1, 2, 3], 4); // not zstd
+    bad(Kind::Manifest, &payload, raw.len() as u64); // codec 2 is blob-only
+    let mut short = vec![2u8];
+    short.extend(zstd::bulk::compress(&raw, 3).unwrap());
+    bad(Kind::Blob, &short, 10); // raw_len smaller than the content
+}

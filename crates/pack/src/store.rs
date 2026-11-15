@@ -61,6 +61,18 @@ pub enum ChunkerKind {
     Xet,
 }
 
+/// Per-put options for [`PackStore::put_stream_opts`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PutOpts {
+    /// Content-defined chunker for large objects.
+    pub chunker: ChunkerKind,
+    /// Byte-group chunks with this element width (2 = bf16/fp16, 4 = fp32)
+    /// before zstd (record codec `GroupedZstd`). A hint for fixed-width
+    /// numeric data such as model weights; `None`, 0 or 1 = off. Changes only
+    /// the stored encoding, never identity.
+    pub group_width: Option<u8>,
+}
+
 /// Tunables for the pack store.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PackConfig {
@@ -1204,7 +1216,7 @@ impl PackStore {
         Ok(m)
     }
 
-    fn put_chunks<I>(&self, chunks: I) -> Result<Hash>
+    fn put_chunks<I>(&self, chunks: I, group: Option<u8>) -> Result<Hash>
     where
         I: Iterator<Item = Result<Vec<u8>>>,
     {
@@ -1248,11 +1260,16 @@ impl PackStore {
                         // Skip encoding chunks we already have (dedup); the
                         // committer re-checks before appending.
                         let r = self.lookup_local(&hash).map(|known| {
-                            let rec = known.is_none().then(|| match compress_with_probe(level, probe, &c) {
-                                Some(z) => {
-                                    (Codec::Zstd, encode_record(Kind::Blob, Codec::Zstd, &hash, c.len() as u64, &z))
-                                }
-                                None => (Codec::Raw, encode_record(Kind::Blob, Codec::Raw, &hash, c.len() as u64, &c)),
+                            let rec = known.is_none().then(|| match group {
+                                Some(w) => encode_grouped_or_raw(level, w, &hash, &c),
+                                None => match compress_with_probe(level, probe, &c) {
+                                    Some(z) => {
+                                        (Codec::Zstd, encode_record(Kind::Blob, Codec::Zstd, &hash, c.len() as u64, &z))
+                                    }
+                                    None => {
+                                        (Codec::Raw, encode_record(Kind::Blob, Codec::Raw, &hash, c.len() as u64, &c))
+                                    }
+                                },
                             });
                             (seq, Encoded { data: c, hash, rec })
                         });
@@ -1431,33 +1448,44 @@ impl PackStore {
     /// [`ObjectStore::put_stream`] with an explicit chunker. Objects under
     /// `chunk_threshold` are stored whole either way.
     pub fn put_stream_with(&self, chunker: ChunkerKind, src: &mut dyn Read) -> Result<Hash> {
+        self.put_stream_opts(PutOpts { chunker, group_width: None }, src)
+    }
+
+    /// [`ObjectStore::put_stream`] with explicit options (see [`PutOpts`]).
+    pub fn put_stream_opts(&self, opts: PutOpts, src: &mut dyn Read) -> Result<Hash> {
         let thr = self.inner.cfg.chunk_threshold;
-        if chunker == ChunkerKind::Xet && thr <= pico2peta_chunk::XET_MAX {
+        if opts.chunker == ChunkerKind::Xet && thr <= pico2peta_chunk::XET_MAX {
             // Chunks must stay below the threshold (they're stored as blobs).
             return Err(Error::Parse(format!(
                 "Xet chunking needs pack.chunk_threshold > {} (have {thr})",
                 pico2peta_chunk::XET_MAX
             )));
         }
+        let group = match opts.group_width {
+            None | Some(0 | 1) => None,
+            Some(w) if (w as usize) <= pico2peta_weights::bytegroup::MAX_WIDTH => Some(w),
+            Some(w) => return Err(Error::Parse(format!("byte-group width {w} out of range"))),
+        };
         let mut head = Vec::with_capacity(thr.min(1 << 16));
         src.take(thr as u64).read_to_end(&mut head)?;
         if head.len() < thr {
             return self.put(&head);
         }
         let reader = std::io::Cursor::new(head).chain(src);
-        match chunker {
+        match opts.chunker {
             ChunkerKind::FastCdc => {
                 let cfg = &self.inner.cfg;
                 let cdc = fastcdc::v2020::StreamCDC::new(reader, cfg.cdc_min, cfg.cdc_avg, cfg.cdc_max);
-                self.put_chunks(cdc.map(|r| {
+                let chunks = cdc.map(|r| {
                     r.map(|c| c.data).map_err(|e| match e {
                         fastcdc::v2020::Error::IoError(io) => Error::Io(io),
                         other => Error::Corrupt(format!("chunker: {other:?}")),
                     })
-                }))
+                });
+                self.put_chunks(chunks, group)
             }
             ChunkerKind::Xet => {
-                self.put_chunks(LengthChunks::new(reader, Box::new(pico2peta_chunk::XetChunker::new())))
+                self.put_chunks(LengthChunks::new(reader, Box::new(pico2peta_chunk::XetChunker::new())), group)
             }
         }
     }
@@ -1608,6 +1636,18 @@ impl PackStore {
     /// Like [`PackStore::put_delta_impl`] with an explicit alignment (for formats
     /// whose regions move between versions, such as reordered tensors).
     pub fn put_delta_mapped_impl(&self, base: &Hash, segs: Option<&[DeltaSeg]>, src: &mut dyn Read) -> Result<Hash> {
+        self.put_delta_opts(base, segs, src, None)
+    }
+
+    /// Like [`PackStore::put_delta_mapped_impl`], byte-grouping the XOR
+    /// stream's chunks with `group_width` (see [`PutOpts::group_width`]).
+    pub fn put_delta_opts(
+        &self,
+        base: &Hash,
+        segs: Option<&[DeltaSeg]>,
+        src: &mut dyn Read,
+        group_width: Option<u8>,
+    ) -> Result<Hash> {
         if !self.ensure_live_impl(base)? {
             return Err(Error::NotFound(*base));
         }
@@ -1624,7 +1664,7 @@ impl PackStore {
             len: 0,
             tmp: Vec::new(),
         };
-        let xor = self.put_stream(&mut xs)?;
+        let xor = self.put_stream_opts(PutOpts { chunker: ChunkerKind::FastCdc, group_width }, &mut xs)?;
         let hash = Hash(*xs.hasher.finalize().as_bytes());
         let len = xs.len;
         if self.dedup_hit(&hash)? {
@@ -1833,7 +1873,7 @@ impl ObjectStore for PackStore {
         if data.len() >= self.inner.cfg.chunk_threshold {
             let cfg = &self.inner.cfg;
             let cdc = fastcdc::v2020::FastCDC::new(data, cfg.cdc_min, cfg.cdc_avg, cfg.cdc_max);
-            return self.put_chunks(cdc.map(|c| Ok(data[c.offset..c.offset + c.length].to_vec())));
+            return self.put_chunks(cdc.map(|c| Ok(data[c.offset..c.offset + c.length].to_vec())), None);
         }
         let hash = Hash::of(data);
         if self.dedup_hit(&hash)? {
@@ -1870,6 +1910,21 @@ impl ObjectStore for PackStore {
     fn put_delta_mapped(&self, base: &Hash, segments: &[(u64, u64, u64)], src: &mut dyn Read) -> Result<Hash> {
         let segs: Vec<DeltaSeg> = segments.iter().map(|&(dst, src, len)| DeltaSeg { dst, src, len }).collect();
         self.put_delta_mapped_impl(base, Some(&segs), src)
+    }
+
+    fn put_stream_grouped(&self, src: &mut dyn Read, width: u8) -> Result<Hash> {
+        self.put_stream_opts(PutOpts { chunker: ChunkerKind::FastCdc, group_width: Some(width) }, src)
+    }
+
+    fn put_delta_mapped_grouped(
+        &self,
+        base: &Hash,
+        segments: &[(u64, u64, u64)],
+        src: &mut dyn Read,
+        width: u8,
+    ) -> Result<Hash> {
+        let segs: Vec<DeltaSeg> = segments.iter().map(|&(dst, src, len)| DeltaSeg { dst, src, len }).collect();
+        self.put_delta_opts(base, Some(&segs), src, Some(width))
     }
 
     fn contains(&self, hash: &Hash) -> Result<bool> {
@@ -2061,6 +2116,27 @@ fn compress_with_probe(level: i32, probe: bool, raw: &[u8]) -> Option<Vec<u8>> {
         }
     }
     zstd_compress(raw, level).filter(|c| c.len() < raw.len())
+}
+
+/// Encodes a blob record as `GroupedZstd` (`width u8 | zstd(group(raw))`),
+/// or raw if that doesn't make it smaller (or compression is off).
+fn encode_grouped_or_raw(level: i32, width: u8, hash: &Hash, raw: &[u8]) -> (Codec, Vec<u8>) {
+    let raw_rec = || (Codec::Raw, encode_record(Kind::Blob, Codec::Raw, hash, raw.len() as u64, raw));
+    if level == 0 || raw.len() < 64 {
+        return raw_rec();
+    }
+    let Ok(g) = pico2peta_weights::bytegroup::group(raw, width as usize) else {
+        return raw_rec();
+    };
+    match zstd_compress(&g, level) {
+        Some(z) if z.len() + 1 < raw.len() => {
+            let mut payload = Vec::with_capacity(z.len() + 1);
+            payload.push(width);
+            payload.extend_from_slice(&z);
+            (Codec::GroupedZstd, encode_record(Kind::Blob, Codec::GroupedZstd, hash, raw.len() as u64, &payload))
+        }
+        _ => raw_rec(),
+    }
 }
 
 thread_local! {

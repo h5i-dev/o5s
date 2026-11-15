@@ -22,7 +22,7 @@ pub use fsck::FsckReport;
 pub use gc::{GcOptions, GcReport, GroupKey, Grouper, OpaqueObjects, Tracer};
 use pico2peta_core::backend::{Backend, LocalDisk};
 use pico2peta_core::{Error, Hash, Name, ObjectStore, Observed, RefValue, ReplaceOutcome, Repository, Result, Rule};
-pub use pico2peta_pack::ChunkerKind;
+pub use pico2peta_pack::{ChunkerKind, PutOpts};
 use pico2peta_pack::{PackStats, PackStore};
 use pico2peta_refs::RefStore;
 use serde::{Deserialize, Serialize};
@@ -327,7 +327,14 @@ impl LocalRepo {
     /// [`ChunkingSection`]). Doesn't create the name; it only decides how the
     /// object's chunks are cut.
     pub fn put_stream_for(&self, name: &Name, src: &mut dyn Read) -> Result<Hash> {
-        self.packs.put_stream_with(self.chunking.for_name(name.as_str()).into(), src)
+        self.put_stream_for_grouped(name, src, None)
+    }
+
+    /// [`LocalRepo::put_stream_for`] with an optional byte-grouping hint (see
+    /// [`ObjectStore::put_stream_grouped`]).
+    pub fn put_stream_for_grouped(&self, name: &Name, src: &mut dyn Read, width: Option<u8>) -> Result<Hash> {
+        let chunker = self.chunking.for_name(name.as_str()).into();
+        self.packs.put_stream_opts(PutOpts { chunker, group_width: width }, src)
     }
 
     /// Repository root.
@@ -369,6 +376,18 @@ impl ObjectStore for LocalRepo {
     }
     fn put_delta_mapped(&self, base: &Hash, segments: &[(u64, u64, u64)], src: &mut dyn Read) -> Result<Hash> {
         self.packs.put_delta_mapped(base, segments, src)
+    }
+    fn put_stream_grouped(&self, src: &mut dyn Read, width: u8) -> Result<Hash> {
+        self.packs.put_stream_opts(PutOpts { chunker: self.chunking.default.into(), group_width: Some(width) }, src)
+    }
+    fn put_delta_mapped_grouped(
+        &self,
+        base: &Hash,
+        segments: &[(u64, u64, u64)],
+        src: &mut dyn Read,
+        width: u8,
+    ) -> Result<Hash> {
+        self.packs.put_delta_mapped_grouped(base, segments, src, width)
     }
     fn get(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Vec<u8>> {
         self.packs.get(hash, range)
