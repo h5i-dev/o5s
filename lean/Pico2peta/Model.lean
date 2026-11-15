@@ -131,7 +131,8 @@ open Classical in
 /-- Sets a namespace rule. Refused if any ref lies under the prefix, so a
 rule can never change for a name that already exists. -/
 noncomputable def setRule (s : State H B) (p : Name) (r : Rule) : Outcome × State H B :=
-  if ∃ n, p.isPrefixOf n = true ∧ s.refs n ≠ none then (.err .ruleChangeOnNonEmpty, s)
+  if s.rules.lookup p = some r then (.ok 0, s) -- idempotent (as `decide_set_rule`)
+  else if ∃ n, p.isPrefixOf n = true ∧ s.refs n ≠ none then (.err .ruleChangeOnNonEmpty, s)
   else (.ok 0, { s with rules := (p, r) :: s.rules.filter (fun x => !(decide (x.1 = p))) })
 
 inductive Op (H B : Type) where

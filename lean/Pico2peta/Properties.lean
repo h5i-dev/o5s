@@ -44,7 +44,9 @@ theorem replace_objects (s : State H B) n rs new : (replace s n rs new).2.object
   split <;> rfl
 
 theorem setRule_objects (s : State H B) p r : (setRule s p r).2.objects = s.objects := by
-  unfold setRule; split <;> rfl
+  unfold setRule; split
+  · rfl
+  · split <;> rfl
 
 theorem objects_stable (hashOf : B → H) (s : State H B) (op : Op H B) (h : H) (x : B)
     (hx : s.objects h = some x) : (step hashOf s op).2.objects h = some x := by
@@ -172,6 +174,8 @@ theorem frozen_step (hashOf : B → H) (s : State H B) (op : Op H B) n v
     split <;> exact ⟨hv, hm⟩
   | setRule p r =>
     simp only [step, setRule]
+    split
+    · exact ⟨hv, hm⟩
     split
     · exact ⟨hv, hm⟩
     · rename_i hno

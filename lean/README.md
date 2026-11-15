@@ -31,3 +31,16 @@ cd lean && lake build
 ```
 
 `.lake` is a symlink to scratch on the dev host.
+
+## Differential testing (Cedar-style)
+
+`Pico2peta/Exec.lean` is an executable form of the model (`lake build p2p-model`).
+Its only non-spec definition, `setRuleC`, is proved equal to the spec's
+`setRule` (`setRuleC_eq`). `crates/refs/tests/lean_diff.rs` runs 300 random
+operation sequences through both the Rust `RefStore` (with compaction forced
+every few records) and the Lean binary, and requires identical outcomes.
+Set `P2P_REQUIRE_LEAN=1` to fail rather than skip when the binary is missing.
+
+The difftest already paid off once. Writing it exposed that the Lean
+`setRule` lacked the Rust idempotency rule (re-setting the same rule on a
+non-empty prefix is `Ok`). The model was fixed and the proofs re-checked.

@@ -83,7 +83,9 @@ theorem replace_other_refs (s : State H B) m rs new n (hmn : m ≠ n) :
   · simp [update, Ne.symm hmn]
 
 theorem setRule_refs (s : State H B) q r : (setRule s q r).2.refs = s.refs := by
-  unfold setRule; split <;> rfl
+  unfold setRule; split
+  · rfl
+  · split <;> rfl
 
 theorem put_refs (hashOf : B → H) (s : State H B) d : (put hashOf s d).refs = s.refs := by
   unfold put; split <;> rfl
