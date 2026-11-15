@@ -75,7 +75,8 @@ fn bf16ish(n: usize, seed: u8) -> Vec<u8> {
 fn profiles_drive_put_named_and_derive_from_previous() {
     let d = tempfile::tempdir().unwrap();
     let toy = Toy::new("toy", "toy/");
-    let profile = Profile { front: Some("toy".into()), chunker: None, derive: DerivePolicy::Previous };
+    let profile =
+        Profile { front: Some("toy".into()), chunker: None, derive: DerivePolicy::Previous, ..Default::default() };
     let r = LocalRepo::init_config(d.path(), &cfg(&[("t", profile)], &[("data/", "t")]))
         .unwrap()
         .with_fronts(FrontRegistry::new().with(toy.clone()).unwrap())
@@ -183,7 +184,7 @@ fn config_validation() {
     let r = LocalRepo::init_config(d.path().join("c"), &cfg(&[("p", p)], &[("m/", "p")])).unwrap();
     assert!(matches!(r.with_fronts(FrontRegistry::new()), Err(Error::Parse(_))));
     // Profiles round-trip through config.toml.
-    let p = Profile { front: None, chunker: Some("xet".into()), derive: DerivePolicy::Previous };
+    let p = Profile { front: None, chunker: Some("xet".into()), derive: DerivePolicy::Previous, ..Default::default() };
     let c = cfg(&[("w", p)], &[("models/", "w")]);
     LocalRepo::init_config(d.path().join("e"), &c).unwrap();
     assert_eq!(LocalRepo::read_config(&d.path().join("e")).unwrap(), c);

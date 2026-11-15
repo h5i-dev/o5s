@@ -19,10 +19,17 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
 | item | state |
 |---|---|
 | P1 Front API (core) | **done**: API v1.14–v1.16. Profiles, fronts, nested prefix claims, front handles, the idmap, `put_named`, per-GC tracer snapshots. Net ported Git, OCI, HF (incl. Xet), PyPI, npm and Maven onto it. |
-| Ordering building block (ORDERING.md, replaces step 3) | **built**: `crates/order` (features, similarity order, frames with references), `bench/exp3`, and production grouped repack with Frame3 records. Exp3 is pre-registered (§6.6, with a dated dev-set amendment). Dev set only: no-hints A4 = ripgrep 0.847, jq 0.794 vs V2 0.850 / 0.928. **redis, git.git and weights are not run yet** (batch phase). Packages smoke: A4 = 0.806× archive order. |
+| Ordering building block (ORDERING.md, replaces step 3) | **built and evaluated.** Experiment 3 (§6.6, official run 2026-11-15) is a pre-registered **FAIL on jq's build time only** (re-timed 1.179 > 1.0). Size is a **STRONG PASS**: V\* = A3 geomean 0.842, max 0.947, and Git storage parity holds on every repo including the held-out redis (0.947) and git.git (0.796). Reads, RSS, and builds on the other three repos pass. A4 (no hints) is within 0.4 % of A3. Generalization: packages yes (0.806×), weights no (0.999×; that's the XOR-delta path's job). It ships as the repack layout (it beats A0 everywhere). Details: `docs/EXP1.md`. |
 | Generic front (§6.4) | **harness written** (`p2p-bench generic`), not yet run at the pre-registered 1 GiB. The 64 MiB smoke run suggests storage passes (1.06× / 1.16× one copy), while the verified-read ratio may fail (see Questions). |
 | Perf pass (a)–(e) | (a) put is CPU-bound by host contention (schedstat), no change; (b) verified read 870 → 1,880 MB/s; (c) 1 KiB put 75k → 129k/s, get 97k → 286k/s; (d) group commit 1.76× at 4 threads, 2.04× at 8; (e) net (clone wire bytes 0.98× git-daemon in their smoke run). Plus: frame prefix decoding and a per-thread zstd decompression context (net's profile). |
 | Chunk-anchored XOR deltas | **done** (v1.16): generic derived objects for edits and insertions. |
+| P5 cross-domain (ROADMAP item 3) | **in progress.** Done:
+  - **attestations and promotion** (`crates/attest`: in-toto Statement v1 in DSSE envelopes, Ed25519 behind `Signer`/`Verifier` traits, stored as provenance records; `promote(src → dst, policy)` as one OCC transaction with required signatures and provenance, audited as a `promote` record);
+  - **search** (`pico2peta_prov::search`: exact, prefix and full text over names and metadata, incremental from the append-only log);
+  - **retention** (`keep_versions` / `only_if_regenerable` per profile, `pico2peta_prov::retention::apply`, rules respected, dry run exact);
+  - **cross-domain dedup** test: the same 16 MiB stored raw, as a Git blob and inside a tar layer costs **+1.26 %** for the two extra framings (`crates/repo/tests/dedup.rs`; compressed containers aren't claimed).
+
+  Next: a provenance API for fronts (names and external ids on subjects), and CLI/server wiring (net). |
 
 **Speed-up work (`docs/RESEARCH_SPEEDUP.md`, from the human; split with net on 2026-11-15)**
 - **§1 (core): done.** Streaming put pipeline, compressibility probe, incremental pack hash. On tmpfs (CPU-bound), incompressible `put_stream` went from 331 to **739 MB/s** (2.2×; median of 5 interleaved reps on a loaded host, load 2.9–5.2), text from 228 to 328 MB/s, dedup re-put from ~630 to ~900 MB/s. On NVMe, incompressible stays at the device's ~200 MB/s fsync ceiling. **§1a's ≥ 800 MB/s target was not met** (best run 791 MB/s); text is compression-bound in the workers. The probe gave no measurable gain (zstd already bails out fast on random data). Details, profiles and the ablation: `docs/BENCH.md`.

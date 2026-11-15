@@ -161,6 +161,15 @@ impl RefState {
         Ok(Ok((Mutation::Txn(ms), versions)))
     }
 
+    /// Whether name rules allow deleting `name` at all (ignoring OCC), using
+    /// the same decision as [`RefState::decide_delete`]. For tools that plan
+    /// deletions (retention dry runs).
+    pub fn rules_allow_delete(rules: &[(String, Rule)], name: &Name) -> bool {
+        let rules: BTreeMap<String, Rule> = rules.iter().cloned().collect();
+        let (rule, prefix) = governing(rules.iter(), Rule::Mutable, name);
+        matches!(mobility(rule, &prefix, name), Mobility::Mutable)
+    }
+
     /// Decides an OCC delete (pure). Deleting an absent name is a no-op
     /// (`Ok(None)`). Create-once and forbidden names can't be deleted.
     pub fn decide_delete(

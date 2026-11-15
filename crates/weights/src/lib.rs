@@ -436,7 +436,12 @@ mod tests {
         let explicit = dir_size(&d1.path().join("objects"), &r1) - s0;
         // Profile path.
         let d2 = tempfile::tempdir().unwrap();
-        let p = Profile { front: Some(SAFETENSORS_FRONT.into()), chunker: None, derive: DerivePolicy::Previous };
+        let p = Profile {
+            front: Some(SAFETENSORS_FRONT.into()),
+            chunker: None,
+            derive: DerivePolicy::Previous,
+            ..Default::default()
+        };
         let cfg = pico2peta_repo::RepoConfig {
             format: pico2peta_repo::FORMAT_VERSION,
             pack: (&PackConfig::default()).into(),
