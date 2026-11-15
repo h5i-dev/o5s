@@ -505,6 +505,7 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
   - small segments are merged against the decoded-segment cache;
   - large segments are split recursively around probe entries (through the page cache) until a sub-range holds about one key per 64 KiB page, or fits one 4 MiB window; that range is then read sequentially in 4 MiB-aligned ranged reads (bypassing the page cache) and merged;
   - results come back in input order.
+  - Follow-up (same file, lead told): the dense-scan path reads through the page cache. Runs of missing 64 KiB pages are fetched with one ranged read of ≤4 MiB each. `PAGE_CACHE_BYTES` went from 64 to 128 MiB.
   - Proptest `get_many_matches_per_key_lookups` (1–4 segments of up to 3 × `CACHE_WHOLE` entries, overrides by newer segments, misses, duplicates, dense and sparse batches) checks it against per-key `get_in`, plus a deterministic edge test. `proptest` became a dev-dependency of `pico2peta-repo`.
 - `crates/cli/src/main.rs`: wrapped a bare URL in a doc comment in `<…>` so that `cargo doc -D warnings` (CI docs job) passes.
 
