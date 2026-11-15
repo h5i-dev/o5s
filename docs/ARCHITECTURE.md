@@ -126,3 +126,25 @@ dangling ref.
 
 Crash consistency (fsync honesty, atomic rename, create-only puts) is assumed by the proofs and tested
 by fault injection at every write/fsync point plus real SIGKILLs.
+
+## Deployment topology and limits
+
+- **One ref authority per repository.** The ref journal is a local file with `flock`-based commit,
+  so all `replace`/`delete`/`update_many` for a repository must go through one host: a `LocalRepo` on
+  that host, or the server running there. Any number of processes *on that host* can share it.
+- **Packs can live on S3** (`open_with_backend`). Pack and index blobs are create-only and
+  content-named, so they're safe even if several hosts write the same bucket. But only one host may own
+  the refs (see above), and staging stays local to each writer.
+- **Not yet supported:** several servers sharing one repository's refs. That would need a ref store on
+  S3 conditional writes (`If-Match` on a journal/snapshot object, or a per-shard object CAS) or an external
+  database. The `RefStore` decision logic (`RefState::decide_*`) is pure and storage-independent, so this is a
+  storage swap, not a semantic change.
+
+## Backup, restore and integrity
+
+- **Consistent backup:** copy `refs/` first, then `objects/`. Objects are immutable and the refs only point at
+  flushed objects, so a backup taken in this order is consistent even while writers run. Objects written
+  after the refs copy are just unreferenced. Pause GC for the duration, because GC is what deletes packs.
+- **Restore:** put both directories back and run `pico2peta fsck`.
+- **Integrity:** `pico2peta fsck` reads and verifies every object and ref. Every normal read also verifies
+  checksums and content hashes, so corruption is reported, never returned as data.

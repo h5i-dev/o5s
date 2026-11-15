@@ -70,6 +70,7 @@
 - **Provenance scale (addressed).** Log nodes (`P2PPLOG2`) carry checkpoint indexes (`P2PPIDX1`, sorted forward and backward tables), rebuilt geometrically when recent records reach max(1024, total/8). `Provenance::load` reads only the recent tail. Older lookups are O(log n) ranged reads, and records are fetched on demand. Remaining: checkpoint rebuild is a full rewrite, O(n) at each geometric step, so a level-based LSM would cut write amplification at 10^8+ records.
 - **Ref store scale.** All refs live in memory (~150 B each), and compaction rewrites a full snapshot. That's fine to ~10^6 names, strained at 10^7. Scaling needs a sharded journal per prefix, or an LSM. Net was advised to keep per-blob OCI links in segment maps, not refs.
 - **Small packs.** `replace` and `flush` seal the writer's open pack, so chatty writers make many small packs. GC consolidates packs under 16 MiB (`small_pack_bytes`). Run GC regularly (cron, or the server's background GC).
+- **Single ref authority per repository.** Refs are a local journal, so multi-host writers to one repository's names need a ref store on S3 conditional writes or a database. The decision logic is already pure (`RefState::decide_*`). See ARCHITECTURE.md, "Deployment topology".
 - **Ambiguous outcome on I/O error.** If an fsync fails during `replace`, the record may still be durable. The caller must re-`resolve` to find out (documented, as in most databases).
 
 ## Environment notes
