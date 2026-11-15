@@ -320,6 +320,13 @@ The contended run checks that no update is lost: the final version equals the nu
   - Partial: `filter blob:none` and `blob:limit=<n>[kmg]`.
   - Non-tip wants (lazy fetches) are allowed only if reachable from this repo's refs, since object ids are global across repos.
   - Real-git test `shallow_and_partial_clone`, including refusing another repo's object.
+- ROADMAP Net 2, Git, "bitmaps or equivalent" and "served-pack size": measured, no change needed.
+  - Development check on redis heads+tags (not a benchmark result): a clone sends 130.8 MB, against 226.9 MB from git daemon (the earlier batch rows), so ~0.58× git's bytes. The "1.8×" premise doesn't hold for the current code. `fsck` is clean.
+  - Profile of that clone (23.7 s vs git daemon ~13 s):
+    - object walk (`walk_paths_with`) 0.6%: a reachability cache would buy nothing measurable;
+    - the store read path ~45%: zstd ~31%, BLAKE3 verify ~10%, crc ~2% (the core landed per-thread DCtx reuse);
+    - the front's delta encoder ~23%.
+  - Remaining clone-time levers: a faster `encode_delta` (rolling block hash), and `?verify=eof`-style reads for clone serving where the repo allows it.
 - Security fix (ROADMAP item 6, done early): SSRF in the proxy-caches. Upstream listings (and redirects) could point the server at any URL, including the EC2 metadata service. Fetches and every redirect hop are now limited to http(s) on the upstream's host plus `file_hosts` (`pypi.org` implies `files.pythonhosted.org`). Unit test `upstream_fetches_stay_on_allowed_hosts`.
 - ROADMAP Net 2, Git: `object-format=sha256` DONE.
   - `Oid` is now 20 or 32 bytes; `Fmt` is per repository, from `[git] sha256_repos` name prefixes.
