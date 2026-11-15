@@ -50,6 +50,13 @@ pub struct PackSection {
     pub cdc_max: u32,
     pub pack_cap: u64,
     pub zstd_level: i32,
+    /// Added after format 1 shipped; defaults keep old configs readable.
+    #[serde(default = "default_fanout")]
+    pub manifest_fanout: usize,
+}
+
+fn default_fanout() -> usize {
+    pico2peta_pack::store::DEFAULT_MANIFEST_FANOUT
 }
 
 impl From<&PackConfig> for PackSection {
@@ -61,6 +68,7 @@ impl From<&PackConfig> for PackSection {
             cdc_max: c.cdc_max,
             pack_cap: c.pack_cap,
             zstd_level: c.zstd_level,
+            manifest_fanout: c.manifest_fanout,
         }
     }
 }
@@ -74,6 +82,7 @@ impl From<&PackSection> for PackConfig {
             cdc_max: c.cdc_max,
             pack_cap: c.pack_cap,
             zstd_level: c.zstd_level,
+            manifest_fanout: c.manifest_fanout,
         }
     }
 }
@@ -193,6 +202,9 @@ impl ObjectStore for LocalRepo {
     fn contains(&self, hash: &Hash) -> Result<bool> {
         self.packs.contains(hash)
     }
+    fn ensure_live(&self, hash: &Hash) -> Result<bool> {
+        self.packs.ensure_live(hash)
+    }
     fn flush(&self) -> Result<()> {
         self.packs.flush()
     }
@@ -204,11 +216,12 @@ impl Repository for LocalRepo {
     }
 
     fn replace(&self, name: &Name, read_set: &[(Name, Observed)], new: Hash) -> Result<ReplaceOutcome> {
-        // Publish our objects first, so a ref never points at an object that
-        // other handles can't see.
+        // Make sure the target is in live (non-condemned) storage, then publish
+        // our objects, so a ref never points at an object other handles can't
+        // see or that GC is about to delete.
+        let live = self.packs.ensure_live(&new)?;
         self.packs.flush()?;
-        let packs = &self.packs;
-        self.refs.replace(name, read_set, new, &|h| packs.contains(h))
+        self.refs.replace(name, read_set, new, &|_| Ok(live))
     }
 
     fn replace_many(
@@ -216,9 +229,14 @@ impl Repository for LocalRepo {
         updates: &[(Name, Hash)],
         read_set: &[(Name, Observed)],
     ) -> Result<pico2peta_core::ReplaceManyOutcome> {
+        let mut missing = None;
+        for (_, h) in updates {
+            if !self.packs.ensure_live(h)? {
+                missing = Some(*h);
+            }
+        }
         self.packs.flush()?;
-        let packs = &self.packs;
-        self.refs.replace_many(updates, read_set, &|h| packs.contains(h))
+        self.refs.replace_many(updates, read_set, &|h| Ok(missing != Some(*h)))
     }
 
     fn list_refs(&self, prefix: &str) -> Result<Vec<(Name, RefValue)>> {
@@ -298,5 +316,20 @@ mod tests {
         )
         .unwrap();
         assert!(LocalRepo::open(d.path()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod config_compat {
+    #[test]
+    fn format1_config_without_fanout_still_loads() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(
+            d.path().join("config.toml"),
+            "format = 1\n[pack]\nchunk_threshold = 1048576\ncdc_min = 16384\ncdc_avg = 65536\ncdc_max = 262144\npack_cap = 268435456\nzstd_level = 3\n",
+        )
+        .unwrap();
+        let c = super::LocalRepo::read_config(d.path()).unwrap();
+        assert_eq!(c.pack.manifest_fanout, pico2peta_pack::store::DEFAULT_MANIFEST_FANOUT);
     }
 }

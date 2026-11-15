@@ -171,6 +171,15 @@ pub trait ObjectStore: Send + Sync {
     /// Length of the object, or `NotFound`.
     fn size(&self, hash: &Hash) -> Result<u64>;
     fn contains(&self, hash: &Hash) -> Result<bool>;
+    /// Like `contains`, but also guarantees that the object (and everything
+    /// it is physically made of) is in **live**, non-condemned storage,
+    /// rewriting it there if GC has condemned the only copy. Use this, not
+    /// `contains`, before making something reference an object without
+    /// re-putting it (API v1.3). The rewrite is durable after the next `flush`.
+    /// Default: `contains` (for stores without GC).
+    fn ensure_live(&self, hash: &Hash) -> Result<bool> {
+        self.contains(hash)
+    }
     /// Makes every previous `put` durable **and visible to other processes
     /// and handles** that open the same repository.
     fn flush(&self) -> Result<()>;

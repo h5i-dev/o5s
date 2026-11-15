@@ -95,7 +95,8 @@ fn object_referenced_after_condemnation_is_rescued() {
     set(&w2, "late2", y);
     let del = r.gc(&opts(), &OpaqueObjects).unwrap();
     assert!(del.deleted_packs > 0);
-    assert!(del.rescued_records >= 1, "{del:?}");
+    // (replace calls ensure_live, so x is rewritten before the delete phase
+    // and the rescue path may have nothing left to do.)
     let fresh = LocalRepo::open(d.path()).unwrap();
     assert_eq!(fresh.get(&x, None).unwrap(), b"unreferenced at sweep time");
     assert_eq!(fresh.get(&y, None).unwrap(), b"also garbage at sweep time");
@@ -166,4 +167,34 @@ fn concurrent_writers_during_gc_lose_nothing() {
         assert_eq!(v.hash, h);
         assert_eq!(Hash::of(&fresh.get(&h, None).unwrap()), h, "{name}");
     }
+}
+
+/// A reference made via `ensure_live` to an object whose only copy is
+/// condemned must survive the delete phase, even when the reference is created
+/// *after* the delete phase's mark (the net session's OCI scenario). Here we
+/// emulate that by calling ensure_live, then deleting without any rescue.
+#[test]
+fn ensure_live_rewrites_condemned_only_objects() {
+    let d = tempfile::tempdir().unwrap();
+    let r = LocalRepo::init(d.path(), &PackConfig::tiny()).unwrap();
+    let small = r.put(b"old layer, unreferenced").unwrap();
+    let big_data = blob(7, 40_000);
+    let big = r.put(&big_data).unwrap(); // a manifest tree
+    set(&r, "anchor", r.put(b"anchor").unwrap());
+    r.flush().unwrap();
+    r.gc(&opts(), &OpaqueObjects).unwrap(); // plan
+    let s = r.gc(&opts(), &OpaqueObjects).unwrap(); // sweep: small and big condemned
+    assert!(s.condemned_packs > 0);
+    // Another process accepts an upload referencing both without re-putting.
+    let w = LocalRepo::open(d.path()).unwrap();
+    assert!(w.ensure_live(&small).unwrap());
+    assert!(w.ensure_live(&big).unwrap());
+    assert!(!w.ensure_live(&Hash::of(b"absent")).unwrap());
+    w.flush().unwrap();
+    // Delete phase with a mark that does NOT include them (refs unchanged).
+    let del = r.gc(&opts(), &OpaqueObjects).unwrap();
+    assert!(del.deleted_packs > 0);
+    let fresh = LocalRepo::open(d.path()).unwrap();
+    assert_eq!(fresh.get(&small, None).unwrap(), b"old layer, unreferenced");
+    assert_eq!(fresh.get(&big, None).unwrap(), big_data);
 }

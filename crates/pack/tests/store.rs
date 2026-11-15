@@ -40,7 +40,7 @@ fn small_and_large_roundtrip_with_reopen() {
         assert_eq!(s.get(&h1, None).unwrap(), b"hello");
         assert_eq!(s.get(&h2, None).unwrap(), big);
         assert_eq!(s.get(&h2, Some(1000..15000)).unwrap(), &big[1000..15000]);
-        assert_eq!(s.stats().unwrap().manifests, 1);
+        assert!(s.stats().unwrap().manifests >= 1);
         s.flush().unwrap();
     }
     let s = open(d.path(), PackConfig::tiny());
@@ -295,4 +295,93 @@ proptest! {
             }
         }
     }
+}
+
+#[test]
+fn manifest_tree_bounded_fanout_and_ranges() {
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig::tiny(); // fanout 4
+    let s = open(d.path(), cfg.clone());
+    let data = pseudo(300_000, 99); // ~1200 chunks → 5+ levels
+    let h = s.put_stream(&mut &data[..]).unwrap();
+    assert_eq!(h, Hash::of(&data));
+    // Every manifest node has at most `fanout` entries; every key is a content hash.
+    let mut stack = vec![h];
+    let mut nodes = 0;
+    while let Some(x) = stack.pop() {
+        if let Some(kids) = s.chunks(&x).unwrap() {
+            nodes += 1;
+            assert!(kids.len() <= cfg.manifest_fanout, "node {x} has {} entries", kids.len());
+            let bytes = s.get(&x, None).unwrap();
+            assert_eq!(Hash::of(&bytes), x, "interior node keyed by content hash");
+            stack.extend(kids);
+        }
+    }
+    assert!(nodes > 50, "expected a deep tree, got {nodes} nodes");
+    for (a, b) in [(0, 1), (12_345, 99_999), (299_000, 300_000), (0, 300_000), (150_000, 150_000)] {
+        assert_eq!(s.get(&h, Some(a..b)).unwrap(), &data[a as usize..b as usize]);
+    }
+    // put (slice) and put_stream build the identical tree.
+    assert_eq!(s.put(&data).unwrap(), h);
+    s.flush().unwrap();
+    let s2 = open(d.path(), cfg);
+    assert_eq!(s2.get(&h, None).unwrap(), data);
+}
+
+#[test]
+fn exact_fanout_boundary_objects() {
+    // Objects whose chunk count is exactly fanout^k must also round-trip.
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { manifest_fanout: 2, ..PackConfig::tiny() };
+    let s = open(d.path(), cfg);
+    for n in [2048usize, 2500, 4096, 5000, 8192, 20_000] {
+        let data = pseudo(n, n as u64 + 7);
+        let h = s.put(&data).unwrap();
+        assert_eq!(s.get(&h, None).unwrap(), data, "len {n}");
+        assert_eq!(s.size(&h).unwrap(), n as u64);
+    }
+}
+
+#[test]
+fn identical_record_sets_never_alias_one_pack_name() {
+    // Two handles write the same single record. Their packs must get distinct
+    // names, or GC condemning one would silently delete the other's "copy".
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { pack_cap: 1 << 30, ..PackConfig::tiny() };
+    for _ in 0..2 {
+        let s = open(d.path(), cfg.clone());
+        // Bypass dedup by using fresh handles that haven't seen each other's packs yet.
+        s.put(b"same bytes").unwrap();
+        s.flush().unwrap();
+    }
+    let packs = std::fs::read_dir(d.path().join("objects/packs"))
+        .unwrap()
+        .filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "pack"))
+        .count();
+    assert!(packs >= 1);
+    let s = open(d.path(), cfg.clone());
+    // Explicit copy of a record into a new pack: must be a new name.
+    let h = Hash::of(b"same bytes");
+    let before: std::collections::HashSet<_> = s.backend().list("packs/").unwrap().into_iter().map(|m| m.key).collect();
+    s.copy_record(&h).unwrap();
+    s.flush().unwrap();
+    let after: std::collections::HashSet<_> = s.backend().list("packs/").unwrap().into_iter().map(|m| m.key).collect();
+    assert_eq!(after.len(), before.len() + 2, "copy must produce a new .pack and .idx");
+}
+
+#[test]
+fn v1_staging_files_are_still_recovered() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("staging")).unwrap();
+    let mut f = pico2peta_pack::format::PACK_MAGIC_V1.to_vec();
+    f.extend_from_slice(&pico2peta_pack::format::encode_record(
+        pico2peta_pack::format::Kind::Blob,
+        pico2peta_pack::format::Codec::Raw,
+        &Hash::of(b"v1"),
+        2,
+        b"v1",
+    ));
+    std::fs::write(d.path().join("staging/old.pack"), f).unwrap();
+    let s = open(d.path(), PackConfig::tiny());
+    assert_eq!(s.get(&Hash::of(b"v1"), None).unwrap(), b"v1");
 }
