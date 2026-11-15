@@ -44,6 +44,20 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 - Ref journal records: `Txn`, `Delete`, `Rotated`. Snapshot `P2PREFS1`.
 - Local caches: `idx-cache/*.idx3` and `midx-*.midx` (`P2PMIDX1`), derived and safe to delete.
 
+### Fixed (independent code review, 2026-11-15)
+- Ref journal: batches over 4 MiB were acknowledged, then truncated by other handles as "torn tails". Records are now limited to 16 MiB and checked at write time.
+- Ref journal: a CRC error in the middle of the journal was silently truncated along with all later records. It's now reported as corruption; only a torn *last* record or a zero-filled tail is truncated.
+- Ref journal: a race at the first compaction could recreate an empty gen-0 journal and split the store.
+- Ref log engine: a stale handle could acknowledge a commit into a trimmed slot (reproduced). Gaps are now detected by HEAD probes, and commits that land in a compacted region fail.
+- Ref log engine: it refuses backends without atomic conditional create (`Backend::atomic_create`).
+- Ref log engine: a lost create response was reported as Conflict for a commit that had landed (raised by the net session).
+- Pack store:
+  - after a seal failed post-publish, later writes could append to the published (hard-linked) pack;
+  - refresh failed on harmless concurrent deletes;
+  - `stats()` had a lock-order inversion;
+  - a corrupt index length could panic;
+  - one corrupt orphan staging file blocked every open (it's now quarantined).
+
 ### Fixed
 - A race between sealing and GC condemnation left a writer's index pointing at a retired open pack.
 - A rewritten pack could alias a condemned pack's content-derived name and be deleted with it.

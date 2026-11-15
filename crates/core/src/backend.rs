@@ -374,7 +374,11 @@ impl Backend for LocalDisk {
             for ent in rd {
                 let ent = ent?;
                 let p = ent.path();
-                let ft = ent.file_type()?;
+                let ft = match ent.file_type() {
+                    Ok(t) => t,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(e) => return Err(e.into()),
+                };
                 if ft.is_dir() {
                     stack.push(p);
                     continue;
@@ -385,7 +389,12 @@ impl Backend for LocalDisk {
                     continue;
                 }
                 if validate_key(rel).is_ok() {
-                    out.push(BlobMeta { key: rel.to_string(), len: ent.metadata()?.len() });
+                    // A concurrently deleted file (GC, log trimming) just isn't listed.
+                    match ent.metadata() {
+                        Ok(m) => out.push(BlobMeta { key: rel.to_string(), len: m.len() }),
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(e) => return Err(e.into()),
+                    }
                 }
             }
         }

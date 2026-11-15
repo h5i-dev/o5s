@@ -20,6 +20,8 @@ pub struct Faults {
     remaining: AtomicI64,
     /// Total hits so far (useful for sizing a sweep).
     hits: AtomicU64,
+    /// Fail only the hit with this index (a transient error), if set.
+    once_at: AtomicI64,
 }
 
 /// Shared handle to a [`Faults`] budget.
@@ -28,12 +30,22 @@ pub type FaultHandle = Arc<Faults>;
 impl Faults {
     /// Never fails.
     pub fn disarmed() -> FaultHandle {
-        Arc::new(Faults { remaining: AtomicI64::new(-1), hits: AtomicU64::new(0) })
+        Arc::new(Faults { remaining: AtomicI64::new(-1), hits: AtomicU64::new(0), once_at: AtomicI64::new(-1) })
+    }
+
+    /// Fails only hit number `n` (0-based): a transient error the code must
+    /// survive, unlike `crash_after`, which models a dead process.
+    pub fn fail_once_at(n: u64) -> FaultHandle {
+        Arc::new(Faults { remaining: AtomicI64::new(-1), hits: AtomicU64::new(0), once_at: AtomicI64::new(n as i64) })
     }
 
     /// Fails at hit number `budget` (0-based) and at every hit after it.
     pub fn crash_after(budget: u64) -> FaultHandle {
-        Arc::new(Faults { remaining: AtomicI64::new(budget as i64), hits: AtomicU64::new(0) })
+        Arc::new(Faults {
+            remaining: AtomicI64::new(budget as i64),
+            hits: AtomicU64::new(0),
+            once_at: AtomicI64::new(-1),
+        })
     }
 
     /// Number of hits seen.
@@ -48,7 +60,10 @@ impl Faults {
 
     /// A durability point. `point` is a static label used in the error message.
     pub fn hit(&self, point: &'static str) -> std::io::Result<()> {
-        self.hits.fetch_add(1, Ordering::Relaxed);
+        let n = self.hits.fetch_add(1, Ordering::Relaxed);
+        if self.once_at.load(Ordering::Relaxed) == n as i64 {
+            return Err(std::io::Error::other(format!("injected transient failure at {point}")));
+        }
         let mut cur = self.remaining.load(Ordering::Relaxed);
         loop {
             if cur < 0 {

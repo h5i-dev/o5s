@@ -504,3 +504,136 @@ fn dir_bytes(p: &Path) -> u64 {
             .sum()
     })
 }
+
+/// Review finding 7: a seal that fails after its pack was published must not
+/// let later writes append to the published file. Every transient failure point
+/// of a flush is swept.
+#[test]
+fn transient_seal_failures_never_corrupt_published_packs() {
+    let cfg = PackConfig { pack_cap: 1 << 30, ..PackConfig::tiny() };
+    for n in 0..12u64 {
+        let d = tempfile::tempdir().unwrap();
+        let s = PackStore::open_with_faults(
+            d.path().join("staging"),
+            backend(d.path()),
+            cfg.clone(),
+            Faults::fail_once_at(n),
+        )
+        .unwrap();
+        let a: Vec<Vec<u8>> = (0..5).map(|i| pseudo(300, i)).collect();
+        let b: Vec<Vec<u8>> = (0..5).map(|i| pseudo(300, 100 + i)).collect();
+        // Any single operation may fail once (that's the injected fault); retry it like a client would.
+        for o in &a {
+            if s.put(o).is_err() {
+                s.put(o).unwrap();
+            }
+        }
+        let _ = s.flush();
+        for o in &b {
+            if s.put(o).is_err() {
+                s.put(o).unwrap();
+            }
+        }
+        s.flush().unwrap_or_else(|e| panic!("n={n}: second flush must succeed: {e}"));
+        for o in a.iter().chain(&b) {
+            assert_eq!(&s.get(&Hash::of(o), None).unwrap(), o, "n={n}");
+        }
+        drop(s);
+        // Every published pack's bytes still hash to its name, and everything is readable.
+        for e in std::fs::read_dir(d.path().join("objects/packs")).unwrap() {
+            let p = e.unwrap().path();
+            if p.extension().is_some_and(|x| x == "pack") {
+                let name = p.file_stem().unwrap().to_string_lossy().to_string();
+                assert_eq!(
+                    blake3::hash(&std::fs::read(&p).unwrap()).to_hex().to_string(),
+                    name,
+                    "n={n}: published pack modified"
+                );
+            }
+        }
+        let s = open(d.path(), cfg.clone());
+        for o in a.iter().chain(&b) {
+            assert_eq!(&s.get(&Hash::of(o), None).unwrap(), o, "n={n} after reopen");
+        }
+    }
+}
+
+/// Review finding 8: stats() and writers take locks in the same order.
+#[test]
+fn stats_and_puts_concurrently_do_not_deadlock() {
+    let d = tempfile::tempdir().unwrap();
+    let s = open(d.path(), PackConfig::tiny());
+    std::thread::scope(|sc| {
+        let s1 = s.clone();
+        sc.spawn(move || {
+            for i in 0..2000u64 {
+                s1.put(&pseudo(200, i)).unwrap();
+            }
+        });
+        for _ in 0..2000 {
+            s.stats().unwrap();
+        }
+    });
+}
+
+/// Review finding 9: an index entry claiming a longer object than its record is
+/// reported as corruption, not a panic.
+#[test]
+fn corrupt_index_length_is_an_error_not_a_panic() {
+    let d = tempfile::tempdir().unwrap();
+    let cfg = PackConfig { pack_cap: 1 << 30, ..PackConfig::tiny() };
+    let h;
+    {
+        let s = open(d.path(), cfg.clone());
+        h = s.put(b"twenty bytes exactly").unwrap();
+        s.flush().unwrap();
+    }
+    let packs = d.path().join("objects/packs");
+    let idx = std::fs::read_dir(&packs)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "idx"))
+        .unwrap();
+    let mut es = pico2peta_pack::format::decode_index(&std::fs::read(&idx).unwrap()).unwrap();
+    for e in es.iter_mut() {
+        e.raw_len += 1000;
+    }
+    std::fs::write(&idx, pico2peta_pack::format::encode_index(&mut es)).unwrap();
+    let s = open(d.path(), cfg);
+    assert!(matches!(s.get(&h, Some(0..1010)), Err(Error::Corrupt(_))));
+    assert!(matches!(s.get(&h, None), Err(Error::Corrupt(_))));
+}
+
+/// Review findings 10 and 6b: a CRC-valid but undecodable orphan is quarantined
+/// (the store still opens); an index whose pack is gone is skipped, not fatal.
+#[test]
+fn bad_orphans_are_quarantined_and_missing_packs_skipped() {
+    use pico2peta_pack::format::*;
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("staging")).unwrap();
+    // A frame record whose directory claims more bytes than the frame holds.
+    let mut payload = 2u32.to_le_bytes().to_vec();
+    payload.extend_from_slice(&100u32.to_le_bytes());
+    payload.extend_from_slice(&100u32.to_le_bytes());
+    payload.extend_from_slice(&[1u8; 10]);
+    let rec = encode_record(Kind::Frame2, Codec::Raw, &Hash::of(&[1u8; 10]), 10, &payload);
+    let mut f = PACK_MAGIC.to_vec();
+    f.extend_from_slice(&[0u8; 16]);
+    f.extend_from_slice(&rec);
+    std::fs::write(d.path().join("staging/bad.pack"), &f).unwrap();
+    let s = open(d.path(), PackConfig::tiny());
+    assert_eq!(s.quarantined().unwrap().len(), 1);
+    let h = s.put(b"still works").unwrap();
+    s.flush().unwrap();
+    // Remove a pack but keep its index (as a crashed GC delete would): refresh skips it.
+    let packs = d.path().join("objects/packs");
+    let pack = std::fs::read_dir(&packs)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "pack"))
+        .unwrap();
+    std::fs::remove_file(&pack).unwrap();
+    let s2 = open(d.path(), PackConfig::tiny());
+    assert!(!s2.contains(&h).unwrap());
+    assert_eq!(s2.orphan_indexes().unwrap().len(), 1);
+}

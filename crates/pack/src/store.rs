@@ -280,6 +280,11 @@ struct Inner {
     faults: FaultHandle,
     index: RwLock<Index>,
     writer: Mutex<Option<OpenPack>>,
+    /// Open packs whose seal failed after publication: frozen (never appended
+    /// to), still readable, and retried on the next flush.
+    pending: Mutex<Vec<OpenPack>>,
+    /// Serializes refreshes, so an older listing can't overwrite a newer one.
+    refresh_lock: Mutex<()>,
     generation: AtomicU64,
     dedup_refresh_ms: AtomicU64,
     /// See [`PackStore::set_mmap_index_threshold`].
@@ -319,13 +324,25 @@ impl Inner {
             off += n as u64;
         }
         let name = hasher.finalize().to_hex().to_string();
-        self.fault("seal.put-pack")?;
-        self.backend.put_if_absent(&format!("packs/{name}.pack"), PutSource::File(path))?;
-        let idx = encode_index(&mut entries);
-        self.fault("seal.put-idx")?;
-        let _: PutOutcome = self.backend.put_if_absent(&format!("packs/{name}.idx"), PutSource::Bytes(&idx))?;
+        // Each step is skipped if an earlier attempt already did it, so a seal
+        // that failed halfway can be retried (even after the staging file is gone).
+        let pack_key = format!("packs/{name}.pack");
+        if self.backend.head(&pack_key)?.is_none() {
+            self.fault("seal.put-pack")?;
+            self.backend.put_if_absent(&pack_key, PutSource::File(path))?;
+        }
+        let idx_key = format!("packs/{name}.idx");
+        if self.backend.head(&idx_key)?.is_none() {
+            let idx = encode_index(&mut entries);
+            self.fault("seal.put-idx")?;
+            let _: PutOutcome = self.backend.put_if_absent(&idx_key, PutSource::Bytes(&idx))?;
+        }
         self.fault("seal.unlink")?;
-        fs::remove_file(path)?;
+        match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
         fsync_dir(&self.staging_dir)?;
         Ok(name)
     }
@@ -376,6 +393,8 @@ impl PackStore {
                 faults,
                 index: RwLock::new(Index::default()),
                 writer: Mutex::new(None),
+                pending: Mutex::new(Vec::new()),
+                refresh_lock: Mutex::new(()),
                 generation: AtomicU64::new(1),
                 dedup_refresh_ms: AtomicU64::new(DEDUP_REFRESH_INTERVAL.as_millis() as u64),
                 // P2P_MMAP_INDEX_BYTES overrides the default (tests use 0 to map every index).
@@ -404,6 +423,7 @@ impl PackStore {
     /// deleted ones, and picks up GC condemnations. Returns the number of
     /// newly loaded packs.
     pub fn refresh(&self) -> Result<usize> {
+        let _serial = self.inner.refresh_lock.lock().map_err(poisoned)?;
         let listed = self.inner.backend.list("packs/")?;
         let keys: HashSet<&str> = listed.iter().map(|m| m.key.as_str()).collect();
         let live_idx: Vec<String> = listed
@@ -411,11 +431,11 @@ impl PackStore {
             .filter_map(|m| m.key.strip_prefix("packs/").and_then(|k| k.strip_suffix(".idx")))
             .map(|s| s.to_string())
             .collect();
-        for name in &live_idx {
-            if !keys.contains(format!("packs/{name}.pack").as_str()) {
-                return Err(Error::Corrupt(format!("index without pack: {name}")));
-            }
-        }
+        // An index without its pack is a pack being deleted by GC (it deletes the
+        // index first, but a non-atomic listing can still show it): skip it.
+        // A permanently missing pack is reported by fsck.
+        let live_idx: Vec<String> =
+            live_idx.into_iter().filter(|name| keys.contains(format!("packs/{name}.pack").as_str())).collect();
         // GC condemnation records (small, create-only, cached by key).
         let gc_keys: Vec<String> = self
             .inner
@@ -497,7 +517,12 @@ impl PackStore {
             if let Ok(rd) = fs::read_dir(self.inner.staging_dir.with_file_name("idx-cache")) {
                 for ent in rd.flatten() {
                     let fname = ent.file_name().to_string_lossy().to_string();
-                    if fname.ends_with(".idx3") && !live.contains(&fname) {
+                    // Another process may have a newer listing: delete only caches whose
+                    // index is confirmed gone from the backend.
+                    if let Some(name) = fname.strip_suffix(".idx3")
+                        && !live.contains(&fname)
+                        && matches!(self.inner.backend.head(&format!("packs/{name}.idx")), Ok(None))
+                    {
                         let _ = fs::remove_file(ent.path());
                     }
                 }
@@ -590,7 +615,12 @@ impl PackStore {
             fs::rename(&tmp, &path)?;
             fsync_dir(&dir)?;
         }
-        let f = File::open(&path)?;
+        let f = match File::open(&path) {
+            Ok(f) => f,
+            // Removed by another process meanwhile: skip this round; a later refresh rebuilds it.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e.into()),
+        };
         // SAFETY: as for pack index caches, MIDX files are written once
         // (temp file + rename) and never modified while mapped.
         let map = unsafe { memmap2::Mmap::map(&f)? };
@@ -615,7 +645,15 @@ impl PackStore {
         if let Ok(rd) = fs::read_dir(&dir) {
             for ent in rd.flatten() {
                 let n = ent.file_name().to_string_lossy().to_string();
-                if n.starts_with("midx-") && n.ends_with(".midx") && n != format!("midx-{tag}.midx") {
+                // Other processes may use a different pack set's MIDX: only remove ones
+                // unused for an hour (mapped files stay valid after unlink anyway).
+                let old = ent
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .is_some_and(|age| age > std::time::Duration::from_secs(3600));
+                if n.starts_with("midx-") && n.ends_with(".midx") && n != format!("midx-{tag}.midx") && old {
                     let _ = fs::remove_file(ent.path());
                 }
             }
@@ -626,6 +664,17 @@ impl PackStore {
     /// Fetches a (large) pack index into the local index cache, verifying it
     /// on the way, and memory-maps it. Non-v3 indexes are converted to v3.
     fn map_index(&self, name: &str, key: &str) -> Result<IdxV3View<memmap2::Mmap>> {
+        for _ in 0..3 {
+            match self.map_index_once(name, key) {
+                // Another process removed the cache file between our check and open: refetch.
+                Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                other => return other,
+            }
+        }
+        self.map_index_once(name, key)
+    }
+
+    fn map_index_once(&self, name: &str, key: &str) -> Result<IdxV3View<memmap2::Mmap>> {
         let dir = self.inner.staging_dir.with_file_name("idx-cache");
         fs::create_dir_all(&dir)?;
         let path = dir.join(format!("{name}.idx3"));
@@ -711,7 +760,20 @@ impl PackStore {
             if !p.exists() {
                 continue;
             }
-            let entries = self.truncate_torn_tail(&f)?;
+            let entries = match self.truncate_torn_tail(&f) {
+                Ok(e) => e,
+                Err(Error::Corrupt(why)) => {
+                    // A CRC-valid but undecodable record: not a torn tail, and not
+                    // something to guess about. Quarantine the file (it's never
+                    // adopted again; `fsck` reports it) so the repository stays usable.
+                    let q = p.with_extension(format!("corrupt-{}", unique_id()));
+                    fs::rename(&p, &q)?;
+                    fsync_dir(&self.inner.staging_dir)?;
+                    let _ = why;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
             if entries.is_empty() {
                 self.fault("recover.unlink-empty")?;
                 fs::remove_file(&p)?;
@@ -850,13 +912,34 @@ impl PackStore {
 
     /// Seals the open pack if there is one.
     fn seal_locked(&self, w: &mut Option<OpenPack>) -> Result<()> {
+        // First retry seals that failed after their pack was published.
+        let pending: Vec<OpenPack> = std::mem::take(&mut *self.inner.pending.lock().map_err(poisoned)?);
+        for op in pending {
+            self.seal_one(op, w, true)?;
+        }
         let Some(op) = w.take() else { return Ok(()) };
+        self.seal_one(op, w, false)
+    }
+
+    fn seal_one(&self, op: OpenPack, w: &mut Option<OpenPack>, was_pending: bool) -> Result<()> {
         let OpenPack { file, path, generation, len, entries } = op;
         let name = match self.inner.seal_file(&path, &file, len, entries.clone()) {
             Ok(n) => n,
             Err(e) => {
-                // Keep the open pack so a later flush can retry. Our records stay readable.
-                *w = Some(OpenPack { file, path, generation, len, entries });
+                let op = OpenPack { file, path, generation, len, entries };
+                // If the pack is already published (on local disk it's a hard link to this
+                // very file), the file must never be appended to again: freeze it in the
+                // pending list (still readable, retried on the next flush) and let new
+                // writes start a fresh staging file. Otherwise it may stay open.
+                let published = was_pending
+                    || self
+                        .published_name(&op)
+                        .is_some_and(|n| self.inner.backend.head(&format!("packs/{n}.pack")).ok().flatten().is_some());
+                if published {
+                    self.inner.pending.lock().map_err(poisoned)?.push(op);
+                } else {
+                    *w = Some(op);
+                }
                 return Err(e);
             }
         };
@@ -889,6 +972,20 @@ impl PackStore {
             }
         }
         Ok(())
+    }
+
+    /// The content-derived name the open pack would be sealed under.
+    fn published_name(&self, op: &OpenPack) -> Option<String> {
+        let mut hasher = blake3::Hasher::new();
+        let mut buf = vec![0u8; 1 << 20];
+        let mut off = 0u64;
+        while off < op.len {
+            let n = buf.len().min((op.len - off) as usize);
+            op.file.read_exact_at(&mut buf[..n], off).ok()?;
+            hasher.update(&buf[..n]);
+            off += n as u64;
+        }
+        Some(hasher.finalize().to_hex().to_string())
     }
 
     /// Seals the open pack. Afterwards every object written by this handle is
@@ -937,7 +1034,17 @@ impl PackStore {
                 PackRef::Open(generation) => {
                     let file = {
                         let w = self.inner.writer.lock().map_err(poisoned)?;
-                        w.as_ref().filter(|op| op.generation == generation).map(|op| op.file.clone())
+                        match w.as_ref().filter(|op| op.generation == generation) {
+                            Some(op) => Some(op.file.clone()),
+                            None => self
+                                .inner
+                                .pending
+                                .lock()
+                                .map_err(poisoned)?
+                                .iter()
+                                .find(|op| op.generation == generation)
+                                .map(|op| op.file.clone()),
+                        }
                     };
                     match file {
                         Some(f) => {
@@ -965,6 +1072,9 @@ impl PackStore {
 
     fn read_record(&self, hash: &Hash, loc: Loc) -> Result<(RecHeader, Vec<u8>)> {
         let (h, raw, loc) = self.read_raw(hash, loc)?;
+        if loc.frame.is_none() && h.raw_len != loc.raw_len {
+            return Err(Error::Corrupt(format!("index length disagrees with record for {hash}")));
+        }
         let (_, payload) = decode_record(&raw)?;
         if let Some((inner, _)) = loc.frame {
             let bodies = self.frame_bodies(&h, payload, &loc)?;
@@ -1153,8 +1263,9 @@ impl PackStore {
 
     /// Counters (local view, without a refresh).
     pub fn stats(&self) -> Result<PackStats> {
-        let idx = self.inner.index.read().map_err(poisoned)?;
+        // Lock order everywhere: writer, then index.
         let w = self.inner.writer.lock().map_err(poisoned)?;
+        let idx = self.inner.index.read().map_err(poisoned)?;
         let mut s = PackStats {
             sealed_packs: idx.known.len(),
             objects: idx.map.len(),
@@ -1480,6 +1591,32 @@ impl PackStore {
         Ok(v)
     }
 
+    /// Staging files quarantined by recovery because they held corrupt records.
+    pub fn quarantined(&self) -> Result<Vec<PathBuf>> {
+        let mut v: Vec<PathBuf> = fs::read_dir(&self.inner.staging_dir)?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|x| x.to_string_lossy().starts_with("corrupt-")))
+            .collect();
+        v.sort();
+        Ok(v)
+    }
+
+    /// Index files whose pack is missing on the backend (for `fsck`).
+    pub fn orphan_indexes(&self) -> Result<Vec<String>> {
+        let listed = self.inner.backend.list("packs/")?;
+        let keys: HashSet<&str> = listed.iter().map(|m| m.key.as_str()).collect();
+        let mut v = Vec::new();
+        for m in &listed {
+            if let Some(name) = m.key.strip_prefix("packs/").and_then(|k| k.strip_suffix(".idx"))
+                && !keys.contains(format!("packs/{name}.pack").as_str())
+                && self.inner.backend.head(&format!("packs/{name}.pack"))?.is_none()
+            {
+                v.push(name.to_string());
+            }
+        }
+        Ok(v)
+    }
+
     /// Path of this handle's open staging file, if any (test hook).
     pub fn staging_file(&self) -> Option<PathBuf> {
         self.inner.writer.lock().ok().and_then(|w| w.as_ref().map(|o| o.path.clone()))
@@ -1580,7 +1717,10 @@ impl PackStore {
             Kind::Frame | Kind::Frame2 => Err(Error::Corrupt("frame record indexed as an object".into())),
             Kind::Blob => {
                 let d = self.read_blob(hash, loc)?;
-                Ok(Box::new(std::io::Cursor::new(d[r.start as usize..r.end as usize].to_vec())))
+                let slice = d
+                    .get(r.start as usize..r.end as usize)
+                    .ok_or_else(|| Error::Corrupt(format!("index length disagrees with data for {hash}")))?;
+                Ok(Box::new(std::io::Cursor::new(slice.to_vec())))
             }
             Kind::Manifest => {
                 let pieces = overlapping(self.read_manifest(hash, loc)?, r.start, r.end);
@@ -1601,6 +1741,11 @@ impl Drop for Inner {
         // Best effort. If this fails, the next open adopts the staging file.
         if self.faults.crashed() {
             return; // simulate a dead process: leave the staging file behind
+        }
+        if let Ok(mut p) = self.pending.lock() {
+            for op in p.drain(..) {
+                let _ = self.seal_file(&op.path, &op.file, op.len, op.entries);
+            }
         }
         if let Ok(mut w) = self.writer.lock()
             && let Some(op) = w.take()

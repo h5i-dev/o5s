@@ -39,6 +39,8 @@
 - Multi-process contention tests.
 - Model-based proptests, never-panic decoder tests, cargo-fuzz targets for every decoder (all clean), and `fsck`.
 
+**Independent code review (2026-11-15).** A fresh-eyes review of pack, refs and GC found 10 confirmed bugs. All are fixed with regression tests (see CHANGELOG). The most severe: acknowledged large batches truncated as torn tails; mid-journal corruption silently truncated; a first-compaction orphan-journal race; stale log-engine handles acknowledging invisible commits; appends to a published pack after a failed seal. The GC protocol itself came out clean.
+
 **Notable bugs found and fixed by the tests**
 - A seal/condemn index race.
 - Pack-name aliasing with condemned packs.
