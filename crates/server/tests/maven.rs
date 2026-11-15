@@ -136,7 +136,9 @@ fn mvn_deploy_resolve_and_proxy_cache() {
         cfg.policy.push(grant("alice", "maven/releases", Access::Write));
         cfg.policy.push(grant("alice", "maven/central", Access::Read));
         cfg.policy.push(grant("reader", "maven", Access::Read));
-        cfg.maven.upstream.insert("central".into(), Upstream { url: CENTRAL.into(), token: None, ttl_secs: 600 });
+        cfg.maven
+            .upstream
+            .insert("central".into(), Upstream { url: CENTRAL.into(), token: None, ttl_secs: 600, file_hosts: vec![] });
     });
     let a_central = format!("{}/maven/central", a.url());
     let a_releases = format!("{}/maven/releases", a.url());
@@ -165,7 +167,7 @@ fn mvn_deploy_resolve_and_proxy_cache() {
     let (ac, ar) = (a_central.clone(), a_releases.clone());
     let b = TestServer::start(move |cfg| {
         cfg.policy.push(grant("reader", "maven", Access::Read));
-        let up = |url: String| Upstream { url, token: Some(READER.into()), ttl_secs: 600 };
+        let up = |url: String| Upstream { url, token: Some(READER.into()), ttl_secs: 600, file_hosts: vec![] };
         cfg.maven.upstream.insert("central".into(), up(ac));
         cfg.maven.upstream.insert("mirror".into(), up(ar));
     });

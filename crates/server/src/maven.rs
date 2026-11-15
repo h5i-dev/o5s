@@ -51,7 +51,12 @@ impl MavenState {
         local: Option<pico2peta_repo::LocalRepo>,
         upstreams: BTreeMap<String, Upstream>,
     ) -> std::result::Result<MavenState, String> {
-        Ok(MavenState { store: Store { repo: repo.clone(), local }, repo, upstreams, http: crate::pkg::http_client()? })
+        Ok(MavenState {
+            store: Store { repo: repo.clone(), local },
+            repo,
+            http: crate::pkg::http_client(&upstreams.values().collect::<Vec<_>>())?,
+            upstreams,
+        })
     }
 }
 

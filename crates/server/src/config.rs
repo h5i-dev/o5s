@@ -137,10 +137,40 @@ pub struct Upstream {
     /// How long a fetched upstream listing is reused before asking again.
     #[serde(default = "default_upstream_ttl")]
     pub ttl_secs: u64,
+    /// Other hosts the upstream's listings may point file downloads at (the upstream's own
+    /// host is always allowed; `pypi.org` implies `files.pythonhosted.org`). Anything else,
+    /// and any redirect elsewhere, is refused: listings are upstream-controlled, so this is
+    /// what keeps a bad upstream from steering the server at internal addresses (SSRF).
+    #[serde(default)]
+    pub file_hosts: Vec<String>,
 }
 
 fn default_upstream_ttl() -> u64 {
     600
+}
+
+impl Upstream {
+    /// Hosts this upstream may make the server fetch from.
+    pub fn allowed_hosts(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.file_hosts.iter().map(|h| h.to_ascii_lowercase()).collect();
+        if let Ok(u) = reqwest::Url::parse(&self.url)
+            && let Some(h) = u.host_str()
+        {
+            let h = h.to_ascii_lowercase();
+            if h == "pypi.org" {
+                out.push("files.pythonhosted.org".into());
+            }
+            out.push(h);
+        }
+        out
+    }
+
+    /// May the server fetch `url` on behalf of this upstream? (http/https, allowed host.)
+    pub fn allows(&self, url: &str) -> bool {
+        let Ok(u) = reqwest::Url::parse(url) else { return false };
+        matches!(u.scheme(), "http" | "https")
+            && u.host_str().is_some_and(|h| self.allowed_hosts().iter().any(|a| a.eq_ignore_ascii_case(h)))
+    }
 }
 
 /// PyPI-compatible indexes (`/pypi/<index>/simple/`, upload at `/pypi/<index>/`).
@@ -556,6 +586,30 @@ pub fn valid_principal(p: &str) -> bool {
         && p.len() <= 128
         && p != crate::auth::ANONYMOUS
         && p.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'@' | b':' | b'-'))
+}
+
+#[cfg(test)]
+mod upstream_tests {
+    use super::Upstream;
+
+    #[test]
+    fn upstream_fetches_stay_on_allowed_hosts() {
+        let up = |url: &str, hosts: &[&str]| Upstream {
+            url: url.into(),
+            token: None,
+            ttl_secs: 1,
+            file_hosts: hosts.iter().map(|s| s.to_string()).collect(),
+        };
+        let pypi = up("https://pypi.org/simple", &[]);
+        assert!(pypi.allows("https://files.pythonhosted.org/packages/x.whl"));
+        assert!(pypi.allows("https://PyPI.org/simple/x/"));
+        assert!(!pypi.allows("http://169.254.169.254/latest/meta-data/"), "IMDS");
+        assert!(!pypi.allows("http://127.0.0.1:8080/admin"));
+        assert!(!pypi.allows("file:///etc/passwd"));
+        assert!(!pypi.allows("https://files.pythonhosted.org.evil.example/x"));
+        let npm = up("https://registry.npmjs.org", &["cdn.example.com"]);
+        assert!(npm.allows("https://cdn.example.com/a.tgz") && !npm.allows("https://other.example.com/a.tgz"));
+    }
 }
 
 #[cfg(test)]

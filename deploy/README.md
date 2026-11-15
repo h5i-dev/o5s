@@ -82,10 +82,12 @@ url = "https://registry.npmjs.org"
 [maven.upstream.central]        # mirror URL https://host/maven/central
 url = "https://repo.maven.apache.org/maven2"
 # token = "..."                 # bearer token for a private upstream
+# file_hosts = ["cdn.example.com"]  # other hosts its listings may point downloads at
 # ttl_secs = 600                # how long fetched listings or metadata are reused
 ```
 
 - Proxied files are verified against the upstream's checksums (sha256, npm integrity, Maven `.sha1`) and stored once. After that they are served from the store, including when the upstream is down. `p2p_upstream_fetches_total{front}` counts upstream file fetches.
+- Downloads are fetched only from the upstream's own host and its `file_hosts` (`pypi.org` implies `files.pythonhosted.org`), and redirects are followed only to such hosts. A compromised upstream therefore can't steer the server at internal addresses (SSRF).
 - Uploads to a proxied index are allowed and take precedence over the upstream's files.
 - For HF repos, configure the Xet chunker on their content in the repo's `config.toml`, so that Xet uploads and the rebuilt files dedup chunk for chunk:
 

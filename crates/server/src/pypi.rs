@@ -54,7 +54,7 @@ impl PypiState {
         local: Option<pico2peta_repo::LocalRepo>,
         upstreams: BTreeMap<String, Upstream>,
     ) -> std::result::Result<PypiState, String> {
-        let http = crate::pkg::http_client()?;
+        let http = crate::pkg::http_client(&upstreams.values().collect::<Vec<_>>())?;
         let store = Store { repo: repo.clone(), local };
         Ok(PypiState { repo, store, upstreams, http, pages: Mutex::new(HashMap::new()) })
     }
@@ -782,6 +782,9 @@ async fn metadata(
                 .get_or_create(&crate::metrics::FrontLabels { front: "pypi_metadata".into() })
                 .inc();
             let murl = format!("{}.metadata", f.url);
+            if !up.allows(&murl) {
+                return err(StatusCode::BAD_GATEWAY, "upstream metadata URL is not on an allowed host");
+            }
             let mut rq = py.http.get(&murl);
             if let (Some(t), Ok(a), Ok(b)) = (&up.token, reqwest::Url::parse(&murl), reqwest::Url::parse(&up.url))
                 && a.host_str() == b.host_str()
@@ -835,6 +838,9 @@ async fn fetch_upstream(
     let Some(f) = files.iter().find(|f| f.filename == file).cloned() else {
         return Err(err(StatusCode::NOT_FOUND, "no such file"));
     };
+    if !up.allows(&f.url) {
+        return Err(err(StatusCode::BAD_GATEWAY, format!("upstream file URL {} is not on an allowed host", f.url)));
+    }
     let mut rq = py.http.get(&f.url);
     // Only send the upstream token to the upstream's own host (files may live on a CDN).
     if let (Some(t), Ok(a), Ok(b)) = (&up.token, reqwest::Url::parse(&f.url), reqwest::Url::parse(&up.url))

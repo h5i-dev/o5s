@@ -37,10 +37,23 @@ pub(crate) async fn blocking<T: Send + 'static>(
     }
 }
 
-pub(crate) fn http_client() -> std::result::Result<reqwest::Client, String> {
+/// The upstream HTTP client. Redirects are followed only to hosts some configured upstream
+/// allows (see `Upstream::allows`), at most 10 hops.
+pub(crate) fn http_client(upstreams: &[&crate::config::Upstream]) -> std::result::Result<reqwest::Client, String> {
+    let ups: Vec<crate::config::Upstream> = upstreams.iter().map(|u| (*u).clone()).collect();
+    let policy = reqwest::redirect::Policy::custom(move |a| {
+        if a.previous().len() >= 10 {
+            a.error("too many redirects")
+        } else if ups.iter().any(|u| u.allows(a.url().as_str())) {
+            a.follow()
+        } else {
+            a.error("redirect to a host no upstream allows")
+        }
+    });
     reqwest::Client::builder()
         .user_agent(concat!("pico2peta/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(10))
+        .redirect(policy)
         .build()
         .map_err(|e| e.to_string())
 }

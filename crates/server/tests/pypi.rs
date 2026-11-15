@@ -209,9 +209,10 @@ fn twine_upload_pip_and_uv_install_and_proxy_cache() {
     let proxy = TestServer::start(move |cfg| {
         cfg.policy.push(grant("reader", "pypi/mirror", Access::Read));
         cfg.policy.push(grant("alice", "pypi/mirror", Access::Write));
-        cfg.pypi
-            .upstream
-            .insert("mirror".into(), Upstream { url: upstream, token: Some(READER.into()), ttl_secs: 600 });
+        cfg.pypi.upstream.insert(
+            "mirror".into(),
+            Upstream { url: upstream, token: Some(READER.into()), ttl_secs: 600, file_hosts: vec![] },
+        );
     });
     // A local upload to the mirror index sits next to the proxied files.
     let own = wheel(&py, &w.path().join("d4"), "mine", "0.1", "7");

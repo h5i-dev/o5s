@@ -320,6 +320,7 @@ The contended run checks that no update is lost: the final version equals the nu
   - Partial: `filter blob:none` and `blob:limit=<n>[kmg]`.
   - Non-tip wants (lazy fetches) are allowed only if reachable from this repo's refs, since object ids are global across repos.
   - Real-git test `shallow_and_partial_clone`, including refusing another repo's object.
+- Security fix (ROADMAP item 6, done early): SSRF in the proxy-caches. Upstream listings (and redirects) could point the server at any URL, including the EC2 metadata service. Fetches and every redirect hop are now limited to http(s) on the upstream's host plus `file_hosts` (`pypi.org` implies `files.pythonhosted.org`). Unit test `upstream_fetches_stay_on_allowed_hosts`.
 - ROADMAP Net 2, Git: `object-format=sha256` DONE.
   - `Oid` is now 20 or 32 bytes; `Fmt` is per repository, from `[git] sha256_repos` name prefixes.
   - Formats are applied to advertisements, v2 capabilities, push and fetch id parsing, `REF_DELTA` bases, pack checksums and tree parsing (by the tree's own id length).

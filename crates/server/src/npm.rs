@@ -59,11 +59,12 @@ impl NpmState {
         local: Option<pico2peta_repo::LocalRepo>,
         upstreams: BTreeMap<String, Upstream>,
     ) -> std::result::Result<NpmState, String> {
+        let http = crate::pkg::http_client(&upstreams.values().collect::<Vec<_>>())?;
         Ok(NpmState {
             store: Store { repo: repo.clone(), local },
             repo,
             upstreams,
-            http: crate::pkg::http_client()?,
+            http,
             pages: Mutex::new(HashMap::new()),
         })
     }
@@ -949,6 +950,9 @@ async fn fetch_upstream(
     let Some(url) = man["dist"]["tarball"].as_str() else {
         return Err(npm_err(StatusCode::NOT_FOUND, "no such version upstream"));
     };
+    if !up.allows(url) {
+        return Err(npm_err(StatusCode::BAD_GATEWAY, format!("upstream tarball URL {url} is not on an allowed host")));
+    }
     let mut rq = npm.http.get(url);
     if let (Some(t), Ok(a), Ok(b)) = (&up.token, reqwest::Url::parse(url), reqwest::Url::parse(&up.url))
         && a.host_str() == b.host_str()

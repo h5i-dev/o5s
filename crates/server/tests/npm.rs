@@ -155,7 +155,10 @@ fn npm_publish_install_and_proxy_cache() {
     let proxy = TestServer::start(move |cfg| {
         cfg.policy.push(grant("reader", "npm/mirror", Access::Read));
         cfg.policy.push(grant("alice", "npm/mirror", Access::Write));
-        cfg.npm.upstream.insert("mirror".into(), Upstream { url: upstream, token: Some(READER.into()), ttl_secs: 1 });
+        cfg.npm.upstream.insert(
+            "mirror".into(),
+            Upstream { url: upstream, token: Some(READER.into()), ttl_secs: 1, file_hosts: vec![] },
+        );
     });
     let m_alice = npm.rc("m-alice", &proxy, "mirror", ALICE);
     let m_reader = npm.rc("m-reader", &proxy, "mirror", READER);
