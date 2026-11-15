@@ -1,0 +1,5 @@
+name = "pico2peta"
+defaultTargets = ["Pico2peta"]
+
+[[lean_lib]]
+name = "Pico2peta"
