@@ -19,6 +19,8 @@
   - Done: **ref journal compaction**, i.e. snapshot + generation rotation with a tombstone commit point. Lagging handles in other processes follow it. Tested with a crash sweep and contention across rotations.
   - Pending: running the fuzzers (nightly toolchain installing on scratch), and recording micro-benchmark numbers (`bench/micro`), which waits for Exp1 to finish so its timings stay clean.
 
+- **M8 Verification: Lean done (P1–P5); a Lean↔Rust difftest is next.** `lean/` has a pure model plus machine-checked proofs, with no `sorry` and only standard axioms. Covered: P1 content immutability, P2 no undetected overwrite, P3 frozen names, P4 authorization, P5 GC safety. Rust already has model-based proptests for refs and packs.
+
 ## API changes
 - **v1 (2026-11-15):** first stable shapes. `Backend` lives in `pico2peta_core::backend`. It is create-only (`put_if_absent` with `PutSource::{Bytes, File}`) and adds `get_range(key, Range)`, `open` (streaming), `head`, `list -> Vec<BlobMeta>`, `delete` and `describe`. New error variants are `KeyNotFound(String)` and `Backend { transient, msg }`. `ObjectStore`/`Repository` take `&self` everywhere, and `open()` returns a `'static` streaming reader. Every backend must pass `backend::conformance::run_all`.
   These changes cover all three of the net session's "Requests for core" from 2026-11-15: streaming put, a backend error variant, and committing early.

@@ -15,8 +15,10 @@ axioms are `propext`, `Classical.choice` and `Quot.sound`:
 | P2 a successful replace validated its read set | `replace_ok_validated` |
 | P2 no undetected overwrite | `no_lost_update` |
 | P3 immutable names can't move | `frozen_step`, `frozen_run`, `published_never_moves` |
+| P4 unauthorized principals can't move or read names | `unauthorized_cannot_move`, `unauthorized_cannot_move_run`, `resolve_denied` (`Auth.lean`, mirroring the server's `Authorizer`) |
+| P5 GC/repack never lose live objects | `gc_preserves_live`, `gc_preserves_refs` (`Gc.lean`, covering the delete phase's verify-before-delete) |
 
-**Assumptions** (not modeled): `replace`/`setRule` are linearized by the
+**Assumptions** (not modeled): for P5, the live set is computed from the refs that are current at delete time, which is the put→replace lease documented in `crates/repo/src/gc.rs`. Also: `replace`/`setRule` are linearized by the
 journal's exclusive flock commit point; fsync is honest; the backend's
 `put_if_absent` is atomic and create-only. These are tested in Rust by fault
 injection and multi-process tests, not proved.
