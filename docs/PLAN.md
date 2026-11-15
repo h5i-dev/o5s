@@ -279,3 +279,126 @@ checksum and truncating a torn tail, and covered by Rust tests, not proofs).
 
 Toolchain: `leanprover/lean4:v4.31.0`, Mathlib by local path from
 `/mnt/scratch/ec2-user/lake/arith/packages/mathlib`, and the `.lake` build dir on scratch.
+
+## 6. Phase 3 (2026-11-15): one store, uniform core, fronts (docs/VISION.md)
+
+**Direction (from the human).** One store replaces Git hosting, Hugging Face, Artifactory, registries and the
+rest. The core treats every domain the same. Domain-specific wins live in **fronts** that plug into a **Front
+API** in the core. Exp1/1b/1c are findings for the Git front, not a reason to drop source code. Every front must
+reach specialist level, and the thresholds are pre-registered here **before any Phase 3 measurement code exists**.
+
+### 6.1 Milestones
+
+| # | Milestone | Owner | Done when |
+|---|---|---|---|
+| P1 | Front API in the core | core | A per-namespace **domain profile**: chunker, encoding pipeline, codecs, derived-object records (generic `base + patch` with pluggable patch formats), grouping key, name rules. The existing domain pieces (weights XOR delta, byte grouping, the Xet chunker choice) sit behind it, and the core names no domain. Profiles are config, and reads never depend on them. |
+| P2 | Windowed delta-search encoder | core | A reusable building block (git pack-objects style: type / name-hash / size ordering, window, depth, trial deltas) that emits derived-object records. Experiment 2 (§6.3) is run on it. |
+| P3 | Generic front at specialist level | core | §6.4 is met and measured. |
+| P4 | Fronts on the Front API | net | The Git, OCI and HF fronts (and PyPI/npm/Maven when built) are ported onto P1, and their thresholds are in §6.5 and measured. |
+| P5 | Cross-domain | both | One authz/audit, provenance across fronts, dedup across domains, one GC policy, promotion and signing. |
+
+**Rules for every Phase 3 measurement:**
+- Thresholds and protocol are committed before the measurement code.
+- No variant or threshold changes after official results are seen. A new attempt is a new, separately
+  pre-registered experiment, and earlier verdicts stand.
+- Timing runs hold `flock /mnt/scratch/pico2peta/bench.lock`.
+- Raw results go to JSONL, and the verdict is computed mechanically by a script, as in Exp1.
+
+### 6.2 Front API design constraints (not thresholds)
+- The core stays domain-agnostic. A front may own: a name prefix (enforced by the core), an external-id index (a
+  generic core primitive, e.g. the sorted id-segment map the net session built for Git/OCI), a GC tracer for
+  what it references, encoding choices per put, and protocol code. A front can't change identity (BLAKE3 of the
+  bytes `get` returns) or bypass OCC, rules, authz or GC safety.
+- Derived objects (`base + patch`) are generic: the patch format is pluggable. XOR (weights), copy/insert (Git
+  style) and zstd patch-from are formats, not kinds. Each has a decoder that is fuzzed and never panics.
+- Every existing repository stays readable, with no migration.
+
+### 6.3 Experiment 2: Git storage parity (core), pre-registered 2026-11-15, before any Experiment 2 code
+
+**Question.** Can the core's generic building blocks, driven by a Git-class encoder, store a Git repository's
+objects in no more space than `git gc --aggressive`, while keeping random reads fast?
+
+**Corpus, object set, payloads, SHA-1 verification:** as in §4.1–§4.2 (ripgrep, jq, redis, git.git mirrors in
+`$BENCH_DATA/mirrors`, canonical `"<type> <size>\0<body>"` payloads, every sampled read SHA-1-verified).
+
+**Baseline B (frozen numbers, from Exp1's `results.jsonl`):** `git -c pack.threads=4 gc --aggressive
+--prune=now`, Git 2.50.1, `.pack` + `.idx`:
+
+| repo | objects | B (bytes) | git --aggressive wall (s) |
+|---|---|---|---|
+| ripgrep | 23,245 | 6,227,408 | 6.37 |
+| jq | 24,771 | 16,161,931 | 12.24 |
+| redis | 274,683 | 268,625,488 | 303.78 |
+| git | 861,069 | 319,033,230 | 531.71 |
+
+Extra baselines, reported and **not judged**: Git 2.56.1 `git repack -adf --window=250 --depth=50` with
+`--path-walk` and with `--name-hash-version=2` (B'), as in §4.9.
+
+**Measured size (no modeling).** S_total = every byte the system stores to serve these objects to a Git client:
+- S_core: all files under the repository's `objects/` after the candidate's full repack (packs and indexes, in
+  the production format).
+- I: the Git front's external-id index for these objects (SHA-1 → BLAKE3), as actually stored. If the net
+  session's index isn't ready, a core-built minimal one is used and disclosed.
+
+R = S_total / B. S_core/B and payload-only are reported too.
+
+**Candidates** (V\* = the lower geomean R):
+- **V8: windowed delta search.** Git pack-objects-style ordering (type, then Git's v1 name hash of the path, then
+  size descending), window **W = 250**, max delta chain depth **50**, trial deltas against every eligible
+  candidate in the window (Git-like size bounds), keeping the smallest. The result is stored as core
+  derived-object records (`base + patch`, copy/insert patch format), with whatever generic record grouping and
+  compression the core provides.
+- **V9 (optional): Git pack passthrough.** The Git front stores Git's own `--aggressive` pack representation as
+  content-addressed objects, with reads resolving Git deltas. It is eligible only if implemented before the
+  official run.
+
+**Development discipline.** Encoder development and tuning may use **ripgrep and jq only** (the dev set). Before
+the official run, the encoder commit is recorded in `docs/EXP1.md` (Experiment 2 section). redis and git.git are
+measured only in the official run, which runs all four repos once on that commit.
+
+**Thresholds (all must hold):**
+
+| condition | threshold |
+|---|---|
+| size | **every repo R ≤ 1.00** (parity on each repo, not just on average) |
+| random reads | 10,000 uniformly random objects, warm cache, **4 concurrent reader threads**: p50 ≤ 5 ms, p99 ≤ 25 ms per repo |
+| build | full repack wall time ≤ 1.0× B's wall time (4 threads). If within ±20 % of 1.0, both are re-timed back to back under the bench lock, and the re-timed pair decides. |
+| memory | peak RSS ≤ 6 GB |
+
+**Verdict:** **PASS** if all hold, otherwise **FAIL**. Also reported: geomean R, R vs B', and R per component.
+
+**Consequences:**
+- PASS: V\* becomes the Git front's storage encoding.
+- FAIL: reported honestly. Per VISION.md, source code is not dropped: the next attempt is pre-registered
+  separately.
+
+**Threats to validity, stated up front:**
+- *Per-object overhead.* On git.git, the core index at 44 B/entry (32-byte BLAKE3 ids) against Git's ~28 B is
+  ≈ 13.8 MB (4.3 % of B) before any record headers or the SHA-1 map. The encoder therefore has to beat Git's
+  payload, not just match it, unless the core's per-object overhead is reduced first. Reducing it is allowed:
+  it is generic core work, done before the official run.
+- Four repos.
+- Build time on a shared host.
+- V8's design is informed by Exp1b/1c.
+
+### 6.4 Generic front (core): thresholds, pre-registered 2026-11-15
+
+The baseline is "files on a filesystem / S3 with versioning". Measured on this host (local disk), under the
+bench lock, as the median of 3 runs:
+
+| metric | baseline | threshold |
+|---|---|---|
+| durable write, 1 GiB incompressible | `dd if=… of=… bs=1M conv=fsync` on the same volume | ≥ 0.90× baseline throughput |
+| verified read, 1 GiB (warm) | `cat file > /dev/null` (warm) | ≥ 0.50× baseline (the store verifies BLAKE3 on every read; plain files verify nothing) |
+| 4 KiB range read in a 1 GiB object | — | p99 ≤ 1 ms (warm) |
+| storage, 10 versions of a 1 GiB file, each with 0.1 % of bytes randomly rewritten (scattered 1-byte edits, deterministic seed) | S3-style versioning = 10 full copies | ≤ 1.15 GiB total, i.e. near-perfect dedup (each 64 KiB chunk containing an edit is stored again) |
+| storage, the same 10 versions with 1 MiB inserted at a random offset each time | 10 full copies | ≤ 1.15 GiB total |
+
+The scattered-edit case is the hard one for chunk dedup. 0.1 % of 1 GiB is about 1 M edits, which touch almost
+every 64 KiB chunk. If the store can't meet it with chunking alone, a generic derived-object encoding
+(`base + patch`) is the expected route. Either way the number is reported.
+
+### 6.5 Net fronts
+
+*(Added by the net session: Git protocol (clone/fetch/push time and bytes on the wire; Git storage size is
+§6.3), HF/Xet, OCI, PyPI/npm/Maven. No measurement code for a front before its row is committed here.)*
