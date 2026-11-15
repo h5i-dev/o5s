@@ -169,6 +169,11 @@ The contended run checks that no update is lost: the final version equals the nu
 - (Later) A Hugging Face / Xet adapter. Before designing it, coordinate with the core on adopting Xet's exact chunker (docs/RESEARCH_SPEEDUP.md §4) for chunk-boundary compatibility with HF-hosted models.
 - Running the git adapter against git.git/redis-sized repos. Not done yet because of the scratch disk budget, which Exp1 needs.
 
+## Phase 2 (2026-11-15): speed-up backlog shared with the core (AGENT_TASK_NET.md "Phase 2")
+- **A. Experiment 1c:** pre-registered as PLAN §4.9 (dc6f869, committed before any 1c code). Harness: `bench/exp1c`, `scripts/exp1c.sh`. Git 2.56.1 for the extra baselines is built in `/mnt/scratch/pico2peta/git-2.56`. Running under the bench lock; results go in EXP1.md.
+- **B. Xet chunker:** `crates/chunk`. Byte-exact Xet chunking that **matches all 796 published reference boundaries** (`xet-team/xet-spec-reference-files`), plus FastCDC v2020 identical to the pack store's chunking, behind a streaming `Chunker` trait. Benchmark: `chunk-bench`.
+- **C. Byte grouping:** `crates/weights/src/bytegroup.rs` (`group` / `ungroup`, with proptest round-trip and no-panic tests). The measurement uses SmolLM2-135M → SmolLM2-135M-Instruct (real bf16 checkpoints) via `examples/bytegroup_measure.rs`.
+
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
 **Principles**

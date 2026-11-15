@@ -1272,8 +1272,10 @@ version = "0.1.0"
 dependencies = [
  "pico2peta-core",
  "pico2peta-repo",
+ "proptest",
  "serde_json",
  "tempfile",
+ "zstd",
 ]
 
 [[package]]
