@@ -212,6 +212,15 @@ pub trait ObjectStore: Send + Sync {
         let _ = base;
         self.put_stream(src)
     }
+    /// Like `put_delta`, with an explicit alignment (API v1.8): each
+    /// `(dst, src, len)` says that object bytes `[dst, dst+len)` correspond to
+    /// base bytes `[src, src+len)` (sorted by `dst`, non-overlapping). Uncovered
+    /// bytes are stored as-is. Used for formats whose regions move between
+    /// versions (reordered or resized tensors). Default: `put_delta`.
+    fn put_delta_mapped(&self, base: &Hash, segments: &[(u64, u64, u64)], src: &mut dyn Read) -> Result<Hash> {
+        let _ = segments;
+        self.put_delta(base, src)
+    }
     /// Returns the bytes of `hash` in `range` (whole object if `None`).
     /// Buffers the result, so use [`ObjectStore::open`] for large objects.
     fn get(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Vec<u8>>;

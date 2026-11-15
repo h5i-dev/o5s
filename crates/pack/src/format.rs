@@ -242,19 +242,74 @@ pub fn unpack_payload(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
 // Manifest: list of (chunk hash, chunk length)
 // ---------------------------------------------------------------------------
 
-/// Encodes a delta record payload.
-pub fn encode_delta(base: &Hash, xor: &Hash) -> Vec<u8> {
+/// A delta alignment segment: object bytes `[dst, dst+len)` are XORed with
+/// base bytes `[src, src+len)`. Bytes not covered by any segment are XORed
+/// with zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DeltaSeg {
+    /// Offset in the new object.
+    pub dst: u64,
+    /// Offset in the base.
+    pub src: u64,
+    /// Length.
+    pub len: u64,
+}
+
+/// Upper bound on alignment segments per delta.
+pub const MAX_DELTA_SEGS: usize = 1 << 20;
+
+/// Encodes a delta record payload: `base | xor` (identity alignment), or
+/// `base | xor | n u32 | (dst u64, src u64, len u64)*` for explicit segments.
+pub fn encode_delta(base: &Hash, xor: &Hash, segs: Option<&[DeltaSeg]>) -> Vec<u8> {
     let mut v = base.as_bytes().to_vec();
     v.extend_from_slice(xor.as_bytes());
+    if let Some(segs) = segs {
+        v.extend_from_slice(&(segs.len() as u32).to_le_bytes());
+        for g in segs {
+            v.extend_from_slice(&g.dst.to_le_bytes());
+            v.extend_from_slice(&g.src.to_le_bytes());
+            v.extend_from_slice(&g.len.to_le_bytes());
+        }
+    }
     v
 }
 
-/// Decodes a delta record payload into `(base, xor)`.
-pub fn decode_delta(b: &[u8]) -> Result<(Hash, Hash)> {
-    if b.len() != 64 {
+/// Decodes a delta record payload into `(base, xor, segments)`; `None` = identity.
+pub fn decode_delta(b: &[u8]) -> Result<(Hash, Hash, Option<Vec<DeltaSeg>>)> {
+    if b.len() == 64 {
+        return Ok((rd_hash(&b[..32]), rd_hash(&b[32..64]), None));
+    }
+    if b.len() < 68 {
         return Err(Error::Corrupt("bad delta record".into()));
     }
-    Ok((rd_hash(&b[..32]), rd_hash(&b[32..])))
+    let n = rd_u32(&b[64..68]) as usize;
+    if n > MAX_DELTA_SEGS || b.len() != 68 + n * 24 {
+        return Err(Error::Corrupt("bad delta segment table".into()));
+    }
+    let segs: Vec<DeltaSeg> = (0..n)
+        .map(|i| {
+            let o = 68 + i * 24;
+            DeltaSeg { dst: rd_u64(&b[o..o + 8]), src: rd_u64(&b[o + 8..o + 16]), len: rd_u64(&b[o + 16..o + 24]) }
+        })
+        .collect();
+    validate_segs(&segs, None)?;
+    Ok((rd_hash(&b[..32]), rd_hash(&b[32..64]), Some(segs)))
+}
+
+/// Segments must be sorted by `dst`, non-overlapping, overflow-free, and
+/// (if `base_len` is known) inside the base.
+pub fn validate_segs(segs: &[DeltaSeg], base_len: Option<u64>) -> Result<()> {
+    let mut end = 0u64;
+    for g in segs {
+        let de = g.dst.checked_add(g.len);
+        let se = g.src.checked_add(g.len);
+        let (Some(de), Some(se)) = (de, se) else { return Err(Error::Corrupt("delta segment overflow".into())) };
+        if g.dst < end || base_len.is_some_and(|bl| se > bl) {
+            return Err(Error::Corrupt("delta segments overlap or exceed the base".into()));
+        }
+        end = de;
+    }
+    Ok(())
 }
 
 /// Encodes a manifest node.

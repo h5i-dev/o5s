@@ -46,8 +46,8 @@ enum Cmd {
     Put {
         #[arg(default_value = "-")]
         file: PathBuf,
-        /// Store as an XOR delta against this object (for new versions of
-        /// model weights with the same layout).
+        /// Store as an XOR delta against this object (new versions of model
+        /// weights). safetensors files are aligned per tensor.
         #[arg(long, conflicts_with = "delta_from_ref")]
         delta_base: Option<Hash>,
         /// Store as an XOR delta against the object NAME currently points at
@@ -230,7 +230,8 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 Box::new(std::io::BufReader::new(std::fs::File::open(&file)?))
             };
             let h = match delta_base {
-                Some(b) => r.put_delta(&b, &mut src)?,
+                // Tensor-aligned for safetensors checkpoints; offset-aligned otherwise.
+                Some(b) => pico2peta_weights::put_checkpoint(r, &b, &mut src)?,
                 None => r.put_stream(&mut src)?,
             };
             r.flush()?;
