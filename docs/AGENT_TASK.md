@@ -12,7 +12,12 @@ The human may be disconnected for long periods — keep making progress without 
   - `CARGO_TARGET_DIR=/mnt/scratch/pico2peta/cargo-target` (already exported in this session)
   - `/mnt/scratch/pico2peta/bench-data` for cloned benchmark repos/datasets
   - `/mnt/scratch/pico2peta/tmp` for temp files (`TMPDIR` is set to it)
-- Rust (cargo 1.100) is installed. Lean 4 / elan is **not** installed; if you install it, put toolchains under `/mnt/scratch` (e.g. `ELAN_HOME=/mnt/scratch/pico2peta/elan`) and symlink as needed.
+- Rust (cargo 1.100) is installed.
+- **Lean 4 + Mathlib are already installed** on scratch — do not reinstall:
+  - `export ELAN_HOME=/mnt/scratch/ec2-user/elan PATH=/mnt/scratch/ec2-user/elan/bin:$PATH` (toolchain `leanprover/lean4:v4.31.0`)
+  - Prebuilt Mathlib (with oleans): `/mnt/scratch/ec2-user/lake/arith/packages/mathlib` (rev `fabf563a7c`). Aeneas Lean lib also at `/mnt/scratch/ec2-user/lake/arith/packages/aeneas`.
+  - In `lean/`, pin `lean-toolchain` to `leanprover/lean4:v4.31.0` and require mathlib by **local path** to that checkout (or the same git rev) so nothing is rebuilt/downloaded. Put the lake `.lake` build dir somewhere sensible; avoid filling `/`.
+  - `/mnt/scratch/ec2-user/env.sh` shows the full toolchain env used elsewhere (don't source it wholesale — it redirects CARGO_TARGET_DIR).
 - 4 cores, 15 GB RAM.
 
 ## Goals (in order)
