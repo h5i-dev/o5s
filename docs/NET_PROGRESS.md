@@ -108,7 +108,7 @@ User docs are in `docs/API.md` and `deploy/README.md`.
   | after grouped `repack_all`: .pack + .idx | 4.82 MB | **1.264×** git .pack + .idx (3.81 MB) |
 
   - The repack takes 52 s on a release build; `git gc --aggressive` takes 7 s.
-  - **After the core's frame v2 and idx v3 (demo 7c9e8a2)**, the same unchanged test gives **1.078× total and 1.021× payload**, with a 34.8 s repack on a loaded host (the lead's run). The rest is mostly index: 44 vs 28 B/object, of which 12 B is BLAKE3 vs SHA-1.
+  - **After the core's frame v2 and idx v3 (demo b3d66e8)**, the same unchanged test gives **1.078× total and 1.021× payload**, with a 34.8 s repack on a loaded host (the lead's run). The rest is mostly index: 44 vs 28 B/object, of which 12 B is BLAKE3 vs SHA-1.
   - Full mirror including refs/pull/* (`P2P_GIT_ALL_REFS=1`, pre-v2 formats): 1.248× total, 1.135× payload.
   - After the repack the repo clones back with identical refs and passes `git fsck --full`.
 - This does **not** reproduce EXP1's predicted ~0.85× on ripgrep. Both parts contribute:
@@ -170,7 +170,7 @@ The contended run checks that no update is lost: the final version equals the nu
 - Running the git adapter against git.git/redis-sized repos. Not done yet because of the scratch disk budget, which Exp1 needs.
 
 ## Phase 2 (2026-11-15): speed-up backlog shared with the core (AGENT_TASK_NET.md "Phase 2")
-- **A. Experiment 1c:** pre-registered as PLAN §4.9 (dc6f869, committed before any 1c code). Harness: `bench/exp1c`, `scripts/exp1c.sh`. Git 2.56.1 for the extra baselines is built in `/mnt/scratch/pico2peta/git-2.56`. Running under the bench lock; results go in EXP1.md.
+- **A. Experiment 1c:** pre-registered as PLAN §4.9 (52443e5, committed before any 1c code). Harness: `bench/exp1c`, `scripts/exp1c.sh`. Git 2.56.1 for the extra baselines is built in `/mnt/scratch/pico2peta/git-2.56`. Running under the bench lock; results go in EXP1.md.
 - **B. Xet chunker:** `crates/chunk`. Byte-exact Xet chunking that **matches all 796 published reference boundaries** (`xet-team/xet-spec-reference-files`), plus FastCDC v2020 identical to the pack store's chunking, behind a streaming `Chunker` trait. Benchmark: `chunk-bench`.
 - **C. Byte grouping:** `crates/weights/src/bytegroup.rs` (`group` / `ungroup`, with proptest round-trip and no-panic tests). The measurement uses SmolLM2-135M → SmolLM2-135M-Instruct (real bf16 checkpoints) via `examples/bytegroup_measure.rs`.
 
@@ -237,8 +237,8 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **Large listings:** `list()` buffers all keys in memory. The trait returns a `Vec`, so a paginated or streaming list would need a trait change if a prefix grows to millions of keys.
 
 ## Requests for core
-- **RESOLVED (2026-11-15):** a ref-log double-Ok regression (core ec271c1) was caught by `two_servers_share_a_repo_via_s3`. 60 acknowledged commits had produced only 50–54 versions, because identical CAS records from two writers were both treated as "ours".
-  - Fixed in core 2e140e8: each log entry now carries a per-attempt nonce, and only our own nonce counts as ours.
+- **RESOLVED (2026-11-15):** a ref-log double-Ok regression (core 8e845fd) was caught by `two_servers_share_a_repo_via_s3`. 60 acknowledged commits had produced only 50–54 versions, because identical CAS records from two writers were both treated as "ours".
+  - Fixed in core e7a75c4: each log entry now carries a per-attempt nonce, and only our own nonce counts as ours.
   - Re-verified on MinIO: 5 of 5 runs give 60 commits with final version 60 (75–83 conflicts), and `ref_log_commit_survives_lost_response` still passes.
 - 2026-11-15: a streaming put, a backend error variant, and committing early. All three were delivered in API v1.
 - `Error::Unauthorized` (v1.1), `replace_many` (v1.2), `ensure_live` (v1.3), the `Grouper` trait and `delete_ref` (v1.5) were delivered, and all are adopted. `DELETE /v1/refs/<name>` exists and `RemoteRepo::delete_ref` overrides the default.
