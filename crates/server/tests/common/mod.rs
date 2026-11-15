@@ -28,6 +28,7 @@ pub fn grant(p: &str, ns: &str, a: Access) -> PolicyEntry {
 pub struct TestServer {
     pub addr: SocketAddr,
     pub dir: tempfile::TempDir,
+    pub state: std::sync::Arc<pico2peta_server::api::AppState>,
     pub stop: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -59,6 +60,7 @@ impl TestServer {
         };
         tweak(&mut cfg);
         let state = pico2peta_server::build_state(&cfg).unwrap();
+        let state_keep = state.clone();
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
         let (addr_tx, addr_rx) = std::sync::mpsc::channel();
         let timeout = Duration::from_secs(cfg.server.request_timeout_secs);
@@ -76,7 +78,7 @@ impl TestServer {
             });
         });
         let addr = addr_rx.recv().unwrap();
-        TestServer { addr, dir, stop: Some(stop_tx), thread: Some(thread) }
+        TestServer { addr, dir, state: state_keep, stop: Some(stop_tx), thread: Some(thread) }
     }
 
     pub fn url(&self) -> String {

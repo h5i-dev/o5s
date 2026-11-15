@@ -105,6 +105,9 @@
   - Index: 62 B/object real vs the 48 B modeled in PLAN §4.4, and git's .idx is about 28 B/object.
 - I've reported this to the core lead to reconcile with the Exp1 harness (`bench/exp1`). Possible causes: frame boundaries, grouping keys that differ from the harness, and the cost of the index format.
 
+- S3 default credential chain (env, web identity, IMDSv2) with background refresh.
+- Separate metrics listener, and per-principal rate limiting (429 with `Retry-After`, `p2p_rate_limited_total`).
+
 ### Next
 - Goal 6: Git smart-HTTP and OCI distribution adapters. The hash-mapping design proposal is below, waiting for the lead's agreement.
 
@@ -183,8 +186,7 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **OIDC/JWT authenticator:** not implemented; the `Authenticator` trait is async and ready for it.
 - **Token management:** tokens and policies live in config and reload on SIGHUP (revocation applies to the next request). There is no admin API to issue or revoke tokens.
 - **Audit log rotation and shipping:** manual (stop, move, start). There is no remote sink (syslog, S3).
-- **Unauthenticated `/metrics`:** restrict it at the network level. There is no separate metrics listener yet.
-- **Rate limiting:** only a global concurrency cap. There is no per-principal rate limit or quota.
+- **Metrics and rate limits:** `/metrics` can move to a separate listener (`server.metrics_listen`), but is still unauthenticated there, so bind it to a private interface. Per-principal token-bucket rate limiting exists (`server.rate_limit`; anonymous callers keyed by IP). There are no byte or storage quotas per principal or namespace.
 - **Durability of server puts:** an unreferenced `put` becomes durable at the next replace or flush (core semantics, since the open pack is not fsynced per put). If the server crashes before that, the client's later `replace` gets `MissingObject` and must re-put. Clients needing durability without a replace call `POST /v1/flush`.
 - **Git adapter limits:**
   - SHA-1 repos only (no `object-format=sha256`). No protocol v2 server side (clients fall back to v0), and no shallow or partial clones.

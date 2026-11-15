@@ -455,3 +455,43 @@ fn delete_ref_over_http() {
     assert!(c.resolve(&a).unwrap().is_none());
     assert!(c.resolve(&b).unwrap().is_some());
 }
+
+#[test]
+fn per_principal_rate_limit() {
+    let s = TestServer::start(|c| {
+        c.server.rate_limit = Some(pico2peta_server::config::RateLimit { per_sec: 1.0, burst: 3.0 })
+    });
+    let who = |t: &str| http().get(format!("{}/v1/whoami", s.url())).bearer_auth(t).send().unwrap();
+    for _ in 0..3 {
+        assert_eq!(who(ALICE).status(), 200);
+    }
+    let r = who(ALICE);
+    assert_eq!(r.status(), 429);
+    assert!(r.headers()["retry-after"].to_str().unwrap().parse::<u64>().unwrap() >= 1);
+    // Other principals have their own bucket.
+    assert_eq!(who(READER).status(), 200);
+    // Ops endpoints are not limited.
+    assert_eq!(http().get(format!("{}/healthz", s.url())).send().unwrap().status(), 200);
+    std::thread::sleep(Duration::from_millis(1100));
+    assert_eq!(who(ALICE).status(), 200, "tokens refill");
+    let m = http().get(format!("{}/metrics", s.url())).send().unwrap().text().unwrap();
+    assert!(m.contains("p2p_rate_limited_total 1"), "{m}");
+}
+
+#[test]
+fn separate_metrics_listener() {
+    let s = TestServer::start(|c| c.server.metrics_listen = Some("127.0.0.1:0".parse().unwrap()));
+    assert_eq!(http().get(format!("{}/metrics", s.url())).send().unwrap().status(), 404);
+    // The ops router serves them instead.
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let st = s.state.clone();
+    let addr = rt.block_on(async {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let a = l.local_addr().unwrap();
+        tokio::spawn(pico2peta_server::serve_ops(l, st, std::future::pending()));
+        a
+    });
+    let r = http().get(format!("http://{addr}/metrics")).send().unwrap();
+    assert_eq!(r.status(), 200);
+    assert!(r.text().unwrap().contains("p2p_http_requests_total"));
+}

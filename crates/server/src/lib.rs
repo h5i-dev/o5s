@@ -116,6 +116,8 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         shutting_down: Arc::new(AtomicBool::new(false)),
         limiter: Arc::new(tokio::sync::Semaphore::new(cfg.server.max_concurrent_requests)),
         trust_forwarded_for: cfg.server.trust_forwarded_for,
+        limits: cfg.server.rate_limit.map(api::RateLimiter::new),
+        metrics_separate: cfg.server.metrics_listen.is_some(),
         local: Some(local),
         gc: cfg.gc.clone(),
         gc_running: Arc::new(AtomicBool::new(false)),
@@ -159,6 +161,16 @@ pub fn app(state: Arc<AppState>, request_timeout: Duration) -> axum::Router {
         .layer(SetSensitiveRequestHeadersLayer::new([axum::http::header::AUTHORIZATION]))
         .layer(PropagateRequestIdLayer::new(rid.clone()))
         .layer(SetRequestIdLayer::new(rid, RandomRequestId))
+}
+
+/// Serves the ops router (`/metrics`, `/healthz`, `/readyz`) on `listener`
+/// until `shutdown` resolves.
+pub async fn serve_ops(
+    listener: TcpListener,
+    state: Arc<AppState>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
+    axum::serve(listener, api::ops_router(state)).with_graceful_shutdown(shutdown).await
 }
 
 /// Serves plain HTTP on `listener` until `shutdown` resolves. See [`serve_on`].

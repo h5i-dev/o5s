@@ -61,7 +61,7 @@ SIGHUP (`systemctl reload`) re-reads the config file and applies **tokens, polic
 
 ## Observability
 - `GET /healthz` is liveness (the process is up). `GET /readyz` is readiness: it is 503 while draining, after an audit-log failure, or when the repository is unreachable. Neither needs credentials.
-- `GET /metrics` serves OpenMetrics text with no credentials, so restrict it at the proxy or firewall. Key series:
+- `GET /metrics` serves OpenMetrics text with no credentials. Set `server.metrics_listen` to a private address so it is served only there (the API port then returns 404 for it), or restrict it at the proxy or firewall. Key series:
   - `p2p_http_requests_total{method,route,status}` and `p2p_http_request_duration_seconds`
   - `p2p_http_in_flight`
   - `p2p_replace_total{outcome=ok|conflict|rejected}`
@@ -81,5 +81,6 @@ With `gc.interval_secs > 0`, the server advances the GC protocol on that schedul
 
 ## Capacity notes
 - Each transfer buffers at most about 2 MiB, whatever the object size. Measured: 19 MiB peak RSS growth while streaming 512 MiB up and back down (`crates/server/tests/memory.rs`).
+- `server.rate_limit = { per_sec, burst }` gives each principal (anonymous callers: each client IP) a token bucket. Excess requests get 429 with `Retry-After`.
 - `max_concurrent_requests` bounds concurrent requests, including those still streaming bodies. Beyond it, the server answers 503 with `Retry-After: 1`.
 - A client that stalls for 60 s in the middle of a transfer is disconnected.

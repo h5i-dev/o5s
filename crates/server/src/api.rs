@@ -27,6 +27,7 @@ use axum::{Extension, Router};
 use futures_util::StreamExt;
 use pico2peta_client::wire::{self, codes};
 use pico2peta_core::{Hash, Name, Repository, validate_path};
+use std::collections::HashMap;
 use std::io::Read;
 use std::ops::Range;
 use std::sync::Arc;
@@ -52,6 +53,10 @@ pub struct AppState {
     pub shutting_down: Arc<AtomicBool>,
     pub limiter: Arc<Semaphore>,
     pub trust_forwarded_for: bool,
+    /// Per-principal token buckets (`None` = unlimited).
+    pub limits: Option<RateLimiter>,
+    /// `/metrics` is served on a separate listener instead of the main one.
+    pub metrics_separate: bool,
     /// The concrete repository, for admin operations outside the trait (GC).
     pub local: Option<pico2peta_repo::LocalRepo>,
     pub gc: crate::config::GcSection,
@@ -125,7 +130,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .route("/readyz", get(readyz))
-        .route("/metrics", get(metrics))
+        .route("/metrics", get(metrics_main))
         .merge(api)
         .layer(middleware::from_fn_with_state(state.clone(), observe))
         .with_state(state)
@@ -173,6 +178,22 @@ async fn authenticate(State(st): St, mut req: Request, next: Next) -> Response {
     req.extensions_mut().insert(Caller { request_id: rid, remote: caller_remote.clone() });
     match st.authn.authenticate(req.headers()).await {
         Ok(p) => {
+            if let Some(l) = &st.limits {
+                let key = if p.authenticated {
+                    format!("p:{}", p.name)
+                } else {
+                    // Anonymous: per client IP (port stripped).
+                    let ip = caller_remote.as_deref().map(|a| a.rsplit_once(':').map_or(a, |x| x.0)).unwrap_or("-");
+                    format!("a:{ip}")
+                };
+                if let Err(wait) = l.check(&key) {
+                    st.metrics.rate_limited.inc();
+                    let mut r = ApiError::new(StatusCode::TOO_MANY_REQUESTS, codes::OVERLOADED, "rate limit exceeded")
+                        .into_response();
+                    r.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from(wait.as_secs().max(1)));
+                    return r;
+                }
+            }
             req.extensions_mut().insert(p);
             next.run(req).await
         }
@@ -253,6 +274,44 @@ impl AppState {
             self.metrics.audit_failures.inc();
             ApiError::internal(format!("operation applied but audit write failed: {e}"))
         })
+    }
+}
+
+/// Token buckets keyed by principal (bounded table).
+pub struct RateLimiter {
+    cfg: crate::config::RateLimit,
+    buckets: std::sync::Mutex<HashMap<String, (f64, Instant)>>,
+}
+
+const MAX_BUCKETS: usize = 100_000;
+
+impl RateLimiter {
+    pub fn new(cfg: crate::config::RateLimit) -> Self {
+        RateLimiter { cfg, buckets: std::sync::Mutex::new(HashMap::new()) }
+    }
+
+    /// Takes one token for `key`, or returns how long until one is available.
+    pub fn check(&self, key: &str) -> Result<(), Duration> {
+        let Ok(mut m) = self.buckets.lock() else { return Ok(()) };
+        let now = Instant::now();
+        if m.len() >= MAX_BUCKETS && !m.contains_key(key) {
+            // Drop buckets that are full again (idle callers); they lose nothing.
+            let full = self.cfg.burst;
+            let rate = self.cfg.per_sec;
+            m.retain(|_, (t, at)| (*t + now.duration_since(*at).as_secs_f64() * rate) < full);
+            if m.len() >= MAX_BUCKETS {
+                return Err(Duration::from_secs(1));
+            }
+        }
+        let (tokens, at) = m.entry(key.to_string()).or_insert((self.cfg.burst, now));
+        *tokens = (*tokens + now.duration_since(*at).as_secs_f64() * self.cfg.per_sec).min(self.cfg.burst);
+        *at = now;
+        if *tokens >= 1.0 {
+            *tokens -= 1.0;
+            Ok(())
+        } else {
+            Err(Duration::from_secs_f64((1.0 - *tokens) / self.cfg.per_sec))
+        }
     }
 }
 
@@ -979,6 +1038,22 @@ async fn readyz(State(st): St) -> Response {
         Ok(Err(e)) => (StatusCode::SERVICE_UNAVAILABLE, format!("repository: {}", e.message)).into_response(),
         Err(_) => (StatusCode::SERVICE_UNAVAILABLE, "repository check timed out").into_response(),
     }
+}
+
+async fn metrics_main(State(st): St) -> Response {
+    if st.metrics_separate {
+        return (StatusCode::NOT_FOUND, "metrics are served on server.metrics_listen").into_response();
+    }
+    metrics(State(st)).await
+}
+
+/// The ops-only router for `server.metrics_listen`.
+pub fn ops_router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/healthz", get(|| async { "ok" }))
+        .route("/readyz", get(readyz))
+        .route("/metrics", get(metrics))
+        .with_state(state)
 }
 
 async fn metrics(State(st): St) -> Response {

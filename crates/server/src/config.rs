@@ -9,6 +9,8 @@
 //! shutdown_grace_secs = 30
 //! trust_forwarded_for = false      # true only behind a proxy that sets X-Forwarded-For
 //! # tls = { cert = "/etc/pico2peta/tls.crt", key = "/etc/pico2peta/tls.key" }  # native HTTPS
+//! # metrics_listen = "10.0.0.5:9100"   # /metrics only there
+//! # rate_limit = { per_sec = 50.0, burst = 200.0 }   # per principal
 //!
 //! [repo]
 //! path = "/var/lib/pico2peta/repo"
@@ -170,6 +172,19 @@ pub struct ServerSection {
     pub trust_forwarded_for: bool,
     /// Serve HTTPS directly (otherwise plain HTTP behind a TLS proxy).
     pub tls: Option<TlsSection>,
+    /// Serve `/metrics` (plus `/healthz`, `/readyz`) on this separate address only,
+    /// e.g. a private interface for Prometheus. Unset: on the main listener.
+    pub metrics_listen: Option<SocketAddr>,
+    /// Per-principal request rate limit (anonymous callers are keyed by client address).
+    pub rate_limit: Option<RateLimit>,
+}
+
+/// Token bucket: `per_sec` sustained, `burst` peak.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RateLimit {
+    pub per_sec: f64,
+    pub burst: f64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -191,6 +206,8 @@ impl Default for ServerSection {
             shutdown_grace_secs: 30,
             trust_forwarded_for: false,
             tls: None,
+            metrics_listen: None,
+            rate_limit: None,
         }
     }
 }
@@ -331,6 +348,11 @@ impl Config {
         let bad = |m: String| Err(ConfigError::Invalid(m));
         if self.server.max_concurrent_requests == 0 {
             return bad("server.max_concurrent_requests must be >= 1".into());
+        }
+        if let Some(r) = self.server.rate_limit
+            && !(r.per_sec > 0.0 && r.burst >= 1.0 && r.per_sec.is_finite() && r.burst.is_finite())
+        {
+            return bad("server.rate_limit needs per_sec > 0 and burst >= 1".into());
         }
         if self.server.request_timeout_secs == 0 {
             return bad("server.request_timeout_secs must be >= 1".into());
