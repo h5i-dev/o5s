@@ -117,3 +117,10 @@ path = "fuzz_targets/midx.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "pkg_parsers"
+path = "fuzz_targets/pkg_parsers.rs"
+test = false
+doc = false
+bench = false

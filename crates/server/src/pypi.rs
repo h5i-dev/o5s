@@ -29,11 +29,13 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
 use pico2peta_core::{Error, Hash, Name, ObjectStore, Repository, Result};
+use sha2::Digest as _;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const RECORD_MAGIC: &[u8; 8] = b"P2PPYPI1";
+const YANK_MAGIC: &[u8; 8] = b"P2PPYYK1";
 const JSON_TYPE: &str = "application/vnd.pypi.simple.v1+json";
 
 pub struct PypiState {
@@ -52,7 +54,7 @@ impl PypiState {
         local: Option<pico2peta_repo::LocalRepo>,
         upstreams: BTreeMap<String, Upstream>,
     ) -> std::result::Result<PypiState, String> {
-        let http = crate::pkg::http_client()?;
+        let http = crate::pkg::http_client(&upstreams.values().collect::<Vec<_>>())?;
         let store = Store { repo: repo.clone(), local };
         Ok(PypiState { repo, store, upstreams, http, pages: Mutex::new(HashMap::new()) })
     }
@@ -70,6 +72,8 @@ struct UpFile {
     requires_python: Option<String>,
     size: Option<u64>,
     yanked: serde_json::Value,
+    /// PEP 714 `core-metadata` (or the older `data-dist-info-metadata`), if offered.
+    core_metadata: Option<serde_json::Value>,
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +91,9 @@ struct Meta {
     source: String,
     #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     yanked: serde_json::Value,
+    /// sha256 of the wheel's core metadata (PEP 658), stored as `<file>.metadata`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    metadata_sha256: Option<String>,
 }
 
 fn encode_record(content: &Hash, m: &Meta) -> Vec<u8> {
@@ -228,6 +235,17 @@ pub async fn dispatch(
             };
             upload(&st, &py, &p, &c, index, mp).await
         }
+        // PEP 592 yank (no client tool has a yank command; this is the server's own API).
+        (m @ (Method::PUT | Method::DELETE), ["-", "yank", project, file]) => {
+            if let Err(r) = check(&st, &p, &c, index, Access::Write) {
+                return r;
+            }
+            let project = normalize(project);
+            if !valid_filename(file, &project) {
+                return err(StatusCode::NOT_FOUND, "no such file");
+            }
+            yank(&st, &py, &p, &c, index, &project, file, m == Method::PUT, req).await
+        }
         (Method::GET | Method::HEAD, ["simple"]) => {
             if let Err(r) = check(&st, &p, &c, index, Access::Read) {
                 return r;
@@ -254,6 +272,14 @@ pub async fn dispatch(
         (Method::GET | Method::HEAD, ["files", project, file]) => {
             if let Err(r) = check(&st, &p, &c, index, Access::Read) {
                 return r;
+            }
+            if let Some(wheel) = file.strip_suffix(".metadata")
+                && wheel.ends_with(".whl")
+                && valid_project(project)
+                && normalize(project) == *project
+                && valid_filename(wheel, project)
+            {
+                return metadata(&st, &py, index, project, wheel, &headers, head).await;
             }
             if !valid_project(project) || normalize(project) != *project || !valid_filename(file, project) {
                 return err(StatusCode::NOT_FOUND, "no such file");
@@ -303,16 +329,31 @@ struct Row {
     size: Option<u64>,
     yanked: serde_json::Value,
     upload_time: Option<String>,
+    metadata: Option<serde_json::Value>,
 }
 
 async fn local_files(py: &Arc<PypiState>, index: &str, project: &str) -> std::result::Result<Vec<Row>, Response> {
     let (py2, prefix) = (py.clone(), format!("pypi/{index}/{project}"));
     blocking(move || {
         let mut out = Vec::new();
+        let mut yanks: HashMap<String, String> = HashMap::new();
+        for (n, v) in py2.repo.list_refs(&format!("{prefix}/_yanked"))? {
+            let b = py2.repo.get(&v.hash, None)?;
+            if let (Some(f), Some(r)) = (n.as_str().rsplit('/').next(), b.strip_prefix(YANK_MAGIC.as_slice())) {
+                yanks.insert(f.to_string(), String::from_utf8_lossy(r).into_owned());
+            }
+        }
         for (n, v) in py2.repo.list_refs(&prefix)? {
             let Some(f) = n.as_str().rsplit('/').next() else { continue };
+            if n.as_str().contains("/_yanked/") {
+                continue;
+            }
             let b = py2.repo.get(&v.hash, None)?;
-            let Some((_, m)) = decode_record(&b) else { continue };
+            let Some((_, mut m)) = decode_record(&b) else { continue };
+            // PEP 592: a yank note overrides the record (records are create-once).
+            if let Some(r) = yanks.get(f) {
+                m.yanked = if r.is_empty() { serde_json::json!(true) } else { serde_json::json!(r) };
+            }
             out.push(Row {
                 filename: f.to_string(),
                 sha256: Some(m.sha256),
@@ -320,6 +361,7 @@ async fn local_files(py: &Arc<PypiState>, index: &str, project: &str) -> std::re
                 size: Some(m.size),
                 yanked: m.yanked,
                 upload_time: Some(m.upload_time),
+                metadata: m.metadata_sha256.map(|s| serde_json::json!({ "sha256": s })),
             });
         }
         Ok(out)
@@ -344,6 +386,7 @@ async fn project_page(py: &Arc<PypiState>, index: &str, project: &str, h: &Heade
                             size: f.size,
                             yanked: f.yanked.clone(),
                             upload_time: None,
+                            metadata: f.core_metadata.clone(),
                         });
                     }
                 }
@@ -377,6 +420,10 @@ async fn project_page(py: &Arc<PypiState>, index: &str, project: &str, h: &Heade
                 if let Some(t) = &r.upload_time {
                     e["upload-time"] = serde_json::json!(t);
                 }
+                if let Some(m) = &r.metadata {
+                    e["core-metadata"] = m.clone();
+                    e["data-dist-info-metadata"] = m.clone();
+                }
                 e
             })
             .collect();
@@ -399,7 +446,14 @@ async fn project_page(py: &Arc<PypiState>, index: &str, project: &str, h: &Heade
             serde_json::Value::Bool(true) => " data-yanked=\"\"".into(),
             _ => String::new(),
         };
-        body.push_str(&format!("<a href=\"{}{frag}\"{rp}{yk}>{}</a>\n", url(&r.filename), r.filename));
+        let md = match &r.metadata {
+            Some(m) => {
+                let v = m["sha256"].as_str().map_or("true".to_string(), |s| format!("sha256={s}"));
+                format!(" data-core-metadata=\"{v}\" data-dist-info-metadata=\"{v}\"")
+            }
+            None => String::new(),
+        };
+        body.push_str(&format!("<a href=\"{}{frag}\"{rp}{yk}{md}>{}</a>\n", url(&r.filename), r.filename));
     }
     body.push_str("</body></html>\n");
     ([(header::CONTENT_TYPE, "text/html")], body).into_response()
@@ -430,7 +484,7 @@ async fn upstream_files(
     } else if !resp.status().is_success() {
         return Err(format!("upstream {page}: {}", resp.status()));
     } else {
-        let v: serde_json::Value = resp.json().await.map_err(|e| format!("upstream {page}: not PEP 691 JSON: {e}"))?;
+        let v = crate::pkg::json_limited(resp).await.map_err(|e| format!("upstream {page}: not PEP 691 JSON: {e}"))?;
         let mut out = Vec::new();
         for f in v["files"].as_array().into_iter().flatten() {
             let (Some(name), Some(u)) = (f["filename"].as_str(), f["url"].as_str()) else { continue };
@@ -442,6 +496,11 @@ async fn upstream_files(
                 requires_python: f["requires-python"].as_str().map(str::to_string),
                 size: f["size"].as_u64(),
                 yanked: f.get("yanked").cloned().unwrap_or(serde_json::Value::Null),
+                core_metadata: f
+                    .get("core-metadata")
+                    .or_else(|| f.get("data-dist-info-metadata"))
+                    .filter(|v| !v.is_null() && **v != serde_json::json!(false))
+                    .cloned(),
             });
         }
         out
@@ -542,7 +601,26 @@ async fn upload(
         upload_time: crate::audit::rfc3339_now(),
         source: "upload".into(),
         yanked: serde_json::Value::Null,
+        metadata_sha256: None,
     };
+    let mut meta = meta;
+    if file.ends_with(".whl") {
+        let (py2, mn) = (py.clone(), file_name(index, &project, &format!("{file}.metadata")));
+        let md = blocking(move || {
+            let Some(mn) = mn else { return Ok(None) };
+            let Some(md) = crate::pkg::wheel_metadata(&*py2.repo, &h, size)? else { return Ok(None) };
+            // Create-once like the file itself; the same bytes are fine.
+            Ok(match crate::pkg::create_once(&*py2.repo, &mn, &md, &|b| b == md.as_slice())? {
+                Ok(_) => Some(crate::git::hex(&sha2::Sha256::digest(&md))),
+                Err(_) => None,
+            })
+        })
+        .await;
+        match md {
+            Ok(m) => meta.metadata_sha256 = m,
+            Err(r) => return r,
+        }
+    }
     let (py2, n2) = (py.clone(), n.clone());
     let res = blocking(move || create_file(&*py2.repo, &n2, h, &meta)).await;
     let (status, outcome) = match &res {
@@ -563,6 +641,20 @@ async fn upload(
             remote: c.remote.clone(),
         })
         .await;
+    if let Ok(Ok(true)) = &res {
+        let version = fields.get("version").cloned().unwrap_or_default();
+        let m = [
+            ("index", index.to_string()),
+            ("project", project.clone()),
+            ("version", version),
+            ("file", file.clone()),
+            ("sha256", sha.clone()),
+        ]
+        .into_iter()
+        .map(|(k, v): (&str, String)| (k.to_string(), v))
+        .collect();
+        crate::prov_api::record_publish(st, "pypi", h, &p.name, m);
+    }
     match res {
         Ok(Ok(_)) => (status, "OK").into_response(),
         Ok(Err(m)) => err(status, m),
@@ -608,6 +700,144 @@ async fn download(
     .await
 }
 
+/// Yanks (or unyanks) a file. The body is the optional reason (plain text).
+#[allow(clippy::too_many_arguments)]
+async fn yank(
+    st: &Arc<AppState>,
+    py: &Arc<PypiState>,
+    p: &Principal,
+    c: &Caller,
+    index: &str,
+    project: &str,
+    file: &str,
+    on: bool,
+    req: Request,
+) -> Response {
+    let (Some(target), Ok(yn)) =
+        (file_name(index, project, file), Name::new(format!("pypi/{index}/{project}/_yanked/{file}")))
+    else {
+        return err(StatusCode::NOT_FOUND, "no such file");
+    };
+    let reason = axum::body::to_bytes(req.into_body(), 4096).await.unwrap_or_default();
+    let (py2, t2, y2) = (py.clone(), target.clone(), yn.clone());
+    let res = blocking(move || {
+        if py2.repo.resolve(&t2)?.is_none() {
+            return Ok(false);
+        }
+        let h = if on { Some(py2.repo.put(&[YANK_MAGIC.as_slice(), &reason].concat())?) } else { None };
+        for _ in 0..8 {
+            let cur = py2.repo.resolve(&y2)?;
+            let obs = cur.map_or(pico2peta_core::Observed::Absent, |c| pico2peta_core::Observed::Version(c.version));
+            let out = match (h, cur) {
+                (Some(h), _) => py2.repo.replace(&y2, &[(y2.clone(), obs)], h)?,
+                (None, Some(_)) => py2.repo.delete_ref(&y2, &[(y2.clone(), obs)])?,
+                (None, None) => return Ok(true),
+            };
+            if let pico2peta_core::ReplaceOutcome::Ok { .. } = out {
+                return Ok(true);
+            }
+        }
+        Err(Error::Corrupt("yank did not settle".into()))
+    })
+    .await;
+    match res {
+        Ok(true) => {
+            let _ = st
+                .audit
+                .record(Event {
+                    request_id: c.request_id.clone(),
+                    principal: p.name.clone(),
+                    action: if on { "pypi_yank" } else { "pypi_unyank" },
+                    target: target.to_string(),
+                    outcome: "ok".into(),
+                    detail: None,
+                    remote: c.remote.clone(),
+                })
+                .await;
+            StatusCode::OK.into_response()
+        }
+        Ok(false) => err(StatusCode::NOT_FOUND, "no such file"),
+        Err(r) => r,
+    }
+}
+
+/// `<wheel>.metadata` (PEP 658): stored at upload, or fetched once from the upstream.
+#[allow(clippy::too_many_arguments)]
+async fn metadata(
+    st: &Arc<AppState>,
+    py: &Arc<PypiState>,
+    index: &str,
+    project: &str,
+    wheel: &str,
+    headers: &HeaderMap,
+    head: bool,
+) -> Response {
+    let Some(n) = file_name(index, project, &format!("{wheel}.metadata")) else {
+        return err(StatusCode::NOT_FOUND, "no such file");
+    };
+    let (py2, n2) = (py.clone(), n.clone());
+    let have = match blocking(move || Ok(py2.repo.resolve(&n2)?.map(|v| v.hash))).await {
+        Ok(x) => x,
+        Err(r) => return r,
+    };
+    let h = match have {
+        Some(h) => h,
+        None => {
+            let Some(up) = py.upstreams.get(index) else { return err(StatusCode::NOT_FOUND, "no metadata") };
+            let files = match upstream_files(py, index, up, project).await {
+                Ok(f) => f,
+                Err(e) => return err(StatusCode::BAD_GATEWAY, e),
+            };
+            let Some(f) = files.iter().find(|f| f.filename == wheel && f.core_metadata.is_some()).cloned() else {
+                return err(StatusCode::NOT_FOUND, "no metadata");
+            };
+            st.metrics
+                .upstream_fetches
+                .get_or_create(&crate::metrics::FrontLabels { front: "pypi_metadata".into() })
+                .inc();
+            let murl = format!("{}.metadata", f.url);
+            if !up.allows(&murl) {
+                return err(StatusCode::BAD_GATEWAY, "upstream metadata URL is not on an allowed host");
+            }
+            let mut rq = py.http.get(&murl);
+            if let (Some(t), Ok(a), Ok(b)) = (&up.token, reqwest::Url::parse(&murl), reqwest::Url::parse(&up.url))
+                && a.host_str() == b.host_str()
+            {
+                rq = rq.bearer_auth(t);
+            }
+            let body = match rq.send().await {
+                Ok(r) if r.status().is_success() => match crate::pkg::bytes_limited(r, 16 << 20).await {
+                    Ok(b) => axum::body::Bytes::from(b),
+                    Err(_) => return err(StatusCode::BAD_GATEWAY, "upstream metadata unreadable or too large"),
+                },
+                Ok(r) => return err(StatusCode::BAD_GATEWAY, format!("upstream metadata: {}", r.status())),
+                Err(e) => return err(StatusCode::BAD_GATEWAY, format!("upstream metadata: {e}")),
+            };
+            if let Some(want) = f.core_metadata.as_ref().and_then(|m| m["sha256"].as_str())
+                && !want.eq_ignore_ascii_case(&crate::git::hex(&sha2::Sha256::digest(&body)))
+            {
+                return err(StatusCode::BAD_GATEWAY, "upstream metadata does not match its sha256");
+            }
+            let (py2, n2) = (py.clone(), n.clone());
+            match blocking(move || {
+                let h = py2.repo.put(&body)?;
+                // A concurrent fetch may have stored it first (the same upstream bytes).
+                let _ = crate::pkg::create_once(&*py2.repo, &n2, &body, &|b| b == &body[..])?;
+                Ok(h)
+            })
+            .await
+            {
+                Ok(h) => h,
+                Err(r) => return r,
+            }
+        }
+    };
+    crate::hf::serve_object(st, h, headers, head, |hm| {
+        hm.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain; charset=utf-8"));
+    })
+    .await
+}
+
 /// Fetches an upstream file into the store (sha256-checked) and records it.
 async fn fetch_upstream(
     st: &Arc<AppState>,
@@ -622,6 +852,9 @@ async fn fetch_upstream(
     let Some(f) = files.iter().find(|f| f.filename == file).cloned() else {
         return Err(err(StatusCode::NOT_FOUND, "no such file"));
     };
+    if !up.allows(&f.url) {
+        return Err(err(StatusCode::BAD_GATEWAY, format!("upstream file URL {} is not on an allowed host", f.url)));
+    }
     let mut rq = py.http.get(&f.url);
     // Only send the upstream token to the upstream's own host (files may live on a CDN).
     if let (Some(t), Ok(a), Ok(b)) = (&up.token, reqwest::Url::parse(&f.url), reqwest::Url::parse(&up.url))
@@ -652,12 +885,20 @@ async fn fetch_upstream(
         upload_time: crate::audit::rfc3339_now(),
         source: "upstream".into(),
         yanked: f.yanked.clone(),
+        // Served from the upstream's `.metadata` on first use, then from the store.
+        metadata_sha256: f.core_metadata.as_ref().and_then(|m| m["sha256"].as_str()).map(str::to_ascii_lowercase),
     };
     let (py2, n2, m2) = (py.clone(), n.clone(), meta.clone());
     match blocking(move || create_file(&*py2.repo, &n2, h, &m2)).await? {
         Ok(_) => Ok((h, meta)),
         Err(m) => Err(err(StatusCode::CONFLICT, m)),
     }
+}
+
+/// Fuzzing: name handling on arbitrary input.
+pub fn fuzz_names(s: &str) -> bool {
+    let n = normalize(s);
+    valid_project(s) && valid_index(s) && valid_filename(s, &n)
 }
 
 #[cfg(test)]
@@ -684,6 +925,7 @@ mod tests {
             upload_time: "t".into(),
             source: "upload".into(),
             yanked: serde_json::Value::Null,
+            metadata_sha256: Some("cd".into()),
         };
         let h = Hash([9; 32]);
         let (h2, m2) = decode_record(&encode_record(&h, &m)).unwrap();

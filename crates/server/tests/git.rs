@@ -374,3 +374,124 @@ fn protocol_v0_and_v2_agree() {
     assert!(trace.contains("version 2"), "no v2 advertisement:\n{trace}");
     assert!(trace.contains("command=ls-refs"), "{trace}");
 }
+
+/// Shallow clone (`--depth`, `--deepen`, `--shallow-since`) and partial clone
+/// (`--filter=blob:none`, with lazy blob fetches on checkout), with the real git client.
+#[test]
+fn shallow_and_partial_clone() {
+    if !have_git() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let s = git_server();
+    let w = tempfile::tempdir().unwrap();
+    let a = w.path().join("a");
+    std::fs::create_dir(&a).unwrap();
+    ok(&a, &["init", "-q"]);
+    for i in 0..6 {
+        commit(&a, "f", &format!("v{i}\n"), &format!("c{i}"));
+        std::fs::write(a.join(format!("big{i}.bin")), vec![i as u8; 10_000]).unwrap();
+        ok(&a, &["add", "."]);
+        ok(&a, &["commit", "-q", "-m", &format!("blob {i}")]);
+    }
+    ok(&a, &["push", "-q", &url(&s, ALICE, "team/sh"), "main"]);
+    let u = url(&s, READER, "team/sh");
+    let count = |d: &Path| ok(d, &["rev-list", "--count", "HEAD"]).trim().parse::<u32>().unwrap();
+
+    // Shallow: depth 1, then deepen by 2, then unshallow.
+    let c = w.path().join("shallow");
+    ok(w.path(), &["clone", "-q", "--depth", "1", &u, "shallow"]);
+    assert_eq!(count(&c), 1);
+    assert_eq!(ok(&c, &["rev-parse", "--is-shallow-repository"]).trim(), "true");
+    assert_eq!(std::fs::read_to_string(c.join("f")).unwrap(), "v5\n");
+    ok(&c, &["fsck", "--no-progress"]);
+    ok(&c, &["fetch", "-q", "--deepen", "2"]);
+    assert_eq!(count(&c), 3);
+    ok(&c, &["fetch", "-q", "--unshallow"]);
+    assert_eq!(count(&c), 12);
+    assert_eq!(ok(&c, &["rev-parse", "--is-shallow-repository"]).trim(), "false");
+    ok(&c, &["fsck", "--no-progress"]);
+    // --shallow-since: every commit here is recent, so a past date takes everything...
+    ok(w.path(), &["clone", "-q", "--shallow-since=2000-01-01", &u, "since"]);
+    assert_eq!(count(&w.path().join("since")), 12);
+
+    // Partial clone: no blobs until needed.
+    let p = w.path().join("partial");
+    ok(w.path(), &["clone", "-q", "--no-checkout", "--filter=blob:none", &u, "partial"]);
+    let missing = ok(&p, &["rev-list", "--objects", "--all", "--missing=print"]);
+    let n_missing = missing.lines().filter(|l| l.starts_with('?')).count();
+    assert!(n_missing >= 12, "blobs should be missing:\n{missing}");
+    // Checkout fetches the needed blobs lazily (non-tip wants, reachable from this repo).
+    ok(&p, &["checkout", "-q", "main"]);
+    assert_eq!(std::fs::read_to_string(p.join("f")).unwrap(), "v5\n");
+    assert_eq!(std::fs::read(p.join("big5.bin")).unwrap(), vec![5u8; 10_000]);
+    let after = ok(&p, &["rev-list", "--objects", "--all", "--missing=print"]);
+    assert!(after.lines().filter(|l| l.starts_with('?')).count() < n_missing);
+    // blob:limit keeps small blobs.
+    let l = w.path().join("limit");
+    ok(w.path(), &["clone", "-q", "--no-checkout", "--filter=blob:limit=1k", &u, "limit"]);
+    let m = ok(&l, &["rev-list", "--objects", "--all", "--missing=print"]);
+    assert_eq!(m.lines().filter(|l| l.starts_with('?')).count(), 6, "only the six 10 KB blobs are omitted:\n{m}");
+
+    // Object ids are global across repos: a want for another repo's object is refused.
+    let b = w.path().join("b");
+    std::fs::create_dir(&b).unwrap();
+    ok(&b, &["init", "-q"]);
+    commit(&b, "secret", "private\n", "other");
+    ok(&b, &["push", "-q", &url(&s, ALICE, "team/other"), "main"]);
+    let secret = ok(&b, &["rev-parse", "HEAD:secret"]).trim().to_string();
+    let (fetched, out) = git(&p, &["fetch", "-q", "origin", &secret]);
+    assert!(!fetched, "fetching another repo's blob must fail:\n{out}");
+}
+
+/// `object-format=sha256` repositories (configured by name prefix) with the real git client:
+/// push, clone (v2 and v0), fsck, incremental fetch, shallow clone. A SHA-1 push into a
+/// SHA-256 repository (and the reverse) is refused.
+#[test]
+fn sha256_repositories() {
+    if !have_git() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let s = TestServer::start(|c| {
+        c.policy.push(grant("alice", "git/team", Access::Write));
+        c.git.sha256_repos = vec!["team/s256".into()];
+    });
+    let w = tempfile::tempdir().unwrap();
+    let a = w.path().join("a");
+    std::fs::create_dir(&a).unwrap();
+    ok(&a, &["init", "-q", "--object-format=sha256"]);
+    for i in 0..4 {
+        commit(&a, "f", &format!("v{i}\n"), &format!("c{i}"));
+    }
+    ok(&a, &["tag", "-a", "-m", "release", "v1"]);
+    let u = url(&s, ALICE, "team/s256/repo");
+    ok(&a, &["push", "-q", "--follow-tags", &u, "main"]);
+    for proto in ["2", "0"] {
+        let c = w.path().join(format!("c{proto}"));
+        let (cloned, out) = git_v(w.path(), &["clone", "-q", &u, c.to_str().unwrap()], proto);
+        assert!(cloned, "clone v{proto}: {out}");
+        assert_eq!(ok(&c, &["rev-parse", "--show-object-format"]).trim(), "sha256");
+        assert_eq!(ok(&c, &["rev-parse", "HEAD"]), ok(&a, &["rev-parse", "HEAD"]));
+        assert_eq!(ok(&c, &["rev-parse", "v1^{commit}"]), ok(&a, &["rev-parse", "v1^{commit}"]));
+        ok(&c, &["fsck", "--strict", "--no-progress"]);
+    }
+    // Incremental fetch.
+    commit(&a, "g", "new\n", "c4");
+    ok(&a, &["push", "-q", &u, "main"]);
+    let c = w.path().join("c2");
+    ok(&c, &["pull", "-q", "--ff-only"]);
+    assert_eq!(ok(&c, &["rev-parse", "HEAD"]), ok(&a, &["rev-parse", "HEAD"]));
+    // Shallow.
+    ok(w.path(), &["clone", "-q", "--depth", "1", &u, "sh"]);
+    assert_eq!(ok(&w.path().join("sh"), &["rev-list", "--count", "HEAD"]).trim(), "1");
+    // Format mismatches are refused.
+    let b = w.path().join("b");
+    std::fs::create_dir(&b).unwrap();
+    ok(&b, &["init", "-q"]);
+    commit(&b, "f", "x\n", "sha1 commit");
+    let (pushed, out) = git(&b, &["push", "-q", &u, "main:refs/heads/other"]);
+    assert!(!pushed, "SHA-1 push into a SHA-256 repo must fail:\n{out}");
+    let (pushed, out) = git(&a, &["push", "-q", &url(&s, ALICE, "team/plain"), "main"]);
+    assert!(!pushed, "SHA-256 push into a SHA-1 repo must fail:\n{out}");
+}

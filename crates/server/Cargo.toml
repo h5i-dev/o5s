@@ -15,6 +15,7 @@ pico2peta-repo.workspace = true
 pico2peta-pack.workspace = true
 pico2peta-prov.workspace = true
 pico2peta-weights.workspace = true
+pico2peta-attest = { path = "../attest" }
 pico2peta-client = { path = "../client" }
 pico2peta-backend-s3 = { path = "../backend-s3" }
 serde.workspace = true
@@ -48,6 +49,8 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 lz4_flex = { version = "0.11", default-features = false, features = ["frame", "std"] }
 md-5 = "0.10"
 http-body = "1"
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1.21", features = ["server", "server-auto", "server-graceful", "service", "tokio", "http1", "http2"] }
 
 [dev-dependencies]
 pico2peta-chunk = { path = "../chunk" }

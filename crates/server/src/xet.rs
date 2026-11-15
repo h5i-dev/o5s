@@ -49,6 +49,8 @@ const SHARD_HEADER_TAG: [u8; 32] = [
 /// Largest chunk (2 × 64 KiB target).
 const MAX_CHUNK: usize = 128 * 1024;
 pub const MAX_XORB_BODY: usize = 80 << 20;
+/// Uncompressed chunk data per xorb (xet-core's `MAX_XORB_BYTES`).
+const MAX_XORB_DATA: usize = 64 << 20;
 pub const MAX_SHARD_BODY: usize = 128 << 20;
 const XORB_RECORD_MAGIC: &[u8; 8] = b"P2PXORB1";
 const FILE_RECORD_MAGIC: &[u8; 8] = b"P2PXFIL1";
@@ -179,6 +181,9 @@ fn lz4_decompress(data: &[u8], expect: usize) -> Result<Vec<u8>> {
 pub fn parse_xorb(b: &[u8]) -> Result<Vec<Vec<u8>>> {
     let mut chunks = Vec::new();
     let mut i = 0;
+    // Real xorbs hold at most 64 MiB of chunk data; LZ4 could otherwise expand a small body
+    // ~255×, so bound the total before decompressing (memory exhaustion).
+    let mut total = 0usize;
     while i < b.len() {
         if b[i..].starts_with(b"XETBLOB") {
             break; // footer
@@ -191,6 +196,10 @@ pub fn parse_xorb(b: &[u8]) -> Result<Vec<Vec<u8>>> {
         let ulen = u32::from_le_bytes([h[5], h[6], h[7], 0]) as usize;
         if ulen > MAX_CHUNK || clen > 2 * MAX_CHUNK {
             return Err(bad("chunk too large"));
+        }
+        total += ulen;
+        if total > MAX_XORB_DATA {
+            return Err(bad("xorb holds more than 64 MiB of chunk data"));
         }
         let data = b.get(i + 8..i + 8 + clen).ok_or_else(|| bad("truncated chunk"))?;
         let raw = match h[4] {
@@ -634,6 +643,25 @@ impl<I: Iterator<Item = (Hash, std::ops::Range<u64>)>> Read for Concat<'_, I> {
     }
 }
 
+/// Fuzzing: every parser of untrusted Xet bytes (must never panic).
+pub fn fuzz_parsers(data: &[u8]) {
+    if let Ok(chunks) = parse_xorb(data) {
+        let hs: Vec<(MerkleHash, u64)> = chunks.iter().map(|c| (chunk_hash(c), c.len() as u64)).collect();
+        let _ = (xorb_hash(&hs), file_hash(&hs));
+    }
+    let _ = parse_shard(data);
+    let _ = XorbRecord::decode(data);
+    if let Some(r) = FileRecord::decode(data) {
+        // Records come from our own store, but decoding must stay safe on any bytes.
+        if r.chunks.windows(2).all(|w| w[0].1 < w[1].1) && r.chunks.first().is_none_or(|c| c.1 > 0) {
+            let size = r.chunks.last().map_or(0, |c| c.1);
+            let _ = r.reconstruction(0, size, &|g| format!("u{g}"));
+        }
+    }
+    let _ = from_hex(std::str::from_utf8(data).unwrap_or(""));
+    let _ = bg4_regroup(data);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -658,6 +686,24 @@ mod tests {
             }
             assert_eq!(bg4_regroup(&g), data, "n={n}");
         }
+    }
+
+    #[test]
+    fn xorb_expansion_is_bounded() {
+        // 600 LZ4 chunks of 128 KiB zeros: a small body, ~76 MiB decompressed.
+        let zeros = vec![0u8; MAX_CHUNK];
+        let mut w = lz4_flex::frame::FrameEncoder::new(Vec::new());
+        std::io::Write::write_all(&mut w, &zeros).unwrap();
+        let z = w.finish().unwrap();
+        let mut x = Vec::new();
+        for _ in 0..600 {
+            let cl = (z.len() as u32).to_le_bytes();
+            let ul = (zeros.len() as u32).to_le_bytes();
+            x.extend_from_slice(&[0, cl[0], cl[1], cl[2], 1, ul[0], ul[1], ul[2]]);
+            x.extend_from_slice(&z);
+        }
+        assert!(x.len() < 1 << 20, "the body stays small");
+        assert!(parse_xorb(&x).unwrap_err().to_string().contains("64 MiB"));
     }
 
     #[test]

@@ -37,12 +37,51 @@ pub(crate) async fn blocking<T: Send + 'static>(
     }
 }
 
-pub(crate) fn http_client() -> std::result::Result<reqwest::Client, String> {
+/// The upstream HTTP client. Redirects are followed only to hosts some configured upstream
+/// allows (see `Upstream::allows`), at most 10 hops.
+pub(crate) fn http_client(upstreams: &[&crate::config::Upstream]) -> std::result::Result<reqwest::Client, String> {
+    let ups: Vec<crate::config::Upstream> = upstreams.iter().map(|u| (*u).clone()).collect();
+    let policy = reqwest::redirect::Policy::custom(move |a| {
+        if a.previous().len() >= 10 {
+            a.error("too many redirects")
+        } else if ups.iter().any(|u| u.allows(a.url().as_str())) {
+            a.follow()
+        } else {
+            a.error("redirect to a host no upstream allows")
+        }
+    });
     reqwest::Client::builder()
         .user_agent(concat!("pico2peta/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(10))
+        .redirect(policy)
         .build()
         .map_err(|e| e.to_string())
+}
+
+/// Upstream listings (PyPI project pages, npm packuments) are read into memory: at most this.
+pub(crate) const MAX_LISTING: usize = 64 << 20;
+
+/// Reads an upstream JSON response with a size cap (a hostile upstream can't exhaust memory).
+pub(crate) async fn json_limited(resp: reqwest::Response) -> std::result::Result<serde_json::Value, String> {
+    serde_json::from_slice(&bytes_limited(resp, MAX_LISTING).await?).map_err(|e| e.to_string())
+}
+
+/// Reads a response body, refusing more than `limit` bytes.
+pub(crate) async fn bytes_limited(resp: reqwest::Response, limit: usize) -> std::result::Result<Vec<u8>, String> {
+    use futures_util::StreamExt as _;
+    if resp.content_length().is_some_and(|n| n > limit as u64) {
+        return Err("upstream response too large".into());
+    }
+    let mut buf = Vec::new();
+    let mut s = resp.bytes_stream();
+    while let Some(c) = s.next().await {
+        let c = c.map_err(|e| e.to_string())?;
+        if buf.len() + c.len() > limit {
+            return Err("upstream response too large".into());
+        }
+        buf.extend_from_slice(&c);
+    }
+    Ok(buf)
 }
 
 /// Where package content goes: the front's handle, plus the concrete repo for named puts.
@@ -195,4 +234,68 @@ pub(crate) fn create_once(
         // Lost a race: compare with the winner.
     }
     Err(Error::Corrupt(format!("{name}: create-once did not settle")))
+}
+
+/// `<dist>.dist-info/METADATA` of a stored wheel, read with range reads (end-of-central-directory,
+/// central directory, one entry), so a multi-gigabyte wheel is never loaded. `None` when the
+/// wheel has no such file, or uses zip64 / an unsupported method, or it is over 16 MiB.
+pub(crate) fn wheel_metadata(store: &dyn Repository, h: &Hash, size: u64) -> Result<Option<Vec<u8>>> {
+    wheel_metadata_with(size, &|r| store.get(h, Some(r)))
+}
+
+/// [`wheel_metadata`] over any ranged reader (`read(range)` returns exactly those bytes).
+pub(crate) fn wheel_metadata_with(
+    size: u64,
+    read: &dyn Fn(std::ops::Range<u64>) -> Result<Vec<u8>>,
+) -> Result<Option<Vec<u8>>> {
+    use std::io::Read as _;
+    let u16_at = |b: &[u8], o: usize| u16::from_le_bytes([b[o], b[o + 1]]) as usize;
+    let u32_at = |b: &[u8], o: usize| u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]) as u64;
+    let tail_len = size.min(22 + 65_535);
+    if tail_len < 22 {
+        return Ok(None);
+    }
+    let tail = read(size - tail_len..size)?;
+    let Some(e) = (0..=tail.len() - 22).rev().find(|&i| tail[i..i + 4] == [0x50, 0x4b, 0x05, 0x06]) else {
+        return Ok(None);
+    };
+    let (cd_size, cd_off) = (u32_at(&tail, e + 12), u32_at(&tail, e + 16));
+    if cd_size == 0xffff_ffff || cd_off == 0xffff_ffff || cd_off + cd_size > size || cd_size > 64 << 20 {
+        return Ok(None);
+    }
+    let cd = read(cd_off..cd_off + cd_size)?;
+    let mut i = 0;
+    while i + 46 <= cd.len() && cd[i..i + 4] == [0x50, 0x4b, 0x01, 0x02] {
+        let (method, csize, usize_) = (u16_at(&cd, i + 10), u32_at(&cd, i + 20), u32_at(&cd, i + 24));
+        let (nlen, xlen, clen) = (u16_at(&cd, i + 28), u16_at(&cd, i + 30), u16_at(&cd, i + 32));
+        let local = u32_at(&cd, i + 42);
+        let name = cd.get(i + 46..i + 46 + nlen).unwrap_or_default();
+        i += 46 + nlen + xlen + clen;
+        let is_meta = name.ends_with(b".dist-info/METADATA") && name.iter().filter(|&&c| c == b'/').count() == 1;
+        if !is_meta {
+            continue;
+        }
+        if usize_ > 16 << 20 || csize > 16 << 20 || local + 30 > size {
+            return Ok(None);
+        }
+        let lh = read(local..local + 30)?;
+        if lh[..4] != [0x50, 0x4b, 0x03, 0x04] {
+            return Ok(None);
+        }
+        let start = local + 30 + u16_at(&lh, 26) as u64 + u16_at(&lh, 28) as u64;
+        if start + csize > size {
+            return Ok(None);
+        }
+        let data = read(start..start + csize)?;
+        return Ok(match method {
+            0 => Some(data),
+            8 => {
+                let mut out = Vec::with_capacity(usize_ as usize);
+                flate2::read::DeflateDecoder::new(&data[..]).take(16 << 20).read_to_end(&mut out)?;
+                (out.len() as u64 == usize_).then_some(out)
+            }
+            _ => None,
+        });
+    }
+    Ok(None)
 }

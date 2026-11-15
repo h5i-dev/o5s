@@ -120,6 +120,32 @@ fn twine_upload_pip_and_uv_install_and_proxy_cache() {
     let other = wheel(&py, &w.path().join("d3"), "demo-pkg", "1.0", "999");
     assert!(!twine(&py, &upload_url, ALICE, &[&other], &[]).status.success(), "file replacement must fail");
 
+    // PEP 658/714: uploaded wheels advertise their core metadata, served as `<file>.metadata`.
+    let http = reqwest::blocking::Client::new();
+    let page: serde_json::Value = http
+        .get(format!("{}/pypi/local/simple/demo-pkg/", up.url()))
+        .bearer_auth(READER)
+        .header("accept", "application/vnd.pypi.simple.v1+json")
+        .send()
+        .unwrap()
+        .json()
+        .unwrap();
+    let f =
+        page["files"].as_array().unwrap().iter().find(|f| f["filename"] == "demo_pkg-1.0-py3-none-any.whl").unwrap();
+    let md_sha = f["core-metadata"]["sha256"].as_str().expect("core-metadata advertised").to_string();
+    let md = http
+        .get(format!("{}/pypi/local/files/demo-pkg/demo_pkg-1.0-py3-none-any.whl.metadata", up.url()))
+        .bearer_auth(READER)
+        .send()
+        .unwrap();
+    assert_eq!(md.status(), 200);
+    let md = md.bytes().unwrap();
+    assert!(String::from_utf8_lossy(&md).contains("Name: demo-pkg"));
+    {
+        use sha2::Digest;
+        assert_eq!(sha2::Sha256::digest(&md).iter().map(|b| format!("{b:02x}")).collect::<String>(), md_sha);
+    }
+
     // pip: latest, pinned, and with a non-normalized name.
     let t = w.path().join("t1");
     assert!(pip_install(&py, &index_url(&up, READER, "local"), &t, "demo-pkg").status.success());
@@ -152,14 +178,41 @@ fn twine_upload_pip_and_uv_install_and_proxy_cache() {
         assert_eq!(import_value(&py, &t, "demo_pkg"), "2");
     }
 
+    // PEP 592 yank: pip skips a yanked file unless it's pinned exactly.
+    let yank_url = format!("{}/pypi/local/-/yank/demo-pkg/demo_pkg-1.1-py3-none-any.whl", up.url());
+    assert_eq!(http.put(&yank_url).bearer_auth(READER).body("x").send().unwrap().status(), 403, "readers can't yank");
+    assert!(http.put(&yank_url).bearer_auth(ALICE).body("broken build").send().unwrap().status().is_success());
+    let page: serde_json::Value = http
+        .get(format!("{}/pypi/local/simple/demo-pkg/", up.url()))
+        .bearer_auth(READER)
+        .header("accept", "application/vnd.pypi.simple.v1+json")
+        .send()
+        .unwrap()
+        .json()
+        .unwrap();
+    let y =
+        page["files"].as_array().unwrap().iter().find(|f| f["filename"] == "demo_pkg-1.1-py3-none-any.whl").unwrap();
+    assert_eq!(y["yanked"], "broken build");
+    let t = w.path().join("ty1");
+    assert!(pip_install(&py, &index_url(&up, READER, "local"), &t, "demo-pkg").status.success());
+    assert_eq!(import_value(&py, &t, "demo_pkg"), "1", "unpinned install skips the yanked 1.1");
+    let t = w.path().join("ty2");
+    assert!(pip_install(&py, &index_url(&up, READER, "local"), &t, "demo-pkg==1.1").status.success());
+    assert_eq!(import_value(&py, &t, "demo_pkg"), "2", "an exact pin still installs it");
+    assert!(http.delete(&yank_url).bearer_auth(ALICE).send().unwrap().status().is_success());
+    let t = w.path().join("ty3");
+    assert!(pip_install(&py, &index_url(&up, READER, "local"), &t, "demo-pkg").status.success());
+    assert_eq!(import_value(&py, &t, "demo_pkg"), "2", "unyanked");
+
     // Proxy-cache: a second server whose index "mirror" proxies the first.
     let upstream = format!("{}/pypi/local/simple", up.url());
     let proxy = TestServer::start(move |cfg| {
         cfg.policy.push(grant("reader", "pypi/mirror", Access::Read));
         cfg.policy.push(grant("alice", "pypi/mirror", Access::Write));
-        cfg.pypi
-            .upstream
-            .insert("mirror".into(), Upstream { url: upstream, token: Some(READER.into()), ttl_secs: 600 });
+        cfg.pypi.upstream.insert(
+            "mirror".into(),
+            Upstream { url: upstream, token: Some(READER.into()), ttl_secs: 600, file_hosts: vec![] },
+        );
     });
     // A local upload to the mirror index sits next to the proxied files.
     let own = wheel(&py, &w.path().join("d4"), "mine", "0.1", "7");
@@ -170,6 +223,26 @@ fn twine_upload_pip_and_uv_install_and_proxy_cache() {
     let t = w.path().join("t6");
     assert!(pip_install(&py, &index_url(&proxy, READER, "mirror"), &t, "mine").status.success());
     assert_eq!(import_value(&py, &t, "mine"), "7");
+    // The proxy passes the upstream's core metadata through (and caches it on first use).
+    let mpage: serde_json::Value = http
+        .get(format!("{}/pypi/mirror/simple/demo-pkg/", proxy.url()))
+        .bearer_auth(READER)
+        .header("accept", "application/vnd.pypi.simple.v1+json")
+        .send()
+        .unwrap()
+        .json()
+        .unwrap();
+    let mf =
+        mpage["files"].as_array().unwrap().iter().find(|f| f["filename"] == "demo_pkg-1.0-py3-none-any.whl").unwrap();
+    assert_eq!(mf["core-metadata"]["sha256"].as_str(), Some(md_sha.as_str()));
+    let pm = http
+        .get(format!("{}/pypi/mirror/files/demo-pkg/demo_pkg-1.0-py3-none-any.whl.metadata", proxy.url()))
+        .bearer_auth(READER)
+        .send()
+        .unwrap();
+    assert_eq!(pm.status(), 200);
+    assert_eq!(pm.bytes().unwrap(), md);
+
     // The upstream goes away: the cached file is still installable.
     up.stop.take().map(|s| s.send(()));
     drop(up);

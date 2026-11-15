@@ -56,7 +56,9 @@ fn run_phase(py: &str, srv: &TestServer, token: &str, repo: &str, xet: bool, pha
 fn huggingface_hub_round_trip_over_lfs() {
     let Some(py) = python() else { return };
     let srv = TestServer::start(|cfg| {
-        cfg.policy.push(grant("alice", "git/hf/models/alice", pico2peta_server::config::Access::Write));
+        for t in ["models", "datasets", "spaces"] {
+            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), pico2peta_server::config::Access::Write));
+        }
     });
     let out = run_client(&py, &srv, ALICE, "alice/tiny-model", false);
     let (so, se) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
@@ -127,7 +129,9 @@ fn hf_repo_is_a_git_repo() {
         return;
     }
     let srv = TestServer::start(|cfg| {
-        cfg.policy.push(grant("alice", "git/hf/models/alice", pico2peta_server::config::Access::Write));
+        for t in ["models", "datasets", "spaces"] {
+            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), pico2peta_server::config::Access::Write));
+        }
     });
     let out = run_client(&py, &srv, ALICE, "alice/both", false);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
@@ -185,7 +189,9 @@ fn huggingface_hub_round_trip_over_xet() {
         return;
     }
     let srv = TestServer::start(|cfg| {
-        cfg.policy.push(grant("alice", "git/hf/models/alice", pico2peta_server::config::Access::Write));
+        for t in ["models", "datasets", "spaces"] {
+            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), pico2peta_server::config::Access::Write));
+        }
     });
     let out = run_client(&py, &srv, ALICE, "alice/xet-model", true);
     let (so, se) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
@@ -291,7 +297,9 @@ fn xet_download_by_hand(srv: &TestServer, repo: &str, path: &str) {
 fn lfs_objects_are_scoped_to_their_repo() {
     let Some(py) = python() else { return };
     let srv = TestServer::start(|cfg| {
-        cfg.policy.push(grant("alice", "git/hf/models/alice", pico2peta_server::config::Access::Write));
+        for t in ["models", "datasets", "spaces"] {
+            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), pico2peta_server::config::Access::Write));
+        }
         cfg.policy.push(grant("reader", "git/hf/models/reader", pico2peta_server::config::Access::Write));
     });
     let out = run_client(&py, &srv, ALICE, "alice/private", false);
@@ -343,7 +351,9 @@ fn lfs_objects_are_scoped_to_their_repo() {
 #[test]
 fn xet_rejects_bad_xorbs_and_tokens() {
     let srv = TestServer::start(|cfg| {
-        cfg.policy.push(grant("alice", "git/hf/models/alice", pico2peta_server::config::Access::Write));
+        for t in ["models", "datasets", "spaces"] {
+            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), pico2peta_server::config::Access::Write));
+        }
     });
     let http = reqwest::blocking::Client::new();
     let r = http

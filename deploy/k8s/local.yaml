@@ -1,0 +1,78 @@
+# pico2peta on one PersistentVolume (packs, refs, staging, audit). 1 replica only.
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: pico2peta-config, namespace: pico2peta }
+data:
+  server.toml: |
+    [server]
+    listen = "0.0.0.0:8080"
+    max_upload_bytes = 1099511627776
+    max_concurrent_requests = 256
+    request_timeout_secs = 3600
+    shutdown_grace_secs = 30
+    [repo]
+    path = "/var/lib/pico2peta/repo"
+    create = true
+    [auth]
+    allow_anonymous = false
+    token_file = "/etc/pico2peta/secret/tokens.toml"
+    [[policy]]
+    principal = "admin"
+    namespace = ""
+    access = "admin"
+    [audit]
+    path = "/var/lib/pico2peta/audit/audit.jsonl"
+    rotate_bytes = 1073741824
+    [gc]
+    interval_secs = 1800
+    grace_secs = 3600
+    [log]
+    format = "json"
+    filter = "info"
+---
+apiVersion: v1
+kind: Service
+metadata: { name: pico2peta, namespace: pico2peta, labels: { app: pico2peta } }
+spec:
+  selector: { app: pico2peta }
+  ports: [{ name: http, port: 8080, targetPort: 8080 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: pico2peta, namespace: pico2peta }
+spec:
+  serviceName: pico2peta
+  replicas: 1                       # local refs: exactly one writer
+  selector: { matchLabels: { app: pico2peta } }
+  template:
+    metadata:
+      labels: { app: pico2peta }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8080", prometheus.io/path: /metrics }
+    spec:
+      terminationGracePeriodSeconds: 45
+      securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, fsGroup: 65532 }
+      containers:
+        - name: server
+          image: ghcr.io/h5i-dev/pico2peta:latest     # build from deploy/Dockerfile
+          args: ["serve", "--config", "/etc/pico2peta/server.toml"]
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /readyz, port: http }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10, failureThreshold: 6 }
+          resources:
+            requests: { cpu: "1", memory: 1Gi }
+            limits: { memory: 4Gi }
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/pico2peta }
+            - { name: config, mountPath: /etc/pico2peta/server.toml, subPath: server.toml }
+            - { name: tokens, mountPath: /etc/pico2peta/secret, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: config, configMap: { name: pico2peta-config } }
+        - { name: tokens, secret: { secretName: pico2peta-tokens, defaultMode: 0400 } }
+        - { name: tmp, emptyDir: {} }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 500Gi } }

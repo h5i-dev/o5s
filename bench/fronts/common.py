@@ -36,7 +36,12 @@ def log(*a):
 
 def record(front, metric, system, value, unit, **extra):
     """One measurement (one run) as a JSON line."""
-    row = {"front": front, "metric": metric, "system": system, "value": value, "unit": unit, "ts": time.time()}
+    try:
+        load1 = float(open("/proc/loadavg").read().split()[0])
+    except (OSError, ValueError):
+        load1 = None
+    # The batch protocol reports the load average with every result.
+    row = {"front": front, "metric": metric, "system": system, "value": value, "unit": unit, "ts": time.time(), "load1": load1}
     row.update(extra)
     with open(RESULTS, "a") as f:
         f.write(json.dumps(row) + "\n")

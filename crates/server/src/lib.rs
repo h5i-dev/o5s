@@ -19,6 +19,7 @@ pub mod npm;
 pub mod oci;
 pub mod oidc;
 pub(crate) mod pkg;
+pub(crate) mod prov_api;
 pub mod pypi;
 pub mod segmap;
 pub mod tls;
@@ -122,7 +123,8 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
             parent.join(format!("{}.git-spool", path.file_name().and_then(|n| n.to_str()).unwrap_or("repo")))
         });
         let st = git::GitState::new(fronts.handle("git")?, dir.clone(), cfg.server.max_upload_bytes)
-            .map_err(|e| StartError::Audit(dir, e))?;
+            .map_err(|e| StartError::Audit(dir, e))?
+            .with_sha256_repos(cfg.git.sha256_repos.clone());
         Some(Arc::new(st))
     } else {
         None
@@ -205,6 +207,8 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         pypi,
         npm,
         maven,
+        search: Default::default(),
+        promotion: cfg.promotion.clone(),
         fronts: Some(fronts),
     }))
 }
@@ -253,7 +257,56 @@ pub async fn serve_ops(
     state: Arc<AppState>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
-    axum::serve(listener, api::ops_router(state)).with_graceful_shutdown(shutdown).await
+    serve_http(listener, api::ops_router(state), shutdown).await
+}
+
+/// How long a client may take to send a request's headers (also bounds idle keep-alive
+/// connections waiting for their next request). Without it, a client trickling headers
+/// (slowloris) holds a connection forever.
+pub const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Accepts connections on `listener` and serves `app` on each (HTTP/1.1 and HTTP/2), with a
+/// header read timeout and HTTP/2 keep-alive pings. Stops accepting when `shutdown`
+/// resolves, then waits for open connections to finish (callers bound that wait).
+pub async fn serve_http<L>(
+    mut listener: L,
+    app: axum::Router,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()>
+where
+    L: axum::serve::Listener<Addr = std::net::SocketAddr>,
+{
+    use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
+    use tower::ServiceExt;
+    let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+    builder.http1().timer(TokioTimer::new()).header_read_timeout(HEADER_READ_TIMEOUT);
+    builder
+        .http2()
+        .timer(TokioTimer::new())
+        .keep_alive_interval(Some(Duration::from_secs(30)))
+        .keep_alive_timeout(Duration::from_secs(20));
+    let graceful = hyper_util::server::graceful::GracefulShutdown::new();
+    tokio::pin!(shutdown);
+    loop {
+        tokio::select! {
+            (io, addr) = listener.accept() => {
+                let app = app.clone();
+                let svc = hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
+                    req.extensions_mut().insert(axum::extract::ConnectInfo(api::PeerAddr(addr)));
+                    app.clone().oneshot(req.map(axum::body::Body::new))
+                });
+                let conn = builder.serve_connection_with_upgrades(TokioIo::new(io), svc).into_owned();
+                let conn = graceful.watch(conn);
+                tokio::spawn(async move {
+                    let _ = conn.await;
+                });
+            }
+            _ = &mut shutdown => break,
+        }
+    }
+    drop(listener);
+    graceful.shutdown().await;
+    Ok(())
 }
 
 /// Serves plain HTTP on `listener` until `shutdown` resolves. See [`serve_on`].
@@ -279,7 +332,6 @@ pub async fn serve_on<L>(
 ) -> std::io::Result<()>
 where
     L: axum::serve::Listener<Addr = std::net::SocketAddr>,
-    api::PeerAddr: for<'a> axum::extract::connect_info::Connected<axum::serve::IncomingStream<'a, L>>,
 {
     let app = app(state.clone(), request_timeout);
     let gc_task = (state.gc.interval_secs > 0).then(|| tokio::spawn(gc_loop(state.clone())));
@@ -299,9 +351,7 @@ where
         info!("shutdown requested; draining");
         let _ = stopping_tx.send(());
     };
-    let server = axum::serve(listener, app.into_make_service_with_connect_info::<api::PeerAddr>())
-        .with_graceful_shutdown(graceful);
-    let server = server.into_future();
+    let server = serve_http(listener, app, graceful);
     tokio::pin!(server);
     tokio::select! {
         r = &mut server => r?,
@@ -461,6 +511,21 @@ pub mod fuzzing {
 
     pub fn oci_parsers(data: &[u8]) {
         crate::oci::fuzz_parsers(data);
+    }
+
+    /// HF (LFS pointers, Xet xorbs/shards/records), PyPI (names, wheel zip) and npm (names) parsers.
+    pub fn pkg_parsers(data: &[u8]) {
+        crate::xet::fuzz_parsers(data);
+        let _ = crate::hf::parse_lfs_pointer(data);
+        let text = String::from_utf8_lossy(data);
+        let _ = crate::pypi::fuzz_names(&text);
+        let _ = crate::npm::fuzz_names(&text);
+        let read = |r: std::ops::Range<u64>| -> pico2peta_core::Result<Vec<u8>> {
+            data.get(r.start as usize..r.end as usize)
+                .map(<[u8]>::to_vec)
+                .ok_or_else(|| pico2peta_core::Error::Corrupt("out of range".into()))
+        };
+        let _ = crate::pkg::wheel_metadata_with(data.len() as u64, &read);
     }
 
     pub fn range(header: &str, size: u64) {

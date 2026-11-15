@@ -763,3 +763,93 @@ fn early_rejection_closes_the_connection() {
     assert!(r.status().is_success());
     assert!(r.headers().get("connection").is_none());
 }
+
+/// `?verify=strict|eof` on object reads (API v1.17): strict always works, eof only when the
+/// repository's `[read]` config allows it, and anything else is a 400.
+#[test]
+fn read_verify_parameter_follows_repo_policy() {
+    let data: Vec<u8> = (0..3_000_000u32).map(|i| (i * 7 % 251) as u8).collect();
+    let get = |s: &TestServer, h: &pico2peta_core::Hash, q: &str| {
+        reqwest::blocking::Client::new()
+            .get(format!("{}/v1/objects/{}{q}", s.url(), h.to_hex()))
+            .bearer_auth(ADMIN)
+            .send()
+            .unwrap()
+    };
+    // Default repository: eof refused.
+    let s = TestServer::start(|_| {});
+    let h = s.client(ADMIN).put(&data).unwrap();
+    assert_eq!(get(&s, &h, "?verify=strict").bytes().unwrap().as_ref(), data.as_slice());
+    assert_eq!(get(&s, &h, "?verify=eof").status(), 403);
+    assert_eq!(get(&s, &h, "?verify=fast").status(), 400);
+    let mut out = Vec::new();
+    let r = s.client(ADMIN).open_verified(&h, None, pico2peta_core::ReadVerify::Eof);
+    assert!(r.is_err(), "RemoteRepo surfaces the refusal");
+    s.client(ADMIN).open_verified(&h, None, pico2peta_core::ReadVerify::Strict).unwrap().read_to_end(&mut out).unwrap();
+    assert_eq!(out, data);
+    // A repository that allows eof reads.
+    let s = TestServer::start(|cfg| {
+        let mut rc = pico2peta_repo::RepoConfig::default();
+        rc.read.allow_eof = true;
+        pico2peta_repo::LocalRepo::init_config(&cfg.repo.path, &rc).unwrap();
+    });
+    let h = s.client(ADMIN).put(&data).unwrap();
+    let r = get(&s, &h, "?verify=eof");
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.bytes().unwrap().as_ref(), data.as_slice());
+    let mut out = Vec::new();
+    s.client(ADMIN).open_verified(&h, None, pico2peta_core::ReadVerify::Eof).unwrap().read_to_end(&mut out).unwrap();
+    assert_eq!(out, data);
+}
+
+/// Slowloris: a client that never finishes its request headers is disconnected after
+/// `HEADER_READ_TIMEOUT` (30 s); so is an idle keep-alive connection.
+#[test]
+fn slow_headers_and_idle_connections_are_closed() {
+    use std::io::{Read, Write};
+    let s = TestServer::start(|_| {});
+    let started = std::time::Instant::now();
+    let mut a = std::net::TcpStream::connect(s.addr).unwrap();
+    a.write_all(b"GET /healthz HTTP/1.1\r\nHost: x\r\n").unwrap();
+    let mut b = std::net::TcpStream::connect(s.addr).unwrap();
+    b.write_all(b"GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
+    let mut buf = [0u8; 512];
+    assert!(b.read(&mut buf).unwrap() > 0, "first request answered");
+    for c in [&mut a, &mut b] {
+        c.set_read_timeout(Some(std::time::Duration::from_secs(45))).unwrap();
+        let mut rest = Vec::new();
+        // Reads until the server closes (EOF) or the 45 s safety timeout (an error).
+        let r = c.read_to_end(&mut rest);
+        assert!(r.is_ok(), "connection still open: {r:?}");
+    }
+    let e = started.elapsed();
+    assert!(e >= std::time::Duration::from_secs(25) && e < std::time::Duration::from_secs(40), "{e:?}");
+}
+
+/// `PUT /v1/objects?for_name=` applies the namespace's full profile (here `derive = "previous"`),
+/// the same contract as `LocalRepo::put_named`; `RemoteRepo::put_named` sends it.
+#[test]
+fn put_named_applies_the_profile_remotely() {
+    use pico2peta_core::{Name, ObjectStore, Observed, Repository};
+    let s = TestServer::start(|cfg| {
+        let mut rc = pico2peta_repo::RepoConfig::default();
+        rc.profiles.insert(
+            "ckpt".into(),
+            pico2peta_repo::Profile { derive: pico2peta_repo::DerivePolicy::Previous, ..Default::default() },
+        );
+        rc.namespaces.insert("alice/ckpt".into(), "ckpt".into());
+        pico2peta_repo::LocalRepo::init_config(&cfg.repo.path, &rc).unwrap();
+    });
+    let c = s.client(ALICE);
+    let n = Name::new("alice/ckpt/model").unwrap();
+    let v1: Vec<u8> = (0..2_000_000u32).map(|i| (i % 251) as u8).collect();
+    let h1 = c.put_named(&n, &mut &v1[..]).unwrap();
+    c.replace(&n, &[(n.clone(), Observed::Absent)], h1).unwrap();
+    let mut v2 = v1.clone();
+    v2[1_000_000] ^= 0xff;
+    let h2 = c.put_named(&n, &mut &v2[..]).unwrap();
+    assert_eq!(h2, pico2peta_core::Hash::of(&v2), "identity is the content hash");
+    assert_eq!(c.get(&h2, None).unwrap(), v2);
+    // No write access on the name: refused.
+    assert!(s.client(READER).put_named(&n, &mut &v2[..]).is_err());
+}

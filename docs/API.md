@@ -73,10 +73,18 @@ curl -H "Authorization: Bearer $T" -r 0-1023 $S/v1/objects/<hash>
 # make earlier puts durable without a replace
 curl -X POST -H "Authorization: Bearer $T" $S/v1/flush
 ```
-- `PUT /v1/objects?group_width=2|4` stores chunks byte-grouped before zstd (bf16/f16 2, f32 4). `for_name=<name>` picks that namespace's chunker. Both are storage hints only: the identity is unchanged and they combine.
+- **`PUT /v1/objects?for_name=<name>`** (stable API) stores the object the way the repository's profile for `<name>`'s namespace says, exactly like `LocalRepo::put_named`:
+  - the profile's front encoding plan (e.g. `safetensors`: tensor-aligned byte grouping);
+  - its chunker (`fastcdc` / `xet`);
+  - `derive = "previous"`: a delta against the object `<name>` points at now.
+
+  It needs write access on `<name>` and doesn't move the name (follow it with a replace). `RemoteRepo::put_named` sends it.
+- `group_width=2|4` byte-groups chunks before zstd (bf16/f16 2, f32 4); with `for_name`, it's used only when the front doesn't choose a width. These are storage choices only: the object's identity (BLAKE3 of its bytes) is unchanged.
 - `PUT /v1/objects?delta_base=<hash>` stores the new object as an XOR delta against `<hash>` (for versions of model weights). Its identity is still the content hash, and reads are unchanged.
 - Objects are immutable. The ETag is the hash, and responses are `Cache-Control: private, immutable`.
 - **Lease:** a newly put object that no name references is reclaimed by GC after `gc.grace_secs` (default 1 h). Point a name at it within that time, or put it again.
+
+- `GET /v1/objects/<hash>?verify=strict|eof` (API v1.17): read verification for this request. Without it, the repository's `[read] verify` default applies (strict unless the operator configured otherwise). `eof` is refused with 403 unless the repository allows it (`[read] allow_eof = true`); a bad value gets 400. `RemoteRepo::open_verified` sends it.
 
 ### Names (OCC)
 ```sh
@@ -127,7 +135,9 @@ git push --atomic origin main v1.0 :old-branch
 - Refs map to names `git/<repo>/refs/...`, so namespace rules apply. For example, make `git/<repo>/refs/tags` immutable to forbid moving or deleting tags.
 - A stale push gets `ng … fetch first`.
 - Served packs are deltified against the previous version of each path.
-- Limits are listed in `docs/NET_PROGRESS.md` under "Production gaps": SHA-1 repos only, no shallow or partial clones.
+- Shallow clones (`--depth`, `--deepen`, `--shallow-since`, `--unshallow`) and partial clones (`--filter=blob:none`, `blob:limit=<n>`, with lazy fetches of missing objects) work over protocol v2 (git's default). A want that isn't a ref tip is served only if it's reachable from this repo's refs.
+- SHA-256 repositories (`git init --object-format=sha256`): configure their name prefixes in `[git] sha256_repos = ["team/s256"]`, since git learns a repository's format before its first push. Every operation works in both formats, and a push in the other format is refused.
+- Limits are listed in `docs/NET_PROGRESS.md` under "Production gaps": `deepen-not` is unsupported.
 
 ## Hugging Face Hub (`/api`, `/<repo>/resolve`)
 ```sh
@@ -141,7 +151,8 @@ git clone https://any:$TOKEN@p2p.example.com/git/hf/models/team/tiny.git   # the
 - Xet uploads (the default with `hf_xet` installed) are served at `/xet` (`casUrl` from `xet-write-token`). Xorbs are checked against their Merkle hash, and shard segments against their verification hashes. Each file is rebuilt and checked against its Xet file hash and sha256, then stored like an LFS upload.
 - LFS objects are scoped to a repo: a commit, `resolve` or download can only reference an object uploaded to that repo, so knowing another repo's sha256 is not enough.
 - Files uploaded through Xet also download through Xet: `resolve` advertises `X-Xet-Hash`, and reconstructions use signed xorb URLs. Files uploaded over LFS download over plain HTTP.
-- Not yet: global Xet dedup queries, pull requests, tags/branches via the HF API (use `git push`), and the repo settings and delete APIs.
+- Branches, tags and history: `create_branch`/`delete_branch` (`startingPoint`), `create_tag`/`delete_tag` (lightweight; annotated tags pushed with git are peeled), `list_repo_refs` and `list_repo_commits` (newest first, up to 1000). Any revision may be a branch, a tag or a commit id.
+- Not yet: global Xet dedup queries, pull requests, and the repo settings and delete APIs.
 - Disable it with `[hf] enabled = false`. It requires `[git]`.
 
 ## PyPI (`/pypi/<index>`)
@@ -150,8 +161,9 @@ twine upload --repository-url https://p2p.example.com/pypi/team/ -u token -p "$T
 pip install --index-url "https://token:$TOKEN@p2p.example.com/pypi/team/simple/" mypkg
 uv pip install --index-url "https://token:$TOKEN@p2p.example.com/pypi/team/simple/" mypkg
 ```
-- Simple API (PEP 503 HTML and PEP 691 JSON, with sha256 and `requires-python`). Uploads use the legacy API that twine and `uv publish` speak. Authorization is on `pypi/<index>`.
+- Simple API (PEP 503 HTML and PEP 691 JSON, with sha256, `requires-python` and PEP 658/714 core metadata: `<wheel>.metadata`). Uploads use the legacy API that twine and `uv publish` speak. Authorization is on `pypi/<index>`.
 - Files are create-once: an identical re-upload is a no-op, while different bytes under the same filename get 409.
+- PEP 592 yank: `PUT /pypi/<index>/-/yank/<project>/<file>` (the body is the reason) and `DELETE` to unyank, with write access. pip skips yanked files unless they're pinned exactly.
 - Proxy-cache: `[pypi.upstream.<index>] url = "https://pypi.org/simple"` (optional `token`, `ttl_secs`). Project pages merge local uploads with upstream files. An upstream file is fetched and sha256-checked on first download, then served from the store, including while the upstream is down.
 
 ## npm (`/npm/<registry>`)
@@ -165,7 +177,8 @@ npm install left-pad
 - Packuments, tarballs, and publish (the JSON body that npm sends). On publish, the tarball's sha512 and sha1 are checked against `dist.integrity` and `dist.shasum`. Versions are create-once (409 on republish with other bytes). Dist-tags come from the publish. Authorization is on `npm/<registry>`.
 - Proxy-cache: `[npm.upstream.<registry>] url = "https://registry.npmjs.org"`. Upstream versions are merged in, and tarballs are fetched and integrity-checked on first install, then served from the store. When the upstream is unreachable, packuments list only cached versions, and `latest` falls back to the newest cached one.
 - `npm dist-tag ls|add|rm` work (for versions in that registry; `latest` can't be removed).
-- Not yet: unpublish, deprecate, and search.
+- `npm deprecate` (and clearing it with `""`), `npm unpublish <pkg>@<v>` and `npm unpublish <pkg> --force` work. Packuments carry a CouchDB-style `_rev`; a stale one gets 409. Unpublish deletes version names, so a namespace rule such as `immutable` refuses it.
+- Not yet: search.
 
 ## Maven (`/maven/<repo>`)
 ```xml
@@ -179,6 +192,32 @@ mvn deploy -DaltDeploymentRepository=p2p::https://p2p.example.com/maven/releases
 - This is the plain repository layout (GET, HEAD, PUT). Checksums (`.md5`, `.sha1`, `.sha256`, `.sha512`) are computed from the stored file, and a checksum PUT must match it.
 - Release files are create-once: re-deploying with other bytes gets 409. `maven-metadata.xml` and `-SNAPSHOT` versions are mutable. Authorization is on `maven/<repo>`.
 - Proxy-cache: `[maven.upstream.central] url = "https://repo.maven.apache.org/maven2"`. A miss is fetched, checked against the upstream's `.sha1`, and stored. Mutable upstream files are refreshed after `ttl_secs`, and the cached copy is served if the upstream is down.
+
+## Provenance, search, attestations and promotion (all fronts)
+- **Automatic provenance:** every publish records `op = "<front>.publish"` (git push per ref, OCI manifest, HF commit, PyPI upload, npm version, Maven file). The stored object is the output, and the front's ids go in `meta` (repo/ref/oid, digest/tag, index/project/version/file, ...).
+- **External ids** name objects in every call below:
+  - `blake3:<hex>` and `name:<core name>`;
+  - `git:<repo>@<oid>` (SHA-1 or SHA-256);
+  - `pypi:<index>/<project>/<file>`, `npm:<registry>/<pkg>@<version>`, `maven:<repo>/<path>`;
+  - `oci:<repo>@sha256:<hex>`.
+
+  Each requires read access on its front's namespace.
+- **`GET /v1/provenance?ref=<id>`** returns producers, consumers, transitive `lineage` and `impact`.
+- **`POST /v1/provenance`** `{op, inputs: {role: id}, outputs: {role: id}, meta}` records a client-declared derivation, e.g. a wheel built from a git commit. It needs write access on every output.
+- **`GET /v1/search?q=<text>`** (or `prefix=` / `exact=`) searches names, front metadata and provenance. Results are limited to names the caller can read.
+- **`POST /v1/attestations`** takes a DSSE envelope (in-toto Statement) and links it to its subjects. **`GET /v1/attestations?ref=<id>`** lists them, with the trusted keys that verify each one.
+- **`POST /v1/promote {src, dst}`** points `dst` at what `src` names, in one OCC transaction, if the `[[promotion]]` rule covering `dst` holds:
+
+  ```toml
+  [[promotion]]
+  dst = "prod"                       # longest matching prefix applies; uncovered names can't be promoted into
+  required_keys = ["<hex ed25519 public key>"]
+  predicate_type = "https://slsa.dev/provenance/v1"
+  require_provenance = true
+  ```
+
+  It needs read on `src` and write on `dst`. It answers 403 with the reasons when the policy refuses, and 409 if either name moved concurrently. Every promotion is recorded in provenance and the audit log.
+- **`GET /v1/admin/audit?principal=&action=&target=&outcome=&since=&limit=`** (admin) is one query over the hash-chained audit log of every front, including rotated files.
 
 ## Operations
 See `deploy/README.md` for install, TLS, reload (SIGHUP), S3 credentials and lifecycle rules, metrics, audit verification (`pico2peta-server verify-audit`) and capacity notes.

@@ -39,6 +39,7 @@ def fmt(v, unit):
 def main():
     rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
     vals = collections.defaultdict(list)
+    loads = collections.defaultdict(list)
     units = {}
     func = collections.defaultdict(list)
     for r in rows:
@@ -47,9 +48,11 @@ def main():
             continue
         key = (r["front"], r["metric"], r.get("corpus", ""), r["system"])
         vals[key].append(r["value"])
+        if r.get("load1") is not None:
+            loads[key].append(r["load1"])
         units[(r["front"], r["metric"])] = r["unit"]
     med = {k: statistics.median(v) for k, v in vals.items()}
-    out = ["| front | metric | corpus | pico2peta | specialist | ratio | tier |", "|---|---|---|---|---|---|---|"]
+    out = ["| front | metric | corpus | pico2peta | specialist | ratio | tier | load (max of both) |", "|---|---|---|---|---|---|---|---|"]
     verdict = {}
     for front, metrics in TIERED.items():
         fails = [n for n, ok, _ in func.get(front, []) if not ok]
@@ -67,7 +70,8 @@ def main():
                 worst = t
             u = units[(f, m)]
             n = len(vals[(f, m, corpus, system)])
-            out.append(f"| {front} | {m} | {corpus} | {fmt(v, u)} ({system}, n={n}) | {fmt(b, u)} ({base_sys}) | {ratio:.2f}x | {t} |")
+            ld = max(loads[(f, m, corpus, system)] + loads[(f, m, corpus, base_sys)], default=float("nan"))
+            out.append(f"| {front} | {m} | {corpus} | {fmt(v, u)} ({system}, n={n}) | {fmt(b, u)} ({base_sys}) | {ratio:.2f}x | {t} | {ld:.2f} |")
         verdict[front] = ("FUNCTIONAL FAIL: " + ", ".join(fails)) if fails else worst
     print("\n".join(out))
     print()
