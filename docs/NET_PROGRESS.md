@@ -171,7 +171,17 @@ The contended run checks that no update is lost: the final version equals the nu
 
 ## Phase 2 (2026-11-15): speed-up backlog shared with the core (AGENT_TASK_NET.md "Phase 2")
 - **A. Experiment 1c:** pre-registered as PLAN §4.9 (52443e5, committed before any 1c code). Harness: `bench/exp1c`, `scripts/exp1c.sh`. Git 2.56.1 for the extra baselines is built in `/mnt/scratch/pico2peta/git-2.56`. Running under the bench lock; results go in EXP1.md.
-- **B. Xet chunker:** `crates/chunk`. Byte-exact Xet chunking that **matches all 796 published reference boundaries** (`xet-team/xet-spec-reference-files`), plus FastCDC v2020 identical to the pack store's chunking, behind a streaming `Chunker` trait. Benchmark: `chunk-bench`.
+- **B. Xet chunker: DONE.** `crates/chunk`.
+  - Byte-exact Xet chunking that **matches all 796 published reference boundaries** (`xet-team/xet-spec-reference-files`), plus FastCDC v2020 identical to the pack store's chunking, behind a streaming `Chunker` trait.
+  - The core wired it in as a per-namespace option (API v1.11), and the server uses it for named uploads.
+  - Speed (`chunk-bench`, 512 MiB of random data per thread, AMD EPYC 7R32 with 4 vCPUs, three runs under bench.lock; other sessions' builds are not locked, so the range is wide):
+
+    | chunker | 1 thread (best / range) | 4 threads (best / range) | mean chunk |
+    |---|---|---|---|
+    | Xet (8/64/128 KiB) | 1.41 GB/s (0.96–1.41) | 3.22 GB/s (1.91–3.22) | 64.2 KB |
+    | FastCDC v2020 (16/64/256 KiB) | 1.96 GB/s (1.33–1.96) | 4.50 GB/s (2.62–4.50) | 80.0 KB |
+
+  - Xet runs at a stable 0.72–0.80× FastCDC's speed: it is a scalar byte-at-a-time Gear loop, whereas FastCDC processes 2 bytes per step. Both are far above the store's put pipeline throughput (about 0.17 GB/s), so the chunker choice is about dedup compatibility, not speed.
 - **Per-namespace chunking in the server (core API v1.11):** `PUT /v1/objects?for_name=<name>` (write access on that name) and OCI blob uploads (namespace `oci/<repo>`) go through `LocalRepo::put_stream_for`, and `RemoteRepo::put_stream_for` exists. Test `put_for_name_uses_namespace_chunker`: the pack store's chunk record counts match `crates/chunk`'s Xet count for `alice/models/` and its FastCDC count elsewhere.
 - **C. Byte grouping: DONE.** `crates/weights/src/bytegroup.rs` (`group` / `ungroup`, with proptest round-trip and no-panic tests). Measured on real checkpoints: bf16 SmolLM2-135M → Instruct delta and raw, and fp32 GPT-2 raw. Gains are 8–14% smaller zstd output; see the request in "Requests for core".
 
