@@ -179,11 +179,14 @@ pub struct GitSection {
     pub enabled: bool,
     /// Spool directory for incoming pushes (default `<repo.path>.git-spool`).
     pub spool_dir: Option<PathBuf>,
+    /// Repository-name prefixes whose repositories use `object-format=sha256` (e.g.
+    /// `["team/sha256"]`). Fixed per repository: git learns the format before its first push.
+    pub sha256_repos: Vec<String>,
 }
 
 impl Default for GitSection {
     fn default() -> Self {
-        GitSection { enabled: true, spool_dir: None }
+        GitSection { enabled: true, spool_dir: None, sha256_repos: Vec::new() }
     }
 }
 

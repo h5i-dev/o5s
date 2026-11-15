@@ -122,7 +122,8 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
             parent.join(format!("{}.git-spool", path.file_name().and_then(|n| n.to_str()).unwrap_or("repo")))
         });
         let st = git::GitState::new(fronts.handle("git")?, dir.clone(), cfg.server.max_upload_bytes)
-            .map_err(|e| StartError::Audit(dir, e))?;
+            .map_err(|e| StartError::Audit(dir, e))?
+            .with_sha256_repos(cfg.git.sha256_repos.clone());
         Some(Arc::new(st))
     } else {
         None

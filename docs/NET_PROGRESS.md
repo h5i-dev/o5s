@@ -320,6 +320,11 @@ The contended run checks that no update is lost: the final version equals the nu
   - Partial: `filter blob:none` and `blob:limit=<n>[kmg]`.
   - Non-tip wants (lazy fetches) are allowed only if reachable from this repo's refs, since object ids are global across repos.
   - Real-git test `shallow_and_partial_clone`, including refusing another repo's object.
+- ROADMAP Net 2, Git: `object-format=sha256` DONE.
+  - `Oid` is now 20 or 32 bytes; `Fmt` is per repository, from `[git] sha256_repos` name prefixes.
+  - Formats are applied to advertisements, v2 capabilities, push and fetch id parsing, `REF_DELTA` bases, pack checksums and tree parsing (by the tree's own id length).
+  - The GC tracer and repack hints parse both formats, since they don't know a stored object's repository.
+  - Real-git test `sha256_repositories`: push, clone v2 and v0, `fsck --strict`, pull, shallow, and both format mismatches refused. HF repos stay SHA-1.
 - ROADMAP Net 2, OCI: cosign (tag scheme and OCI 1.1 referrers) and notation sign/list/verify work against the OCI front (`tests/oci_sign.rs`, real binaries). Wiring them to core attestations waits for core P5.
 - idmap large-segment page cache: DONE (see "Requests for core").
 - **read_verify, server side: DONE** (as agreed with the core: one policy source, the repo's `[read]` config, and no server setting).

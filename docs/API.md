@@ -130,7 +130,8 @@ git push --atomic origin main v1.0 :old-branch
 - A stale push gets `ng … fetch first`.
 - Served packs are deltified against the previous version of each path.
 - Shallow clones (`--depth`, `--deepen`, `--shallow-since`, `--unshallow`) and partial clones (`--filter=blob:none`, `blob:limit=<n>`, with lazy fetches of missing objects) work over protocol v2 (git's default). A want that isn't a ref tip is served only if it's reachable from this repo's refs.
-- Limits are listed in `docs/NET_PROGRESS.md` under "Production gaps": SHA-1 repos only; `deepen-not` is unsupported.
+- SHA-256 repositories (`git init --object-format=sha256`): configure their name prefixes in `[git] sha256_repos = ["team/s256"]`, since git learns a repository's format before its first push. Every operation works in both formats, and a push in the other format is refused.
+- Limits are listed in `docs/NET_PROGRESS.md` under "Production gaps": `deepen-not` is unsupported.
 
 ## Hugging Face Hub (`/api`, `/<repo>/resolve`)
 ```sh

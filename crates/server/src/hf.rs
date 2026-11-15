@@ -249,7 +249,7 @@ fn parse_tree(body: &[u8]) -> Result<Vec<TreeEntry>> {
         out.push((
             String::from_utf8_lossy(&body[i..sp]).into_owned(),
             String::from_utf8_lossy(&body[sp + 1..nul]).into_owned(),
-            o,
+            Oid::from(o), // HF repos are SHA-1 repositories
         ));
         i = nul + 21;
     }
@@ -1951,7 +1951,7 @@ mod tests {
 
     #[test]
     fn tree_insert_and_remove() {
-        let o = [7u8; 20];
+        let o = Oid::from([7u8; 20]);
         let mut t = BTreeMap::new();
         insert_path(&mut t, "a/b/c.txt", Node::File { mode: "100644".into(), oid: o }).unwrap();
         insert_path(&mut t, "a/d.txt", Node::File { mode: "100644".into(), oid: o }).unwrap();

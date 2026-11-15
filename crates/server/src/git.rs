@@ -47,8 +47,110 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-pub type Oid = [u8; 20];
-const ZERO_OID: Oid = [0; 20];
+/// A git object id: SHA-1 (20 bytes) or SHA-256 (32 bytes) of the canonical object.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+pub struct Oid {
+    b: [u8; 32],
+    n: u8,
+}
+
+impl Oid {
+    pub fn from_slice(s: &[u8]) -> Option<Oid> {
+        if s.len() != 20 && s.len() != 32 {
+            return None;
+        }
+        let mut b = [0u8; 32];
+        b[..s.len()].copy_from_slice(s);
+        Some(Oid { b, n: s.len() as u8 })
+    }
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.b[..self.n as usize]
+    }
+    pub fn fmt(&self) -> Fmt {
+        if self.n == 32 { Fmt::Sha256 } else { Fmt::Sha1 }
+    }
+}
+
+impl std::ops::Deref for Oid {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        self.as_bytes()
+    }
+}
+
+impl PartialEq<[u8; 20]> for Oid {
+    fn eq(&self, o: &[u8; 20]) -> bool {
+        self.as_bytes() == o
+    }
+}
+
+impl From<[u8; 20]> for Oid {
+    fn from(a: [u8; 20]) -> Oid {
+        Oid::from_slice(&a).unwrap_or_else(|| unreachable!("20 bytes"))
+    }
+}
+
+/// A repository's object format (`object-format=sha1|sha256`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Fmt {
+    #[default]
+    Sha1,
+    Sha256,
+}
+
+impl Fmt {
+    pub fn hash_len(self) -> usize {
+        match self {
+            Fmt::Sha1 => 20,
+            Fmt::Sha256 => 32,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Fmt::Sha1 => "sha1",
+            Fmt::Sha256 => "sha256",
+        }
+    }
+    pub fn zero(self) -> Oid {
+        Oid { b: [0; 32], n: self.hash_len() as u8 }
+    }
+    /// The object id of canonical bytes (also the pack checksum algorithm).
+    pub fn hash(self, data: &[u8]) -> Oid {
+        match self {
+            Fmt::Sha1 => Oid::from(<[u8; 20]>::from(Sha1::digest(data))),
+            Fmt::Sha256 => {
+                Oid::from_slice(&<[u8; 32]>::from(sha2::Sha256::digest(data))).unwrap_or_else(|| unreachable!())
+            }
+        }
+    }
+}
+
+/// Incremental pack checksum in a repository's format.
+pub(crate) enum PackHasher {
+    Sha1(Sha1),
+    Sha256(sha2::Sha256),
+}
+
+impl PackHasher {
+    pub(crate) fn new(f: Fmt) -> PackHasher {
+        match f {
+            Fmt::Sha1 => PackHasher::Sha1(Sha1::new()),
+            Fmt::Sha256 => PackHasher::Sha256(sha2::Sha256::new()),
+        }
+    }
+    pub(crate) fn update(&mut self, d: &[u8]) {
+        match self {
+            PackHasher::Sha1(h) => h.update(d),
+            PackHasher::Sha256(h) => h.update(d),
+        }
+    }
+    pub(crate) fn finish(self) -> Vec<u8> {
+        match self {
+            PackHasher::Sha1(h) => h.finalize().to_vec(),
+            PackHasher::Sha256(h) => h.finalize().to_vec(),
+        }
+    }
+}
 const AGENT: &str = "agent=pico2peta/0.1";
 /// Budget for resolved delta bases kept in memory while indexing a pack.
 const DELTA_CACHE_BYTES: usize = 256 << 20;
@@ -121,13 +223,16 @@ pub fn parse_header(b: &[u8]) -> Option<(Kind, usize, usize)> {
     Some((kind, size, nul + 1))
 }
 
+/// SHA-1 object id (the HF front's repos, and the default format).
 pub fn oid_of(canonical: &[u8]) -> Oid {
-    Sha1::digest(canonical).into()
+    Fmt::Sha1.hash(canonical)
 }
 
+/// The oid map key: the id, zero-padded to 32 bytes (SHA-1 and SHA-256 ids never collide in
+/// practice; a SHA-256 id would need 12 trailing zero bytes).
 pub fn key_of(oid: &Oid) -> Key {
     let mut k = [0u8; 32];
-    k[..20].copy_from_slice(oid);
+    k[..oid.len()].copy_from_slice(oid);
     k
 }
 
@@ -135,19 +240,36 @@ pub fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
+/// 40 hex digits (SHA-1) or 64 (SHA-256).
 pub fn parse_oid(s: &[u8]) -> Option<Oid> {
-    if s.len() != 40 {
+    if s.len() != 40 && s.len() != 64 {
         return None;
     }
-    let mut o = [0u8; 20];
-    for (i, b) in o.iter_mut().enumerate() {
+    let mut o = [0u8; 32];
+    for (i, b) in o.iter_mut().take(s.len() / 2).enumerate() {
         *b = u8::from_str_radix(std::str::from_utf8(&s[2 * i..2 * i + 2]).ok()?, 16).ok()?;
     }
-    Some(o)
+    Oid::from_slice(&o[..s.len() / 2])
 }
 
-/// Oids an object references (submodule commits in trees are skipped).
+/// Oids an object of a SHA-1 repository references (submodule commits in trees are skipped).
 pub fn refs_of(kind: Kind, body: &[u8]) -> Result<Vec<Oid>> {
+    refs_of_fmt(Fmt::Sha1, kind, body)
+}
+
+/// References under either object format (for code that doesn't know the repository: GC
+/// tracing, repack hints). A wrong-format parse fails or yields ids absent from the oid map.
+pub fn refs_any(kind: Kind, body: &[u8]) -> Vec<Oid> {
+    let mut out = refs_of_fmt(Fmt::Sha1, kind, body).unwrap_or_default();
+    if let Ok(more) = refs_of_fmt(Fmt::Sha256, kind, body) {
+        out.extend(more);
+    }
+    out
+}
+
+/// [`refs_of`] for a repository in format `fmt` (the tree entry hash length).
+pub fn refs_of_fmt(fmt: Fmt, kind: Kind, body: &[u8]) -> Result<Vec<Oid>> {
+    let hl = fmt.hash_len();
     let bad = |m: &str| Error::Corrupt(format!("git {}: {m}", kind.name()));
     let mut out = Vec::new();
     match kind {
@@ -166,7 +288,8 @@ pub fn refs_of(kind: Kind, body: &[u8]) -> Result<Vec<Oid>> {
                     _ => k == b"object",
                 };
                 if wanted {
-                    out.push(parse_oid(v).ok_or_else(|| bad("bad oid in header"))?);
+                    let o = parse_oid(v).filter(|o| o.len() == hl).ok_or_else(|| bad("bad oid in header"))?;
+                    out.push(o);
                 }
             }
             if kind == Kind::Commit && out.is_empty() {
@@ -179,15 +302,14 @@ pub fn refs_of(kind: Kind, body: &[u8]) -> Result<Vec<Oid>> {
                 let sp = body[i..].iter().position(|&c| c == b' ').ok_or_else(|| bad("entry without mode"))? + i;
                 let mode = &body[i..sp];
                 let nul = body[sp..].iter().position(|&c| c == 0).ok_or_else(|| bad("entry without name"))? + sp;
-                if nul + 21 > body.len() {
+                if nul + 1 + hl > body.len() {
                     return Err(bad("truncated entry"));
                 }
-                let mut o = [0u8; 20];
-                o.copy_from_slice(&body[nul + 1..nul + 21]);
+                let o = Oid::from_slice(&body[nul + 1..nul + 1 + hl]).ok_or_else(|| bad("bad entry"))?;
                 if mode != b"160000" {
                     out.push(o);
                 }
-                i = nul + 21;
+                i = nul + 1 + hl;
             }
         }
     }
@@ -257,6 +379,8 @@ pub struct GitState {
     pub(crate) oidmap: Arc<SegMap>,
     spool: PathBuf,
     max_push_bytes: u64,
+    /// Repo-name prefixes whose repositories use SHA-256 (`[git] sha256_repos`).
+    sha256: Vec<String>,
 }
 
 impl GitState {
@@ -267,7 +391,19 @@ impl GitState {
         std::fs::create_dir_all(&spool)?;
         let n = Name::new("git/_oidmap").unwrap_or_else(|_| unreachable!("static name is valid"));
         let oidmap = Arc::new(SegMap::new(repo.clone(), n, Arc::new(SegCache::default())));
-        Ok(GitState { repo, oidmap, spool, max_push_bytes })
+        Ok(GitState { repo, oidmap, spool, max_push_bytes, sha256: Vec::new() })
+    }
+
+    /// Repositories under these name prefixes are SHA-256 repositories.
+    pub fn with_sha256_repos(mut self, prefixes: Vec<String>) -> GitState {
+        self.sha256 = prefixes;
+        self
+    }
+
+    /// The object format of repository `repo` (fixed by configuration: git announces it
+    /// before the first push, so it can't be learned from the push).
+    pub(crate) fn fmt_for(&self, repo: &str) -> Fmt {
+        if self.sha256.iter().any(|p| pico2peta_core::is_under(repo, p)) { Fmt::Sha256 } else { Fmt::Sha1 }
     }
 }
 
@@ -277,11 +413,24 @@ pub(crate) struct View<'a> {
     root: Root,
     /// Objects added by the current push, not yet in the map.
     pub(crate) extra: HashMap<Oid, (Kind, Hash)>,
+    /// Object format of the repository being served (hashing new objects, pack checksums).
+    pub(crate) fmt: Fmt,
 }
 
 impl<'a> View<'a> {
     pub(crate) fn new(st: &'a GitState) -> Result<View<'a>> {
-        Ok(View { st, root: st.oidmap.root_blocking()?.1, extra: HashMap::new() })
+        Ok(View { st, root: st.oidmap.root_blocking()?.1, extra: HashMap::new(), fmt: Fmt::Sha1 })
+    }
+
+    /// References of an object in this view's repository format.
+    pub(crate) fn refs(&self, kind: Kind, body: &[u8]) -> Result<Vec<Oid>> {
+        refs_of_fmt(self.fmt, kind, body)
+    }
+
+    pub(crate) fn for_repo(st: &'a GitState, repo: &str) -> Result<View<'a>> {
+        let mut v = View::new(st)?;
+        v.fmt = st.fmt_for(repo);
+        Ok(v)
     }
 
     pub(crate) fn lookup(&self, oid: &Oid) -> Result<Option<(Kind, Hash)>> {
@@ -355,7 +504,7 @@ pub(crate) fn list_refs(st: &GitState, repo: &str) -> Result<Vec<(String, Oid, R
     for (n, v) in st.repo.list_refs(&prefix)? {
         let Some(gitref) = n.as_str().strip_prefix(&format!("git/{repo}/")) else { continue };
         let bytes = st.repo.get(&v.hash, None)?;
-        out.push((gitref.to_string(), oid_of(&bytes), v));
+        out.push((gitref.to_string(), st.fmt_for(repo).hash(&bytes), v));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(out)
@@ -370,20 +519,13 @@ fn head_target(refs: &[(String, Oid, RefValue)]) -> Option<&(String, Oid, RefVal
 
 fn advertisement(st: &GitState, repo: &str, service: &str) -> Result<Vec<u8>> {
     let refs = list_refs(st, repo)?;
+    let fmt = st.fmt_for(repo);
+    let of = format!("object-format={}", fmt.name());
     let mut out = pkt(format!("# service={service}\n").as_bytes());
     out.extend_from_slice(FLUSH);
     let mut caps = match service {
-        "git-upload-pack" => vec!["side-band-64k", "no-progress", "ofs-delta", "object-format=sha1", AGENT],
-        _ => vec![
-            "report-status",
-            "delete-refs",
-            "side-band-64k",
-            "atomic",
-            "ofs-delta",
-            "quiet",
-            "object-format=sha1",
-            AGENT,
-        ],
+        "git-upload-pack" => vec!["side-band-64k", "no-progress", "ofs-delta", of.as_str(), AGENT],
+        _ => vec!["report-status", "delete-refs", "side-band-64k", "atomic", "ofs-delta", "quiet", of.as_str(), AGENT],
     }
     .into_iter()
     .map(str::to_string)
@@ -399,7 +541,7 @@ fn advertisement(st: &GitState, repo: &str, service: &str) -> Result<Vec<u8>> {
     }
     lines.extend(refs.iter().map(|r| (r.0.clone(), r.1)));
     if lines.is_empty() {
-        out.extend_from_slice(&pkt(format!("{} capabilities^{{}}\0{caps}\n", hex(&ZERO_OID)).as_bytes()));
+        out.extend_from_slice(&pkt(format!("{} capabilities^{{}}\0{caps}\n", hex(&fmt.zero())).as_bytes()));
     }
     for (i, (name, oid)) in lines.iter().enumerate() {
         let line = if i == 0 { format!("{} {name}\0{caps}\n", hex(oid)) } else { format!("{} {name}\n", hex(oid)) };
@@ -430,7 +572,7 @@ struct Entry {
     done: Option<(Kind, Oid)>,
 }
 
-fn read_entry_header(r: &mut dyn Read, offset: u64) -> Result<(u8, usize, Base, u64)> {
+fn read_entry_header(r: &mut dyn Read, offset: u64, hash_len: usize) -> Result<(u8, usize, Base, u64)> {
     let bad = |m: &str| Error::Parse(format!("pack entry at {offset}: {m}"));
     let mut byte = [0u8; 1];
     let mut used = 0u64;
@@ -466,11 +608,11 @@ fn read_entry_header(r: &mut dyn Read, offset: u64) -> Result<(u8, usize, Base, 
             Base::Ofs(offset - off)
         }
         7 => {
-            let mut o = [0u8; 20];
-            for b in o.iter_mut() {
+            let mut o = [0u8; 32];
+            for b in o.iter_mut().take(hash_len) {
                 *b = next(r)?;
             }
-            Base::Ref(o)
+            Base::Ref(Oid::from_slice(&o[..hash_len]).ok_or_else(|| bad("bad ref-delta base"))?)
         }
         1..=4 => Base::None,
         _ => return Err(bad("invalid object type")),
@@ -644,11 +786,12 @@ fn index_pack(view: &mut View<'_>, file: &mut std::fs::File, pack_off: u64) -> R
     if len < pack_off + 32 {
         return Err(Error::Parse("pack too short".into()));
     }
-    // Trailer: SHA-1 of everything before it.
+    let tl = view.fmt.hash_len() as u64;
+    // Trailer: the repository's hash (SHA-1 or SHA-256) of everything before it.
     {
         file.seek(SeekFrom::Start(pack_off))?;
-        let mut h = Sha1::new();
-        let mut left = len - pack_off - 20;
+        let mut h = PackHasher::new(view.fmt);
+        let mut left = len - pack_off - tl;
         let mut buf = vec![0u8; 1 << 20];
         let mut r = BufReader::new(&mut *file);
         while left > 0 {
@@ -657,9 +800,9 @@ fn index_pack(view: &mut View<'_>, file: &mut std::fs::File, pack_off: u64) -> R
             h.update(&buf[..n]);
             left -= n as u64;
         }
-        let mut trailer = [0u8; 20];
+        let mut trailer = vec![0u8; tl as usize];
         r.read_exact(&mut trailer)?;
-        if <[u8; 20]>::from(h.finalize()) != trailer {
+        if h.finish() != trailer {
             return Err(Error::Parse("pack checksum mismatch".into()));
         }
     }
@@ -670,7 +813,7 @@ fn index_pack(view: &mut View<'_>, file: &mut std::fs::File, pack_off: u64) -> R
         return Err(Error::Parse("not a version 2/3 pack".into()));
     }
     let count = u32::from_be_bytes([hdr[8], hdr[9], hdr[10], hdr[11]]) as usize;
-    let end = len - 20;
+    let end = len - tl;
     // Pass 1: entry boundaries.
     let mut entries: Vec<Entry> = Vec::with_capacity(count.min(1 << 16));
     let mut off = pack_off + 12;
@@ -679,7 +822,7 @@ fn index_pack(view: &mut View<'_>, file: &mut std::fs::File, pack_off: u64) -> R
             return Err(Error::Parse("pack truncated".into()));
         }
         file.seek(SeekFrom::Start(off))?;
-        let (code, size, base, hl) = read_entry_header(&mut BufReader::new(&mut *file), off)?;
+        let (code, size, base, hl) = read_entry_header(&mut BufReader::new(&mut *file), off, view.fmt.hash_len())?;
         let data_off = off + hl;
         // Inflate (discarding output) only to find the entry boundary.
         let clen = skip_zlib_at(file, data_off, size)?;
@@ -704,7 +847,7 @@ fn index_pack(view: &mut View<'_>, file: &mut std::fs::File, pack_off: u64) -> R
             match resolve(view, file, &mut entries, &by_offset, &mut cache, idx, 0)? {
                 Some((kind, body)) => {
                     let canon = canonical(kind, &body);
-                    let oid = oid_of(&canon);
+                    let oid = view.fmt.hash(&canon);
                     if !in_pack.contains(&oid) {
                         // Already stored under this oid (a re-push, or a fork's objects): skip the
                         // put and the oid-map entry. `ensure_live` rewrites it if GC condemned it.
@@ -724,7 +867,7 @@ fn index_pack(view: &mut View<'_>, file: &mut std::fs::File, pack_off: u64) -> R
                             }
                         };
                         view.extra.insert(oid, (kind, h));
-                        needed.extend(refs_of(kind, &body)?);
+                        needed.extend(view.refs(kind, &body)?);
                         in_pack.insert(oid);
                     }
                     entries[idx].done = Some((kind, oid));
@@ -1002,7 +1145,7 @@ fn shallow_cut(view: &View<'_>, wants: &[Oid], opts: &FetchOpts) -> Result<(Hash
         let mut o = *w;
         for _ in 0..8 {
             match view.load(&o)? {
-                Some((Kind::Tag, body)) => match refs_of(Kind::Tag, &body)?.first() {
+                Some((Kind::Tag, body)) => match view.refs(Kind::Tag, &body)?.first() {
                     Some(t) => o = *t,
                     None => break,
                 },
@@ -1016,7 +1159,7 @@ fn shallow_cut(view: &View<'_>, wants: &[Oid], opts: &FetchOpts) -> Result<(Hash
         if !included.insert(c) {
             continue;
         }
-        let parents: Vec<Oid> = refs_of(Kind::Commit, &body)?.into_iter().skip(1).collect();
+        let parents: Vec<Oid> = view.refs(Kind::Commit, &body)?.into_iter().skip(1).collect();
         let mut cut = opts.depth.is_some_and(|n| d >= n);
         let mut kept = Vec::new();
         for p in &parents {
@@ -1059,7 +1202,7 @@ fn shallow_depth(view: &View<'_>, wants: &[Oid], shallow: &HashSet<Oid>) -> Resu
             continue; // the client has nothing behind it
         }
         if let Some((Kind::Commit, body)) = view.load(&c)? {
-            for p in refs_of(Kind::Commit, &body)?.into_iter().skip(1) {
+            for p in view.refs(Kind::Commit, &body)?.into_iter().skip(1) {
                 queue.push_back((p, d + 1));
             }
         }
@@ -1088,13 +1231,13 @@ fn boundary_exclude(view: &View<'_>, common: &[Oid], stop: &HashSet<Oid>) -> Res
         if !stop.contains(&o)
             && let Some((Kind::Commit, body)) = view.load(&o)?
         {
-            stack.extend(refs_of(Kind::Commit, &body)?.into_iter().skip(1));
+            stack.extend(view.refs(Kind::Commit, &body)?.into_iter().skip(1));
         }
     }
     let commits: HashSet<Oid> = ex.clone();
     for c in common.iter().take(MAX_BOUNDARY) {
         if let Some((Kind::Commit, body)) = view.load(c)?
-            && let Some(tree) = refs_of(Kind::Commit, &body)?.first().copied()
+            && let Some(tree) = view.refs(Kind::Commit, &body)?.first().copied()
         {
             let got = walk(view, &[tree], &ex, |_, _, _| Ok(()))?;
             ex.extend(got);
@@ -1142,7 +1285,7 @@ fn walk_paths_with(
             view.load(&oid)?.ok_or_else(|| Error::Corrupt(format!("missing git object {}", hex(&oid))))?;
         match kind {
             Kind::Commit => {
-                let refs = refs_of(kind, &body)?;
+                let refs = view.refs(kind, &body)?;
                 // Parents go below the tree on the stack: content first, then history.
                 for p in refs.iter().skip(1).rev() {
                     if commits.is_none_or(|c| c.contains(p)) {
@@ -1154,7 +1297,7 @@ fn walk_paths_with(
                 }
             }
             Kind::Tag => {
-                for o in refs_of(kind, &body)? {
+                for o in view.refs(kind, &body)? {
                     stack.push((o, String::new()));
                 }
             }
@@ -1164,17 +1307,18 @@ fn walk_paths_with(
                 while i < body.len() {
                     let Some(sp) = body[i..].iter().position(|&c| c == b' ').map(|x| x + i) else { break };
                     let Some(nul) = body[sp..].iter().position(|&c| c == 0).map(|x| x + sp) else { break };
-                    if nul + 21 > body.len() {
+                    // Entries hash like the tree itself (SHA-1 or SHA-256 repository).
+                    let hl = oid.len();
+                    if nul + 1 + hl > body.len() {
                         break;
                     }
                     let mode = &body[i..sp];
-                    let mut o = [0u8; 20];
-                    o.copy_from_slice(&body[nul + 1..nul + 21]);
+                    let Some(o) = Oid::from_slice(&body[nul + 1..nul + 1 + hl]) else { break };
                     if mode != b"160000" {
                         let name = String::from_utf8_lossy(&body[sp + 1..nul]);
                         kids.push((o, if path.is_empty() { name.to_string() } else { format!("{path}/{name}") }));
                     }
-                    i = nul + 21;
+                    i = nul + 1 + hl;
                 }
                 stack.extend(kids.into_iter().rev());
             }
@@ -1213,7 +1357,7 @@ fn walk(
         }
         let (kind, body) =
             view.load(&oid)?.ok_or_else(|| Error::Corrupt(format!("missing git object {}", hex(&oid))))?;
-        for child in refs_of(kind, &body)? {
+        for child in view.refs(kind, &body)? {
             if !seen.contains(&child) && !exclude.contains(&child) {
                 stack.push(child);
             }
@@ -1291,9 +1435,9 @@ pub async fn dispatch(
             let r = repo.clone();
             let s2 = service.clone();
             let v2 = service == "git-upload-pack" && wants_v2(&headers);
-            match tokio::task::spawn_blocking(
-                move || if v2 { Ok(v2_capabilities()) } else { advertisement(&g, &r, &s2) },
-            )
+            match tokio::task::spawn_blocking(move || {
+                if v2 { Ok(v2_capabilities(g.fmt_for(&r))) } else { advertisement(&g, &r, &s2) }
+            })
             .await
             {
                 Ok(Ok(body)) => {
@@ -1370,17 +1514,17 @@ fn parse_upload_request(body: &[u8]) -> Result<UploadRequest> {
         };
         let line = trim_nl(&line);
         if let Some(rest) = line.strip_prefix(b"want ") {
-            let oid = parse_oid(rest.get(..40).ok_or_else(|| Error::Parse("short want".into()))?)
-                .ok_or_else(|| Error::Parse("bad want".into()))?;
+            let hexlen = rest.iter().position(|&b| b == b' ').unwrap_or(rest.len());
+            let oid = parse_oid(&rest[..hexlen]).ok_or_else(|| Error::Parse("bad want".into()))?;
             if first {
-                let caps = String::from_utf8_lossy(rest.get(40..).unwrap_or_default()).to_string();
+                let caps = String::from_utf8_lossy(&rest[hexlen..]).to_string();
                 req.sideband = caps.split(' ').any(|c| c == "side-band-64k" || c == "side-band");
                 first = false;
             }
             req.wants.push(oid);
         } else if let Some(rest) = line.strip_prefix(b"have ") {
-            req.haves
-                .push(parse_oid(rest.get(..40).unwrap_or_default()).ok_or_else(|| Error::Parse("bad have".into()))?);
+            let hexlen = rest.iter().position(|&b| b == b' ').unwrap_or(rest.len());
+            req.haves.push(parse_oid(&rest[..hexlen]).ok_or_else(|| Error::Parse("bad have".into()))?);
         } else if line == b"done" {
             req.done = true;
             break;
@@ -1416,6 +1560,9 @@ async fn upload_pack(
         let metrics = st.metrics.clone();
         tokio::task::spawn_blocking(move || {
             let res = match req.command.as_str() {
+                _ if req.object_format.as_deref().is_some_and(|f| f != git.fmt_for(&repo).name()) => {
+                    Err(Error::Parse(format!("this repository uses object-format={}", git.fmt_for(&repo).name())))
+                }
                 "ls-refs" => v2_ls_refs(&git, &repo, &req.args).and_then(|out| send(&tx, out)),
                 "fetch" => v2_fetch(&git, &repo, &req.args, &tx, &metrics),
                 other => Err(Error::Parse(format!("unknown v2 command {other:?}"))),
@@ -1510,13 +1657,13 @@ fn negotiate(view: &View<'_>, git: &GitState, repo: &str, wants: &[Oid], haves: 
             let Some((kind, body)) = view.load(&o)? else { continue };
             match kind {
                 Kind::Commit => {
-                    for (i, child) in refs_of(kind, &body)?.into_iter().enumerate() {
+                    for (i, child) in view.refs(kind, &body)?.into_iter().enumerate() {
                         if i > 0 {
                             stack.push(child); // parents only (index 0 is the tree)
                         }
                     }
                 }
-                Kind::Tag => stack.extend(refs_of(kind, &body)?),
+                Kind::Tag => stack.extend(view.refs(kind, &body)?),
                 _ => {}
             }
             if haves.len() == common.len() {
@@ -1537,11 +1684,10 @@ fn negotiate(view: &View<'_>, git: &GitState, repo: &str, wants: &[Oid], haves: 
 // ---------------------------------------------------------------------------
 
 /// The v2 capability advertisement (no `# service` line in v2).
-fn v2_capabilities() -> Vec<u8> {
+fn v2_capabilities(fmt: Fmt) -> Vec<u8> {
     let mut out = Vec::new();
-    for l in
-        ["version 2\n", &format!("{AGENT}\n"), "ls-refs=unborn\n", "fetch=shallow filter\n", "object-format=sha1\n"]
-    {
+    let of = format!("object-format={}\n", fmt.name());
+    for l in ["version 2\n", &format!("{AGENT}\n"), "ls-refs=unborn\n", "fetch=shallow filter\n", &of] {
         out.extend_from_slice(&pkt(l.as_bytes()));
     }
     out.extend_from_slice(FLUSH);
@@ -1551,12 +1697,15 @@ fn v2_capabilities() -> Vec<u8> {
 struct V2Request {
     command: String,
     args: Vec<Vec<u8>>,
+    /// `object-format=` the client asked for (checked against the repository's).
+    object_format: Option<String>,
 }
 
 fn parse_v2_request(body: &[u8]) -> Result<V2Request> {
     let mut r = body;
     let mut command = None;
     let mut args = Vec::new();
+    let mut object_format = None;
     let mut in_args = false;
     loop {
         match read_pkt(&mut r)? {
@@ -1568,17 +1717,21 @@ fn parse_v2_request(body: &[u8]) -> Result<V2Request> {
                     args.push(l);
                 } else if let Some(c) = l.strip_prefix(b"command=") {
                     command = Some(String::from_utf8_lossy(c).to_string());
-                } else if l.starts_with(b"object-format=") && l != b"object-format=sha1" {
-                    return Err(Error::Unsupported("only sha1 repositories are supported"));
+                } else if let Some(f) = l.strip_prefix(b"object-format=") {
+                    object_format = Some(String::from_utf8_lossy(f).into_owned());
                 }
             }
         }
     }
-    Ok(V2Request { command: command.ok_or_else(|| Error::Parse("v2 request without command".into()))?, args })
+    Ok(V2Request {
+        command: command.ok_or_else(|| Error::Parse("v2 request without command".into()))?,
+        args,
+        object_format,
+    })
 }
 
 fn v2_ls_refs(git: &GitState, repo: &str, args: &[Vec<u8>]) -> Result<Vec<u8>> {
-    let view = View::new(git)?;
+    let view = View::for_repo(git, repo)?;
     let refs = list_refs(git, repo)?;
     let has = |a: &[u8]| args.iter().any(|x| x == a);
     let (peel, symrefs, unborn) = (has(b"peel"), has(b"symrefs"), has(b"unborn"));
@@ -1605,10 +1758,10 @@ fn v2_ls_refs(git: &GitState, repo: &str, args: &[Vec<u8>]) -> Result<Vec<u8>> {
         let mut l = format!("{} {name}", hex(oid));
         if peel && let Some((Kind::Tag, body)) = view.load(oid)? {
             // Peel through nested tags to the final object.
-            let mut target = refs_of(Kind::Tag, &body)?.first().copied();
+            let mut target = view.refs(Kind::Tag, &body)?.first().copied();
             for _ in 0..16 {
                 match target.map(|t| view.load(&t)).transpose()?.flatten() {
-                    Some((Kind::Tag, b)) => target = refs_of(Kind::Tag, &b)?.first().copied(),
+                    Some((Kind::Tag, b)) => target = view.refs(Kind::Tag, &b)?.first().copied(),
                     _ => break,
                 }
             }
@@ -1635,7 +1788,8 @@ fn v2_fetch(
     let mut opts = FetchOpts::default();
     let mut relative = false;
     let oid_arg = |o: &[u8], what: &str| {
-        parse_oid(o.get(..40).unwrap_or_default()).ok_or_else(|| Error::Parse(format!("bad {what}")))
+        // 40 (SHA-1) or 64 (SHA-256) hex digits, up to the first space.
+        parse_oid(o.split(|&b| b == b' ').next().unwrap_or_default()).ok_or_else(|| Error::Parse(format!("bad {what}")))
     };
     for a in args {
         if let Some(o) = a.strip_prefix(b"want ") {
@@ -1673,7 +1827,7 @@ fn v2_fetch(
     if wants.is_empty() {
         return Err(Error::Parse("fetch without wants".into()));
     }
-    let view = View::new(git)?;
+    let view = View::for_repo(git, repo)?;
     let common = negotiate(&view, git, repo, &wants, &haves)?;
     if relative && let Some(n) = opts.depth {
         // `--deepen N`: N more commits behind the client's current boundary.
@@ -1728,7 +1882,7 @@ fn serve_upload(
     tx: &mpsc::Sender<std::result::Result<Bytes, std::io::Error>>,
     metrics: &crate::metrics::Metrics,
 ) -> Result<()> {
-    let view = View::new(git)?;
+    let view = View::for_repo(git, repo)?;
     let common = negotiate(&view, git, repo, &req.wants, &req.haves)?;
     let mut out = Vec::new();
     if let Some(first) = common.first() {
@@ -1806,14 +1960,14 @@ fn write_pack(
     if let Some(inc) = commits {
         for c in &opts.client_shallow {
             if let Some((Kind::Commit, body)) = view.load(c)? {
-                tips.extend(refs_of(Kind::Commit, &body)?.into_iter().skip(1).filter(|p| inc.contains(p)));
+                tips.extend(view.refs(Kind::Commit, &body)?.into_iter().skip(1).filter(|p| inc.contains(p)));
             }
         }
     }
     let objs = walk_paths_with(view, &tips, &exclude, commits, opts.blob_limit)?;
     // Stream the pack. Blobs and trees are deltified against the previously
     // sent version at the same path (newest first, so older versions are deltas).
-    let mut h = Sha1::new();
+    let mut h = PackHasher::new(view.fmt);
     let mut buf = Vec::with_capacity(1 << 17);
     let mut header = b"PACK".to_vec();
     header.extend_from_slice(&2u32.to_be_bytes());
@@ -1916,10 +2070,11 @@ fn write_pack(
         }
         start = end;
     }
-    let trailer: [u8; 20] = h.finalize().into();
+    let trailer = h.finish();
+    let tl = trailer.len() as u64;
     buf.extend_from_slice(&trailer);
     flush(&mut buf, true)?;
-    info!(repo, objects = objs.len(), deltas, bytes = offset + 20, "upload-pack served");
+    info!(repo, objects = objs.len(), deltas, bytes = offset + tl, "upload-pack served");
     Ok(())
 }
 
@@ -2091,7 +2246,17 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
     let capset: HashSet<&str> = caps.split(' ').collect();
     let sideband = capset.contains("side-band-64k");
     let atomic = capset.contains("atomic");
-    let mut view = View::new(git)?;
+    let fmt = git.fmt_for(repo);
+    // The client states its repository's format; it must match this repository's.
+    if let Some(of) = capset.iter().find_map(|c| c.strip_prefix("object-format="))
+        && of != fmt.name()
+    {
+        return Err(Error::Parse(format!("this repository uses object-format={}, the push uses {of}", fmt.name())));
+    }
+    if cmds.iter().any(|c| c.old.len() != fmt.hash_len() || c.new.len() != fmt.hash_len()) {
+        return Err(Error::Parse(format!("push commands must use {} object ids", fmt.name())));
+    }
+    let mut view = View::for_repo(git, repo)?;
     let has_pack = f.metadata()?.len() > pack_off;
     let unpack = if has_pack {
         match index_pack(&mut view, &mut f, pack_off) {
@@ -2116,13 +2281,13 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
     for (i, c) in cmds.iter().enumerate() {
         let check = (|| -> std::result::Result<(Name, Option<Hash>, Observed), String> {
             let name = ref_name(repo, &c.gitref).ok_or("unsupported ref name")?;
-            if c.new == ZERO_OID {
+            if c.new == fmt.zero() {
                 let cur = git.repo.resolve(&name).map_err(|e| e.to_string())?;
                 let cur_oid = match &cur {
-                    Some(v) => Some(oid_of(&git.repo.get(&v.hash, None).map_err(|e| e.to_string())?)),
+                    Some(v) => Some(fmt.hash(&git.repo.get(&v.hash, None).map_err(|e| e.to_string())?)),
                     None => None,
                 };
-                if cur_oid != Some(c.old) && c.old != ZERO_OID {
+                if cur_oid != Some(c.old) && c.old != fmt.zero() {
                     return Err("fetch first (stale old value)".into());
                 }
                 return Ok((name, None, RefValue::observed(cur)));
@@ -2137,10 +2302,10 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
             }
             let cur = git.repo.resolve(&name).map_err(|e| e.to_string())?;
             let cur_oid = match &cur {
-                Some(v) => Some(oid_of(&git.repo.get(&v.hash, None).map_err(|e| e.to_string())?)),
+                Some(v) => Some(fmt.hash(&git.repo.get(&v.hash, None).map_err(|e| e.to_string())?)),
                 None => None,
             };
-            let expected = if c.old == ZERO_OID { None } else { Some(c.old) };
+            let expected = if c.old == fmt.zero() { None } else { Some(c.old) };
             if cur_oid != expected {
                 return Err("fetch first (stale old value)".into());
             }
@@ -2269,7 +2434,9 @@ impl pico2peta_repo::Grouper for GitGrouper {
                 continue;
             }
             let bytes = repo.get(&v.hash, None)?;
+            // Either object format; the id that isn't in the oid map is skipped below.
             tips.push(oid_of(&bytes));
+            tips.push(Fmt::Sha256.hash(&bytes));
         }
         let mut commits: Vec<(u64, Oid, Hash, Vec<u8>)> = Vec::new();
         let mut seen: HashSet<Oid> = HashSet::new();
@@ -2285,11 +2452,11 @@ impl pico2peta_repo::Grouper for GitGrouper {
                     if live.contains(&h) {
                         out.insert(h, GroupKey { group: "tag".into(), order: format!("{t:020}") });
                     }
-                    stack.extend(refs_of(kind, &body)?);
+                    stack.extend(refs_any(kind, &body));
                 }
                 Kind::Commit => {
                     let t = object_time(kind, &body);
-                    let refs = refs_of(kind, &body)?;
+                    let refs = refs_any(kind, &body);
                     stack.extend(refs.iter().skip(1).copied());
                     commits.push((t, o, h, body));
                 }
@@ -2303,7 +2470,7 @@ impl pico2peta_repo::Grouper for GitGrouper {
             if live.contains(&h) {
                 out.insert(h, GroupKey { group: "commit".into(), order: format!("{t:020}") });
             }
-            let Some(tree) = refs_of(Kind::Commit, &body)?.first().copied() else { continue };
+            let Some(tree) = refs_any(Kind::Commit, &body).first().copied() else { continue };
             let mut stack: Vec<(Oid, String)> = vec![(tree, String::new())];
             while let Some((toid, dir)) = stack.pop() {
                 if !seen_tree.insert(toid) {
@@ -2320,14 +2487,14 @@ impl pico2peta_repo::Grouper for GitGrouper {
                 while i < tbody.len() {
                     let Some(sp) = tbody[i..].iter().position(|&c| c == b' ').map(|x| x + i) else { break };
                     let Some(nul) = tbody[sp..].iter().position(|&c| c == 0).map(|x| x + sp) else { break };
-                    if nul + 21 > tbody.len() {
+                    let hl = toid.len();
+                    if nul + 1 + hl > tbody.len() {
                         break;
                     }
                     let mode = &tbody[i..sp];
                     let name = String::from_utf8_lossy(&tbody[sp + 1..nul]).to_string();
-                    let mut oid = [0u8; 20];
-                    oid.copy_from_slice(&tbody[nul + 1..nul + 21]);
-                    i = nul + 21;
+                    let Some(oid) = Oid::from_slice(&tbody[nul + 1..nul + 1 + hl]) else { break };
+                    i = nul + 1 + hl;
                     let path = if dir.is_empty() { name } else { format!("{dir}/{name}") };
                     match mode {
                         b"40000" => stack.push((oid, path)),
@@ -2409,7 +2576,7 @@ pub(crate) fn fuzz_make_push(objects: &[(u8, Vec<u8>)], tip: usize) -> Vec<u8> {
     let mut pack = b"PACK".to_vec();
     pack.extend_from_slice(&2u32.to_be_bytes());
     pack.extend_from_slice(&(objects.len() as u32).to_be_bytes());
-    let mut tip_oid = ZERO_OID;
+    let mut tip_oid = Fmt::Sha1.zero();
     for (i, (code, body)) in objects.iter().enumerate() {
         let kind = Kind::from_code(*code).unwrap_or(Kind::Blob);
         if i == tip {
@@ -2422,7 +2589,8 @@ pub(crate) fn fuzz_make_push(objects: &[(u8, Vec<u8>)], tip: usize) -> Vec<u8> {
     }
     let trailer: [u8; 20] = Sha1::digest(&pack).into();
     pack.extend_from_slice(&trailer);
-    let mut out = pkt(format!("{} {} refs/heads/main\0report-status\n", hex(&ZERO_OID), hex(&tip_oid)).as_bytes());
+    let mut out =
+        pkt(format!("{} {} refs/heads/main\0report-status\n", hex(&Fmt::Sha1.zero()), hex(&tip_oid)).as_bytes());
     out.extend_from_slice(FLUSH);
     out.extend_from_slice(&pack);
     out
@@ -2434,7 +2602,8 @@ pub(crate) fn fuzz_parsers(data: &[u8]) {
         let _ = refs_of(k, data);
     }
     let _ = parse_upload_request(data);
-    let _ = read_entry_header(&mut &data[..], 1 << 40);
+    let _ = read_entry_header(&mut &data[..], 1 << 40, 20);
+    let _ = read_entry_header(&mut &data[..], 1 << 40, 32);
     if data.len() > 2 {
         let split = data[0] as usize % data.len();
         let _ = apply_delta(&data[..split], &data[split..]);
@@ -2515,7 +2684,8 @@ impl GitTracer {
             return Ok(Some(Vec::new()));
         }
         let bytes = store.get(h, None)?;
-        let Ok(oids) = refs_of(kind, &bytes[hl..]) else { return Ok(None) };
+        // The tracer sees core objects, not repositories: accept either object format.
+        let oids = refs_any(kind, &bytes[hl..]);
         let mut out = Vec::with_capacity(oids.len());
         for o in oids {
             if let Some(v) = self.oidmap.get_in(&self.root, &key_of(&o))? {
@@ -2589,7 +2759,7 @@ mod tests {
             let enc = ofs_encode(off);
             let mut hdr = vec![0x60u8]; // OFS_DELTA, size 0
             hdr.extend_from_slice(&enc);
-            let (_, _, base, _) = read_entry_header(&mut &hdr[..], off + 10).unwrap();
+            let (_, _, base, _) = read_entry_header(&mut &hdr[..], off + 10, 20).unwrap();
             assert!(matches!(base, Base::Ofs(b) if b == 10), "{off}");
         }
     }
@@ -2598,7 +2768,7 @@ mod tests {
     fn pack_headers() {
         assert_eq!(pack_entry_header(Kind::Blob, 5), vec![0x35]);
         let h = pack_entry_header(Kind::Commit, 300);
-        let (code, size, _, n) = read_entry_header(&mut &h[..], 100).unwrap();
+        let (code, size, _, n) = read_entry_header(&mut &h[..], 100, 20).unwrap();
         assert_eq!((code, size, n as usize), (1, 300, h.len()));
     }
 
