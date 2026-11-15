@@ -577,3 +577,91 @@ fn token_admin_api() {
     assert_eq!(admin(reqwest::Method::DELETE, &format!("/v1/admin/tokens/{sha}")).send().unwrap().status(), 404);
     assert_eq!(who(ALICE).status(), 200);
 }
+
+/// Two independent servers (separate local dirs, nothing shared but S3) serve one
+/// repository with refs on the backend: OCC holds across hosts.
+#[test]
+fn two_servers_share_a_repo_via_s3() {
+    let Ok(endpoint) = std::env::var("P2P_S3_ENDPOINT") else {
+        eprintln!("skipping: set P2P_S3_ENDPOINT (see scripts/minio-test.sh)");
+        return;
+    };
+    let bucket = std::env::var("P2P_S3_BUCKET").unwrap_or_else(|_| "p2p-test".into());
+    let region = std::env::var("P2P_S3_REGION").unwrap_or_else(|_| "us-east-1".into());
+    let creds = pico2peta_backend_s3::Credentials::from_env().expect("AWS_* credentials");
+    let admin = pico2peta_backend_s3::S3Client::new(
+        pico2peta_backend_s3::S3Config::new(&endpoint, &region, &bucket),
+        std::sync::Arc::new(creds),
+    )
+    .unwrap();
+    tokio::runtime::Runtime::new().unwrap().block_on(admin.create_bucket()).unwrap();
+    let prefix = format!("multihost-{}-{}", std::process::id(), fastrand_u64());
+    let start = || {
+        let (e, b, r, p) = (endpoint.clone(), bucket.clone(), region.clone(), prefix.clone());
+        TestServer::start(move |c| {
+            c.repo.refs = pico2peta_repo::RefsStore::Backend;
+            c.backend = pico2peta_server::config::BackendSection::S3(pico2peta_server::config::S3Section {
+                endpoint: e,
+                region: r,
+                bucket: b,
+                prefix: p,
+                path_style: true,
+                conditional_writes: true,
+                max_in_flight: Some(8),
+            })
+        })
+    };
+    let (s1, s2) = (start(), start());
+    let (c1, c2) = (s1.client(ALICE), s2.client(ALICE));
+    // An object written through server 1 can be referenced through server 2.
+    let h = c1.put(b"shared content").unwrap();
+    c1.flush().unwrap();
+    let name = n("alice/shared");
+    assert!(matches!(c2.replace(&name, &[(name.clone(), Observed::Absent)], h).unwrap(), ReplaceOutcome::Ok { .. }));
+    assert_eq!(c1.resolve(&name).unwrap().unwrap().hash, h, "server 1 sees server 2's commit");
+    assert_eq!(c1.get(&h, None).unwrap(), b"shared content");
+    // Contention across hosts: no lost updates, no double commits.
+    let hot = n("alice/counter");
+    let per = 15;
+    let (commits, conflicts) = std::thread::scope(|sc| {
+        let hs: Vec<_> = [&s1, &s2, &s1, &s2]
+            .iter()
+            .map(|s| {
+                let c = s.client(ALICE);
+                let hot = hot.clone();
+                sc.spawn(move || {
+                    let (mut ok, mut conflicts) = (0, 0);
+                    while ok < per {
+                        let obs = pico2peta_core::RefValue::observed(c.resolve(&hot).unwrap());
+                        match c.replace(&hot, &[(hot.clone(), obs)], h).unwrap() {
+                            ReplaceOutcome::Ok { .. } => ok += 1,
+                            ReplaceOutcome::Conflict { .. } => conflicts += 1,
+                        }
+                    }
+                    (ok, conflicts)
+                })
+            })
+            .collect();
+        hs.into_iter().map(|h| h.join().unwrap()).fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1))
+    });
+    let v1 = c1.resolve(&hot).unwrap().unwrap().version;
+    let v2 = c2.resolve(&hot).unwrap().unwrap().version;
+    eprintln!("multi-host: commits={commits} conflicts={conflicts} final version={v1}");
+    assert_eq!(v1, v2, "both servers agree");
+    assert_eq!(v1 as usize, commits, "every commit is exactly one version");
+}
+
+#[test]
+fn refs_engine_mismatch_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    pico2peta_repo::LocalRepo::init(d.path().join("r"), &Default::default()).unwrap();
+    let mut cfg: pico2peta_server::config::Config = toml::from_str(&format!(
+        "[repo]\npath = {:?}\nrefs = \"backend\"\n[audit]\npath = {:?}\n",
+        d.path().join("r"),
+        d.path().join("a.jsonl")
+    ))
+    .unwrap();
+    cfg.auth.allow_anonymous = true;
+    let e = pico2peta_server::build_state(&cfg).err().expect("must refuse");
+    assert!(e.to_string().contains("created with refs"), "{e}");
+}

@@ -73,8 +73,20 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
                 path.display()
             ))));
         }
-        info!(path = %path.display(), "initializing repository");
-        drop(LocalRepo::init(path, &pico2peta_pack::PackConfig::default())?);
+        info!(path = %path.display(), refs = ?cfg.repo.refs, "initializing repository");
+        drop(LocalRepo::init_with(path, &pico2peta_pack::PackConfig::default(), cfg.repo.refs)?);
+    }
+    let existing = LocalRepo::read_config(path)?;
+    if existing.refs.store != cfg.repo.refs {
+        return Err(StartError::Repo(pico2peta_core::Error::Parse(format!(
+            "repo.refs = {:?} in the server config, but {} was created with refs = {:?}",
+            cfg.repo.refs,
+            path.display(),
+            existing.refs.store
+        ))));
+    }
+    if existing.refs.store == pico2peta_repo::RefsStore::Backend && matches!(cfg.backend, BackendSection::Local) {
+        warn!("refs on the backend with a local backend: only processes on this host can share the repository");
     }
     let local = match backend {
         None => LocalRepo::open(path)?,

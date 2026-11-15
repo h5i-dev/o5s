@@ -59,6 +59,13 @@ For large uploads, disable request buffering in the proxy (`proxy_request_buffer
 ## Reloading configuration
 SIGHUP (`systemctl reload`) re-reads the config file and applies **tokens, policies and the TLS certificate** atomically. Revoked tokens stop working on the next request. If the new file fails validation, nothing changes and an error is logged. Every reload is audited (`action = "config_reload"`). All other settings need a restart.
 
+## Several servers per repository
+Create the repository with `[repo] refs = "backend"` (and an S3 `[backend]`). Then run any number of servers, each with its **own** `repo.path` (local staging), pointing at the same bucket and prefix. Refs are committed through S3's conditional create (`If-None-Match`), so OCC holds across hosts. Put a load balancer in front.
+
+Notes:
+- `[gc]` should run on one server only. GC is safe with concurrent writers, but parallel GC runs only duplicate work.
+- An object put on one server becomes visible to the others once it is flushed (any `replace` does that).
+
 ## Observability
 - `GET /healthz` is liveness (the process is up). `GET /readyz` is readiness: it is 503 while draining, after an audit-log failure, or when the repository is unreachable. Neither needs credentials.
 - `GET /metrics` serves OpenMetrics text with no credentials. Set `server.metrics_listen` to a private address so it is served only there (the API port then returns 404 for it), or restrict it at the proxy or firewall. Key series:

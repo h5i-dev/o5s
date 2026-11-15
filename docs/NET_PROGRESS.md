@@ -2,7 +2,7 @@
 
 ## Status (2026-11-15)
 
-**Summary:** all six goals in AGENT_TASK_NET.md are done, and production hardening continued beyond them (see "Hardening after goal 6"). Remaining limits are listed under "Production gaps". The parts:
+**Summary (verified 2026-11-15):** all six goals in AGENT_TASK_NET.md are done and verified. The checks: clippy `-D warnings`; all 18 net test binaries, including MinIO; OCI conformance 73/0; real-git round-trips; and the cargo-fuzz targets. CI also has Lean and fuzz-smoke jobs. Production hardening continued beyond the goals (see "Hardening after goal 6"). Remaining limits are listed under "Production gaps". The parts:
 - S3 backend: MinIO conformance plus fault injection.
 - Server: authn (tokens and OIDC), authz, audit, metrics, TLS, reload, rate limits, GC.
 - Client.
@@ -98,7 +98,7 @@ User docs are in `docs/API.md` and `deploy/README.md`.
 - `GitGrouper` follows the EXP1 V2 layout:
   - Groups are `blob:<ext>` (or `blob:<basename>`), `tree`, `commit` and `tag`.
   - Order is path, then the time of the oldest commit that contains the object. Every git repo's refs are walked, oldest commits first.
-- Enabled through `[gc] grouped = true` (the default) and `repack_all`, or per call with `POST /v1/admin/gc?repack_all=true`.
+- **Opt-in** through `[gc] grouped = true` (the default is false since Experiment 1 failed its pre-registered verdict: redis is 1.336× git-aggressive, above the 1.30 per-repo maximum; see docs/EXP1.md) and `repack_all`, or per call with `POST /v1/admin/gc?repack_all=true`.
 - **Measured on ripgrep** (heads + tags, 14,190 objects), with `cargo test --release -p pico2peta-server --test git grouped_repack -- --ignored`:
 
   | | bytes | vs git `--aggressive` |
@@ -120,6 +120,7 @@ User docs are in `docs/API.md` and `deploy/README.md`.
 - Separate metrics listener, and per-principal rate limiting (429 with `Retry-After`, `p2p_rate_limited_total`).
 - Audit log rotation with a continuous hash chain across files.
 - Token admin API (create, list, revoke) over `auth.token_file`.
+- **Multi-host serving:** `[repo] refs = "backend"` creates the repository with the core's backend ref log. Several servers with separate local directories can then share one S3 bucket and prefix. MinIO test (`two_servers_share_a_repo_via_s3`): two servers, four writers contending on one name, 60 commits and 64 OCC conflicts, final version exactly 60 on both servers, and an object written through one server referenced through the other. A config/repo engine mismatch is refused at startup.
 - OIDC/JWT authentication (`tests/oidc.rs` against a mock issuer: valid token, wrong audience, expired, bad signature, tampered token, key rotation, unknown kid, static tokens alongside).
 - Git protocol v2 for fetch (git's default). `tests/git.rs` now runs on v2 by default and checks v0 and v2 for identical results.
 - Git wire deltas: upload-pack deltifies blobs and trees against the previously sent version of the same path. A ripgrep clone (release) transfers 33.8 MB → **6.1 MB**, takes 3.65 s → 2.91 s, refs are identical and fsck is clean.
