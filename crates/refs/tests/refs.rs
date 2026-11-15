@@ -267,6 +267,7 @@ proptest! {
     fn matches_model(ops in proptest::collection::vec(op(), 1..60)) {
         let d = tempfile::tempdir().unwrap();
         let mut r = RefStore::open(d.path()).unwrap();
+        r.set_compact_threshold(300); // rotate every few records
         let mut m = Model::default();
         for o in ops {
             match o {
@@ -297,6 +298,7 @@ proptest! {
                 Op::Reopen => {
                     drop(r);
                     r = RefStore::open(d.path()).unwrap();
+                    r.set_compact_threshold(300);
                 }
             }
             let got: Vec<(String, Hash, u64)> = r.list("").unwrap().into_iter().map(|(k, v)| (k.to_string(), v.hash, v.version)).collect();
@@ -332,5 +334,103 @@ proptest! {
             let y = n("y");
             let _ = r.replace(&y, &[(y.clone(), Observed::Absent)], h(2), &yes);
         }
+    }
+}
+
+#[test]
+fn compaction_preserves_state_and_bounds_files() {
+    let d = tempfile::tempdir().unwrap();
+    let r = RefStore::open(d.path()).unwrap();
+    r.set_compact_threshold(1000);
+    r.set_rule("pkg", Rule::ImmutableAfterPublish).unwrap();
+    let lagging = RefStore::open(d.path()).unwrap(); // never commits; will lag many generations
+    for i in 0..300u64 {
+        let nm = n(&format!("b/{}", i % 7));
+        let obs = RefValue::observed(r.resolve(&nm).unwrap());
+        r.replace(&nm, &[(nm.clone(), obs)], h(i), &yes).unwrap();
+    }
+    let p = n("pkg/x");
+    r.replace(&p, &[(p.clone(), Observed::Absent)], h(1), &yes).unwrap();
+    assert!(r.generation().unwrap() >= 5, "should have rotated several times");
+    let files = std::fs::read_dir(d.path()).unwrap().count();
+    assert!(files <= 6, "old generations are cleaned up ({files} files)");
+    let want = r.snapshot().unwrap();
+    assert_eq!(lagging.snapshot().unwrap(), want, "lagging handle catches up across rotations");
+    assert_eq!(RefStore::open(d.path()).unwrap().snapshot().unwrap(), want);
+    // Rules survive compaction.
+    assert!(matches!(r.replace(&p, &[(p.clone(), Observed::Version(1))], h(2), &yes), Err(Error::Forbidden { .. })));
+    // The lagging handle can commit (on the newest generation).
+    let z = n("z");
+    lagging.replace(&z, &[(z.clone(), Observed::Absent)], h(9), &yes).unwrap();
+    assert_eq!(r.resolve(&z).unwrap().unwrap().hash, h(9));
+}
+
+#[test]
+fn contention_across_rotations() {
+    let d = tempfile::tempdir().unwrap();
+    let c = n("counter");
+    let wins: u64 = std::thread::scope(|sc| {
+        (0..4u64)
+            .map(|t| {
+                let dir = d.path().to_path_buf();
+                let c = c.clone();
+                sc.spawn(move || {
+                    let r = RefStore::open(&dir).unwrap();
+                    r.set_compact_threshold(500);
+                    let mut wins = 0;
+                    while wins < 50 {
+                        let obs = RefValue::observed(r.resolve(&c).unwrap());
+                        if let ReplaceOutcome::Ok { .. } =
+                            r.replace(&c, &[(c.clone(), obs)], h(t * 1000 + wins), &yes).unwrap()
+                        {
+                            wins += 1;
+                        }
+                    }
+                    wins
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|j| j.join().unwrap())
+            .sum()
+    });
+    let r = RefStore::open(d.path()).unwrap();
+    assert_eq!(r.resolve(&c).unwrap().unwrap().version, wins);
+    assert!(r.generation().unwrap() > 3);
+}
+
+#[test]
+fn crash_during_compaction_at_every_point() {
+    for budget in 0..40u64 {
+        let d = tempfile::tempdir().unwrap();
+        let mut committed: BTreeMap<Name, RefValue> = BTreeMap::new();
+        {
+            let r = RefStore::open_with_faults(d.path(), Faults::crash_after(budget)).unwrap();
+            r.set_compact_threshold(200);
+            for i in 0..12u64 {
+                let nm = n(&format!("r/{}", i % 4));
+                let obs = match committed.get(&nm) {
+                    Some(v) => Observed::Version(v.version),
+                    None => Observed::Absent,
+                };
+                match r.replace(&nm, &[(nm.clone(), obs)], h(i), &yes) {
+                    Ok(ReplaceOutcome::Ok { version }) => {
+                        committed.insert(nm, RefValue { hash: h(i), version });
+                    }
+                    Ok(c) => panic!("budget {budget}: unexpected {c:?}"),
+                    Err(_) => break,
+                }
+            }
+        }
+        let r = RefStore::open(d.path()).unwrap_or_else(|e| panic!("budget {budget}: reopen failed: {e}"));
+        let got: BTreeMap<Name, RefValue> = r.list("").unwrap().into_iter().collect();
+        for (k, v) in &committed {
+            let g = got.get(k).unwrap_or_else(|| panic!("budget {budget}: lost {k}"));
+            // At most one unacknowledged later commit may have landed.
+            assert!(g.version == v.version || g.version == v.version + 1, "budget {budget}: {k} {g:?} vs {v:?}");
+        }
+        let z = n("z");
+        r.replace(&z, &[(z.clone(), Observed::Absent)], h(99), &yes).unwrap();
+        assert_eq!(RefStore::open(d.path()).unwrap().resolve(&z).unwrap().unwrap().hash, h(99), "budget {budget}");
     }
 }
