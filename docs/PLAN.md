@@ -315,6 +315,11 @@ reach specialist level, and the thresholds are pre-registered here **before any 
 
 ### 6.3 Experiment 2: Git storage parity (core), pre-registered 2026-11-15, before any Experiment 2 code
 
+> **Withdrawn 2026-11-15, before any Experiment 2 code was written.** The human replaced Phase 3 step (3)
+> (a Git-style windowed delta-search encoder) with one generic, domain-agnostic similarity orderer and framer
+> (docs/ORDERING.md). Its evaluation is §6.6 (Experiment 3). Git storage parity (≤ 1.00 per repo) is reported
+> there as a line of the verdict. The text below is kept for the record and is not run.
+
 **Question.** Can the core's generic building blocks, driven by a Git-class encoder, store a Git repository's
 objects in no more space than `git gc --aggressive`, while keeping random reads fast?
 
@@ -397,6 +402,90 @@ bench lock, as the median of 3 runs:
 The scattered-edit case is the hard one for chunk dedup. 0.1 % of 1 GiB is about 1 M edits, which touch almost
 every 64 KiB chunk. If the store can't meet it with chunking alone, a generic derived-object encoding
 (`base + patch`) is the expected route. Either way the number is reported.
+
+### 6.6 Experiment 3: generic similarity ordering and framing (core), pre-registered 2026-11-15, before any Experiment 3 code
+
+**Question (docs/ORDERING.md).** Does one domain-agnostic building block (content features → similarity order →
+similarity-aware frames with reference prefixes) beat the ad-hoc Git-specific layout (Exp1 V2: extension
+partition, path order, fixed 4 MiB frames), reach `git gc --aggressive` size on source, and help outside Git too?
+
+**Main corpus, object set, payloads, verification, size model:** exactly Exp1 (§4.1, §4.2, §4.4 canonical
+payloads, SHA-1 verification of every sampled read). The size is S(V) = payload + any dictionaries or reference
+metadata + the **48 B/object** modeled index, so the variants are directly comparable with Exp1's V0–V3. They are
+implemented in the Exp1 harness (`bench/exp1`). **Baseline B:** the frozen Exp1 `git gc --aggressive` numbers
+(table in §6.3).
+
+**Variants (all reported). The ablations are the ones ORDERING.md lists:**
+
+| id | order | framing |
+|---|---|---|
+| **A0** | V2: extension partition, path, history position (re-run for a same-host comparison) | fixed 4 MiB |
+| **A1** | similarity order (below), with hints | fixed 4 MiB |
+| **A2** | V2's path order | similarity cuts + reference prefix (below) |
+| **A3** | similarity order, with front hints as tie-breakers | similarity cuts + reference prefix |
+| **A4** | similarity order, **no hints** (content and size only) | similarity cuts + reference prefix |
+
+**V\* = the lower geomean R of A3 and A4** (the full design, with and without hints). A0–A2 are reported as
+ablations and are not eligible.
+
+**Algorithm, fixed now (constants tunable on the dev set only, then frozen):**
+- *Features:* Exp1c's Odess-style extractor (`bench/exp1c`: Gear rolling hash, sampling 1/128, 12 linear
+  transforms, 3 super-features). Objects over 1 MiB get features per 64 KiB window, unioned. Objects with no sample
+  (< ~256 B) have no super-features.
+- *Order:*
+  - Candidate neighbours are the objects sharing ≥ 1 super-feature (LSH: one bucket table per super-feature, with
+    buckets larger than 256 truncated to the 256 nearest in size).
+  - Similarity = number of shared super-features, then the number of equal features (of 12).
+  - Greedy chaining: take the largest unplaced object, then repeatedly append the most similar unplaced
+    candidate. Ties go to front hints in A1/A3 (same path, then nearest path, then nearest history position), and
+    to nearest size in A4. When no candidate is left, start a new chain.
+  - Then 2-opt on the chain, within windows of 64.
+  - Featureless objects go last: by hints in A1/A3, by size in A4.
+- *Framing:*
+  - Cut before an object that shares no super-feature with any of the frame's last 8 objects, once the frame
+    holds ≥ 64 KiB. The cap is C = 16 MiB raw (tunable, bounded by the read thresholds below).
+  - At a forced cut inside a similar run (the next object shares super-features with the previous frame), the new
+    frame is compressed with the most similar earlier object (from an earlier frame) as a zstd reference prefix.
+  - Reference depth ≤ 2: a read decodes at most 3 frames.
+  - zstd level 19 throughout.
+- *Hints:* path and history position only (the same information V2 uses). They break ties and never decide the
+  layout.
+
+**Thresholds (§4.5, unchanged).** STRONG PASS: geomean R(V\*) ≤ 1.00 and every repo ≤ 1.15. PASS: geomean ≤ 1.15
+and every repo ≤ 1.30. FAIL: anything else. Secondary thresholds, all required for (STRONG) PASS:
+- random reads over 10,000 uniformly random objects, warm, with **4 concurrent reader threads**: p50 ≤ 5 ms,
+  p99 ≤ 25 ms;
+- build ≤ 1.0× the Exp1 `git gc --aggressive` wall time (4 threads; if within ±20 %, both are re-timed back to back
+  under the bench lock);
+- peak RSS ≤ 6 GB.
+
+Also reported as its own line: **Git storage parity, every repo R(V\*) ≤ 1.00** (VISION.md's target).
+
+**Generalization (each judged on its own, with the same variants minus the path-based ones where there are no
+paths):**
+- *Weights:* every tensor of SmolLM2-135M and SmolLM2-135M-Instruct as an object (544 objects, real bf16). The
+  reference is the file order (all base tensors, then all instruct tensors) with fixed 4 MiB frames.
+- *Packages:* the member files of 10 consecutive releases each of 3 pure-Python PyPI packages (decompressed from
+  their wheels), objects = files. The reference is archive order with fixed 4 MiB frames. If the network can't
+  reach PyPI, this corpus is reported as not run (disclosed), not substituted.
+- *Criterion:* A4 (no hints) "generalizes" on a corpus if its size is ≤ 0.98× the reference ordering, with reads
+  inside the thresholds above.
+
+**Process.**
+- Develop and tune only on ripgrep and jq (short runs), and on the generalization corpora.
+- Record the frozen commit in EXP1.md before the official run.
+- Run redis and git.git once, in the batch benchmark phase, under the bench lock.
+- Generate the verdict mechanically by extending `scripts/exp1-report.py` (`EXP1_ELIGIBLE=a3,a4`).
+
+**Consequences.**
+- PASS: the orderer becomes the core's repack layout for every front. `Grouper`/`GroupKey` become hints.
+- FAIL: reported honestly. The building block still ships if it beats A0 on every corpus; otherwise V2 stays.
+
+**Threats to validity:**
+- The design is informed by Exp1/1b/1c.
+- Four repos.
+- The 48 B/object index model (the production index is 44 B, plus record overhead).
+- Generalization corpora are small.
 
 ### 6.5 Net fronts, pre-registered 2026-11-15, before any front measurement code (net session)
 

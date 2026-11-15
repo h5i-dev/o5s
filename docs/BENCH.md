@@ -42,6 +42,30 @@ Short runs under `bench.lock`, on `/dev/shm` unless stated. The host is shared (
 - A new test covers read-ahead specifically: corruption in the middle of a 12 MB object, ranged reads on either
   side of it, an early drop, and odd-sized reads.
 
+**(c) Small objects (`p2p-bench small <dir> 100000`, 1 KiB distinct objects, put + one flush, warm random gets).**
+
+| 1 KiB objects | NVMe 1 thread | NVMe 4 threads | tmpfs 1 thread | tmpfs 4 threads |
+|---|---|---|---|---|
+| put, before | 75.1k/s | 64.5k/s | 108–111k/s | 70–73k/s |
+| put, after | **128.7k/s** | **95.5k/s** | **136–148k/s** | **111–132k/s** |
+| get, before | 97.2k/s | 233k/s | 110k/s | 268–343k/s |
+| get, after | **286k/s** | **797k/s** | 232k/s | 537k/s |
+
+Before, 4-thread puts were *slower* than 1-thread puts. The profile showed three causes:
+- **zstd under the writer lock.** `put()` took the lock, then compressed. Now compression, record encoding and
+  CRC happen before the lock, and only the append is serialized. `lock_contended` fell from 8.3 % to 3.9 %.
+- **Hopeless zstd attempts on small incompressible records** (zstd match finder + histograms, ~24 % of samples).
+  Records of 256 B–8 KiB now get an order-0 entropy check (≥ 7.5 bits/byte → raw) when the probe is on. It is
+  table-driven: a first version with a `log2` per histogram bin cost 32 % of the run and made 1-thread puts
+  slower, so it was replaced before commit.
+- **Four syscalls per sealed-pack read** (`open`, `fstat`, `pread`, `close`). `LocalDisk` now caches open handles
+  to `*.pack` files, which are immutable. A hit costs one `fstat` to check the link count, so a pack deleted by
+  another process's GC still reads as `KeyNotFound`. Without that check, `ensure_live` could have trusted a deleted
+  pack (net's HF test caught this before commit; a regression test was added).
+
+The remaining small-put cost is BLAKE3 on 1 KiB inputs (single-block path, ~33 %): once for identity and once
+for the incremental pack hash.
+
 ## 2026-11-15: streaming put pipeline (RESEARCH_SPEEDUP §1), before/after
 
 `p2p-bench stream <dir> 512` puts 512 MiB twice (the second put is all dedup hits) and reads it back with

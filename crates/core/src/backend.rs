@@ -250,14 +250,22 @@ pub mod conformance {
 /// create-only semantics across processes) and fsyncs the directory.
 pub struct LocalDisk {
     root: std::path::PathBuf,
+    /// Open handles to immutable blobs (`*.pack`: create-only and
+    /// content-named, so their bytes never change), with their length. Saves
+    /// an open/fstat/close per ranged read. A handle to a file deleted by
+    /// another process still reads the original (correct, verified) bytes.
+    fds: std::sync::Mutex<std::collections::HashMap<String, (std::sync::Arc<std::fs::File>, u64)>>,
 }
+
+/// Open pack handles cached per [`LocalDisk`] (the cache is cleared when full).
+const FD_CACHE: usize = 256;
 
 impl LocalDisk {
     /// Opens (creating if needed) a backend rooted at `root`.
     pub fn new(root: impl Into<std::path::PathBuf>) -> Result<Self> {
         let root = root.into();
         std::fs::create_dir_all(&root)?;
-        Ok(LocalDisk { root })
+        Ok(LocalDisk { root, fds: Default::default() })
     }
 
     /// The root directory.
@@ -357,12 +365,39 @@ impl Backend for LocalDisk {
 
     fn get_range(&self, key: &str, range: Range<u64>) -> Result<Vec<u8>> {
         use std::os::unix::fs::FileExt;
-        let f = std::fs::File::open(self.path(key)?).map_err(not_found_as(key))?;
         if range.start > range.end {
             return Err(Error::Parse(format!("bad range {range:?}")));
         }
+        let cached = key.ends_with(".pack");
+        let mut hit = if cached { self.fds.lock().ok().and_then(|m| m.get(key).cloned()) } else { None };
+        // A deleted file must read as deleted (GC safety: `ensure_live` must not
+        // trust a pack GC removed). One fstat instead of open + fstat + close.
+        if let Some((f, _)) = &hit {
+            use std::os::unix::fs::MetadataExt;
+            if f.metadata()?.nlink() == 0 {
+                if let Ok(mut m) = self.fds.lock() {
+                    m.remove(key);
+                }
+                hit = None;
+            }
+        }
+        let (f, len) = match hit {
+            Some(x) => x,
+            None => {
+                let f = std::fs::File::open(self.path(key)?).map_err(not_found_as(key))?;
+                let len = f.metadata()?.len();
+                let x = (std::sync::Arc::new(f), len);
+                if cached && let Ok(mut m) = self.fds.lock() {
+                    if m.len() >= FD_CACHE {
+                        m.clear();
+                    }
+                    m.insert(key.to_string(), x.clone());
+                }
+                x
+            }
+        };
         // Check against the real length before allocating (a corrupt range must not abort).
-        if range.end > f.metadata()?.len() {
+        if range.end > len {
             return Err(Error::Corrupt(format!("read of {key} at {range:?} is past its end")));
         }
         let mut buf = vec![0u8; (range.end - range.start) as usize];
@@ -431,6 +466,9 @@ impl Backend for LocalDisk {
     }
 
     fn delete(&self, key: &str) -> Result<()> {
+        if let Ok(mut m) = self.fds.lock() {
+            m.remove(key);
+        }
         let path = self.path(key)?;
         match std::fs::remove_file(&path) {
             Ok(()) => {
@@ -452,6 +490,24 @@ impl Backend for LocalDisk {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The pack-handle cache must not hide a deletion by someone else (another
+    /// process's GC): a deleted pack reads as `KeyNotFound`, as without the cache.
+    #[test]
+    fn cached_pack_handles_see_external_deletes() {
+        let d = std::env::temp_dir().join(format!("p2p-fdc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let b = LocalDisk::new(&d).unwrap();
+        b.put_if_absent("packs/a.pack", PutSource::Bytes(b"0123456789")).unwrap();
+        assert_eq!(b.get_range("packs/a.pack", 2..5).unwrap(), b"234");
+        assert_eq!(b.get_range("packs/a.pack", 5..9).unwrap(), b"5678"); // cached handle
+        std::fs::remove_file(d.join("packs/a.pack")).unwrap(); // "another process"
+        assert!(matches!(b.get_range("packs/a.pack", 2..5), Err(Error::KeyNotFound(_))));
+        // Re-created (content-named, so same bytes): readable again.
+        b.put_if_absent("packs/a.pack", PutSource::Bytes(b"0123456789")).unwrap();
+        assert_eq!(b.get_range("packs/a.pack", 0..3).unwrap(), b"012");
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn local_disk_conformance() {

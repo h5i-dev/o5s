@@ -15,7 +15,7 @@ from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 api = HfApi()
 repo = os.environ.get("HF_TEST_REPO", "alice/tiny-model")
 work = tempfile.mkdtemp()
-# Downloads land here (megabytes per run): always remove it.
+# Always remove the download caches (~9 MB per run), also on assertion failure.
 atexit.register(shutil.rmtree, work, ignore_errors=True)
 rng = __import__("random").Random(7)
 
