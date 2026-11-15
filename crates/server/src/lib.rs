@@ -10,6 +10,7 @@ pub mod audit;
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod git;
 pub mod metrics;
 pub mod oci;
 pub mod segmap;
@@ -89,6 +90,17 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
     } else {
         None
     };
+    let git = if cfg.git.enabled {
+        let dir = cfg.git.spool_dir.clone().unwrap_or_else(|| {
+            let parent = path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| path.clone());
+            parent.join(format!("{}.git-spool", path.file_name().and_then(|n| n.to_str()).unwrap_or("repo")))
+        });
+        let st = git::GitState::new(repo.clone(), dir.clone(), cfg.server.max_upload_bytes)
+            .map_err(|e| StartError::Audit(dir, e))?;
+        Some(Arc::new(st))
+    } else {
+        None
+    };
     let audit = audit::AuditLog::open(&cfg.audit.path).map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
     Ok(Arc::new(AppState {
         repo,
@@ -105,6 +117,7 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         gc: cfg.gc.clone(),
         gc_running: Arc::new(AtomicBool::new(false)),
         oci,
+        git,
     }))
 }
 

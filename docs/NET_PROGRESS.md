@@ -93,6 +93,19 @@
 - `/v1` writes under `oci/`, `git/` and `_prov/` need global admin, which protects the digest↔content invariants.
 - `POST /v1/replace_many` (atomic, API v1.2), with `RemoteRepo` overriding `replace_many`.
 
+### Goal 6b: Git smart HTTP adapter (`crates/server/src/git.rs`, `/git/<repo>.git`). Done (v1 scope).
+- Protocol v0/v1 upload-pack (clone and fetch, with have/ACK/NAK negotiation and side-band-64k) and receive-pack (push, with report-status, side-band-64k and `--atomic` via `replace_many`). v2 clients fall back to v0 automatically.
+- The pack reader is written in-crate:
+  - Spools the push to disk and verifies the SHA-1 trailer.
+  - Resolves OFS and REF deltas, including thin packs against existing objects, with a 256 MiB bounded base cache.
+  - Stores canonical `<type> <size>\0<body>` objects and checks connectivity (every referenced oid is in the pack or the repo).
+  - Appends one oid-map segment per push.
+- Ref updates are CAS: `old` must match the current ref, otherwise `ng … fetch first`. Namespace rules apply, so for example `git/<repo>/refs/tags` can be `ImmutableAfterPublish` (`ng … ref is immutable`). Deletes return `ng`.
+- Wants must be tips of this repo's refs, and common haves are restricted to commits reachable from this repo. Because the oid map is global, this keeps repos from reading each other's objects.
+- `GitTracer` (header range-read, then commit, tree and tag parsing through an oid-map snapshot) is chained in server GC as `ProvTracer { AdapterTracer { git, oci } }`.
+- Verified with the real git 2.50 CLI. Full head and tag sets of the ripgrep and jq mirrors push, clone back with **identical refs**, and pass `git fsck --full` (debug build: ripgrep 8 s push / 17 s clone, jq 9 s / 21 s; server RSS ≤ 170 MB).
+- Automated tests (`tests/git.rs`, real git CLI): push, clone, incremental fetch, stale-push rejection, force-with-lease, reader and stranger authz, immutable tags, atomic all-or-nothing, delete refusal, and GC tracer edges, including BLAKE3 = hash of canonical git bytes.
+
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
 **Principles**
@@ -147,6 +160,13 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **Unauthenticated `/metrics`:** restrict it at the network level. There is no separate metrics listener yet.
 - **Rate limiting:** only a global concurrency cap. There is no per-principal rate limit or quota.
 - **Durability of server puts:** an unreferenced `put` becomes durable at the next replace or flush (core semantics, since the open pack is not fsynced per put). If the server crashes before that, the client's later `replace` gets `MissingObject` and must re-put. Clients needing durability without a replace call `POST /v1/flush`.
+- **Git adapter limits:**
+  - SHA-1 repos only (no `object-format=sha256`). No protocol v2 server side (clients fall back to v0), no shallow or partial clones, and no ref deletion.
+  - Served packs carry full objects, with no delta compression on the wire, so clones transfer more bytes than from git.
+  - Upload-pack walks the full reachable set per request (no bitmaps or commit-graph), which is O(history) per fetch.
+  - Each push object is held in memory (cap 1 GiB per object).
+  - Ref names outside the core grammar (`[A-Za-z0-9._+-]` segments) are rejected with `ng`.
+- **OCI adapter limits:** no deletes (so registry GC can only reclaim blobs that were never referenced by a manifest), sha256 digests only, and upload sessions do not survive restarts.
 - **Large listings:** `list()` buffers all keys in memory. The trait returns a `Vec`, so a paginated or streaming list would need a trait change if a prefix grows to millions of keys.
 
 ## Requests for core

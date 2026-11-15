@@ -250,6 +250,12 @@ impl SegMap {
         Ok(None)
     }
 
+    /// Looks `key` up in a root loaded earlier (for many lookups against one
+    /// consistent version, e.g. a GC mark or a git walk).
+    pub fn get_in(&self, root: &Root, key: &Key) -> Result<Option<Value>> {
+        self.lookup_in(root, key)
+    }
+
     /// Looks `key` up (blocking).
     pub fn get_blocking(&self, key: &Key) -> Result<Option<Value>> {
         let (_, root) = self.root_blocking()?;

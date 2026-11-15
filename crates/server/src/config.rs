@@ -69,6 +69,23 @@ pub struct Config {
     pub gc: GcSection,
     #[serde(default)]
     pub oci: OciSection,
+    #[serde(default)]
+    pub git: GitSection,
+}
+
+/// Git smart HTTP endpoint (`/git/<repo>.git/...`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct GitSection {
+    pub enabled: bool,
+    /// Spool directory for incoming pushes (default `<repo.path>.git-spool`).
+    pub spool_dir: Option<PathBuf>,
+}
+
+impl Default for GitSection {
+    fn default() -> Self {
+        GitSection { enabled: true, spool_dir: None }
+    }
 }
 
 /// OCI distribution endpoint (`/v2/`).

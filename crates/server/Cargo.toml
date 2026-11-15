@@ -36,6 +36,8 @@ fastrand = "2"
 clap.workspace = true
 getrandom = "0.3"
 base64 = "0.22"
+flate2 = "1"
+sha1 = "0.10"
 
 [dev-dependencies]
 tempfile.workspace = true

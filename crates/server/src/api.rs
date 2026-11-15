@@ -55,6 +55,7 @@ pub struct AppState {
     pub gc: crate::config::GcSection,
     pub gc_running: Arc<AtomicBool>,
     pub oci: Option<Arc<crate::oci::OciState>>,
+    pub git: Option<Arc<crate::git::GitState>>,
 }
 
 type St = State<Arc<AppState>>;
@@ -99,6 +100,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v2/", get(crate::oci::base))
         .route("/v2", get(crate::oci::base))
         .route("/v2/{*rest}", axum::routing::any(crate::oci::dispatch))
+        .route("/git/{*rest}", axum::routing::any(crate::git::dispatch))
         .layer(middleware::from_fn_with_state(state.clone(), authenticate))
         .layer(middleware::from_fn_with_state(state.clone(), shed_load));
     Router::new()
@@ -176,6 +178,11 @@ async fn authenticate(State(st): St, mut req: Request, next: Next) -> Response {
             }
             if let crate::auth::AuthError::Unavailable(m) = e {
                 return ApiError::unavailable(codes::INTERNAL, m).into_response();
+            }
+            if req.uri().path().starts_with("/git/") {
+                let mut r = (StatusCode::UNAUTHORIZED, e.to_string()).into_response();
+                r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"pico2peta\""));
+                return r;
             }
             if req.uri().path().starts_with("/v2") {
                 let body = serde_json::json!({"errors": [{"code": "UNAUTHORIZED", "message": e.to_string()}]});
@@ -745,6 +752,21 @@ async fn set_rule(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// GC tracer for adapter content: git objects first, then OCI/segment maps.
+pub struct AdapterTracer {
+    pub git: crate::git::GitTracer,
+    pub oci: crate::oci::OciTracer,
+}
+
+impl pico2peta_repo::Tracer for AdapterTracer {
+    fn children(&self, h: &Hash, store: &dyn pico2peta_core::ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+        if let Some(c) = self.git.children_of(h, store)? {
+            return Ok(c);
+        }
+        Ok(self.oci.children_of(h, store)?.unwrap_or_default())
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct GcQuery {
     #[serde(default)]
@@ -762,8 +784,15 @@ pub async fn run_gc(st: &AppState, dry_run: bool) -> ApiResult<wire::GcReportJso
     let opts = st.gc.options(dry_run);
     let running = st.gc_running.clone();
     let res = blocking(move || {
-        // Provenance records, then OCI manifests/segment maps; everything else is a leaf.
-        let tracer = pico2peta_prov::ProvTracer { inner: crate::oci::OciTracer::new(Arc::new(local.clone())) };
+        // Provenance records, then git objects, OCI manifests and segment maps;
+        // everything else is a leaf.
+        let shared: Arc<dyn Repository> = Arc::new(local.clone());
+        let tracer = pico2peta_prov::ProvTracer {
+            inner: AdapterTracer {
+                git: crate::git::GitTracer::new(shared.clone())?,
+                oci: crate::oci::OciTracer::new(shared),
+            },
+        };
         let r = local.gc(&opts, &tracer);
         running.store(false, Ordering::Release);
         r
