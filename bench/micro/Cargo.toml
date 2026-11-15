@@ -13,4 +13,5 @@ path = "src/main.rs"
 [dependencies]
 pico2peta-core.workspace = true
 pico2peta-repo.workspace = true
+pico2peta-weights.workspace = true
 blake3.workspace = true

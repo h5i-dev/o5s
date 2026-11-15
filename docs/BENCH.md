@@ -50,7 +50,7 @@ Memory stays bounded: streaming 1 GiB in and out peaks at about 210 MB RSS for t
 
 ## Model-weights versioning (Xet-style workload): `p2p-bench weights <dir> 256`
 
-A synthetic 256 MiB safetensors-like checkpoint (64 random f16 tensors, so incompressible)
+A synthetic 256 MiB safetensors checkpoint (a real safetensors header) (64 random f16 tensors, so incompressible)
 stored in five successive versions. The baseline is "full copies", which is what plain object storage
 or Git LFS keeps. Xet itself isn't available offline here, so this measures our chunk dedup against the
 no-dedup baseline and identifies where tensor-aware dedup (ZipLLM, Xet) is needed.
@@ -63,6 +63,8 @@ no-dedup baseline and identifies where tensor-aware dedup (ZipLLM, Xet) is neede
 | 4 | header/metadata edit only | 1024 MiB | 273 MiB | 0.27 |
 | 5 | full fine-tune (pseudo-random noise in the low 4 mantissa bits of every f16) | 1280 MiB | 530 MiB | 0.41 |
 | 5′ | same v5, stored with `put_delta` against v4 (XOR delta, API v1.7) | n/a | **+90 MiB** (vs +257 MiB) | n/a |
+| 6 | the same tensors re-exported in a different order, with an edited header: offset-aligned `put_delta` | n/a | +256.5 MiB | n/a |
+| 6′ | same, tensor-aligned (`put --delta-*`, pico2peta-weights, API v1.8) | n/a | **+0.0 MiB** | n/a |
 
 - Content-defined chunking stores only what changed for partial retrains (v2 adds 16 MiB = 4 tensors)
   and resynchronizes after insertions that shift offsets (v3 adds ~0).
@@ -72,3 +74,6 @@ no-dedup baseline and identifies where tensor-aware dedup (ZipLLM, Xet) is neede
   the same fine-tune costs 90 MiB instead of 257 MiB (−65%). The noise floor is 64 MiB (4 random bits per 16),
   so zstd gets within 1.4× of it. ZipLLM reports −54% on real models. The noise model is synthetic, so real
   checkpoints will differ.
+- **Alignment matters:** a byte-offset XOR is useless once tensors move (v6, a whole copy). Aligning each
+  tensor with its same-named counterpart makes the identical tensors' XOR all zeros, which deduplicates
+  to nothing.

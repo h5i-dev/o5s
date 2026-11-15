@@ -1158,6 +1158,7 @@ dependencies = [
  "blake3",
  "pico2peta-core",
  "pico2peta-repo",
+ "pico2peta-weights",
 ]
 
 [[package]]

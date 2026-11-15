@@ -48,15 +48,30 @@ fn weights(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
     let tensors = 64usize;
     let tsize = (mib << 20) / tensors;
     let mut ts: Vec<Vec<u8>> = (0..tensors).map(|i| bytes(1000 + i as u64, tsize)).collect();
-    let build = |ts: &Vec<Vec<u8>>| -> Vec<u8> {
-        let header = format!("{{\"tensors\":{},\"size\":{}}}", ts.len(), tsize).into_bytes();
+    // A real safetensors file: tensors written in `order`, named by their index in `ts`.
+    let build_ordered = |ts: &Vec<Vec<u8>>, order: &[usize], meta: &str| -> Vec<u8> {
+        let mut parts = Vec::new();
+        let mut off = 0usize;
+        for &i in order {
+            let len = ts[i].len();
+            parts.push(format!(
+                "\"t{i}\":{{\"dtype\":\"F16\",\"shape\":[{}],\"data_offsets\":[{off},{}]}}",
+                len / 2,
+                off + len
+            ));
+            off += len;
+        }
+        parts.push(format!("\"__metadata__\":{{\"note\":\"{meta}\"}}"));
+        let header = format!("{{{}}}", parts.join(",")).into_bytes();
         let mut v = (header.len() as u64).to_le_bytes().to_vec();
         v.extend_from_slice(&header);
-        for t in ts {
-            v.extend_from_slice(t);
+        for &i in order {
+            v.extend_from_slice(&ts[i]);
         }
         v
     };
+    let identity: Vec<usize> = (0..tensors).collect();
+    let build = |ts: &Vec<Vec<u8>>| -> Vec<u8> { build_ordered(ts, &identity, "v") };
     let disk = |p: &std::path::Path| -> u64 {
         fn walk(p: &std::path::Path) -> u64 {
             std::fs::read_dir(p).map_or(0, |rd| {
@@ -132,6 +147,33 @@ fn weights(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
             used as f64 / 1048576.0,
             used as f64 / full as f64
         );
+    }
+    // v6: the same tensors, written in a different order with an edited header (a typical
+    // re-export by another tool). Offset-aligned delta vs tensor-aligned delta (pico2peta-weights).
+    let mut perm: Vec<usize> = (0..tensors).rev().collect();
+    perm.swap(0, tensors / 2);
+    let v6 = build_ordered(&ts, &perm, "re-exported");
+    let v5 = prev_blob.clone();
+    for (label, aligned) in
+        [("offset-aligned `put_delta`", false), ("tensor-aligned `put --delta-*` (pico2peta-weights)", true)]
+    {
+        let r3root = root.with_extension(if aligned { "t" } else { "o" });
+        let r3 = LocalRepo::init(&r3root, &PackConfig::default())?;
+        let hb = r3.put_stream(&mut &v5[..])?;
+        r3.flush()?;
+        let before = disk(&r3root);
+        if aligned {
+            pico2peta_weights::put_checkpoint(&r3, &hb, &mut &v6[..])?;
+        } else {
+            r3.put_delta(&hb, &mut &v6[..])?;
+        }
+        r3.flush()?;
+        println!(
+            "| 6 | same tensors reordered + header edit, {label} | {:.0} | – | +{:.1} | – |",
+            v6.len() as f64 / 1048576.0,
+            (disk(&r3root) - before) as f64 / 1048576.0
+        );
+        std::fs::remove_dir_all(&r3root)?;
     }
     std::fs::remove_dir_all(&root)?;
     Ok(())
