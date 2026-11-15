@@ -297,10 +297,11 @@ impl<'a> View<'a> {
         }
     }
 
-    /// Present and not collected.
+    /// Present, and safe to reference: `ensure_live` rewrites the object if GC
+    /// has condemned its only copy (the client assumes the server has it).
     fn has(&self, oid: &Oid) -> Result<bool> {
         Ok(match self.lookup(oid)? {
-            Some((_, h)) => self.extra.contains_key(oid) || self.st.repo.contains(&h)?,
+            Some((_, h)) => self.extra.contains_key(oid) || self.st.repo.ensure_live(&h)?,
             None => false,
         })
     }
@@ -466,7 +467,8 @@ fn read_entry_header(r: &mut dyn Read, offset: u64) -> Result<(u8, usize, Base, 
 fn inflate_at(f: &mut std::fs::File, off: u64, expect: usize) -> Result<(Vec<u8>, u64)> {
     f.seek(SeekFrom::Start(off))?;
     let mut z = flate2::bufread::ZlibDecoder::new(BufReader::with_capacity(64 << 10, &mut *f));
-    let mut out = Vec::with_capacity(expect.min(MAX_OBJECT));
+    // Never trust the declared size for allocation; grow as data arrives.
+    let mut out = Vec::with_capacity(expect.min(1 << 20));
     (&mut z)
         .take(expect as u64 + 1)
         .read_to_end(&mut out)
@@ -480,6 +482,29 @@ fn inflate_at(f: &mut std::fs::File, off: u64, expect: usize) -> Result<(Vec<u8>
         return Err(Error::Parse(format!("pack entry at {off}: trailing data in zlib stream")));
     }
     Ok((out, z.total_in()))
+}
+
+/// Like [`inflate_at`] but discards the output: returns the compressed length.
+/// Used to find entry boundaries without allocating the declared size.
+fn skip_zlib_at(f: &mut std::fs::File, off: u64, expect: usize) -> Result<u64> {
+    f.seek(SeekFrom::Start(off))?;
+    let mut z = flate2::bufread::ZlibDecoder::new(BufReader::with_capacity(64 << 10, &mut *f));
+    let mut buf = [0u8; 64 << 10];
+    let mut total = 0usize;
+    loop {
+        let n = z.read(&mut buf).map_err(|e| Error::Parse(format!("pack inflate at {off}: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        total += n;
+        if total > expect {
+            return Err(Error::Parse(format!("pack entry at {off}: inflates beyond its declared {expect} bytes")));
+        }
+    }
+    if total != expect {
+        return Err(Error::Parse(format!("pack entry at {off}: inflated {total} bytes, header says {expect}")));
+    }
+    Ok(z.total_in())
 }
 
 fn delta_varint(d: &[u8], i: &mut usize) -> Result<usize> {
@@ -511,7 +536,7 @@ pub fn apply_delta(base: &[u8], d: &[u8]) -> Result<Vec<u8>> {
     if dst > MAX_OBJECT {
         return Err(bad("result too large"));
     }
-    let mut out = Vec::with_capacity(dst);
+    let mut out = Vec::with_capacity(dst.min(1 << 20));
     while i < d.len() {
         let op = d[i];
         i += 1;
@@ -629,7 +654,7 @@ fn index_pack(view: &mut View<'_>, file: &mut std::fs::File, pack_off: u64) -> R
     let count = u32::from_be_bytes([hdr[8], hdr[9], hdr[10], hdr[11]]) as usize;
     let end = len - 20;
     // Pass 1: entry boundaries.
-    let mut entries: Vec<Entry> = Vec::with_capacity(count.min(1 << 20));
+    let mut entries: Vec<Entry> = Vec::with_capacity(count.min(1 << 16));
     let mut off = pack_off + 12;
     for _ in 0..count {
         if off >= end {
@@ -638,8 +663,8 @@ fn index_pack(view: &mut View<'_>, file: &mut std::fs::File, pack_off: u64) -> R
         file.seek(SeekFrom::Start(off))?;
         let (code, size, base, hl) = read_entry_header(&mut BufReader::new(&mut *file), off)?;
         let data_off = off + hl;
-        // Delta payload sizes are their own size; inflate to find the boundary.
-        let (_, clen) = inflate_at(file, data_off, size)?;
+        // Inflate (discarding output) only to find the entry boundary.
+        let clen = skip_zlib_at(file, data_off, size)?;
         entries.push(Entry { offset: off, code, size, data_off, base, done: None });
         off = data_off + clen;
     }
@@ -1319,6 +1344,10 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
                 return Err("deleting refs is not supported".into());
             }
             let (kind, h) = view.lookup(&c.new).map_err(|e| e.to_string())?.ok_or("missing new object")?;
+            // Not in this push: the client assumes we have it, so make sure it stays.
+            if !view.extra.contains_key(&c.new) && !git.repo.ensure_live(&h).map_err(|e| e.to_string())? {
+                return Err("missing new object".into());
+            }
             if c.gitref.starts_with("refs/heads/") && kind != Kind::Commit {
                 return Err("branch must point at a commit".into());
             }
@@ -1377,6 +1406,70 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
         }
     }
     Ok(PushResult { unpack, statuses, sideband })
+}
+
+// ---------------------------------------------------------------------------
+// Fuzzing hooks (see `crate::fuzzing`)
+// ---------------------------------------------------------------------------
+
+pub(crate) fn fuzz_push(repo: Arc<pico2peta_repo::LocalRepo>, spool: &std::path::Path, data: &[u8]) {
+    let Ok(st) = GitState::new(repo, spool.join("spool"), 1 << 30) else { return };
+    let p = spool.join("req");
+    if std::fs::write(&p, data).is_err() {
+        return;
+    }
+    if let Ok(res) = process_push(&st, "fuzz/repo", &p) {
+        // A successful unpack must leave every referenced object resolvable.
+        if res.unpack.is_ok() {
+            for (r, s) in &res.statuses {
+                if s.is_ok() {
+                    let n = ref_name("fuzz/repo", r).unwrap_or_else(|| panic!("accepted bad ref {r}"));
+                    let v = st.repo.resolve(&n).ok().flatten().unwrap_or_else(|| panic!("ok ref {r} not set"));
+                    assert!(st.repo.contains(&v.hash).unwrap_or(false));
+                }
+            }
+        }
+    }
+}
+
+/// A receive-pack request creating `refs/heads/main` → `objects[tip]`, with
+/// every object stored whole (codes 1..=4) in a valid pack.
+pub(crate) fn fuzz_make_push(objects: &[(u8, Vec<u8>)], tip: usize) -> Vec<u8> {
+    let mut pack = b"PACK".to_vec();
+    pack.extend_from_slice(&2u32.to_be_bytes());
+    pack.extend_from_slice(&(objects.len() as u32).to_be_bytes());
+    let mut tip_oid = ZERO_OID;
+    for (i, (code, body)) in objects.iter().enumerate() {
+        let kind = Kind::from_code(*code).unwrap_or(Kind::Blob);
+        if i == tip {
+            tip_oid = oid_of(&canonical(kind, body));
+        }
+        pack.extend_from_slice(&pack_entry_header(kind, body.len()));
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        let _ = z.write_all(body);
+        pack.extend_from_slice(&z.finish().unwrap_or_default());
+    }
+    let trailer: [u8; 20] = Sha1::digest(&pack).into();
+    pack.extend_from_slice(&trailer);
+    let mut out = pkt(format!("{} {} refs/heads/main\0report-status\n", hex(&ZERO_OID), hex(&tip_oid)).as_bytes());
+    out.extend_from_slice(FLUSH);
+    out.extend_from_slice(&pack);
+    out
+}
+
+pub(crate) fn fuzz_parsers(data: &[u8]) {
+    let _ = parse_header(data);
+    for k in [Kind::Commit, Kind::Tree, Kind::Tag, Kind::Blob] {
+        let _ = refs_of(k, data);
+    }
+    let _ = parse_upload_request(data);
+    let _ = read_entry_header(&mut &data[..], 1 << 40);
+    if data.len() > 2 {
+        let split = data[0] as usize % data.len();
+        let _ = apply_delta(&data[..split], &data[split..]);
+    }
+    let mut r = data;
+    while let Ok(Some(_)) = read_pkt(&mut r) {}
 }
 
 // ---------------------------------------------------------------------------

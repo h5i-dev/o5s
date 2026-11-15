@@ -20,3 +20,15 @@ pub use backend::{S3Backend, to_core};
 pub use client::{Body, Created, ObjectMeta, S3Client, S3Stats, S3StatsSnapshot, validate_key};
 pub use config::{Credentials, CredentialsProvider, MAX_PART_SIZE, MIN_PART_SIZE, RetryConfig, S3Config};
 pub use error::{S3Error, S3Result};
+
+/// Entry points for fuzzing and never-panic tests. Not a stable API.
+#[doc(hidden)]
+pub mod fuzzing {
+    /// Runs every XML response parser on `data`.
+    pub fn xml(data: &[u8]) {
+        let _ = crate::xml::parse_list(data);
+        let _ = crate::xml::parse_error(data);
+        let _ = crate::xml::parse_upload_id(data);
+        let _ = crate::xml::parse_complete(data);
+    }
+}

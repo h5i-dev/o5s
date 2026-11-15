@@ -263,10 +263,12 @@ impl SegMap {
     }
 
     /// Like [`Self::get_blocking`], but a value whose object no longer exists
-    /// (weak entry collected by GC) is a miss.
+    /// (weak entry collected by GC) is a miss, and a hit is made safe to
+    /// reference: `ensure_live` rewrites the object if GC has condemned its
+    /// only copy, so callers may point new names at it without re-putting it.
     pub fn get_live_blocking(&self, key: &Key) -> Result<Option<Value>> {
         match self.get_blocking(key)? {
-            Some(v) if self.repo.contains(&v.hash)? => Ok(Some(v)),
+            Some(v) if self.repo.ensure_live(&v.hash)? => Ok(Some(v)),
             _ => Ok(None),
         }
     }
@@ -276,7 +278,7 @@ impl SegMap {
     pub fn insert_blocking(&self, mut entries: Vec<(Key, Value)>) -> Result<usize> {
         entries.sort_by_key(|e| e.0);
         entries.dedup_by(|a, b| a.0 == b.0);
-        for _attempt in 0..16 {
+        for attempt in 0..64u32 {
             let (cur, root) = self.root_blocking()?;
             let mut fresh = Vec::with_capacity(entries.len());
             for (k, v) in &entries {
@@ -304,7 +306,9 @@ impl SegMap {
             match self.repo.replace(&self.name, &[(self.name.clone(), observed)], root_hash)? {
                 ReplaceOutcome::Ok { .. } => return Ok(n),
                 ReplaceOutcome::Conflict { .. } => {
-                    std::thread::sleep(std::time::Duration::from_millis(fastrand::u64(1..20)));
+                    // Another process won; back off (jittered, capped) and rebase.
+                    let cap = 1u64 << attempt.min(6);
+                    std::thread::sleep(std::time::Duration::from_millis(fastrand::u64(1..=cap.max(2))));
                 }
             }
         }

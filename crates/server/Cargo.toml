@@ -35,10 +35,11 @@ sha2 = "0.10"
 fastrand = "2"
 clap.workspace = true
 getrandom = "0.3"
+tempfile.workspace = true
 base64 = "0.22"
 flate2 = "1"
 sha1 = "0.10"
 
 [dev-dependencies]
-tempfile.workspace = true
+proptest.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "blocking"] }

@@ -279,3 +279,69 @@ pub fn init_logging(cfg: &config::LogSection) {
         config::LogFormat::Text => b.try_init(),
     };
 }
+
+/// Entry points for fuzzing and never-panic tests. Not a stable API.
+#[doc(hidden)]
+pub mod fuzzing {
+    use std::sync::Arc;
+
+    /// A fresh local repository in a temp dir (kept alive by the returned guard).
+    pub fn temp_repo() -> (tempfile::TempDir, Arc<pico2peta_repo::LocalRepo>) {
+        let d = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let r = pico2peta_repo::LocalRepo::init(d.path().join("r"), &Default::default())
+            .unwrap_or_else(|e| panic!("init: {e}"));
+        (d, Arc::new(r))
+    }
+
+    /// The whole receive-pack path (commands + pack) on raw request bytes.
+    pub fn git_push(repo: Arc<pico2peta_repo::LocalRepo>, spool: &std::path::Path, data: &[u8]) {
+        crate::git::fuzz_push(repo, spool, data);
+    }
+
+    /// Builds a valid receive-pack request body creating `refs/heads/main`.
+    pub fn git_push_request(objects: &[(u8, Vec<u8>)], tip: usize) -> Vec<u8> {
+        crate::git::fuzz_make_push(objects, tip)
+    }
+
+    pub fn git_parsers(data: &[u8]) {
+        crate::git::fuzz_parsers(data);
+    }
+
+    pub fn oci_parsers(data: &[u8]) {
+        crate::oci::fuzz_parsers(data);
+    }
+
+    pub fn range(header: &str, size: u64) {
+        if let Ok(v) = axum::http::HeaderValue::from_str(header)
+            && let Ok(Some(r)) = crate::api::parse_range(Some(&v), size)
+        {
+            assert!(r.start < r.end && r.end <= size, "range {r:?} outside 0..{size}");
+        }
+    }
+
+    pub fn segmap(data: &[u8]) {
+        let _ = crate::segmap::decode_segment(data);
+        let _ = crate::segmap::Root::decode(data);
+    }
+
+    /// Opens an audit log whose existing content is `data`, then verifies it.
+    pub fn audit(data: &[u8]) {
+        let d = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let p = d.path().join("audit.jsonl");
+        if std::fs::write(&p, data).is_err() {
+            return;
+        }
+        if let Ok(a) = crate::audit::AuditLog::open(&p) {
+            drop(a);
+        }
+        let _ = crate::audit::verify(&p);
+    }
+
+    pub fn config(data: &[u8]) {
+        if let Ok(s) = std::str::from_utf8(data)
+            && let Ok(c) = toml::from_str::<crate::config::Config>(s)
+        {
+            let _ = c.validate();
+        }
+    }
+}

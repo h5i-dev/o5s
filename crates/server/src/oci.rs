@@ -1155,6 +1155,19 @@ impl pico2peta_repo::Tracer for OciTracer {
     }
 }
 
+pub(crate) fn fuzz_parsers(data: &[u8]) {
+    for mt in [MT_OCI_MANIFEST, MT_OCI_INDEX, MT_DOCKER_MANIFEST, MT_DOCKER_LIST, "application/x-other"] {
+        let _ = manifest_refs(data, mt);
+    }
+    if let Ok(s) = std::str::from_utf8(data) {
+        let _ = route(s);
+        let _ = valid_repo(s);
+        let _ = valid_tag(s);
+        let _ = parse_digest(s);
+        let _ = hex_key(s);
+    }
+}
+
 mod hex {
     pub fn encode_lower(b: &[u8]) -> String {
         super::hex(b)
