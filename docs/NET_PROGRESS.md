@@ -2,6 +2,17 @@
 
 ## Status (2026-11-15)
 
+**Summary:** all six goals in AGENT_TASK_NET.md are done, and production hardening continued beyond them (see "Hardening after goal 6"). Remaining limits are listed under "Production gaps". The parts:
+- S3 backend: MinIO conformance plus fault injection.
+- Server: authn (tokens and OIDC), authz, audit, metrics, TLS, reload, rate limits, GC.
+- Client.
+- CI: fmt, clippy, test, docs, MinIO, OCI conformance.
+- Deploy.
+- OCI adapter: conformance 73/0.
+- Git adapter: real-git round-trips.
+
+User docs are in `docs/API.md` and `deploy/README.md`.
+
 ### Goal 1: S3 backend (`crates/backend-s3`). Done.
 - `S3Client` (async) and `S3Backend` (sync `pico2peta_core::backend::Backend`, with its own tokio runtime).
 - SigV4 signing is implemented in-crate. It is checked against the AWS documentation test vectors (GET with Range, PUT, ListObjects). Payloads are signed with their SHA-256, so the server verifies body integrity.
@@ -123,9 +134,6 @@ Run with `cargo test --release -p pico2peta-server --test load -- --ignored --no
 
 The contended run checks that no update is lost: the final version equals the number of commits.
 
-### Next
-- Goal 6: Git smart-HTTP and OCI distribution adapters. The hash-mapping design proposal is below, waiting for the lead's agreement.
-
 ### Goal 6a: OCI distribution adapter (`crates/server/src/oci.rs`, `/v2`). Done.
 - Covers pull, push (monolithic and chunked with `Content-Range` checks), cross-repo mount, tags/list with pagination, and the OCI 1.1 referrers API (`OCI-Subject`, `artifactType` filter). Manifest and tag deletes go through OCC `delete_ref`; blob deletes return 405.
 - Auth: Basic (any user, the token as password) or Bearer. Unauthenticated requests get a `WWW-Authenticate: Basic` challenge.
@@ -150,6 +158,13 @@ The contended run checks that no update is lost: the final version equals the nu
 - `GitTracer` (header range-read, then commit, tree and tag parsing through an oid-map snapshot) is chained in server GC as `ProvTracer { AdapterTracer { git, oci } }`.
 - Verified with the real git 2.50 CLI. Full head and tag sets of the ripgrep and jq mirrors push, clone back with **identical refs**, and pass `git fsck --full` (debug build: ripgrep 8 s push / 17 s clone, jq 9 s / 21 s; server RSS ≤ 170 MB).
 - Automated tests (`tests/git.rs`, real git CLI): push, clone, incremental fetch, stale-push rejection, force-with-lease, reader and stranger authz, immutable tags, atomic all-or-nothing, delete refusal, and GC tracer edges, including BLAKE3 = hash of canonical git bytes.
+
+### Next (candidates, in priority order)
+- Git protocol v2 on the server (ref-prefix filtering for repos with many refs). v2 clients currently fall back to v0.
+- Git `object-format=sha256` repositories.
+- An admin API for issuing and revoking tokens, and mapping OIDC groups to policies.
+- Per-namespace storage quotas.
+- Running the git adapter against git.git/redis-sized repos. Not done yet because of the scratch disk budget, which Exp1 needs.
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
