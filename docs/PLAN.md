@@ -7,72 +7,80 @@ file (struck through, with the date and the reason), and EXP1.md reports results
 
 ## 1. Milestones
 
-| # | Milestone | Done when |
-|---|-----------|-----------|
-| M0 | Plan (this file) | PLAN.md committed with the thresholds in §4 |
-| M1 | Workspace + object layer | `Hash` (BLAKE3-256), `ObjectStore` trait, `put`, `get(hash, range)`, in-memory store; unit tests |
-| M2 | Physical layer | Append-only packs + index on a `Backend` trait (local disk; S3 stub); small-object bundling; FastCDC chunking + manifest for large objects; ranged reads that fetch only the chunks they cover; crash recovery by rescanning the open pack |
-| M3 | Name layer | Refs, `resolve`, `replace(name, read_set, new_hash) → Ok \| Conflict`, namespace rules (mutable / immutable-after-publish / head-mutable-release-immutable), durable ref journal |
-| M4 | CLI | `pico2peta init/put/get/resolve/replace/ns/stat` over a local repo directory |
-| M5 | Reference model + differential tests | Pure executable model (`pico2peta-model`); proptest drives random op sequences against model and implementation (including reopen/recovery) and compares every observable result |
-| M6 | Experiment 1 | `bench/exp1` harness, results + methodology in `docs/EXP1.md`, verdict against §4 |
-| M7 | Lean 4 core | `lean/`: model of objects/refs/replace; proofs P1–P3 (§5), P4–P5 if time allows |
-| M8 | Later layers | Provenance, Git/OCI adapters, GC. Starts only after M1–M7 are solid |
+**Revision 2026-11-15:** The human raised the target to production grade (see "Quality bar" in
+AGENT_TASK.md) and split the work across two sessions. Lean and the model/difftest are deferred.
+§4 is unchanged and still frozen.
 
-Every milestone ends with: `cargo test` green, no build warnings, a commit on `demo`, and a
-`docs/PROGRESS.md` update.
+Ownership: **core** = session `pico2peta` (branch `demo`). **net** = session `pico2peta-net`
+(branch `net`), which owns the S3 backend, server, client, CI and deploy.
+
+| # | Milestone | Owner | Done when |
+|---|-----------|-------|-----------|
+| M0 | Plan | core | this file; the §4 thresholds are frozen |
+| M1 | Core API v1 | core | `Backend`, `ObjectStore`, `Repository` traits stable in `pico2peta-core`; LocalDisk passes the backend conformance suite |
+| M2 | Pack store | core | multi-process safe (per-writer staging + flock, content-addressed create-only sealed packs, re-list on miss); streaming `put_stream`/`open` with bounded memory; FastCDC chunking + manifests; crash recovery tested by fault injection at every write/fsync point |
+| M3 | Ref store | core | durable journal with checksummed records, an exclusive lock around validate+append+fsync (one commit point), catch-up replay from other processes, namespace rules, multi-process contention test |
+| M4 | Local repo + CLI | core | `pico2peta-repo::LocalRepo: Repository`; CLI over `dyn Repository` (local, or remote via the net client) |
+| M5 | Experiment 1 | core | `bench/exp1`, `docs/EXP1.md`, verdict against §4 |
+| M6 | GC / repack | core | mark/sweep with a grace period that is safe against concurrent writers; repack (similarity grouping if Exp1 passes) |
+| N1–N5 | S3 backend, server, client, CI, deploy | net | see AGENT_TASK_NET.md |
+| M7 | Hardening | both | fuzz targets for every decoder, benchmarks with recorded numbers, CHANGELOG |
+| M8 | Verification (deferred) | core | reference model + proptest difftest, Lean proofs P1–P3 (§5) |
+| M9 | Later layers | both | provenance, Git/OCI adapters |
+
+Every milestone ends with: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test`
+green, a commit, and a `docs/PROGRESS.md` update. `net` is merged into `demo` at each
+milestone, at least every ~2 hours.
 
 ## 2. Crate layout (Cargo workspace)
 
 ```
-Cargo.toml                 workspace
 crates/
-  core/     pico2peta-core     Hash, Range, errors, ObjectStore trait, Name, ReadSet types
-  pack/     pico2peta-pack     physical layer: Backend trait (LocalDisk, S3 stub), pack writer/reader,
-                               index, bundling, FastCDC chunking, PackStore: ObjectStore
-  refs/     pico2peta-refs     name layer: namespace rules, RefStore (memory + journaled file)
-  model/    pico2peta-model    pure reference model (BTreeMaps, no I/O) — mirrors lean/
-  cli/      pico2peta-cli      binary `pico2peta`
-  difftest/ (tests only)       proptest differential tests: model vs implementation
-bench/
-  exp1/     pico2peta-exp1     Experiment 1 harness (git object extraction, grouping, zstd)
-lean/                          Lean 4 project (toolchain v4.31.0, Mathlib by local path)
-docs/                          DESIGN_BRIEF, AGENT_TASK, PLAN, PROGRESS, EXP1
-scripts/                       env.sh (scratch paths), exp1 driver scripts
+  core/        pico2peta-core        Hash, Error, Name/Rule/Observed, ObjectStore + Repository traits,
+                                     backend::{Backend, LocalDisk, conformance}
+  pack/        pico2peta-pack        PackStore: ObjectStore (packs, index, bundling, FastCDC, recovery)
+  refs/        pico2peta-refs        RefStore: journaled refs, OCC replace, namespace rules
+  repo/        pico2peta-repo        LocalRepo = PackStore + RefStore: Repository; repo layout/config/locking
+  cli/         pico2peta-cli         binary `pico2peta` over dyn Repository
+  backend-s3/  (net)                 S3 Backend
+  server/      (net)                 HTTP service
+  client/      (net)                 remote Repository
+bench/exp1/                          Experiment 1 harness
+fuzz/                                cargo-fuzz targets (M7)
+lean/                                deferred (M8)
 ```
-
-Dependencies, kept small: `blake3`, `fastcdc`, `zstd` (with `zdict_builder`), `thiserror`,
-`clap`, `proptest` (dev), `tempfile` (dev).
 
 ## 3. Key design decisions (defaults; can be revised)
 
-- **Identity.** `hash = BLAKE3-256(content)` of the whole logical object, whatever its size.
-  Chunking is a physical detail. A large object is stored as a *manifest* (a list of chunk hashes
-  and lengths) indexed under the object's hash, so `put` and `get` never expose chunks.
-- **Packs.** A pack is an immutable, append-only file of self-delimiting records
-  `[magic | hash | kind | codec | raw_len | stored_len | payload | crc32]`. When a pack is sealed
-  (at a size cap, 256 MiB by default), its sorted index file `<id>.idx` (hash → pack, offset,
-  length, kind) is written. On restart, the one unsealed pack is rescanned and a torn trailing
-  record is truncated.
-- **Bundling.** Objects under `chunk_threshold` (default 1 MiB) are records in the current pack.
-  Larger objects go through FastCDC (min/avg/max 16/64/256 KiB), and each chunk is stored as its
-  own record, deduplicated by chunk hash.
-- **Compression.** Each record is zstd-compressed and stored raw if that doesn't help.
-  Similarity-grouped repacking is what Experiment 1 tests; it ships in the physical layer only if
-  §4 passes.
-- **Refs / OCC.** Every ref has `(hash, version)`, and `version` goes up by one on every
-  successful change. A read set is a list of `(name, observed)` with
-  `observed ∈ {Absent, Version(v)}`. `replace` commits **iff** every entry still matches the
-  current state, which is OCC validation over the read set (Kung–Robinson). Versions rather than
-  hash values avoid ABA. The target name must be in the read set, so blind writes are impossible.
-- **Namespace rules** (by longest matching prefix):
-  - `Mutable`: any validated replace is allowed.
-  - `ImmutableAfterPublish`: allowed only when the name is `Absent` (create once).
-  - `HeadMutableReleaseImmutable { heads, releases }`: names under `heads/` are mutable, names
-    under `releases/` are create-once, and anything else in the namespace is rejected.
-  A rule violation is a distinct error (`Forbidden`), not a `Conflict`.
-- **Referential integrity.** `replace` requires `new_hash` to exist in the object store
-  (`MissingObject` otherwise).
+- **Identity.** `hash = BLAKE3-256(content)` of the whole logical object. Large objects are
+  stored as a manifest (a list of chunk hashes and lengths) under the object hash. Chunks are
+  ordinary blobs addressed by their own hash.
+- **Backend contract.** Immutable, create-only blobs (`put_if_absent`), ranged reads, listing,
+  and delete for GC only. Synchronous, `Send + Sync`. Retries happen inside the backend. The full
+  contract is in the `pico2peta_core::backend` docs.
+- **Packs.** These are records `[magic | kind | codec | hash | raw_len | stored_len | payload | crc32]`
+  after an 8-byte versioned pack magic. Each writer handle owns its own staging file
+  `staging/<random>.pack` and holds an exclusive flock on it. Sealing hashes the file, then runs
+  `put_if_absent(packs/<blake3>.pack)` followed by `put_if_absent(packs/<blake3>.idx)`. The index's
+  presence is the commit point, and pack names are content-derived, so concurrent or repeated
+  seals are idempotent. On open, an orphaned staging file (its flock is free) is recovered: the
+  torn tail is truncated, then the file is sealed.
+- **Visibility.** `flush()` seals the writer's open pack, so the objects become visible to every
+  other process. `replace` flushes before committing, which means a ref never points at an object
+  that other readers can't see. Readers re-list `packs/` when a lookup misses. The resulting
+  small packs are consolidated by repack (M6).
+- **Streaming.** `put_stream` buffers at most `chunk_threshold` bytes. Above that it streams
+  through FastCDC, hashing incrementally. `open` yields one chunk at a time, verifying each one.
+- **Refs / OCC.** Every ref has `(hash, version)`. A read set is `[(name, Absent | Version(v))]`
+  and must include the target. Commit happens iff every entry matches (Kung–Robinson validation;
+  versions avoid ABA). The commit point is: exclusive flock on the journal, replay any records
+  appended by other processes, validate, append a checksummed record, fsync, unlock.
+- **Namespace rules.** These match on the longest prefix: `Mutable`, `ImmutableAfterPublish`
+  (create-once), `HeadMutableReleaseImmutable` (`heads/*` mutable, `releases/*` create-once,
+  everything else forbidden). A rule may only be set on a prefix with no existing refs, so
+  immutability can't be retracted. Violations return `Forbidden`, which is distinct from
+  `Conflict`.
+- **Referential integrity.** `replace` requires `new_hash` to exist (`MissingObject`).
 
 ## 4. Experiment 1 — pre-registered protocol and thresholds
 
@@ -157,7 +165,7 @@ What follows from each result (also decided in advance):
   this is fair, but it would differ if pico2peta stored its own tree format.
 - Read latency is measured on the experimental reader, not the M2 pack reader.
 
-## 5. Lean 4 properties (M7)
+## 5. Lean 4 properties (M8, deferred)
 
 Pure model, structurally mirroring `pico2peta-model`:
 - **P1 Content immutability:** for any operation sequence, if `get h = some d` at time t, then
