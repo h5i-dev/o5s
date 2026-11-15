@@ -306,7 +306,8 @@ The contended run checks that no update is lost: the final version equals the nu
   - Files uploaded over LFS still download over plain HTTP; they have no Xet chunk list.
 - Root disk rule (the human, 2026-11-15): nothing under /home or /tmp beyond sources. perf's build-id cache is set to `/mnt/scratch/pico2peta/perf-buildid`.
 - **HF refs API: DONE.** Branches (create/delete, `startingPoint`), tags (create/delete), `list_repo_refs`, `list_repo_commits` and tag revisions everywhere. All of it is git refs of the repo. Tested with the real client, in LFS and Xet modes.
-- Waiting on the core lead: who fixes idmap's large-segment lookups (the redis push/clone root cause).
+- idmap large-segment page cache: DONE (see "Requests for core").
+- Pending on the core: the `read_verify = strict | eof` option. The server will keep `strict` as its default and expose `eof` only when the server config enables it; the request parameter is to be agreed with the core.
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
@@ -385,7 +386,8 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
   - Profile of the second push (perf, cpu-clock:u): `ZSTD_decompressSequences` 40%, BLAKE3 30%, crc32 14%, `Index::get` 0.2%.
   - Cause: `SegMap::segment_lookup` (`crates/repo/src/idmap.rs:256`, which came from net's segmap) binary-searches segments over `CACHE_WHOLE` (32k entries) with ranged reads, about 18 `get(seg, 72-byte range)` per lookup. Each one decompresses and BLAKE3-verifies the whole stored chunk around the range. The Git front does one lookup per object on push and on clone, so a ~300k-entry map costs ~5M chunk decodes. jq and ripgrep segments are under 32k entries and are cached whole, so they're fast.
   - My earlier hypotheses were wrong: `dedup_hit` → `refresh()` relisting, and `Index::get` (the core lead measured both paths fast).
-  - Proposed fix: a bounded page cache (64 KiB pages, keyed by segment and page) for large segments, optionally plus a sorted bulk `get_many`. Asked the core lead whether net or core makes the change in idmap.
+  - **Fixed by net in `crates/repo/src/idmap.rs`, with the core lead's go-ahead.** Large segments are read through a byte-bounded page cache: 64 KiB aligned pages, 64 MiB shared, FIFO eviction, and entries straddling pages handled. `SegMap::get_many` was added for batches. Test `large_segment_pages_find_every_entry`.
+  - Development check, not a benchmark result (redis heads+tags): re-push 263 s → 11.9 s, and clone 372 s → 23.5 s (git daemon ~13 s), with `fsck` clean.
 - **Byte-grouping pack codec (Phase 2 C): delivered by the core as record codec 2 (`GroupedZstd`, API v1.12).** Measured with `crates/weights/examples/bytegroup_measure.rs` under the bench lock, on real checkpoints. Two granularities are reported. *Per-block* means each 64 KiB block is grouped on its own, which is what the record codec does. *Tensor-grouped* means each whole tensor is grouped first, which is the possible object-level follow-up. My first report gave only the tensor-grouped numbers under a "64 KiB blocks" label; the core lead caught that.
 
   | data (zstd output, 64 KiB blocks) | per-block, L3 | per-block, L19 | tensor-grouped, L3 | tensor-grouped, L19 |
@@ -409,6 +411,7 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - (none open)
 
 ## Small fixes made to core crates
+- `crates/repo/src/idmap.rs` (2026-11-15, agreed with the core lead): a page cache for large-segment lookups, plus `SegMap::get_many`.
 - `crates/cli/src/main.rs`: wrapped a bare URL in a doc comment in `<…>` so that `cargo doc -D warnings` (CI docs job) passes.
 
 ## Questions for human

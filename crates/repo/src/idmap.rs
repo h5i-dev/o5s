@@ -66,6 +66,12 @@ pub const ENTRY: u64 = 72;
 const CACHE_WHOLE: u64 = 1 << 15;
 /// Total entries kept in the decoded-segment cache.
 const CACHE_ENTRIES: u64 = 1 << 20;
+/// Large segments are read in aligned pages of this size. A ranged read of a chunked object
+/// decodes (and verifies) the whole chunk it touches, which averages 64 KiB, so caching pages
+/// turns ~log2(n) chunk decodes per lookup into hits.
+const PAGE: u64 = 64 << 10;
+/// Bytes of large-segment pages kept (shared by all maps).
+const PAGE_CACHE_BYTES: u64 = 64 << 20;
 
 /// A map key (external ids are hashed or padded to 32 bytes by the front).
 pub type Key = [u8; 32];
@@ -195,9 +201,37 @@ pub struct SegMap {
 #[derive(Default)]
 pub struct SegCache {
     inner: Mutex<(HashMap<Hash, Segment>, u64)>,
+    pages: Mutex<Pages>,
+}
+
+/// Pages of large segments: (segment, page index) → bytes, bounded in bytes, FIFO eviction.
+#[derive(Default)]
+struct Pages {
+    map: HashMap<(Hash, u64), Arc<Vec<u8>>>,
+    order: std::collections::VecDeque<(Hash, u64)>,
+    bytes: u64,
 }
 
 impl SegCache {
+    fn page(&self, k: &(Hash, u64)) -> Option<Arc<Vec<u8>>> {
+        self.pages.lock().ok()?.map.get(k).cloned()
+    }
+    fn put_page(&self, k: (Hash, u64), v: Arc<Vec<u8>>) {
+        if let Ok(mut g) = self.pages.lock() {
+            let n = v.len() as u64;
+            while g.bytes + n > PAGE_CACHE_BYTES
+                && let Some(old) = g.order.pop_front()
+            {
+                if let Some(o) = g.map.remove(&old) {
+                    g.bytes -= o.len() as u64;
+                }
+            }
+            if g.map.insert(k, v).is_none() {
+                g.bytes += n;
+                g.order.push_back(k);
+            }
+        }
+    }
     fn get(&self, h: &Hash) -> Option<Arc<Vec<(Key, Value)>>> {
         self.inner.lock().ok()?.0.get(h).cloned()
     }
@@ -253,15 +287,11 @@ impl SegMap {
             };
             return Ok(entries.binary_search_by(|(k, _)| k.cmp(key)).ok().map(|i| entries[i].1));
         }
-        // Binary search with ranged reads.
+        // Binary search over cached pages of the segment.
         let (mut lo, mut hi) = (0u64, count);
         while lo < hi {
             let mid = lo + (hi - lo) / 2;
-            let off = SEG_HEADER + mid * ENTRY;
-            let b = self.repo.get(seg, Some(off..off + ENTRY))?;
-            if b.len() as u64 != ENTRY {
-                return Err(Error::Corrupt(format!("short segment read in {seg}")));
-            }
+            let b = self.entry_bytes(seg, count, mid)?;
             let (k, v) = decode_entry(&b);
             match k.cmp(key) {
                 std::cmp::Ordering::Equal => return Ok(Some(v)),
@@ -270,6 +300,45 @@ impl SegMap {
             }
         }
         Ok(None)
+    }
+
+    /// Entry `i` of a large segment, read through the page cache.
+    fn entry_bytes(&self, seg: &Hash, count: u64, i: u64) -> Result<[u8; ENTRY as usize]> {
+        let size = SEG_HEADER + count * ENTRY;
+        let off = SEG_HEADER + i * ENTRY;
+        let mut out = [0u8; ENTRY as usize];
+        let mut done = 0u64;
+        while done < ENTRY {
+            let at = off + done;
+            let pi = at / PAGE;
+            let page = match self.cache.page(&(*seg, pi)) {
+                Some(p) => p,
+                None => {
+                    let r = pi * PAGE..((pi + 1) * PAGE).min(size);
+                    let want = r.end - r.start;
+                    let p = Arc::new(self.repo.get(seg, Some(r))?);
+                    if p.len() as u64 != want {
+                        return Err(Error::Corrupt(format!("short segment read in {seg}")));
+                    }
+                    self.cache.put_page((*seg, pi), p.clone());
+                    p
+                }
+            };
+            let s = (at - pi * PAGE) as usize;
+            let n = (ENTRY - done).min(page.len() as u64 - s as u64) as usize;
+            if n == 0 {
+                return Err(Error::Corrupt(format!("short segment read in {seg}")));
+            }
+            out[done as usize..done as usize + n].copy_from_slice(&page[s..s + n]);
+            done += n as u64;
+        }
+        Ok(out)
+    }
+
+    /// Looks up many keys against one root (e.g. every object of a push). Lookups share the
+    /// segment and page caches, so a batch costs about one decode per touched page.
+    pub fn get_many(&self, root: &Root, keys: &[Key]) -> Result<Vec<Option<Value>>> {
+        keys.iter().map(|k| self.lookup_in(root, k)).collect()
     }
 
     fn lookup_in(&self, root: &Root, key: &Key) -> Result<Option<Value>> {
@@ -581,6 +650,23 @@ mod tests {
         assert_eq!(m.get_blocking(&key(2 * 777)).unwrap(), Some(val(777)));
         assert_eq!(m.get_blocking(&key(2 * (n - 1))).unwrap(), Some(val(n - 1)));
         assert_eq!(m.get_blocking(&key(3)).unwrap(), None);
+    }
+
+    #[test]
+    fn large_segment_pages_find_every_entry() {
+        let (_d, repo) = repo();
+        let m = SegMap::new(repo, Name::new("t/pages").unwrap(), Arc::default());
+        let n = CACHE_WHOLE + 3000;
+        m.insert_blocking((0..n).map(|i| (key(i * 2), val(i))).collect()).unwrap();
+        let (_, root) = m.root_blocking().unwrap();
+        // 72-byte entries straddle 64 KiB pages regularly; every one must be found.
+        let keys: Vec<Key> = (0..n).map(|i| key(i * 2)).collect();
+        let got = m.get_many(&root, &keys).unwrap();
+        for (i, g) in got.iter().enumerate() {
+            assert_eq!(*g, Some(val(i as u64)), "entry {i}");
+        }
+        let misses: Vec<Key> = (0..200).map(|i| key(i * 2 + 1)).collect();
+        assert!(m.get_many(&root, &misses).unwrap().iter().all(Option::is_none));
     }
 
     #[test]
