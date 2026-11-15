@@ -297,10 +297,11 @@ impl<'a> View<'a> {
         }
     }
 
-    /// Present and not collected.
+    /// Present, and safe to reference: `ensure_live` rewrites the object if GC
+    /// has condemned its only copy (the client assumes the server has it).
     fn has(&self, oid: &Oid) -> Result<bool> {
         Ok(match self.lookup(oid)? {
-            Some((_, h)) => self.extra.contains_key(oid) || self.st.repo.contains(&h)?,
+            Some((_, h)) => self.extra.contains_key(oid) || self.st.repo.ensure_live(&h)?,
             None => false,
         })
     }
@@ -1343,6 +1344,10 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
                 return Err("deleting refs is not supported".into());
             }
             let (kind, h) = view.lookup(&c.new).map_err(|e| e.to_string())?.ok_or("missing new object")?;
+            // Not in this push: the client assumes we have it, so make sure it stays.
+            if !view.extra.contains_key(&c.new) && !git.repo.ensure_live(&h).map_err(|e| e.to_string())? {
+                return Err("missing new object".into());
+            }
             if c.gitref.starts_with("refs/heads/") && kind != Kind::Commit {
                 return Err("branch must point at a commit".into());
             }
