@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = ["crates/core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+pico2peta-core = { path = "crates/core" }
+blake3 = "1"
+fastcdc = "3"
+zstd = "0.13"
+thiserror = "2"
+crc32fast = "1"
+clap = { version = "4", features = ["derive"] }
+proptest = "1"
+tempfile = "3"
+
+[profile.release]
+debug = 1
