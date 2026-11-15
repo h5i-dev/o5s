@@ -247,6 +247,8 @@ const PREFIXES: &[&str] = &["a", "p", "p/y", "m"];
 
 #[derive(Debug, Clone)]
 enum Op {
+    /// Unique targets (all in the read set, observed truly or by guess) + new values.
+    Many(Vec<(usize, bool)>, u8),
     Replace(usize, Vec<(usize, Option<u8>)>, u8, bool),
     Rule(usize, u8),
     Reopen,
@@ -257,6 +259,7 @@ fn op() -> impl Strategy<Value = Op> {
         6 => (0..NAMES.len(), proptest::collection::vec((0..NAMES.len(), proptest::option::of(0u8..4)), 0..3), any::<u8>(), any::<bool>())
             .prop_map(|(t, rs, v, fresh)| Op::Replace(t, rs, v, fresh)),
         2 => (0..PREFIXES.len(), 0u8..3).prop_map(|(p, r)| Op::Rule(p, r)),
+        2 => (proptest::collection::vec((0..NAMES.len(), any::<bool>()), 1..4), any::<u8>()).prop_map(|(t, v)| Op::Many(t, v)),
         1 => Just(Op::Reopen),
     ]
 }
@@ -271,6 +274,38 @@ proptest! {
         let mut m = Model::default();
         for o in ops {
             match o {
+                Op::Many(mut targets, v) => {
+                    targets.sort_by_key(|t| t.0);
+                    targets.dedup_by_key(|t| t.0);
+                    let rs: Vec<(String, Observed)> = targets.iter().map(|(t, fresh)| {
+                        let nm = NAMES[*t];
+                        (nm.to_string(), if *fresh { m.obs(nm) } else { Observed::Version(7) })
+                    }).collect();
+                    // Model: conflict if any stale; else each rule in order; else apply all.
+                    let expect: std::result::Result<bool, &str> = if rs.iter().any(|(n2, o)| m.obs(n2) != *o) {
+                        Ok(false)
+                    } else {
+                        let mut trial = Model { refs: m.refs.clone(), rules: m.rules.clone() };
+                        let mut res = Ok(true);
+                        for (i, (t, _)) in targets.iter().enumerate() {
+                            // Each update is judged against the pre-state.
+                            let mut probe = Model { refs: m.refs.clone(), rules: m.rules.clone() };
+                            if let Err(e) = probe.replace(NAMES[*t], &rs, h(v as u64 + i as u64)) { res = Err(e); break; }
+                            let ver = m.refs.get(NAMES[*t]).map_or(1, |x| x.1 + 1);
+                            trial.refs.insert(NAMES[*t].to_string(), (h(v as u64 + i as u64), ver));
+                        }
+                        if res == Ok(true) { m.refs = trial.refs; }
+                        res
+                    };
+                    let ups: Vec<(Name, Hash)> = targets.iter().enumerate().map(|(i, (t, _))| (n(NAMES[*t]), h(v as u64 + i as u64))).collect();
+                    let rs2: Vec<(Name, Observed)> = rs.iter().map(|(a, o)| (n(a), *o)).collect();
+                    match (expect, r.replace_many(&ups, &rs2, &yes)) {
+                        (Ok(true), Ok(pico2peta_core::ReplaceManyOutcome::Ok { .. })) => {}
+                        (Ok(false), Ok(pico2peta_core::ReplaceManyOutcome::Conflict { .. })) => {}
+                        (Err(code), Err(e)) => prop_assert_eq!(code, e.code()),
+                        (e, g) => prop_assert!(false, "many: model {:?} vs impl {:?}", e, g),
+                    }
+                }
                 Op::Replace(t, extra, v, fresh) => {
                     let target = NAMES[t];
                     // Usually include the target with its true observation (fresh) or a guess.
@@ -433,4 +468,51 @@ fn crash_during_compaction_at_every_point() {
         r.replace(&z, &[(z.clone(), Observed::Absent)], h(99), &yes).unwrap();
         assert_eq!(RefStore::open(d.path()).unwrap().resolve(&z).unwrap().unwrap().hash, h(99), "budget {budget}");
     }
+}
+
+#[test]
+fn replace_many_is_atomic() {
+    let d = tempfile::tempdir().unwrap();
+    let r = RefStore::open(d.path()).unwrap();
+    r.set_rule("pkg", Rule::ImmutableAfterPublish).unwrap();
+    let (a, b, p) = (n("a"), n("b"), n("pkg/x"));
+    let out = r
+        .replace_many(
+            &[(a.clone(), h(1)), (b.clone(), h(2))],
+            &[(a.clone(), Observed::Absent), (b.clone(), Observed::Absent)],
+            &yes,
+        )
+        .unwrap();
+    assert_eq!(out, pico2peta_core::ReplaceManyOutcome::Ok { versions: vec![1, 1] });
+    // One stale entry: nothing changes.
+    let out = r
+        .replace_many(
+            &[(a.clone(), h(3)), (b.clone(), h(4))],
+            &[(a.clone(), Observed::Version(1)), (b.clone(), Observed::Absent)],
+            &yes,
+        )
+        .unwrap();
+    assert!(matches!(out, pico2peta_core::ReplaceManyOutcome::Conflict { .. }));
+    assert_eq!(r.resolve(&a).unwrap().unwrap().hash, h(1));
+    // A rule violation on one name: nothing changes.
+    r.replace(&p, &[(p.clone(), Observed::Absent)], h(5), &yes).unwrap();
+    let e = r.replace_many(
+        &[(a.clone(), h(3)), (p.clone(), h(6))],
+        &[(a.clone(), Observed::Version(1)), (p.clone(), Observed::Version(1))],
+        &yes,
+    );
+    assert!(matches!(e, Err(Error::Forbidden { .. })));
+    assert_eq!(r.resolve(&a).unwrap().unwrap().hash, h(1));
+    // Input validation.
+    assert!(matches!(
+        r.replace_many(&[(a.clone(), h(3))], &[(b.clone(), Observed::Version(1))], &yes),
+        Err(Error::TargetNotInReadSet(_))
+    ));
+    assert!(
+        r.replace_many(&[(a.clone(), h(3)), (a.clone(), h(4))], &[(a.clone(), Observed::Version(1))], &yes).is_err()
+    );
+    // Persisted as one record; survives reopen and compaction.
+    r.compact().unwrap();
+    let r2 = RefStore::open(d.path()).unwrap();
+    assert_eq!(r2.resolve(&b).unwrap().unwrap(), RefValue { hash: h(2), version: 1 });
 }

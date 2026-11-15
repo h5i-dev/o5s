@@ -211,6 +211,16 @@ impl Repository for LocalRepo {
         self.refs.replace(name, read_set, new, &|h| packs.contains(h))
     }
 
+    fn replace_many(
+        &self,
+        updates: &[(Name, Hash)],
+        read_set: &[(Name, Observed)],
+    ) -> Result<pico2peta_core::ReplaceManyOutcome> {
+        self.packs.flush()?;
+        let packs = &self.packs;
+        self.refs.replace_many(updates, read_set, &|h| packs.contains(h))
+    }
+
     fn list_refs(&self, prefix: &str) -> Result<Vec<(Name, RefValue)>> {
         self.refs.list(prefix)
     }

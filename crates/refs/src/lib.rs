@@ -21,8 +21,8 @@
 
 use pico2peta_core::fault::{FaultHandle, Faults};
 use pico2peta_core::{
-    Error, Hash, Mobility, Name, Observed, RefValue, ReplaceOutcome, Result, Rule, governing, is_under, mobility,
-    validate_path,
+    Error, Hash, Mobility, Name, Observed, RefValue, ReplaceManyOutcome, ReplaceOutcome, Result, Rule, governing,
+    is_under, mobility, validate_path,
 };
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
@@ -31,7 +31,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 const MAGIC: &[u8; 8] = b"P2PREFJ1";
-const MAX_RECORD: u32 = 4096;
+const MAX_RECORD: u32 = 4 << 20;
+/// Maximum number of names in one atomic `replace_many`.
+pub const MAX_BATCH: usize = 10_000;
 
 /// Pure in-memory ref state, plus the decision logic shared by every handle.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -52,6 +54,8 @@ pub enum Mutation {
     /// Journal tombstone: this journal is closed, and state continues in
     /// generation `n` (snapshot + journal). Written only by compaction.
     Rotated(u64),
+    /// Several `Set`s committed atomically (one record, one commit point).
+    Batch(Vec<(Name, RefValue)>),
 }
 
 impl RefState {
@@ -115,7 +119,49 @@ impl RefState {
                 self.rules.insert(p, r);
             }
             Mutation::Rotated(_) => {}
+            Mutation::Batch(v) => {
+                for (n, val) in v {
+                    self.refs.insert(n, val);
+                }
+            }
         }
+    }
+
+    /// Decides an atomic multi-name replace (pure). Same order as
+    /// [`RefState::decide_replace`]: input, then read set, then rules (each name).
+    pub fn decide_replace_many(
+        &self,
+        updates: &[(Name, Hash)],
+        read_set: &[(Name, Observed)],
+    ) -> Result<std::result::Result<Mutation, ReplaceManyOutcome>> {
+        if updates.is_empty() || updates.len() > MAX_BATCH {
+            return Err(Error::Parse(format!("replace_many takes 1..={MAX_BATCH} updates")));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for (n, _) in updates {
+            if !seen.insert(n) {
+                return Err(Error::Parse(format!("duplicate target {n} in replace_many")));
+            }
+            if !read_set.iter().any(|(r, _)| r == n) {
+                return Err(Error::TargetNotInReadSet(n.clone()));
+            }
+        }
+        let mut stale: Vec<(Name, Observed)> =
+            read_set.iter().filter(|(n, o)| self.observe(n) != *o).map(|(n, _)| (n.clone(), self.observe(n))).collect();
+        if !stale.is_empty() {
+            stale.sort();
+            stale.dedup();
+            return Ok(Err(ReplaceManyOutcome::Conflict { stale }));
+        }
+        let mut sets = Vec::with_capacity(updates.len());
+        for (name, new) in updates {
+            match self.decide_replace(name, read_set, *new)? {
+                Ok(Mutation::Set(n, v)) => sets.push((n, v)),
+                Ok(_) => return Err(Error::Corrupt("unexpected mutation".into())),
+                Err(_) => return Err(Error::Corrupt("read set changed during decision".into())),
+            }
+        }
+        Ok(Ok(Mutation::Batch(sets)))
     }
 
     /// Refs under `prefix` ("" = all), sorted.
@@ -144,6 +190,16 @@ fn encode(m: &Mutation) -> Vec<u8> {
             p.push(3);
             p.extend_from_slice(&g.to_le_bytes());
         }
+        Mutation::Batch(v) => {
+            p.push(4);
+            p.extend_from_slice(&(v.len() as u32).to_le_bytes());
+            for (n, val) in v {
+                p.extend_from_slice(&(n.as_str().len() as u16).to_le_bytes());
+                p.extend_from_slice(n.as_str().as_bytes());
+                p.extend_from_slice(val.hash.as_bytes());
+                p.extend_from_slice(&val.version.to_le_bytes());
+            }
+        }
     }
     let mut rec = Vec::with_capacity(8 + p.len());
     rec.extend_from_slice(&(p.len() as u32).to_le_bytes());
@@ -156,6 +212,31 @@ fn encode(m: &Mutation) -> Vec<u8> {
 pub fn decode_payload(p: &[u8]) -> Result<Mutation> {
     let bad = |w: &str| Error::Corrupt(format!("ref journal: {w}"));
     let (&tag, rest) = p.split_first().ok_or_else(|| bad("empty record"))?;
+    if tag == 4 {
+        let cnt: [u8; 4] = rest.get(..4).and_then(|b| b.try_into().ok()).ok_or_else(|| bad("short batch"))?;
+        let cnt = u32::from_le_bytes(cnt) as usize;
+        if cnt == 0 || cnt > MAX_BATCH {
+            return Err(bad("bad batch size"));
+        }
+        let mut rest = &rest[4..];
+        let mut v = Vec::with_capacity(cnt);
+        for _ in 0..cnt {
+            let l = rest.get(..2).ok_or_else(|| bad("short batch entry"))?;
+            let l = u16::from_le_bytes([l[0], l[1]]) as usize;
+            let e = rest.get(2..2 + l + 40).ok_or_else(|| bad("short batch entry"))?;
+            let name = Name::new(std::str::from_utf8(&e[..l]).map_err(|_| bad("non-utf8 name"))?)?;
+            let mut h = [0u8; 32];
+            h.copy_from_slice(&e[l..l + 32]);
+            let mut ver = [0u8; 8];
+            ver.copy_from_slice(&e[l + 32..l + 40]);
+            v.push((name, RefValue { hash: Hash(h), version: u64::from_le_bytes(ver) }));
+            rest = &rest[2 + l + 40..];
+        }
+        if !rest.is_empty() {
+            return Err(bad("trailing bytes in batch"));
+        }
+        return Ok(Mutation::Batch(v));
+    }
     if tag == 3 {
         let g: [u8; 8] = rest.try_into().map_err(|_| bad("bad rotation record"))?;
         return Ok(Mutation::Rotated(u64::from_le_bytes(g)));
@@ -561,11 +642,39 @@ impl RefStore {
             Ok(m) => {
                 let version = match &m {
                     Mutation::Set(_, v) => v.version,
-                    Mutation::Rule(..) | Mutation::Rotated(_) => 0,
+                    Mutation::Rule(..) | Mutation::Rotated(_) | Mutation::Batch(_) => 0,
                 };
                 Ok((Some(m), ReplaceOutcome::Ok { version }))
             }
             Err(conflict) => Ok((None, conflict)),
+        })
+    }
+
+    /// Atomic multi-name OCC replace: either every update commits (in one
+    /// journal record) or none does.
+    pub fn replace_many(
+        &self,
+        updates: &[(Name, Hash)],
+        read_set: &[(Name, Observed)],
+        exists: &dyn Fn(&Hash) -> Result<bool>,
+    ) -> Result<ReplaceManyOutcome> {
+        for (n, h) in updates {
+            if !read_set.iter().any(|(r, _)| r == n) {
+                return Err(Error::TargetNotInReadSet(n.clone()));
+            }
+            if !exists(h)? {
+                return Err(Error::MissingObject(*h));
+            }
+        }
+        self.commit(|s| match s.decide_replace_many(updates, read_set)? {
+            Ok(m) => {
+                let versions = match &m {
+                    Mutation::Batch(v) => v.iter().map(|(_, val)| val.version).collect(),
+                    _ => Vec::new(),
+                };
+                Ok((Some(m), ReplaceManyOutcome::Ok { versions }))
+            }
+            Err(c) => Ok((None, c)),
         })
     }
 

@@ -24,12 +24,14 @@
   These changes cover all three of the net session's "Requests for core" from 2026-11-15: streaming put, a backend error variant, and committing early.
 
 - **v1.1 (2026-11-15), additive:** `Error::Unauthorized(String)` (code `"unauthorized"`) for authn/authz failures, requested by net. The CLI exits with 5. Exhaustive `match`es on `Error` need the new arm.
+- **v1.2 (2026-11-15), additive:** `Repository::replace_many(updates: &[(Name, Hash)], read_set) -> ReplaceManyOutcome { Ok { versions } | Conflict { stale } }`. It's atomic (one journal record, one commit point) and checks rules per name. The default impl handles single updates and returns `Unsupported` otherwise; `LocalRepo` implements it fully. It's intended for git `push --atomic` and OCI manifest+tag.
 
 ## Production gaps
 - **Index in memory.** Every handle loads all `.idx` files into a HashMap, about 100 B/object, which is fine up to ~10^7–10^8 objects. Billions need a fan-out/on-disk index or a PostgreSQL index (an open question in the brief).
 - **Flat manifests.** A 100 GB object at a 64 KiB average chunk size has a ~64 MB manifest. This needs hierarchical manifests.
 - **GC assumes an operation lease.** A `put` → `replace` must finish within the grace period (default 1 h). There's no enforcement yet; an epoch/lease token on `replace` would make it checkable.
 - **GC tracer.** GC treats objects as opaque, so only ref targets and their chunks are roots. Structured objects (directories, snapshots) need a `Tracer` once those formats exist.
+- **Ref store scale.** All refs live in memory (~150 B each), and compaction rewrites a full snapshot. That's fine to ~10^6 names, strained at 10^7. Scaling needs a sharded journal per prefix, or an LSM. Net was advised to keep per-blob OCI links in segment maps, not refs.
 - **No ref deletion.** `Repository` has no `delete(name)` yet, so the only way to drop a root is to move a ref.
 - **Small packs.** `replace` and `flush` seal the writer's open pack, so chatty writers make many small packs. Repack (M6) is the planned fix.
 - **Ambiguous outcome on I/O error.** If an fsync fails during `replace`, the record may still be durable. The caller must re-`resolve` to find out (documented, as in most databases).
