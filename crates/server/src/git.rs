@@ -903,6 +903,36 @@ fn ofs_encode(mut off: u64) -> Vec<u8> {
     b
 }
 
+/// What the client already has, cheaply (git's no-bitmap "edge" strategy):
+/// every commit reachable from `common` (commit objects only), plus the full
+/// trees of up to [`MAX_BOUNDARY`] common commits. Objects outside this set
+/// that the client has anyway may be re-sent, which is harmless.
+fn boundary_exclude(view: &View<'_>, common: &[Oid]) -> Result<HashSet<Oid>> {
+    let mut ex: HashSet<Oid> = HashSet::new();
+    let mut stack: Vec<Oid> = common.to_vec();
+    while let Some(o) = stack.pop() {
+        if !ex.insert(o) {
+            continue;
+        }
+        if let Some((Kind::Commit, body)) = view.load(&o)? {
+            stack.extend(refs_of(Kind::Commit, &body)?.into_iter().skip(1));
+        }
+    }
+    let commits: HashSet<Oid> = ex.clone();
+    for c in common.iter().take(MAX_BOUNDARY) {
+        if let Some((Kind::Commit, body)) = view.load(c)?
+            && let Some(tree) = refs_of(Kind::Commit, &body)?.first().copied()
+        {
+            let got = walk(view, &[tree], &ex, |_, _, _| Ok(()))?;
+            ex.extend(got);
+        }
+    }
+    debug_assert!(commits.is_subset(&ex));
+    Ok(ex)
+}
+
+const MAX_BOUNDARY: usize = 16;
+
 /// Objects to send with the path they were reached by (for delta pairing):
 /// reachable from `tips`, minus `exclude`. Newest history first.
 fn walk_paths(view: &View<'_>, tips: &[Oid], exclude: &HashSet<Oid>) -> Result<Vec<(Oid, Kind, String)>> {
@@ -1282,8 +1312,7 @@ fn serve_upload(
     }
     send(tx, out)?;
     // Objects to send: reachable from wants minus reachable from common.
-    let exclude =
-        if common.is_empty() { HashSet::new() } else { walk(&view, &common, &HashSet::new(), |_, _, _| Ok(()))? };
+    let exclude = if common.is_empty() { HashSet::new() } else { boundary_exclude(&view, &common)? };
     let objs = walk_paths(&view, &req.wants, &exclude)?;
     // Stream the pack. Blobs and trees are deltified against the previously
     // sent version at the same path (newest first, so older versions are deltas).

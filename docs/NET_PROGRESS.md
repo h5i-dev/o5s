@@ -192,7 +192,7 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **Git adapter limits:**
   - SHA-1 repos only (no `object-format=sha256`). No protocol v2 server side (clients fall back to v0), and no shallow or partial clones.
   - Served packs use OFS deltas against the previously sent version at the same path (greedy block matching, depth ≤ 50). They are not as tight as git's sliding-window search: a ripgrep clone transfers 6.1 MB vs git's 3.4 MB aggressive pack. Thin packs against the client's haves are not used.
-  - Upload-pack walks the full reachable set per request (no bitmaps or commit-graph), which is O(history) per fetch.
+  - Upload-pack has no bitmaps or commit-graph. Incremental fetches exclude what the client has with git's no-bitmap edge strategy (the commit closure of common commits plus the trees of up to 16 boundary commits), so they cost O(commits) rather than O(objects). A clone still walks every object it sends.
   - Each push object is held in memory (cap 1 GiB per object).
   - Ref names outside the core grammar (`[A-Za-z0-9._+-]` segments) are rejected with `ng`.
 - **OCI adapter limits:** blob DELETE returns 405 (blobs are reclaimed by GC once no manifest references them), sha256 digests only, and upload sessions do not survive restarts.
