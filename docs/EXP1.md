@@ -121,10 +121,29 @@ What the numbers say:
     §4.8, registered before any 1b code). A sanity run of the 1b harness on ripgrep (V4 1.166×, V5 1.667×)
     was made to check correctness before the official run. The official 1b numbers come from a fresh full run.
 
-## Experiment 1b
+## Experiment 1b (PLAN.md §4.8)
 
-*(Running: `scripts/exp1b.sh`, results in `results-1b.jsonl`. The report is generated with
-`EXP1_ELIGIBLE=v4,v5 scripts/exp1-report.py results.jsonl,results-1b.jsonl`.)*
+Interim (git.git still running). The verdict is already determined by redis:
+
+| repo | V4 (depth 50) | V5 (depth 10) | V4 build ratio | V4 read p50 / p99 (ms) |
+|---|---|---|---|---|
+| ripgrep | 1.164 | 1.665 | 2.44 | 0.10 / 0.38 |
+| jq | 1.089 | 1.427 | 1.41 | 0.10 / 0.59 |
+| redis | **1.347** | 1.860 | 2.74 | 0.13 / 1.52 |
+
+### Verdict: **FAIL** (same thresholds as §4.5)
+V\* = V4. Redis's R = 1.347 exceeds the 1.30 per-repo limit, and V4's build time is 1.4–2.7× Git's
+(threshold ≤ 1.0). Reads are fast, with chain decode p99 ≤ 1.5 ms.
+
+**Explicit delta against the previous version of the same path loses to Git** even before the index
+model is counted: redis's V4 payload alone is 1.33× Git's pack. A plausible reason (an analysis, not
+something tested here) is that Git's delta search tries 250 candidate bases chosen by size and name
+similarity, so it finds better bases than "the immediately previous version". Level-19 patch-from per
+object is also slow.
+
+**Pre-registered consequence:** keep Git-compatible storage as the recommended configuration for source
+code (the net session's Git adapter, plus opt-in grouped repack, which on a real ripgrep import reaches 1.02×
+git-aggressive on payload). No new variants are added after seeing these results.
 
 ## Production cross-check (not part of the pre-registered verdict)
 
