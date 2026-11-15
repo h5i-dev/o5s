@@ -1290,8 +1290,9 @@ pub async fn run_gc(st: &AppState, dry_run: bool, repack_all: bool) -> ApiResult
     if st.gc_running.swap(true, Ordering::AcqRel) {
         return Err(ApiError::new(StatusCode::CONFLICT, codes::GC_RUNNING, "a GC run is already in progress"));
     }
-    let opts = st.gc.options_with(dry_run, repack_all);
-    let grouped = st.gc.grouped;
+    // The repository's GC defaults (e.g. `[gc] similarity_repack`) with the server's overrides.
+    let opts = st.gc.options_with(local.gc_options(), dry_run, repack_all);
+    let grouped = opts.similarity_repack;
     let running = st.gc_running.clone();
     let res = blocking(move || {
         // Provenance records here; git objects, OCI manifests and segment maps come from

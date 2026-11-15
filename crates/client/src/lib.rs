@@ -321,6 +321,162 @@ impl RemoteRepo {
         }
     }
 
+    /// `POST /v1/attestations`: stores a DSSE envelope and links it to its subjects. Returns the
+    /// stored envelope's hash and the server-trusted keys that verify it (possibly none: any
+    /// writer may attest, and promotion only counts trusted keys).
+    pub fn attest(&self, envelope: &pico2peta_attest::Envelope) -> Result<(Hash, Vec<String>)> {
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            envelope: String,
+            trusted_keys: Vec<String>,
+        }
+        let resp = self.post_once("/v1/attestations", "application/json", envelope.to_json())?;
+        self.block(async move {
+            if resp.status() != StatusCode::CREATED {
+                return Err(error_from(resp, &Ctx::default()).await);
+            }
+            let r: Resp = resp.json().await.map_err(transport)?;
+            Ok((r.envelope.parse()?, r.trusted_keys))
+        })
+    }
+
+    /// `GET /v1/attestations?ref=<id>`: the envelopes about an object (`ref_id` is an external
+    /// id such as `name:<name>`, `blake3:<hex>`, `git:<repo>@<oid>`), each with its hash and the
+    /// server-trusted keys that verify it.
+    pub fn attestations(&self, ref_id: &str) -> Result<Vec<(Hash, pico2peta_attest::Envelope, Vec<String>)>> {
+        #[derive(serde::Deserialize)]
+        struct Item {
+            hash: String,
+            envelope: serde_json::Value,
+            trusted_keys: Vec<String>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            attestations: Vec<Item>,
+        }
+        let r: Resp = self.get_json("/v1/attestations", vec![("ref", ref_id.to_string())])?;
+        r.attestations
+            .into_iter()
+            .map(|i| {
+                let raw = serde_json::to_vec(&i.envelope).map_err(|e| Error::Parse(format!("envelope: {e}")))?;
+                Ok((i.hash.parse()?, pico2peta_attest::Envelope::from_json(&raw)?, i.trusted_keys))
+            })
+            .collect()
+    }
+
+    /// `POST /v1/promote`: points `dst` at what `src` names if the server's `[[promotion]]` rule
+    /// for `dst` holds. A refusal by the policy is `Ok(Refused(reasons))`; missing access or no
+    /// rule covering `dst` is an error.
+    pub fn promote(&self, src: &Name, dst: &Name) -> Result<pico2peta_attest::PromoteOutcome> {
+        use pico2peta_attest::PromoteOutcome;
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            promoted: Option<String>,
+            record: Option<String>,
+            refused: Option<Vec<String>>,
+        }
+        let body = serde_json::json!({ "src": src.as_str(), "dst": dst.as_str() }).to_string().into_bytes();
+        let resp = self.post_once("/v1/promote", "application/json", body)?;
+        let dst = dst.clone();
+        self.block(async move {
+            match resp.status() {
+                StatusCode::CONFLICT => Ok(PromoteOutcome::Conflict),
+                s if s.is_success() || s == StatusCode::FORBIDDEN => {
+                    let bytes = resp.bytes().await.map_err(transport)?;
+                    match serde_json::from_slice::<Resp>(&bytes) {
+                        Ok(Resp { promoted: Some(o), record: Some(r), .. }) if s.is_success() => {
+                            Ok(PromoteOutcome::Promoted { object: o.parse()?, record: r.parse()? })
+                        }
+                        Ok(Resp { refused: Some(reasons), .. }) => Ok(PromoteOutcome::Refused(reasons)),
+                        _ => {
+                            let msg = serde_json::from_slice::<wire::ErrorBody>(&bytes).map_or_else(
+                                |_| String::from_utf8_lossy(&bytes[..bytes.len().min(256)]).into_owned(),
+                                |b| b.error.message,
+                            );
+                            Err(Error::Unauthorized(format!("promote to {dst}: HTTP {s}: {msg}")))
+                        }
+                    }
+                }
+                _ => Err(error_from(resp, &Ctx { name: Some(&dst), ..Default::default() }).await),
+            }
+        })
+    }
+
+    /// `GET /v1/provenance?ref=<id>`: producers, consumers, lineage and impact.
+    pub fn provenance(&self, ref_id: &str) -> Result<wire::ProvenanceJson> {
+        self.get_json("/v1/provenance", vec![("ref", ref_id.to_string())])
+    }
+
+    /// Every object `ref_id` was transitively derived from (provenance lineage).
+    pub fn lineage(&self, ref_id: &str) -> Result<Vec<Hash>> {
+        self.provenance(ref_id)?.lineage.iter().map(|h| h.parse()).collect()
+    }
+
+    /// Every object transitively derived from `ref_id` (provenance impact).
+    pub fn impact(&self, ref_id: &str) -> Result<Vec<Hash>> {
+        self.provenance(ref_id)?.impact.iter().map(|h| h.parse()).collect()
+    }
+
+    /// `GET /v1/search`: names, front metadata and provenance, limited to names the caller can
+    /// read (at most 200 hits). A `&str` searches text; see [`Search`] for prefix/exact.
+    pub fn search(&self, query: impl Into<Search>) -> Result<Vec<SearchHit>> {
+        let (k, v) = match query.into() {
+            Search::Text(t) => ("q", t),
+            Search::Prefix(p) => ("prefix", p),
+            Search::Exact(e) => ("exact", e),
+        };
+        let r: wire::SearchResults = self.get_json("/v1/search", vec![(k, v)])?;
+        r.results
+            .into_iter()
+            .map(|h| {
+                Ok(SearchHit {
+                    object: h.object.parse()?,
+                    names: h.names,
+                    meta: h.meta.into_iter().map(|m| (m.key, m.value, m.op)).collect(),
+                })
+            })
+            .collect()
+    }
+
+    /// An idempotent JSON GET with query parameters.
+    fn get_json<T: serde::de::DeserializeOwned + Send + 'static>(
+        &self,
+        path: &'static str,
+        query: Vec<(&'static str, String)>,
+    ) -> Result<T> {
+        let this = self.clone();
+        self.block(async move {
+            let resp = this.send_retry(Method::GET, path, |r| r.query(&query)).await?;
+            if !resp.status().is_success() {
+                return Err(error_from(resp, &Ctx::default()).await);
+            }
+            resp.json().await.map_err(transport)
+        })
+    }
+
+    /// A non-idempotent POST: retried only when the connection was never established.
+    fn post_once(&self, path: &'static str, content_type: &'static str, body: Vec<u8>) -> Result<reqwest::Response> {
+        let this = self.clone();
+        self.block(async move {
+            let mut attempt = 0;
+            loop {
+                let rb = this
+                    .request(Method::POST, path)
+                    .header("content-type", content_type)
+                    .body(body.clone())
+                    .timeout(this.inner.cfg.request_timeout);
+                match rb.send().await {
+                    Ok(r) => return Ok(r),
+                    Err(e) if e.is_connect() && attempt + 1 < this.inner.cfg.max_attempts => {
+                        tokio::time::sleep(this.backoff(attempt)).await;
+                        attempt += 1;
+                    }
+                    Err(e) => return Err(transport(e)),
+                }
+            }
+        })
+    }
+
     /// Base URL of the server.
     pub fn url(&self) -> &str {
         &self.inner.base
@@ -392,6 +548,32 @@ impl RemoteRepo {
             Ok(l.refs)
         })
     }
+}
+
+/// A [`RemoteRepo::search`] query.
+#[derive(Clone, Debug)]
+pub enum Search {
+    /// Free text over names, front metadata and provenance.
+    Text(String),
+    /// Names starting with this prefix.
+    Prefix(String),
+    /// One exact name.
+    Exact(String),
+}
+
+impl From<&str> for Search {
+    fn from(s: &str) -> Search {
+        Search::Text(s.to_string())
+    }
+}
+
+/// One [`RemoteRepo::search`] result: the object, the readable names it has, and its metadata
+/// as `(key, value, op)`.
+#[derive(Clone, Debug)]
+pub struct SearchHit {
+    pub object: Hash,
+    pub names: Vec<String>,
+    pub meta: Vec<(String, String, String)>,
 }
 
 /// Parses a `PutResponse` and checks it against the locally computed hash.

@@ -212,6 +212,44 @@ pub struct WhoAmI {
     pub authenticated: bool,
 }
 
+/// `GET /v1/provenance?ref=` (API "Provenance"). Records stay JSON: their `meta` keys are
+/// front-specific.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ProvenanceJson {
+    /// The object the ref resolved to.
+    pub object: String,
+    /// Records that output the object.
+    pub producers: Vec<serde_json::Value>,
+    /// Records that took the object as an input.
+    pub consumers: Vec<serde_json::Value>,
+    /// Transitive inputs (hex hashes).
+    pub lineage: Vec<String>,
+    /// Transitive outputs (hex hashes).
+    pub impact: Vec<String>,
+}
+
+/// One metadata entry of a search hit.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SearchMeta {
+    pub key: String,
+    pub value: String,
+    pub op: String,
+}
+
+/// One `GET /v1/search` hit.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub object: String,
+    pub names: Vec<String>,
+    pub meta: Vec<SearchMeta>,
+}
+
+/// `GET /v1/search` response.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SearchResults {
+    pub results: Vec<SearchResult>,
+}
+
 /// Result of one GC invocation (see `pico2peta_repo::GcReport`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GcReportJson {
