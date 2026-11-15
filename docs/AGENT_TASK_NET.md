@@ -36,3 +36,28 @@ Until the core traits land on `demo`, design against the trait shapes in `docs/P
 - `git merge demo` into `net` at least every hour. Keep `net` building against the latest `demo`, because the lead merges `net` into `demo` at milestones.
 - Commit often, and don't push. End commit messages with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Keep `docs/NET_PROGRESS.md` current: what's done, what's next, production gaps, requests for core, and questions for the human. If a decision belongs to the human, write it down there and carry on with a sensible default.
+
+## Phase 2 (2026-11-15): share the core's speed-up backlog (from the human)
+
+The core session keeps `docs/RESEARCH_SPEEDUP.md` §1, the streaming put pipeline in `crates/pack/src/store.rs`. You take the parts below, which don't touch `store.rs`, and you work in parallel with it. Order: A, B, C.
+
+**A. Experiment 1c (§3).** You temporarily own `bench/exp1c/`, `scripts/exp1c*`, and an "Experiment 1c" section appended to `docs/EXP1.md`.
+- Pre-register the protocol and thresholds in a new section of `docs/PLAN.md` and **commit that before writing any measurement code**. Reuse Exp1's corpus and thresholds unless there's a stated reason not to.
+- Candidate: resemblance-detected base selection (Odess-style content-defined sampling super-features), then zstd patch-from (dictionary = base) delta. Keep a bounded candidate set, like Git's window.
+- Baselines: the original `git gc --aggressive` (the frozen thresholds), plus `git repack -adf --path-walk` and `--name-hash-version=2`. Report against both, honestly.
+- The mirrors are already in `/mnt/scratch/pico2peta/bench-data/mirrors`. Watch the disk: `/mnt/scratch` has about 19 GB free.
+
+**B. Xet-compatible chunker (§4) as a standalone crate `crates/chunk`.**
+- Implement Gear CDC exactly per the Xet chunking spec (https://huggingface.co/docs/xet/chunking): 8K/64K/128K, `MASK=0xFFFF000000000000`, min-size skip-ahead.
+- Add a conformance test against the published reference chunk list (`xet-team/xet-spec-reference-files`). Download it to `/mnt/scratch/pico2peta/bench-data/xet-ref`, and skip the test cleanly if it's absent.
+- Expose a streaming `Chunker` trait with FastCDC and Xet implementations, and benchmark both (GB/s, 1 core and 4 cores).
+- Do not wire it into `store.rs`. The core lead integrates it later as a per-namespace option.
+
+**C. Byte-grouping transform (§2) as pure functions in `crates/weights`.** You own a new module, `crates/weights/src/bytegroup.rs`.
+- Implement `group(bytes, width) -> Vec<u8>` / `ungroup`, with width 2 (bf16/fp16) and 4 (fp32), plus proptest round-trips and no-panic tests on bad input.
+- Measure zstd on the XOR delta with and without grouping, using the weights bench data or a real bf16 safetensors file.
+- Do not add a pack codec. Hand the core a "Requests for core" entry with the measured gain, and the core adds the codec id in `store.rs`.
+
+**Shared-machine rule.** Any timing measurement, and any long CPU-heavy run (Exp1c), must hold an exclusive lock, so that one session's benchmarks aren't distorted by the other's load:
+`flock /mnt/scratch/pico2peta/bench.lock <command>`
+Builds and tests don't need the lock; use `-j2`.
