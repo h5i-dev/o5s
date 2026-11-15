@@ -35,10 +35,15 @@ pub fn pack_header_len(magic: &[u8]) -> Option<u64> {
         None
     }
 }
+/// Index format v1 magic (read-only; v2 is written).
 pub const IDX_MAGIC: &[u8; 8] = b"P2PIDX01";
+/// Magic at the start of every pack record.
 pub const REC_MAGIC: u32 = u32::from_le_bytes(*b"P2PR");
+/// Record header length in bytes.
 pub const REC_HEADER: usize = 4 + 1 + 1 + 2 + 32 + 8 + 4;
+/// Record trailer (CRC-32) length in bytes.
 pub const REC_TRAILER: usize = 4;
+/// v1 index entry length in bytes.
 pub const IDX_ENTRY: usize = 32 + 8 + 4 + 8 + 1 + 1;
 /// v2 entries add `frame_inner: u32` and `frame_len: u32` (0 = not framed).
 pub const IDX_ENTRY_V2: usize = IDX_ENTRY + 8;
@@ -73,8 +78,11 @@ fn rd_hash(b: &[u8]) -> Hash {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// What a pack record holds.
 pub enum Kind {
+    /// A whole object (or chunk), at most `MAX_BLOB` bytes.
     Blob = 0,
+    /// A manifest node: the `(hash, length)` list of a large object or of a range of one.
     Manifest = 1,
     /// Several small objects compressed together. The payload is an
     /// uncompressed member directory followed by the (codec-compressed)
@@ -85,8 +93,11 @@ pub enum Kind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// How a record payload is encoded.
 pub enum Codec {
+    /// Stored as is.
     Raw = 0,
+    /// zstd-compressed.
     Zstd = 1,
 }
 
@@ -113,14 +124,20 @@ impl Codec {
 /// Parsed record header (payload excluded).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecHeader {
+    /// Record kind.
     pub kind: Kind,
+    /// Payload codec.
     pub codec: Codec,
+    /// Content hash of the logical object (for frames, of the concatenated bodies).
     pub hash: Hash,
+    /// Logical (uncompressed) length.
     pub raw_len: u64,
+    /// Stored payload length.
     pub stored_len: u32,
 }
 
 impl RecHeader {
+    /// Total record length: header + payload + trailer.
     pub fn total_len(&self) -> u64 {
         (REC_HEADER + self.stored_len as usize + REC_TRAILER) as u64
     }
@@ -198,6 +215,7 @@ pub fn unpack_payload(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
 // Manifest: list of (chunk hash, chunk length)
 // ---------------------------------------------------------------------------
 
+/// Encodes a manifest node.
 pub fn encode_manifest(chunks: &[(Hash, u64)]) -> Vec<u8> {
     let mut v = Vec::with_capacity(4 + chunks.len() * 40);
     v.extend_from_slice(&(chunks.len() as u32).to_le_bytes());
@@ -208,6 +226,7 @@ pub fn encode_manifest(chunks: &[(Hash, u64)]) -> Vec<u8> {
     v
 }
 
+/// Decodes a manifest node (length-checked).
 pub fn decode_manifest(b: &[u8]) -> Result<Vec<(Hash, u64)>> {
     if b.len() < 4 {
         return Err(Error::Corrupt("short manifest".into()));
@@ -258,6 +277,7 @@ pub fn encode_frame(members: &[(Hash, &[u8])], level: i32) -> Result<(Codec, Vec
 /// A frame member: `(hash, offset in the decompressed frame, length)`.
 pub type FrameMember = (Hash, u32, u32);
 
+/// Parses a frame's member directory and returns the members and the offset where the bodies start.
 pub fn decode_frame_dir(payload: &[u8]) -> Result<(Vec<FrameMember>, usize)> {
     if payload.len() < 4 {
         return Err(Error::Corrupt("short frame".into()));
@@ -307,12 +327,19 @@ pub fn decode_frame_bodies(h: &RecHeader, payload: &[u8]) -> Result<Vec<u8>> {
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// One pack index entry: where an object (or chunk, or frame member) lives in a pack.
 pub struct IdxEntry {
+    /// Object hash.
     pub hash: Hash,
+    /// Record offset in the pack.
     pub offset: u64,
+    /// Stored payload length of the record.
     pub stored_len: u32,
+    /// Logical length of the object.
     pub raw_len: u64,
+    /// Record kind (members of frames are `Blob`).
     pub kind: Kind,
+    /// Payload codec.
     pub codec: Codec,
     /// For an object stored inside a frame: `(offset within the
     /// decompressed frame, decompressed frame length)`. Here `offset` and
@@ -320,6 +347,7 @@ pub struct IdxEntry {
     pub frame: Option<(u32, u32)>,
 }
 
+/// Encodes a sorted index (format v2) with a BLAKE3 trailer.
 pub fn encode_index(entries: &mut [IdxEntry]) -> Vec<u8> {
     entries.sort_by_key(|e| e.hash);
     let mut v = Vec::with_capacity(16 + entries.len() * IDX_ENTRY_V2 + 32);
@@ -341,6 +369,7 @@ pub fn encode_index(entries: &mut [IdxEntry]) -> Vec<u8> {
     v
 }
 
+/// Decodes and verifies an index (format v1 or v2).
 pub fn decode_index(b: &[u8]) -> Result<Vec<IdxEntry>> {
     if b.len() < 16 + 32 {
         return Err(Error::Corrupt("bad index header".into()));

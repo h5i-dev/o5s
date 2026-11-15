@@ -10,6 +10,7 @@ This mirrors `crates/server/src/auth.rs` (`Authorizer::allows`) and the guards i
 * `resolve n` needs read on `n`;
 * `replace n rs _` needs write on `n` **and** read on every name in `rs` (a read set
   is information about those names);
+* `deleteRef n rs` needs the same as `replace`;
 * `setRule p _` needs admin on `p`.
 
 Theorems: an unauthorized principal can't move a name (`unauthorized_cannot_move`,
@@ -56,6 +57,10 @@ noncomputable def authStep (hashOf : B → H) (pol : List Grant) (p : Principal)
   | .replace n rs new =>
     if allows pol p n .write && rs.all (fun x => allows pol p x.1 .read) then
       some (step hashOf s (.replace n rs new))
+    else none
+  | .deleteRef n rs =>
+    if allows pol p n .write && rs.all (fun x => allows pol p x.1 .read) then
+      some (step hashOf s (.deleteRef n rs))
     else none
   | .setRule q r => if allows pol p q .admin then some (step hashOf s (.setRule q r)) else none
 
@@ -104,6 +109,17 @@ theorem unauthorized_cannot_move (hashOf : B → H) (pol : List Grant) (p : Prin
     simp only [authStep] at hr
     split at hr
     · simp only [Option.some.injEq] at hr; subst hr; simp [step, setRule_refs]
+    · cases hr
+  | deleteRef m rs =>
+    simp only [authStep] at hr
+    split at hr
+    · rename_i hall
+      simp only [Option.some.injEq] at hr
+      subst hr
+      have hmn : m ≠ n := by
+        intro e; subst e
+        simp [hw] at hall
+      simp [step, deleteRef_other s m rs n hmn]
     · cases hr
   | replace m rs new =>
     simp only [authStep] at hr

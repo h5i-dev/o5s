@@ -1,5 +1,6 @@
 //! Core types shared by every pico2peta layer: content hashes, names, read sets,
 //! namespace rules, errors, and the `ObjectStore` trait.
+#![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use std::collections::HashMap;
@@ -20,16 +21,20 @@ use std::str::FromStr;
 pub struct Hash(pub [u8; 32]);
 
 impl Hash {
+    /// Length of a hash in bytes.
     pub const LEN: usize = 32;
 
+    /// BLAKE3-256 of `data`.
     pub fn of(data: &[u8]) -> Hash {
         Hash(*blake3::hash(data).as_bytes())
     }
 
+    /// The raw 32 bytes.
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
 
+    /// Lowercase hex (64 characters).
     pub fn to_hex(&self) -> String {
         const HEX: &[u8; 16] = b"0123456789abcdef";
         let mut s = String::with_capacity(64);
@@ -80,40 +85,77 @@ impl FromStr for Hash {
 // Errors
 // ---------------------------------------------------------------------------
 
+/// Every error a pico2peta API can return. `Error::code()` gives a stable
+/// machine-readable string (used on the wire).
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// No object with this hash is stored.
     #[error("object not found: {0}")]
     NotFound(Hash),
+    /// A backend blob (pack, index, GC record) doesn't exist.
     #[error("backend key not found: {0}")]
     KeyNotFound(String),
+    /// A backend operation failed after the backend's own retries.
     #[error("backend error (transient={transient}): {msg}")]
-    Backend { transient: bool, msg: String },
+    Backend {
+        /// Whether retrying later might succeed (throttling, unavailability).
+        transient: bool,
+        /// Human-readable cause.
+        msg: String,
+    },
+    /// A byte range outside `0..=len` was requested.
     #[error("invalid range {start}..{end} for object of length {len}")]
-    InvalidRange { start: u64, end: u64, len: u64 },
+    InvalidRange {
+        /// Requested start offset.
+        start: u64,
+        /// Requested end offset (exclusive).
+        end: u64,
+        /// Object length.
+        len: u64,
+    },
+    /// A ref name or namespace prefix violates the name grammar (name, reason).
     #[error("invalid name {0:?}: {1}")]
     InvalidName(String, &'static str),
+    /// `replace`/`delete_ref` target isn't in its own read set (no blind writes).
     #[error("replace target {0} is not in the read set")]
     TargetNotInReadSet(Name),
+    /// A ref would point at an object that isn't stored.
     #[error("object {0} does not exist; refusing to point a name at it")]
     MissingObject(Hash),
+    /// The namespace rule forbids this change.
     #[error("forbidden by namespace rule {rule:?} for {name}: {why}")]
-    Forbidden { name: Name, rule: Rule, why: &'static str },
+    Forbidden {
+        /// The name that may not change.
+        name: Name,
+        /// The rule governing it.
+        rule: Rule,
+        /// Why the rule forbids it.
+        why: &'static str,
+    },
+    /// A rule can't be set or changed on a prefix that already has refs.
     #[error("cannot set rule on {0}: names already exist under it")]
     RuleChangeOnNonEmpty(String),
+    /// Stored data failed a checksum, hash or format check.
     #[error("corrupt data: {0}")]
     Corrupt(String),
+    /// Invalid input (arguments, configuration, text formats).
     #[error("parse error: {0}")]
     Parse(String),
+    /// The operation isn't supported by this implementation.
     #[error("unsupported: {0}")]
     Unsupported(&'static str),
+    /// Another process holds a lock that is required exclusively.
     #[error("repository is locked by another process")]
     Locked,
+    /// Authentication or authorization failed (API v1.1).
     #[error("unauthorized: {0}")]
     Unauthorized(String),
+    /// An operating-system I/O error.
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }
 
+/// Result type of all pico2peta APIs.
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
@@ -170,6 +212,7 @@ pub trait ObjectStore: Send + Sync {
     fn open(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Box<dyn Read + Send>>;
     /// Length of the object, or `NotFound`.
     fn size(&self, hash: &Hash) -> Result<u64>;
+    /// Whether `hash` is stored (any copy, including one GC has condemned; see `ensure_live`).
     fn contains(&self, hash: &Hash) -> Result<bool>;
     /// Like `contains`, but also guarantees that the object (and everything
     /// it is physically made of) is in **live**, non-condemned storage,
@@ -210,6 +253,13 @@ pub trait Repository: ObjectStore {
             _ => Err(Error::Unsupported("replace_many is not supported by this repository")),
         }
     }
+    /// OCC delete of a ref (API v1.5). It obeys namespace rules: create-once
+    /// names can't be deleted. Re-creating a deleted name continues its
+    /// version sequence. Deleting an absent name is `Ok { version: 0 }`.
+    fn delete_ref(&self, name: &Name, read_set: &[(Name, Observed)]) -> Result<ReplaceOutcome> {
+        let _ = (name, read_set);
+        Err(Error::Unsupported("delete_ref is not supported by this repository"))
+    }
     /// All refs under `prefix` ("" = all), sorted by name.
     fn list_refs(&self, prefix: &str) -> Result<Vec<(Name, RefValue)>>;
     /// Sets the rule for namespace `prefix`. Fails with
@@ -226,12 +276,15 @@ pub struct MemStore {
 }
 
 impl MemStore {
+    /// An empty store.
     pub fn new() -> Self {
         Self::default()
     }
+    /// Number of stored objects.
     pub fn len(&self) -> usize {
         self.objects.read().map(|m| m.len()).unwrap_or(0)
     }
+    /// True if nothing is stored.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -282,11 +335,13 @@ impl ObjectStore for MemStore {
 pub struct Name(String);
 
 impl Name {
+    /// Validates and wraps a name (see the type docs for the grammar).
     pub fn new(s: impl Into<String>) -> Result<Name> {
         let s = s.into();
         validate_path(&s)?;
         Ok(Name(s))
     }
+    /// The name as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -355,6 +410,7 @@ pub enum Rule {
 }
 
 impl Rule {
+    /// Canonical spelling (`mutable`, `immutable`, `head-release`).
     pub fn as_str(&self) -> &'static str {
         match self {
             Rule::Mutable => "mutable",
@@ -362,6 +418,7 @@ impl Rule {
             Rule::HeadMutableReleaseImmutable => "head-release",
         }
     }
+    /// Stable one-byte code used in on-disk formats.
     pub fn code(&self) -> u8 {
         match self {
             Rule::Mutable => 0,
@@ -369,6 +426,7 @@ impl Rule {
             Rule::HeadMutableReleaseImmutable => 2,
         }
     }
+    /// Inverse of [`Rule::code`].
     pub fn from_code(c: u8) -> Option<Rule> {
         Some(match c {
             0 => Rule::Mutable,
@@ -426,6 +484,7 @@ pub fn mobility(rule: Rule, prefix: &str, name: &Name) -> Mobility {
 /// The state of one name as observed by a reader.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Observed {
+    /// The name did not exist.
     Absent,
     /// Present at this version (versions start at 1 and increase by 1 per change).
     Version(u64),
@@ -434,11 +493,14 @@ pub enum Observed {
 /// The current value of a ref.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RefValue {
+    /// Object the name points at.
     pub hash: Hash,
+    /// Version, starting at 1 and incremented on every change (continuing across deletes).
     pub version: u64,
 }
 
 impl RefValue {
+    /// What a reader observed, given a `resolve` result.
     pub fn observed(v: Option<RefValue>) -> Observed {
         match v {
             None => Observed::Absent,
@@ -454,19 +516,31 @@ pub type ReadSet = Vec<(Name, Observed)>;
 /// Result of a `replace` that passed input validation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReplaceOutcome {
-    /// Committed; the name is now at this version.
-    Ok { version: u64 },
-    /// Some read-set entries no longer match. Lists `(name, current)`.
-    Conflict { stale: Vec<(Name, Observed)> },
+    /// Committed; the name is now at `version`.
+    Ok {
+        /// The new version.
+        version: u64,
+    },
+    /// Some read-set entries no longer match. Nothing changed.
+    Conflict {
+        /// `(name, current state)` for each stale entry.
+        stale: Vec<(Name, Observed)>,
+    },
 }
 
 /// Result of a `replace_many` that passed input validation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReplaceManyOutcome {
-    /// All updates committed atomically; new versions in update order.
-    Ok { versions: Vec<u64> },
+    /// All updates committed atomically.
+    Ok {
+        /// New versions, in update order.
+        versions: Vec<u64>,
+    },
     /// Some read-set entries no longer match; nothing was changed.
-    Conflict { stale: Vec<(Name, Observed)> },
+    Conflict {
+        /// `(name, current state)` for each stale entry.
+        stale: Vec<(Name, Observed)>,
+    },
 }
 
 /// Finds the governing namespace for `name`: the longest prefix in `rules`

@@ -190,6 +190,7 @@ fn garbage_journal_rejected() {
 struct Model {
     refs: BTreeMap<String, (Hash, u64)>,
     rules: BTreeMap<String, Rule>,
+    tomb: BTreeMap<String, u64>,
 }
 
 impl Model {
@@ -226,8 +227,31 @@ impl Model {
         if !allowed {
             return Err("forbidden");
         }
-        let v = self.refs.get(name).map_or(1, |v| v.1 + 1);
+        let v = self.refs.get(name).map_or(self.tomb.get(name).map_or(1, |t| t + 1), |v| v.1 + 1);
+        self.tomb.remove(name);
         self.refs.insert(name.to_string(), (new, v));
+        Ok(true)
+    }
+    fn delete(&mut self, name: &str, rs: &[(String, Observed)]) -> std::result::Result<bool, &'static str> {
+        if !rs.iter().any(|(n, _)| n == name) {
+            return Err("target_not_in_read_set");
+        }
+        if rs.iter().any(|(n, o)| self.obs(n) != *o) {
+            return Ok(false);
+        }
+        let Some(cur) = self.refs.get(name).copied() else { return Ok(true) };
+        let (rule, p) = self.rule_for(name);
+        let rest = if p.is_empty() { name.to_string() } else { name[p.len()..].trim_start_matches('/').to_string() };
+        let ok = match rule {
+            Rule::Mutable => true,
+            Rule::ImmutableAfterPublish => false,
+            Rule::HeadMutableReleaseImmutable => rest.starts_with("heads/") && rest.len() > 6,
+        };
+        if !ok {
+            return Err("forbidden");
+        }
+        self.refs.remove(name);
+        self.tomb.insert(name.to_string(), cur.1);
         Ok(true)
     }
     fn set_rule(&mut self, p: &str, r: Rule) -> std::result::Result<(), &'static str> {
@@ -247,6 +271,7 @@ const PREFIXES: &[&str] = &["a", "p", "p/y", "m"];
 
 #[derive(Debug, Clone)]
 enum Op {
+    Delete(usize, bool),
     /// Unique targets (all in the read set, observed truly or by guess) + new values.
     Many(Vec<(usize, bool)>, u8),
     Replace(usize, Vec<(usize, Option<u8>)>, u8, bool),
@@ -259,6 +284,7 @@ fn op() -> impl Strategy<Value = Op> {
         6 => (0..NAMES.len(), proptest::collection::vec((0..NAMES.len(), proptest::option::of(0u8..4)), 0..3), any::<u8>(), any::<bool>())
             .prop_map(|(t, rs, v, fresh)| Op::Replace(t, rs, v, fresh)),
         2 => (0..PREFIXES.len(), 0u8..3).prop_map(|(p, r)| Op::Rule(p, r)),
+        2 => (0..NAMES.len(), any::<bool>()).prop_map(|(t, f)| Op::Delete(t, f)),
         2 => (proptest::collection::vec((0..NAMES.len(), any::<bool>()), 1..4), any::<u8>()).prop_map(|(t, v)| Op::Many(t, v)),
         1 => Just(Op::Reopen),
     ]
@@ -274,6 +300,18 @@ proptest! {
         let mut m = Model::default();
         for o in ops {
             match o {
+                Op::Delete(t, fresh) => {
+                    let nm = NAMES[t];
+                    let rs = vec![(nm.to_string(), if fresh { m.obs(nm) } else { Observed::Version(3) })];
+                    let expect = m.delete(nm, &rs);
+                    let rs2: Vec<(Name, Observed)> = rs.iter().map(|(a, o)| (n(a), *o)).collect();
+                    match (expect, r.delete(&n(nm), &rs2)) {
+                        (Ok(true), Ok(ReplaceOutcome::Ok { .. })) => {}
+                        (Ok(false), Ok(ReplaceOutcome::Conflict { .. })) => {}
+                        (Err(code), Err(e)) => prop_assert_eq!(code, e.code()),
+                        (e, g) => prop_assert!(false, "delete: model {:?} vs impl {:?}", e, g),
+                    }
+                }
                 Op::Many(mut targets, v) => {
                     targets.sort_by_key(|t| t.0);
                     targets.dedup_by_key(|t| t.0);
@@ -285,16 +323,17 @@ proptest! {
                     let expect: std::result::Result<bool, &str> = if rs.iter().any(|(n2, o)| m.obs(n2) != *o) {
                         Ok(false)
                     } else {
-                        let mut trial = Model { refs: m.refs.clone(), rules: m.rules.clone() };
+                        let mut trial = Model { refs: m.refs.clone(), rules: m.rules.clone(), tomb: m.tomb.clone() };
                         let mut res = Ok(true);
                         for (i, (t, _)) in targets.iter().enumerate() {
                             // Each update is judged against the pre-state.
-                            let mut probe = Model { refs: m.refs.clone(), rules: m.rules.clone() };
+                            let mut probe = Model { refs: m.refs.clone(), rules: m.rules.clone(), tomb: m.tomb.clone() };
                             if let Err(e) = probe.replace(NAMES[*t], &rs, h(v as u64 + i as u64)) { res = Err(e); break; }
-                            let ver = m.refs.get(NAMES[*t]).map_or(1, |x| x.1 + 1);
+                            let ver = m.refs.get(NAMES[*t]).map_or(m.tomb.get(NAMES[*t]).map_or(1, |t| t + 1), |x| x.1 + 1);
+                            trial.tomb.remove(NAMES[*t]);
                             trial.refs.insert(NAMES[*t].to_string(), (h(v as u64 + i as u64), ver));
                         }
-                        if res == Ok(true) { m.refs = trial.refs; }
+                        if res == Ok(true) { m.refs = trial.refs; m.tomb = trial.tomb; }
                         res
                     };
                     let ups: Vec<(Name, Hash)> = targets.iter().enumerate().map(|(i, (t, _))| (n(NAMES[*t]), h(v as u64 + i as u64))).collect();
@@ -515,4 +554,32 @@ fn replace_many_is_atomic() {
     r.compact().unwrap();
     let r2 = RefStore::open(d.path()).unwrap();
     assert_eq!(r2.resolve(&b).unwrap().unwrap(), RefValue { hash: h(2), version: 1 });
+}
+
+#[test]
+fn delete_rules_tombstones_and_persistence() {
+    let d = tempfile::tempdir().unwrap();
+    let r = RefStore::open(d.path()).unwrap();
+    r.set_rule("pkg", Rule::ImmutableAfterPublish).unwrap();
+    r.set_rule("m", Rule::HeadMutableReleaseImmutable).unwrap();
+    let (a, p, head, rel) = (n("a"), n("pkg/x"), n("m/heads/main"), n("m/releases/v1"));
+    for nm in [&a, &p, &head, &rel] {
+        r.replace(nm, &[(nm.clone(), Observed::Absent)], h(1), &yes).unwrap();
+    }
+    r.replace(&a, &[(a.clone(), Observed::Version(1))], h(2), &yes).unwrap();
+    // Stale delete conflicts; fresh delete succeeds.
+    assert!(matches!(r.delete(&a, &[(a.clone(), Observed::Version(1))]).unwrap(), ReplaceOutcome::Conflict { .. }));
+    assert_eq!(r.delete(&a, &[(a.clone(), Observed::Version(2))]).unwrap(), ReplaceOutcome::Ok { version: 2 });
+    assert_eq!(r.resolve(&a).unwrap(), None);
+    // Immutable names can't be deleted; heads can.
+    assert!(matches!(r.delete(&p, &[(p.clone(), Observed::Version(1))]), Err(Error::Forbidden { .. })));
+    assert!(matches!(r.delete(&rel, &[(rel.clone(), Observed::Version(1))]), Err(Error::Forbidden { .. })));
+    r.delete(&head, &[(head.clone(), Observed::Version(1))]).unwrap();
+    // Re-create continues the version sequence (no ABA on versions).
+    r.compact().unwrap(); // tombstones survive compaction
+    let r = RefStore::open(d.path()).unwrap();
+    assert_eq!(r.replace(&a, &[(a.clone(), Observed::Absent)], h(3), &yes).unwrap(), ReplaceOutcome::Ok { version: 3 });
+    // Deleting an absent name is an idempotent no-op.
+    let z = n("zz");
+    assert_eq!(r.delete(&z, &[(z.clone(), Observed::Absent)]).unwrap(), ReplaceOutcome::Ok { version: 0 });
 }

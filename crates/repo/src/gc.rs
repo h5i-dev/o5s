@@ -19,15 +19,23 @@
 //!   by its `.pack`, and finally the GC records.
 //!
 //! Writers re-list at least every [`pico2peta_pack::store::DEDUP_REFRESH_INTERVAL`]
-//! before trusting a dedup hit, and they ignore copies in condemned packs. A
-//! writer whose `put` deduplicated against a pack being collected has
-//! therefore either learned about the condemnation (and rewritten the object)
-//! or referenced it early enough for the delete phase's mark to rescue it.
-//! Readers whose pack disappears re-list and follow the rescued copy.
+//! before trusting a dedup hit, and they ignore copies in condemned packs.
+//! Before committing a ref, `replace`/`replace_many` call
+//! [`ObjectStore::ensure_live`] on the target: it rewrites the object (and its
+//! chunks) into live storage if GC has condemned the only copy, and returns
+//! false if the object is gone, so the replace then fails with `MissingObject`
+//! instead of creating a dangling ref. Readers whose pack disappears re-list
+//! and follow the rescued copy.
 //!
-//! **Assumption (operation lease):** a single `put` → `replace` sequence
-//! finishes within `G`. [`GcOptions::grace`] defaults to 1 hour and must be at
-//! least 10 minutes unless `allow_short_grace` is set (tests only).
+//! **Remaining timing assumption:** the few milliseconds between
+//! `ensure_live` and the journal commit, plus the dedup refresh interval
+//! (60 s), are far shorter than the grace period. A slow writer (put now,
+//! replace hours later) is therefore safe: at worst its `replace` fails and it
+//! must put again. [`GcOptions::grace`] defaults to 1 hour and must be at least
+//! 10 minutes unless `allow_short_grace` is set (tests only). Objects
+//! referenced *indirectly* (children found by a [`Tracer`]) must be passed
+//! through `ensure_live` by the adapter that links them, as the Git and OCI
+//! adapters do.
 
 use crate::LocalRepo;
 use pico2peta_core::backend::PutSource;
@@ -59,7 +67,9 @@ impl Tracer for OpaqueObjects {
 /// Example (Git): group = file extension, order = path + commit time.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct GroupKey {
+    /// Objects with the same group are compressed together.
     pub group: String,
+    /// Position within the group (lexicographic).
     pub order: String,
 }
 
@@ -68,6 +78,7 @@ pub struct GroupKey {
 /// those it knows; unknown objects are copied verbatim. Adapters implement it
 /// (e.g. the Git adapter by walking trees: paths are known only from trees).
 pub trait Grouper: Send + Sync {
+    /// Group keys for (some of) `live`. Objects without a key are copied verbatim.
     fn assign(&self, repo: &dyn Repository, live: &HashSet<Hash>) -> Result<HashMap<Hash, GroupKey>>;
 }
 

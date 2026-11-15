@@ -50,9 +50,11 @@ pub const DEFAULT_MANIFEST_FANOUT: usize = 4096;
 pub struct PackConfig {
     /// Objects at least this large are chunked.
     pub chunk_threshold: usize,
-    /// FastCDC minimum, average and maximum chunk sizes.
+    /// FastCDC minimum chunk size.
     pub cdc_min: u32,
+    /// FastCDC average chunk size.
     pub cdc_avg: u32,
+    /// FastCDC maximum chunk size (must be below `chunk_threshold`).
     pub cdc_max: u32,
     /// The open pack is sealed once it reaches this many bytes.
     pub pack_cap: u64,
@@ -132,11 +134,17 @@ struct Loc {
 /// Summary counters.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PackStats {
+    /// Sealed packs known to this handle.
     pub sealed_packs: usize,
+    /// Addressable hashes (objects, chunks, manifest nodes).
     pub objects: usize,
+    /// Of which blobs (including chunks and frame members).
     pub blobs: usize,
+    /// Of which manifest nodes.
     pub manifests: usize,
+    /// Bytes in this handle's open (unsealed) pack.
     pub open_bytes: u64,
+    /// Sum of blob lengths.
     pub logical_blob_bytes: u64,
 }
 
@@ -199,9 +207,15 @@ struct Inner {
     dedup_refresh_ms: AtomicU64,
     /// Recently decompressed frames: `((frame hash, record offset), bodies)`.
     frame_cache: Mutex<Vec<FrameCacheEntry>>,
+    /// Recently used manifest nodes (immutable, so they can be cached freely).
+    manifest_cache: Mutex<Vec<ManifestCacheEntry>>,
 }
 
 type FrameCacheEntry = ((Hash, u64), Arc<Vec<u8>>);
+type ManifestCacheEntry = (Hash, Arc<Vec<(Hash, u64)>>);
+
+/// Manifest nodes cached per handle (each up to `manifest_fanout` × 40 B).
+const MANIFEST_CACHE: usize = 16;
 
 /// Frames kept decompressed per handle (at most ~4 MiB each by default).
 const FRAME_CACHE: usize = 8;
@@ -286,6 +300,7 @@ impl PackStore {
                 generation: AtomicU64::new(1),
                 dedup_refresh_ms: AtomicU64::new(DEDUP_REFRESH_INTERVAL.as_millis() as u64),
                 frame_cache: Mutex::new(Vec::new()),
+                manifest_cache: Mutex::new(Vec::new()),
             }),
         };
         s.refresh()?;
@@ -293,6 +308,7 @@ impl PackStore {
         Ok(s)
     }
 
+    /// The configuration this store was opened with.
     pub fn config(&self) -> &PackConfig {
         &self.inner.cfg
     }
@@ -541,15 +557,24 @@ impl PackStore {
 
     /// Compresses (if useful) and appends one record to the open pack.
     fn append(&self, w: &mut Option<OpenPack>, kind: Kind, hash: Hash, raw_len: u64, raw: &[u8]) -> Result<()> {
-        let compressed = if self.inner.cfg.zstd_level != 0 && raw.len() >= 64 {
-            zstd::bulk::compress(raw, self.inner.cfg.zstd_level).ok().filter(|c| c.len() < raw.len())
-        } else {
-            None
-        };
+        let compressed = compress(self.inner.cfg.zstd_level, raw);
         let (codec, payload): (Codec, &[u8]) = match &compressed {
             Some(c) => (Codec::Zstd, c),
             None => (Codec::Raw, raw),
         };
+        self.append_encoded(w, kind, hash, raw_len, codec, payload)
+    }
+
+    /// Appends an already-encoded payload (see [`compress`]).
+    fn append_encoded(
+        &self,
+        w: &mut Option<OpenPack>,
+        kind: Kind,
+        hash: Hash,
+        raw_len: u64,
+        codec: Codec,
+        payload: &[u8],
+    ) -> Result<()> {
         let rec = encode_record(kind, codec, &hash, raw_len, payload);
         if w.is_none() {
             *w = Some(self.new_open_pack()?);
@@ -724,6 +749,22 @@ impl PackStore {
     }
 
     fn read_manifest(&self, hash: &Hash, loc: Loc) -> Result<Vec<(Hash, u64)>> {
+        {
+            let c = self.inner.manifest_cache.lock().map_err(poisoned)?;
+            if let Some((_, m)) = c.iter().find(|(k, _)| k == hash) {
+                return Ok(m.as_ref().clone());
+            }
+        }
+        let m = self.read_manifest_uncached(hash, loc)?;
+        let mut c = self.inner.manifest_cache.lock().map_err(poisoned)?;
+        if c.len() >= MANIFEST_CACHE {
+            c.remove(0);
+        }
+        c.push((*hash, Arc::new(m.clone())));
+        Ok(m)
+    }
+
+    fn read_manifest_uncached(&self, hash: &Hash, loc: Loc) -> Result<Vec<(Hash, u64)>> {
         let (_, data) = self.read_record(hash, loc)?;
         let m = decode_manifest(&data)?;
         if m.iter().try_fold(0u64, |a, c| a.checked_add(c.1)) != Some(loc.raw_len) {
@@ -739,41 +780,37 @@ impl PackStore {
         // A tree of manifests. Every node is the manifest of a contiguous range
         // of the object and is keyed by the BLAKE3 of that range, so every
         // index key is still the content hash of what `get` returns for it.
-        struct Level {
-            hasher: blake3::Hasher,
-            entries: Vec<(Hash, u64)>,
-            len: u64,
-        }
         let fanout = self.inner.cfg.manifest_fanout;
         let mut whole = blake3::Hasher::new();
         let mut levels: Vec<Level> = vec![Level { hasher: blake3::Hasher::new(), entries: Vec::new(), len: 0 }];
-        for c in chunks {
-            let c = c?;
-            whole.update(&c);
-            for l in levels.iter_mut() {
-                l.hasher.update(&c);
-            }
-            let ch = Hash::of(&c);
-            if !self.dedup_hit(&ch)? {
-                let mut w = self.inner.writer.lock().map_err(poisoned)?;
-                self.append(&mut w, Kind::Blob, ch, c.len() as u64, &c)?;
-                self.maybe_seal(&mut w)?;
-            }
-            levels[0].entries.push((ch, c.len() as u64));
-            levels[0].len += c.len() as u64;
-            // Carry full nodes upward.
-            let mut i = 0;
-            while levels[i].entries.len() == fanout {
-                if i + 1 == levels.len() {
-                    // The new parent's first node so far is exactly this node's bytes.
-                    let h = levels[i].hasher.clone();
-                    levels.push(Level { hasher: h, entries: Vec::new(), len: 0 });
+        let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 8);
+        let level = self.inner.cfg.zstd_level;
+        let mut chunks = chunks.peekable();
+        while chunks.peek().is_some() {
+            // Read a batch, then hash and compress its chunks in parallel.
+            let mut batch: Vec<Vec<u8>> = Vec::with_capacity(CHUNK_BATCH);
+            while batch.len() < CHUNK_BATCH {
+                match chunks.next() {
+                    Some(c) => batch.push(c?),
+                    None => break,
                 }
-                let lv = &mut levels[i];
-                let node = self.emit_node(&mut lv.hasher, &mut lv.entries, &mut lv.len)?;
-                levels[i + 1].entries.push(node);
-                levels[i + 1].len += node.1;
-                i += 1;
+            }
+            let mut enc: Vec<(Hash, Option<Vec<u8>>)> = vec![(Hash([0; 32]), None); batch.len()];
+            let per = batch.len().div_ceil(workers);
+            std::thread::scope(|sc| {
+                for (bs, es) in batch.chunks(per.max(1)).zip(enc.chunks_mut(per.max(1))) {
+                    sc.spawn(move || {
+                        for (b, e) in bs.iter().zip(es.iter_mut()) {
+                            let h = Hash::of(b);
+                            // Skip compressing chunks we already have (dedup).
+                            let known = matches!(self.lookup_local(&h), Ok(Some(_)));
+                            *e = (h, if known { None } else { compress(level, b) });
+                        }
+                    });
+                }
+            });
+            for (c, (ch, z)) in batch.iter().zip(enc) {
+                self.add_chunk(c, ch, z, &mut whole, &mut levels, fanout)?;
             }
         }
         let hash = Hash(*whole.finalize().as_bytes());
@@ -797,6 +834,47 @@ impl PackStore {
             self.maybe_seal(&mut w)?;
         }
         Ok(hash)
+    }
+
+    /// Adds one chunk (already hashed and maybe compressed) to the tree.
+    fn add_chunk(
+        &self,
+        c: &[u8],
+        ch: Hash,
+        z: Option<Vec<u8>>,
+        whole: &mut blake3::Hasher,
+        levels: &mut Vec<Level>,
+        fanout: usize,
+    ) -> Result<()> {
+        whole.update(c);
+        for l in levels.iter_mut() {
+            l.hasher.update(c);
+        }
+        if !self.dedup_hit(&ch)? {
+            let mut w = self.inner.writer.lock().map_err(poisoned)?;
+            match &z {
+                Some(z) => self.append_encoded(&mut w, Kind::Blob, ch, c.len() as u64, Codec::Zstd, z)?,
+                None => self.append_encoded(&mut w, Kind::Blob, ch, c.len() as u64, Codec::Raw, c)?,
+            }
+            self.maybe_seal(&mut w)?;
+        }
+        levels[0].entries.push((ch, c.len() as u64));
+        levels[0].len += c.len() as u64;
+        // Carry full nodes upward.
+        let mut i = 0;
+        while levels[i].entries.len() == fanout {
+            if i + 1 == levels.len() {
+                // The new parent's first node so far is exactly this node's bytes.
+                let h = levels[i].hasher.clone();
+                levels.push(Level { hasher: h, entries: Vec::new(), len: 0 });
+            }
+            let lv = &mut levels[i];
+            let node = self.emit_node(&mut lv.hasher, &mut lv.entries, &mut lv.len)?;
+            levels[i + 1].entries.push(node);
+            levels[i + 1].len += node.1;
+            i += 1;
+        }
+        Ok(())
     }
 
     /// Writes one interior manifest node and resets the level.
@@ -1141,6 +1219,25 @@ pub fn read_name_list(b: &dyn Backend, key: &str) -> Result<Vec<String>> {
     }
     Ok(v)
 }
+
+/// One level of a manifest tree under construction.
+struct Level {
+    hasher: blake3::Hasher,
+    entries: Vec<(Hash, u64)>,
+    len: u64,
+}
+
+/// zstd-compresses `raw` at `level`, or returns `None` when that doesn't help (or level 0).
+fn compress(level: i32, raw: &[u8]) -> Option<Vec<u8>> {
+    if level != 0 && raw.len() >= 64 {
+        zstd::bulk::compress(raw, level).ok().filter(|c| c.len() < raw.len())
+    } else {
+        None
+    }
+}
+
+/// Chunks hashed and compressed in parallel per batch in `put_chunks`.
+const CHUNK_BATCH: usize = 64;
 
 /// Converts the `io::Error` wrapping of a core error back into it.
 fn unwrap_io(e: std::io::Error) -> Error {
