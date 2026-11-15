@@ -166,6 +166,7 @@ The contended run checks that no update is lost: the final version equals the nu
 - Git `object-format=sha256` repositories.
 - Mapping OIDC groups to policies.
 - Per-namespace storage quotas.
+- (Later) A Hugging Face / Xet adapter. Before designing it, coordinate with the core on adopting Xet's exact chunker (docs/RESEARCH_SPEEDUP.md §4) for chunk-boundary compatibility with HF-hosted models.
 - Running the git adapter against git.git/redis-sized repos. Not done yet because of the scratch disk budget, which Exp1 needs.
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
