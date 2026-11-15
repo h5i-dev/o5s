@@ -1,7 +1,7 @@
 # Lean 4 model of the pico2peta core
 
 `Pico2peta/Model.lean` is a pure model of the object layer (`put`), the name
-layer (`replace` and `deleteRef` with OCC read sets and tombstoned versions, `setRule`) and namespace rules
+layer (`replace`, `deleteRef` and the atomic transaction `updateMany` with OCC read sets and tombstoned versions, `setRule`) and namespace rules
 (longest-prefix governance, `mobilityOf`). It mirrors `crates/core::mobility`
 and `crates/refs::RefState::{decide_replace, decide_set_rule}`.
 
@@ -14,7 +14,7 @@ axioms are `propext`, `Classical.choice` and `Quot.sound`:
 | P1' stored data hashes to its key | `wf_step`, `wf_run` |
 | P2 a successful replace validated its read set | `replace_ok_validated` |
 | P2 no undetected overwrite | `no_lost_update` |
-| P3 immutable names can't move | `frozen_step`, `frozen_run`, `published_never_moves` |
+| P3 immutable names can't move (including through transactions) | `frozen_step`, `frozen_run`, `published_never_moves`, `updateMany_frozen` |
 | P4 unauthorized principals can't move or read names | `unauthorized_cannot_move`, `unauthorized_cannot_move_run`, `resolve_denied` (`Auth.lean`, mirroring the server's `Authorizer`) |
 | P5 GC/repack never lose live objects | `gc_preserves_live`, `gc_preserves_refs` (`Gc.lean`, covering the delete phase's verify-before-delete) |
 

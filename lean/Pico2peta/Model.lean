@@ -50,16 +50,20 @@ inductive Err where
   | missingObject
   | forbidden
   | ruleChangeOnNonEmpty
+  /-- Malformed input (empty or duplicate-target transaction); `Error::Parse` in Rust. -/
+  | invalid
 deriving DecidableEq
 
 inductive Outcome where
   | ok (version : Nat)
+  | okMany (versions : List Nat)
   | conflict
   | err (e : Err)
 deriving DecidableEq
 
 def Outcome.isOk : Outcome → Bool
   | .ok _ => true
+  | .okMany _ => true
   | _ => false
 
 structure State (H B : Type) where
@@ -147,6 +151,71 @@ def deleteRef (s : State H B) (n : Name) (rs : List (Name × Observed)) : Outcom
         (.ok cur.version, { s with refs := update s.refs n none, tombs := update s.tombs n (some cur.version) })
       | _ => (.err .forbidden, s)
 
+/-- One decided effect of a transaction. -/
+inductive Eff (H : Type) where
+  | set (n : Name) (v : RefVal H)
+  | del (n : Name) (v : Nat)
+  | skip
+
+def Eff.version {H : Type} : Eff H → Nat
+  | .set _ v => v.version
+  | .del _ v => v
+  | .skip => 0
+
+/-- Decides one entry of a transaction against the pre-state (the rules
+of `replace` for `some`, of `deleteRef` for `none`). -/
+def decideOne (s : State H B) (n : Name) : Option H → Except Err (Eff H)
+  | some h =>
+    match mobilityOf s.rules n, s.refs n with
+    | .forbidden, _ => .error .forbidden
+    | .createOnce, some _ => .error .forbidden
+    | _, cur => .ok (.set n ⟨h, nextVersion cur (s.tombs n)⟩)
+  | none =>
+    match s.refs n with
+    | none => .ok .skip
+    | some cur =>
+      match mobilityOf s.rules n with
+      | .mutable => .ok (.del n cur.version)
+      | _ => .error .forbidden
+
+def decideAll (s : State H B) : List (Name × Option H) → Except Err (List (Eff H))
+  | [] => .ok []
+  | (n, u) :: rest =>
+    match decideOne s n u with
+    | .error e => .error e
+    | .ok e =>
+      match decideAll s rest with
+      | .error e' => .error e'
+      | .ok es => .ok (e :: es)
+
+def applyEff (s : State H B) : Eff H → State H B
+  | .set n v => { s with refs := update s.refs n (some v), tombs := update s.tombs n none }
+  | .del n v => { s with refs := update s.refs n none, tombs := update s.tombs n (some v) }
+  | .skip => s
+
+/-- Per-entry input checks, in order: target in read set, then object exists. -/
+def inputErr (s : State H B) (rs : List (Name × Observed)) : List (Name × Option H) → Option Err
+  | [] => none
+  | (n, u) :: rest =>
+    if !(rs.any fun x => decide (x.1 = n)) then some .targetNotInReadSet
+    else if (match u with | some h => (s.objects h).isNone | none => false) then some .missingObject
+    else inputErr s rs rest
+
+/-- Atomic multi-name update (mirrors `RefStore::update_many`, API v1.6;
+`replace_many` is the all-`some` case). Every entry is decided against the
+pre-state. Any error aborts the whole transaction. -/
+def updateMany (s : State H B) (ups : List (Name × Option H)) (rs : List (Name × Observed)) :
+    Outcome × State H B :=
+  match inputErr s rs ups with
+  | some e => (.err e, s)
+  | none =>
+    if ups = [] ∨ ¬ (ups.map Prod.fst).Nodup then (.err .invalid, s)
+    else if rs.any (fun x => decide (observe s x.1 ≠ x.2)) then (.conflict, s)
+    else
+      match decideAll s ups with
+      | .error e => (.err e, s)
+      | .ok es => (.okMany (es.map Eff.version), es.foldl applyEff s)
+
 open Classical in
 /-- Sets a namespace rule. Refused if any ref lies under the prefix, so a
 rule can never change for a name that already exists. -/
@@ -159,12 +228,14 @@ inductive Op (H B : Type) where
   | put (d : B)
   | replace (n : Name) (rs : List (Name × Observed)) (new : H)
   | deleteRef (n : Name) (rs : List (Name × Observed))
+  | updateMany (ups : List (Name × Option H)) (rs : List (Name × Observed))
   | setRule (p : Name) (r : Rule)
 
 noncomputable def step (hashOf : B → H) (s : State H B) : Op H B → Outcome × State H B
   | .put d => (.ok 0, put hashOf s d)
   | .replace n rs new => replace s n rs new
   | .deleteRef n rs => deleteRef s n rs
+  | .updateMany ups rs => updateMany s ups rs
   | .setRule p r => setRule s p r
 
 noncomputable def run (hashOf : B → H) : State H B → List (Op H B) → State H B

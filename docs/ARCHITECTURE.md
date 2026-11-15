@@ -1,0 +1,128 @@
+# pico2peta architecture and on-disk formats
+
+This is the reference for operators and implementers. The code is authoritative; each section names
+the module that implements it. All integers are little endian.
+
+## Repository layout (`LocalRepo`, crates/repo)
+
+```text
+<root>/config.toml         format = 1, plus [pack] tunables (written once at init, create-only)
+<root>/staging/<id>.pack   open packs, one per writer handle, each exclusively flock'ed
+<root>/objects/            LocalDisk backend root (another Backend, e.g. S3, may be used instead)
+    packs/<P>.pack           sealed packs; P = BLAKE3 of the pack bytes (create-only)
+    packs/<P>.idx            sorted index for P; its existence is the pack's commit point
+    gc/<ts>-<id>.plan        GC: packs eligible for the next sweep
+    gc/<ts>-<id>.condemned   GC: packs to delete once the grace period has passed
+<root>/refs/journal[.<g>]  ref journal, generation g (0 = "journal")
+<root>/refs/snapshot.<g>   full ref state at the start of generation g (g ≥ 1)
+<root>/refs/CURRENT        current generation number (a hint; tombstones are authoritative)
+<root>/idx-cache/          derived, safe to delete: mapped *.idx3 copies and midx-*.midx
+```
+
+## Objects (crates/pack)
+
+**Identity.** An object's id is BLAKE3-256 of its full content, whatever its size or storage form.
+`get(id)` always returns bytes that hash to `id` (verified on every whole read; ranged reads verify
+every record they touch).
+
+### Pack file (`P2PPACK2`)
+`"P2PPACK2" | nonce[16] | record*`. The nonce makes every pack's bytes unique, so a pack's
+content-derived name never aliases another pack (GC relies on this). `P2PPACK1` (no nonce) is still read.
+
+### Record
+```text
+magic u32 "P2PR" | kind u8 | codec u8 | 0u16 | hash[32] | raw_len u64 | stored_len u32 | payload | crc32 u32
+```
+`codec`: 0 raw, 1 zstd. `kind`:
+
+| kind | payload | hash / raw_len |
+|---|---|---|
+| 0 Blob | the object (≤ 2 GiB) | object hash / length |
+| 1 Manifest | `n u32 | (child hash[32], len u64)*` | hash/length of the byte range it covers |
+| 2 Frame (v1, read-only) | `n u32 | (hash[32], len u32)* | bodies` | BLAKE3 of concatenated bodies |
+| 3 Frame2 | `n u32 | len u32* | bodies` | BLAKE3 of concatenated bodies |
+| 4 Delta | `base[32] | xor[32] [| n u32 | (dst, src, len u64)*]` | object hash / length |
+
+- **Large objects** (≥ `chunk_threshold`) are FastCDC chunks stored as blobs, under a tree of manifests
+  with at most `manifest_fanout` entries per node. Every node is keyed by the content hash of its range.
+- **Frames** hold many small objects compressed together (similarity-grouped repack). Members are indexed
+  individually. A frame isn't itself addressable.
+- **Deltas**: object = (aligned base) XOR `xor`, where `xor` is an ordinary object. With segments, object
+  bytes `[dst, dst+len)` align with base bytes `[src, src+len)`. Uncovered bytes are XORed with zero.
+
+### Pack index (`P2PIDX03`)
+```text
+"P2PIDX03" | n_rec u64 | n_ent u64 | rec[n_rec] | ent[n_ent] | blake3[32]
+rec = offset u64 | stored_len u32 | raw_len u64 | kind u8 | codec u8           (22 B)
+ent = hash[32] | rec u32 | inner u32 | len u32   (sorted by hash; 44 B)
+```
+Frame members share their frame's record (`inner`/`len` locate the member). v1 (`P2PIDX01`, 54 B
+entries) and v2 (`P2PIDX02`, 62 B) are still read.
+
+### Multi-pack index (`P2PMIDX1`, local and derived)
+`"P2PMIDX1" | n_packs u32 | name[64]* | n u64 | (hash[32], pack u32, entry u32)* | blake3[32]`.
+
+## Write path and concurrency (crates/pack)
+1. A writer appends records to its own staging file (`flock`ed). Small objects are bundled one record
+   each. Large ones are chunked, and chunks already present are deduplicated (ignoring condemned copies).
+2. `flush`/seal: fsync, hash the file, `put_if_absent(packs/P.pack)` (hard link on local disk), then
+   `put_if_absent(packs/P.idx)`, unlink staging, fsync the directory. Repeated or concurrent seals are
+   idempotent.
+3. Recovery on open: any staging file whose lock is free belongs to a dead writer. It's scanned record
+   by record, truncated at the first torn or corrupt record, and sealed.
+4. Readers re-list `packs/` on a miss, and before trusting a dedup hit if their view is older than 60 s.
+
+## Names (crates/refs)
+
+Journal file: `"P2PREFJ1" | (len u32 | crc32 u32 | payload)*`. Payload tags:
+
+| tag | meaning |
+|---|---|
+| 1 | Set(name, hash, version) |
+| 2 | Rule(prefix, rule) |
+| 3 | Rotated(next generation): tombstone, the commit point of compaction |
+| 4 | Batch (replace_many) |
+| 5 | Delete(name, last version) |
+| 6 | Txn (update_many: nested Set/Delete records) |
+
+**Commit point.** Take an exclusive `flock` on the current journal, catch up (truncating a torn tail),
+validate (input → read set → rules), append one record, fsync, unlock. Reads take a shared lock.
+**Compaction.** Write `snapshot.<g+1>` (`P2PREFS1` + records + crc32) and an empty `journal.<g+1>`,
+append `Rotated(g+1)` to the old journal (the commit point), then update `CURRENT`. Handles that reach
+the tombstone switch generations.
+
+**Rules** match on the longest prefix: `mutable`, `immutable` (create-once, never deleted),
+`head-release` (`heads/*` mutable, `releases/*` create-once, anything else forbidden). A rule can only be
+set on a prefix that has no refs, so immutability can never be retracted.
+
+## GC (crates/repo/src/gc.rs)
+
+Phases, each at least `grace` (≥ 10 min) apart:
+- **plan:** list live packs.
+- **sweep:** mark from refs, through the `Tracer`. Copy live records out of mostly-garbage or small packs
+  (frames if a `Grouper` is given), then write `condemned`.
+- **delete:** mark again, rescue anything live that is only in condemned packs, verify, then delete
+  `.idx` before `.pack`.
+
+`replace` calls `ensure_live`, which rewrites a condemned-only target, so a slow writer can't create a
+dangling ref.
+
+## Provenance (crates/prov)
+
+- Records `P2PPROV1`: canonical `op | params? | inputs | outputs | meta`.
+- Log nodes `P2PPLOG2`: `prev? | checkpoint? | total u64 | records`, with the head at ref `_prov/log`.
+- Checkpoint index `P2PPIDX1`: `n_fwd u64 | n_bwd u64 | (key, record)*`, both tables sorted. It's rebuilt
+  when the recent records reach max(1024, total/8).
+
+## Verification map
+
+| property | proof (lean/) | tests (Rust) |
+|---|---|---|
+| content never changes; data hashes to key | `objects_stable_run`, `wf_run` | read-path verification, fuzz, `fsck` |
+| no undetected overwrite | `no_lost_update`, `replace_ok_validated` | contention tests (threads, processes), Lean↔Rust difftest |
+| immutable names never move (incl. deletes, transactions) | `frozen_run`, `updateMany_frozen` | rule tests, model proptest, difftest |
+| unauthorized principals can't move/read | `unauthorized_cannot_move_run`, `resolve_denied` | server authz tests (net) |
+| GC never loses live objects | `gc_preserves_live` | GC crash sweep, concurrent-writer GC, SIGKILL test |
+
+Crash consistency (fsync honesty, atomic rename, create-only puts) is assumed by the proofs and tested
+by fault injection at every write/fsync point plus real SIGKILLs.

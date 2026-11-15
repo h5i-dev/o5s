@@ -16,6 +16,8 @@ const PREFIXES: &[&str] = &["a", "p", "p/y", "m", "m/heads"];
 #[derive(Debug, Clone)]
 enum Op {
     Put(u8),
+    /// (entries: name index, Some(hash token) or None=delete), fresh read set?
+    Txn(Vec<(usize, Option<u8>)>, bool),
     Delete(usize, Option<u8>, bool),
     Replace(usize, u8, Vec<(usize, Option<u8>)>),
     Rule(usize, u8),
@@ -28,6 +30,7 @@ fn op() -> impl Strategy<Value = Op> {
             .prop_map(|(t, h, rs)| Op::Replace(t, h, rs)),
         2 => (0..PREFIXES.len(), 0u8..3).prop_map(|(p, r)| Op::Rule(p, r)),
         2 => (0..NAMES.len(), proptest::option::of(0u8..4), any::<bool>()).prop_map(|(t, o, f)| Op::Delete(t, o, f)),
+        3 => (proptest::collection::vec((0..NAMES.len(), proptest::option::of(0u8..5)), 0..4), any::<bool>()).prop_map(|(e, f)| Op::Txn(e, f)),
     ]
 }
 
@@ -90,6 +93,36 @@ proptest! {
                     rust_out.push(match res {
                         Ok(ReplaceOutcome::Ok { version }) => format!("ok {version}"),
                         Ok(ReplaceOutcome::Conflict { .. }) => "conflict".into(),
+                        Err(e) => format!("err {}", e.code()),
+                    });
+                }
+                Op::Txn(entries, fresh) => {
+                    // Read set: each listed name, observed truly (fresh) or as "absent".
+                    let mut rs: Vec<(Name, Observed)> = Vec::new();
+                    let mut rs_txt = String::new();
+                    let mut seen = std::collections::BTreeSet::new();
+                    for (i, _) in entries {
+                        if !seen.insert(*i) { continue; }
+                        let nm = Name::new(NAMES[*i]).unwrap();
+                        let ob = if *fresh { r.resolve(&nm).unwrap().map(|v| v.version as u8) } else { None };
+                        rs.push((nm, ob.map_or(Observed::Absent, |v| Observed::Version(v as u64))));
+                        rs_txt.push_str(&format!(" {} {}", NAMES[*i], obs_str(ob)));
+                    }
+                    let ups: Vec<(Name, Option<Hash>)> =
+                        entries.iter().map(|(i, h)| (Name::new(NAMES[*i]).unwrap(), h.map(tok))).collect();
+                    let mut line = format!("U {}", entries.len());
+                    for (i, h) in entries {
+                        line.push_str(&format!(" {} {}", NAMES[*i], h.map_or("-".to_string(), |h| format!("h{h}"))));
+                    }
+                    script.push_str(&line);
+                    script.push_str(&rs_txt);
+                    script.push('\n');
+                    let objs = &objects;
+                    rust_out.push(match r.update_many(&ups, &rs, &|x| Ok(objs.contains(x))) {
+                        Ok(pico2peta_core::ReplaceManyOutcome::Ok { versions }) => {
+                            format!("ok {}", versions.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","))
+                        }
+                        Ok(pico2peta_core::ReplaceManyOutcome::Conflict { .. }) => "conflict".into(),
                         Err(e) => format!("err {}", e.code()),
                     });
                 }

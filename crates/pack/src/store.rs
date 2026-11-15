@@ -1236,28 +1236,78 @@ impl PackStore {
             Kind::Blob => Ok(None),
             Kind::Manifest => Ok(Some(self.read_manifest(hash, loc)?.into_iter().map(|c| c.0).collect())),
             Kind::Delta => {
-                let (b, x) = self.read_delta(hash, loc)?;
+                let (b, x, _) = self.read_delta(hash, loc)?;
                 Ok(Some(vec![b, x]))
             }
             Kind::Frame | Kind::Frame2 => Err(Error::Corrupt("frame record indexed as an object".into())),
         }
     }
 
-    fn read_delta(&self, hash: &Hash, loc: Loc) -> Result<(Hash, Hash)> {
+    fn read_delta(&self, hash: &Hash, loc: Loc) -> Result<(Hash, Hash, Option<Vec<DeltaSeg>>)> {
         let (_, data) = self.read_record(hash, loc)?;
         decode_delta(&data)
     }
 
     /// See [`ObjectStore::put_delta`].
     pub fn put_delta_impl(&self, base: &Hash, src: &mut dyn Read) -> Result<Hash> {
+        self.put_delta_mapped_impl(base, None, src)
+    }
+
+    /// The base as seen through an alignment: the bytes of `[start, end)` of the
+    /// *new* object's coordinate space (`end = None` means unbounded, zero-filled).
+    fn virtual_base(
+        &self,
+        base: &Hash,
+        segs: Option<&[DeltaSeg]>,
+        start: u64,
+        end: Option<u64>,
+        depth: usize,
+    ) -> Result<Box<dyn Read + Send>> {
+        let base_len = self.size(base)?;
+        let ident = [DeltaSeg { dst: 0, src: 0, len: base_len }];
+        let segs = segs.unwrap_or(&ident);
+        let mut parts: Vec<Box<dyn Read + Send>> = Vec::new();
+        let mut pos = start;
+        for g in segs {
+            let (gs, ge) = (g.dst, g.dst + g.len);
+            if ge <= pos {
+                continue;
+            }
+            if end.is_some_and(|e| gs >= e) {
+                break;
+            }
+            if gs > pos {
+                parts.push(Box::new(std::io::repeat(0).take(gs - pos)));
+                pos = gs;
+            }
+            let pe = end.map_or(ge, |e| e.min(ge));
+            let so = g.src + (pos - gs);
+            parts.push(self.open_depth(base, Some(so..so + (pe - pos)), depth + 1)?);
+            pos = pe;
+        }
+        match end {
+            Some(e) if e > pos => parts.push(Box::new(std::io::repeat(0).take(e - pos))),
+            Some(_) => {}
+            None => parts.push(Box::new(std::io::repeat(0))),
+        }
+        Ok(Box::new(ChainAll { parts: parts.into_iter().collect(), cur: None }))
+    }
+
+    /// Like [`PackStore::put_delta_impl`] with an explicit alignment (for formats
+    /// whose regions move between versions, such as reordered tensors).
+    pub fn put_delta_mapped_impl(&self, base: &Hash, segs: Option<&[DeltaSeg]>, src: &mut dyn Read) -> Result<Hash> {
         if !self.ensure_live_impl(base)? {
             return Err(Error::NotFound(*base));
         }
-        let base_len = self.size(base)?;
+        if let Some(sg) = segs {
+            if sg.len() > MAX_DELTA_SEGS {
+                return Err(Error::Parse("too many delta segments".into()));
+            }
+            validate_segs(sg, Some(self.size(base)?)).map_err(|e| Error::Parse(e.to_string()))?;
+        }
         let mut xs = XorSource {
             src,
-            base: self.open(base, None)?,
-            base_left: base_len,
+            base: self.virtual_base(base, segs, 0, None, 0)?,
             hasher: blake3::Hasher::new(),
             len: 0,
             tmp: Vec::new(),
@@ -1269,7 +1319,7 @@ impl PackStore {
             return Ok(hash);
         }
         let mut w = self.inner.writer.lock().map_err(poisoned)?;
-        self.append(&mut w, Kind::Delta, hash, len, &encode_delta(base, &xor))?;
+        self.append(&mut w, Kind::Delta, hash, len, &encode_delta(base, &xor, segs))?;
         self.maybe_seal(&mut w)?;
         Ok(hash)
     }
@@ -1389,7 +1439,7 @@ impl PackStore {
             }
         }
         if loc.kind == Kind::Delta {
-            let (b, x) = self.read_delta(hash, loc)?;
+            let (b, x, _) = self.read_delta(hash, loc)?;
             for child in [b, x] {
                 if !self.ensure_live_impl(&child)? {
                     return Err(Error::Corrupt(format!("delta {hash} references missing {child}")));
@@ -1489,6 +1539,11 @@ impl ObjectStore for PackStore {
         self.put_delta_impl(base, src)
     }
 
+    fn put_delta_mapped(&self, base: &Hash, segments: &[(u64, u64, u64)], src: &mut dyn Read) -> Result<Hash> {
+        let segs: Vec<DeltaSeg> = segments.iter().map(|&(dst, src, len)| DeltaSeg { dst, src, len }).collect();
+        self.put_delta_mapped_impl(base, Some(&segs), src)
+    }
+
     fn contains(&self, hash: &Hash) -> Result<bool> {
         Ok(self.lookup(hash)?.is_some())
     }
@@ -1512,15 +1567,11 @@ impl PackStore {
         let r = check_range(range, loc.raw_len)?;
         match loc.kind {
             Kind::Delta => {
-                let (base, xor) = self.read_delta(hash, loc)?;
-                let base_len = self.size(&base)?;
-                let (bs, be) = (r.start.min(base_len), r.end.min(base_len));
-                let base_r = self.open_depth(&base, Some(bs..be), depth + 1)?;
-                // Bytes past the end of the base were XORed with zero.
-                let padded = base_r.chain(std::io::repeat(0).take((r.end - r.start) - (be - bs)));
+                let (base, xor, segs) = self.read_delta(hash, loc)?;
+                let base_r = self.virtual_base(&base, segs.as_deref(), r.start, Some(r.end), depth)?;
                 let xor_r = self.open_depth(&xor, Some(r.clone()), depth + 1)?;
                 Ok(Box::new(XorReader {
-                    base: Box::new(padded),
+                    base: base_r,
                     xor: xor_r,
                     tmp: Vec::new(),
                     verify: whole.then(|| (blake3::Hasher::new(), *hash)),
@@ -1592,8 +1643,8 @@ const MAX_DELTA_DEPTH: usize = 32;
 /// Reads the new object from `src`, hashes it, and yields `src XOR base`.
 struct XorSource<'a> {
     src: &'a mut dyn Read,
+    /// The (aligned, zero-extended, unbounded) base.
     base: Box<dyn Read + Send>,
-    base_left: u64,
     hasher: blake3::Hasher,
     len: u64,
     tmp: Vec<u8>,
@@ -1604,16 +1655,39 @@ impl Read for XorSource<'_> {
         let n = self.src.read(buf)?;
         self.hasher.update(&buf[..n]);
         self.len += n as u64;
-        let k = (n as u64).min(self.base_left) as usize;
-        if k > 0 {
-            self.tmp.resize(k, 0);
-            self.base.read_exact(&mut self.tmp[..k])?;
-            for (a, b) in buf[..k].iter_mut().zip(&self.tmp[..k]) {
+        if n > 0 {
+            self.tmp.resize(n, 0);
+            self.base.read_exact(&mut self.tmp[..n])?;
+            for (a, b) in buf[..n].iter_mut().zip(&self.tmp[..n]) {
                 *a ^= b;
             }
-            self.base_left -= k as u64;
         }
         Ok(n)
+    }
+}
+
+/// Concatenates readers.
+struct ChainAll {
+    parts: std::collections::VecDeque<Box<dyn Read + Send>>,
+    cur: Option<Box<dyn Read + Send>>,
+}
+
+impl Read for ChainAll {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            if self.cur.is_none() {
+                match self.parts.pop_front() {
+                    Some(p) => self.cur = Some(p),
+                    None => return Ok(0),
+                }
+            }
+            let Some(c) = self.cur.as_mut() else { return Ok(0) };
+            let n = c.read(buf)?;
+            if n > 0 || buf.is_empty() {
+                return Ok(n);
+            }
+            self.cur = None;
+        }
     }
 }
 

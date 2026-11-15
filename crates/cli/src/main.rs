@@ -46,8 +46,8 @@ enum Cmd {
     Put {
         #[arg(default_value = "-")]
         file: PathBuf,
-        /// Store as an XOR delta against this object (for new versions of
-        /// model weights with the same layout).
+        /// Store as an XOR delta against this object (new versions of model
+        /// weights). safetensors files are aligned per tensor.
         #[arg(long, conflicts_with = "delta_from_ref")]
         delta_base: Option<Hash>,
         /// Store as an XOR delta against the object NAME currently points at
@@ -101,6 +101,8 @@ enum Cmd {
     Flush,
     /// Repository statistics.
     Stat,
+    /// Verify every stored object (CRC + content hash) and every ref. Exit 1 on problems.
+    Fsck,
     /// Provenance: record derivations, query lineage and impact.
     Prov {
         #[command(subcommand)]
@@ -228,7 +230,8 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 Box::new(std::io::BufReader::new(std::fs::File::open(&file)?))
             };
             let h = match delta_base {
-                Some(b) => r.put_delta(&b, &mut src)?,
+                // Tensor-aligned for safetensors checkpoints; offset-aligned otherwise.
+                Some(b) => pico2peta_weights::put_checkpoint(r, &b, &mut src)?,
                 None => r.put_stream(&mut src)?,
             };
             r.flush()?;
@@ -341,22 +344,23 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 }
                 ProvCmd::Why { hash } => {
                     let p = pico2peta_prov::Provenance::load(r, &log)?;
-                    for (rh, rec) in p.producers(&hash) {
+                    let producers = p.producers(&hash)?;
+                    for (rh, rec) in &producers {
                         writeln!(out, "record {rh} op={}", rec.op)?;
                         for (role, h) in &rec.inputs {
                             writeln!(out, "  in  {role:<12} {h}")?;
                         }
                     }
-                    for h in p.lineage(&hash) {
+                    for h in p.lineage(&hash)? {
                         writeln!(out, "lineage {h}")?;
                     }
-                    if p.producers(&hash).is_empty() {
+                    if producers.is_empty() {
                         return Ok(Outcome::Absent);
                     }
                 }
                 ProvCmd::Impact { hash } => {
                     let p = pico2peta_prov::Provenance::load(r, &log)?;
-                    for h in p.impact(&hash) {
+                    for h in p.impact(&hash)? {
                         writeln!(out, "{h}")?;
                     }
                 }
@@ -384,6 +388,20 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             for d in &rep.dangling_refs {
                 writeln!(out, "DANGLING REF   {d}")?;
             }
+        }
+        Cmd::Fsck => {
+            let repo = local_only("fsck is only available for local repositories (run it on the server host)")?;
+            let rep = repo.fsck()?;
+            writeln!(out, "objects   {} ({} bytes verified)", rep.objects_checked, rep.bytes_checked)?;
+            writeln!(out, "refs      {}", rep.refs_checked)?;
+            for e in &rep.errors {
+                writeln!(out, "ERROR     {e}")?;
+            }
+            if !rep.ok() {
+                out.flush()?;
+                return Err(Error::Corrupt(format!("fsck found {} problem(s)", rep.errors.len())));
+            }
+            writeln!(out, "ok")?;
         }
         Cmd::Stat => {
             let repo = local_only("stat is only available for local repositories (run it on the server host)")?;

@@ -1115,6 +1115,7 @@ dependencies = [
  "pico2peta-core",
  "pico2peta-prov",
  "pico2peta-repo",
+ "pico2peta-weights",
  "tempfile",
 ]
 
@@ -1244,6 +1245,16 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "pico2peta-weights"
+version = "0.1.0"
+dependencies = [
+ "pico2peta-core",
+ "pico2peta-repo",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

@@ -15,8 +15,10 @@
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod fsck;
 pub mod gc;
 
+pub use fsck::FsckReport;
 pub use gc::{GcOptions, GcReport, GroupKey, Grouper, OpaqueObjects, Tracer};
 use pico2peta_core::backend::{Backend, LocalDisk};
 use pico2peta_core::{Error, Hash, Name, ObjectStore, Observed, RefValue, ReplaceOutcome, Repository, Result, Rule};
@@ -216,6 +218,9 @@ impl ObjectStore for LocalRepo {
     }
     fn put_delta(&self, base: &Hash, src: &mut dyn Read) -> Result<Hash> {
         self.packs.put_delta(base, src)
+    }
+    fn put_delta_mapped(&self, base: &Hash, segments: &[(u64, u64, u64)], src: &mut dyn Read) -> Result<Hash> {
+        self.packs.put_delta_mapped(base, segments, src)
     }
     fn get(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Vec<u8>> {
         self.packs.get(hash, range)

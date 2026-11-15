@@ -37,18 +37,24 @@ milestone, at least every ~2 hours.
 ```
 crates/
   core/        pico2peta-core        Hash, Error, Name/Rule/Observed, ObjectStore + Repository traits,
-                                     backend::{Backend, LocalDisk, conformance}
-  pack/        pico2peta-pack        PackStore: ObjectStore (packs, index, bundling, FastCDC, recovery)
-  refs/        pico2peta-refs        RefStore: journaled refs, OCC replace, namespace rules
-  repo/        pico2peta-repo        LocalRepo = PackStore + RefStore: Repository; repo layout/config/locking
-  cli/         pico2peta-cli         binary `pico2peta` over dyn Repository
+                                     backend::{Backend, LocalDisk, conformance}, fault injection
+  pack/        pico2peta-pack        PackStore: packs, index v3 + mmap + MIDX, bundling, FastCDC + manifest
+                                     trees, frames, XOR deltas, recovery
+  refs/        pico2peta-refs        RefStore: journal + compaction, OCC replace/delete/transactions, rules
+  repo/        pico2peta-repo        LocalRepo = PackStore + RefStore: Repository; GC/repack (grouped); fsck
+  prov/        pico2peta-prov        provenance records, checkpointed log, lineage/impact, GC tracer
+  weights/     pico2peta-weights     model-weights kind: tensor-aligned deltas for safetensors
+  cli/         pico2peta-cli         binary `pico2peta` over dyn Repository (local or --remote)
   backend-s3/  (net)                 S3 Backend
-  server/      (net)                 HTTP service
+  server/      (net)                 HTTP service (+ Git smart-HTTP, OCI distribution)
   client/      (net)                 remote Repository
 bench/exp1/                          Experiment 1 harness
-fuzz/                                cargo-fuzz targets (M7)
-lean/                                deferred (M8)
+bench/micro/                         throughput and model-weights benchmarks
+fuzz/                                cargo-fuzz targets (core and net)
+lean/                                Lean 4 model, proofs and executable model (difftest)
 ```
+
+*(Layout updated 2026-11-15 to match the code; §4 is unchanged.)*
 
 ## 3. Key design decisions (defaults; can be revised)
 
@@ -165,7 +171,7 @@ What follows from each result (also decided in advance):
   this is fair, but it would differ if pico2peta stored its own tree format.
 - Read latency is measured on the experimental reader, not the M2 pack reader.
 
-## 5. Lean 4 properties (M8, deferred)
+## 5. Lean 4 properties (M8, done; see lean/README.md)
 
 Pure model, structurally mirroring `pico2peta-model`:
 - **P1 Content immutability:** for any operation sequence, if `get h = some d` at time t, then

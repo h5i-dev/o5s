@@ -13,6 +13,7 @@ path = "src/main.rs"
 pico2peta-core.workspace = true
 pico2peta-repo.workspace = true
 pico2peta-prov.workspace = true
+pico2peta-weights.workspace = true
 pico2peta-client = { path = "../client" }
 clap.workspace = true
 

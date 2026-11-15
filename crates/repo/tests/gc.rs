@@ -368,3 +368,32 @@ fn gc_keeps_delta_bases_alive() {
     assert_eq!(fresh.get(&h2, None).unwrap(), v2);
     assert!(fresh.contains(&hb).unwrap(), "base kept alive through the delta");
 }
+
+#[test]
+fn fsck_passes_on_healthy_repo_and_detects_corruption() {
+    let d = tempfile::tempdir().unwrap();
+    let r = LocalRepo::init(d.path(), &PackConfig { pack_cap: 1 << 30, zstd_level: 0, ..PackConfig::tiny() }).unwrap();
+    let h = r.put(b"precious bytes, stored raw so a flipped bit is visible").unwrap();
+    let big = r.put(&blob(5, 30_000)).unwrap();
+    set(&r, "a", h);
+    set(&r, "b", big);
+    r.flush().unwrap();
+    let rep = r.fsck().unwrap();
+    assert!(rep.ok(), "{rep:?}");
+    assert!(rep.objects_checked > 10 && rep.refs_checked == 2);
+    // Flip a byte inside the small object's payload in its sealed pack.
+    let packs = d.path().join("objects/packs");
+    for e in std::fs::read_dir(&packs).unwrap() {
+        let p = e.unwrap().path();
+        if p.extension().is_some_and(|x| x == "pack") {
+            let mut b = std::fs::read(&p).unwrap();
+            if let Some(i) = b.windows(8).position(|w| w == b"precious") {
+                b[i] ^= 0x20;
+                std::fs::write(&p, b).unwrap();
+            }
+        }
+    }
+    let rep = LocalRepo::open(d.path()).unwrap().fsck().unwrap();
+    assert!(!rep.ok());
+    assert!(rep.errors.iter().any(|e| e.contains("corrupt")), "{:?}", rep.errors);
+}

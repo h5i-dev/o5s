@@ -33,9 +33,10 @@ fn lineage_impact_and_regeneration_aware_gc() {
     record(&r, &log(), &[rec("quantize", &[("model", model)], &[("q", quant)])]).unwrap();
 
     let p = Provenance::load(&r, &log()).unwrap();
-    assert_eq!(p.len(), 2);
-    assert_eq!(p.lineage(&quant), [data, code, model].into_iter().collect());
-    assert_eq!(p.impact(&data), [model, quant].into_iter().collect());
+    assert_eq!(p.len(), 3, "len counts recordings (the duplicate is recorded twice)");
+    assert_eq!(p.producers(&quant).unwrap().len(), 1, "but queries see one distinct record");
+    assert_eq!(p.lineage(&quant).unwrap(), [data, code, model].into_iter().collect());
+    assert_eq!(p.impact(&data).unwrap(), [model, quant].into_iter().collect());
     assert!(p.regenerable(&r, &quant).unwrap().is_some());
 
     // Refs: the published quantized model and the provenance log. `model` is
@@ -95,7 +96,8 @@ fn concurrent_recorders_all_land() {
     });
     let p = Provenance::load(&r, &log()).unwrap();
     assert_eq!(p.len(), 40);
-    assert_eq!(p.impact(&base).len(), 40);
+    assert!(!p.is_empty());
+    assert_eq!(p.impact(&base).unwrap().len(), 40);
 }
 
 proptest! {
@@ -112,4 +114,52 @@ proptest! {
         let _ = Record::decode(&junk);
         let _ = LogNode::decode(&junk);
     }
+}
+
+/// Thousands of records: checkpoints are created, old records are found via the
+/// index (ranged binary search), recent ones from memory, and results match.
+#[test]
+fn checkpointed_log_scales_and_matches() {
+    let d = tempfile::tempdir().unwrap();
+    let r = LocalRepo::init(d.path(), &PackConfig::default()).unwrap();
+    let root = r.put(b"root dataset").unwrap();
+    let mut prev = root;
+    let mut chain = Vec::new();
+    // 3000 derivations in batches of 50: a linear chain root -> o1 -> o2 -> ...
+    for batch in 0..60 {
+        let mut recs = Vec::new();
+        for i in 0..50 {
+            let out = r.put(format!("out {batch} {i}").as_bytes()).unwrap();
+            recs.push(rec("step", &[("in", prev)], &[("out", out)]));
+            chain.push(out);
+            prev = out;
+        }
+        record(&r, &log(), &recs).unwrap();
+    }
+    let p = Provenance::load(&r, &log()).unwrap();
+    assert_eq!(p.len(), 3000);
+    // Oldest link (in a checkpoint) and newest (recent) both resolve.
+    assert_eq!(p.producers(&chain[0]).unwrap().len(), 1);
+    assert_eq!(p.producers(&chain[2999]).unwrap().len(), 1);
+    assert_eq!(p.consumers(&root).unwrap().len(), 1);
+    let lin = p.lineage(&chain[1500]).unwrap();
+    assert_eq!(lin.len(), 1501, "root plus 1500 predecessors");
+    assert_eq!(p.impact(&chain[2990]).unwrap().len(), 9);
+    // The head node's walk stops at a checkpoint: memory holds only recent records.
+    let head = r.resolve(&log()).unwrap().unwrap().hash;
+    let mut n = LogNode::decode(&r.get(&head, None).unwrap()).unwrap();
+    let mut walked = 0;
+    while n.checkpoint.is_none() {
+        walked += 1;
+        n = LogNode::decode(&r.get(&n.prev.unwrap(), None).unwrap()).unwrap();
+    }
+    assert!(walked < 20, "checkpoints keep the recent tail short ({walked} nodes)");
+    // GC with the provenance tracer keeps everything referenced from the log, including checkpoints.
+    let opts = GcOptions { grace: Duration::ZERO, allow_short_grace: true, ..GcOptions::default() };
+    for _ in 0..3 {
+        r.gc(&opts, &ProvTracer { inner: OpaqueObjects }).unwrap();
+    }
+    let fresh = LocalRepo::open(d.path()).unwrap();
+    let p = Provenance::load(&fresh, &log()).unwrap();
+    assert_eq!(p.lineage(&chain[100]).unwrap().len(), 101);
 }
