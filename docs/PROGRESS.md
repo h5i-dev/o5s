@@ -2,6 +2,8 @@
 
 ## Status (2026-11-15). Start here.
 
+**All milestones in PLAN.md (M0–M9) are complete and verified.** `scripts/check.sh` (fmt, clippy -D warnings, full test suite) passes on `demo` with `net` merged in. Exp1 and Exp1b are finished: both FAIL under their pre-registered rules, reported in EXP1.md. The remaining items are the production gaps listed below.
+
 | milestone | state | where |
 |---|---|---|
 | M0 Plan | done; Exp1 thresholds frozen | `docs/PLAN.md` |
