@@ -186,6 +186,10 @@ enum Cmd {
         /// Report what would happen without changing anything.
         #[arg(long)]
         dry_run: bool,
+        /// Copy live records verbatim instead of laying them out by content
+        /// similarity (the default, also settable with `[gc] similarity_repack`).
+        #[arg(long)]
+        no_similarity_repack: bool,
     },
 }
 
@@ -363,6 +367,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                     },
                     allow_eof: *allow_eof_reads,
                 },
+                gc: Default::default(),
             },
         )?;
         println!("initialized {}", cli.repo.display());
@@ -597,14 +602,16 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 }
             }
         }
-        Cmd::Gc { grace, unsafe_short_grace, dry_run } => {
+        Cmd::Gc { grace, unsafe_short_grace, dry_run, no_similarity_repack } => {
+            let repo = local_only("gc is only available for local repositories (run it on the server host)")?;
+            let base = repo.gc_options();
             let opts = pico2peta_repo::GcOptions {
                 grace: parse_duration(&grace)?,
                 allow_short_grace: unsafe_short_grace,
                 dry_run,
-                ..Default::default()
+                similarity_repack: base.similarity_repack && !no_similarity_repack,
+                ..base
             };
-            let repo = local_only("gc is only available for local repositories (run it on the server host)")?;
             // Provenance records keep their inputs alive (but not their outputs).
             let tracer = pico2peta_prov::ProvTracer { inner: pico2peta_repo::OpaqueObjects };
             let rep = repo.gc(&opts, &tracer)?;

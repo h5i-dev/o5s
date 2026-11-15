@@ -53,6 +53,15 @@ pub trait Tracer: Send + Sync {
     fn children(&self, hash: &Hash, store: &dyn ObjectStore) -> Result<Vec<Hash>>;
 }
 
+/// A grouper with no hints: similarity repack then orders by content alone.
+pub struct NoHints;
+
+impl Grouper for NoHints {
+    fn assign(&self, _: &dyn Repository, _: &HashSet<Hash>) -> Result<HashMap<Hash, GroupKey>> {
+        Ok(HashMap::new())
+    }
+}
+
 /// Treats every object as an opaque leaf. Only ref targets (and their
 /// chunks) are kept alive.
 pub struct OpaqueObjects;
@@ -103,6 +112,11 @@ pub struct GcOptions {
     pub repack_all: bool,
     /// zstd level for frames written by a grouped repack (Exp1: 19).
     pub frame_level: i32,
+    /// Lay out repacked small objects by content similarity
+    /// (`pico2peta_order`, docs/ORDERING.md). **On by default for every
+    /// domain** (the human's decision on Experiment 3); a `Grouper` only adds
+    /// tie-breaking hints. `false` copies live records verbatim.
+    pub similarity_repack: bool,
     /// Maximum uncompressed frame size for a grouped repack (default 6 MiB, the
     /// value frozen for Experiment 3; Exp1 V2 used 4 MiB).
     pub frame_cap: usize,
@@ -117,6 +131,7 @@ impl Default for GcOptions {
             small_pack_bytes: 16 << 20,
             dry_run: false,
             repack_all: false,
+            similarity_repack: true,
             frame_level: 19,
             frame_cap: pico2peta_order::frame::DEFAULT_CAP as usize,
         }
@@ -387,8 +402,8 @@ impl LocalRepo {
                     .flat_map(|(_, es)| es.iter().map(|e| e.hash))
                     .filter(|h| live.contains(h) || protected.contains(h))
                     .collect();
-                if let Some(g) = grouper {
-                    copied.extend(self.write_grouped(g, &to_copy, opts)?);
+                if opts.similarity_repack {
+                    copied.extend(self.write_grouped(grouper.unwrap_or(&NoHints), &to_copy, opts)?);
                 }
                 for (_, entries) in &victims {
                     for e in entries {

@@ -280,6 +280,14 @@ checksum and truncating a torn tail, and covered by Rust tests, not proofs).
 Toolchain: `leanprover/lean4:v4.31.0`, Mathlib by local path from
 `/mnt/scratch/ec2-user/lake/arith/packages/mathlib`, and the `.lake` build dir on scratch.
 
+## General amendment (2026-11-15, from the human): build-time thresholds
+
+For every experiment **registered after 2026-11-15**, a build-time condition against a baseline is met when the
+**geometric mean of the per-repo build ratios is ≤ 1.0×, and every repo's ratio is ≤ 1.25×**. The back-to-back re-time
+rule (±20 % of 1.0) still applies to each repo's ratio. Experiments registered earlier (Exp1, 1b, 1c, 2, 3) keep their
+own thresholds and verdicts. Context: Experiment 3 failed only on jq's re-timed build ratio (1.18×, about 2 s absolute),
+and the human overrode that consequence (EXP1.md).
+
 ## 6. Phase 3 (2026-11-15): one store, uniform core, fronts (docs/VISION.md)
 
 **Direction (from the human).** One store replaces Git hosting, Hugging Face, Artifactory, registries and the

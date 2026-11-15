@@ -308,6 +308,13 @@ more when the 1-minute load was below 2.5, and that rerun decides. It gave **1.1
     with history depth, whereas Git's delta search is cheap on small histories.
   - On the large repos we are well under (0.63, 0.75).
 
+**Human decision (2026-11-15), added below the unchanged verdict.** The human accepts a build time slightly over on
+one small repo (jq 1.18×, about 2 s absolute, measured under load), given the wins on redis (0.63), git.git (0.75) and
+ripgrep (0.94). The human therefore **overrides the pre-registered consequence**: the similarity ordering and framing
+layout (A3) becomes the **default repack layout for every domain**, enabled by default and possible to disable. The
+verdict above stays FAIL, as pre-registered. For experiments registered after this date, the build-time condition is
+geomean ≤ 1.0× **and** every repo ≤ 1.25× (PLAN.md, general amendment of 2026-11-15).
+
 **Consequence (pre-registered):** FAIL is reported honestly. Per §6.6, "the building block still ships if it beats A0
 on every corpus". It does (all four repos, and packages; weights are a tie at 0.999), so similarity ordering
 stays the grouped-repack layout. The build-time gap on small repos is follow-up work. Any re-evaluation is a new,

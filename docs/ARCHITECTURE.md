@@ -137,8 +137,10 @@ The core is domain-agnostic. Domain behaviour comes from **fronts** registered w
 
 Phases, each at least `grace` (≥ 10 min) apart:
 - **plan:** list live packs.
-- **sweep:** mark from refs, through the `Tracer`. Copy live records out of mostly-garbage or small packs
-  (frames if a `Grouper` is given), then write `condemned`.
+- **sweep:** mark from refs, through the `Tracer`. Copy live records out of mostly-garbage or small packs, then
+  write `condemned`. By default (`[gc] similarity_repack = true`, CLI `gc --no-similarity-repack` to disable),
+  live small objects are laid out by content similarity (frames and Frame3). A `Grouper` (a front) only adds
+  tie-breaking hints. This is the human's decision after Experiment 3 (EXP1.md).
 - **delete:** mark again, rescue anything live that is only in condemned packs, verify, then delete
   `.idx` before `.pack`.
 

@@ -58,6 +58,7 @@ fn cfg(profiles: &[(&str, Profile)], namespaces: &[(&str, &str)]) -> RepoConfig 
         profiles: profiles.iter().map(|(n, p)| (n.to_string(), p.clone())).collect::<BTreeMap<_, _>>(),
         namespaces: namespaces.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect(),
         read: Default::default(),
+        gc: Default::default(),
     }
 }
 
