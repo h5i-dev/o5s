@@ -1,5 +1,6 @@
 //! Core types shared by every pico2peta layer: content hashes, names, read sets,
 //! namespace rules, errors, and the `ObjectStore` trait.
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use std::collections::HashMap;
 pub mod backend;
@@ -107,6 +108,8 @@ pub enum Error {
     Unsupported(&'static str),
     #[error("repository is locked by another process")]
     Locked,
+    #[error("unauthorized: {0}")]
+    Unauthorized(String),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -130,6 +133,7 @@ impl Error {
             Error::Parse(_) => "parse",
             Error::Unsupported(_) => "unsupported",
             Error::Locked => "locked",
+            Error::Unauthorized(_) => "unauthorized",
             Error::Io(_) => "io",
         }
     }

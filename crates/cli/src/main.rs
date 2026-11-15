@@ -1,7 +1,8 @@
 //! `pico2peta` command-line tool.
 //!
 //! Exit codes: 0 success, 1 error, 2 not found / absent, 3 replace conflict,
-//! 4 forbidden by namespace rule.
+//! 4 forbidden by namespace rule, 5 unauthorized.
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use clap::{Parser, Subcommand};
 use pico2peta_core::{Error, Hash, Name, Observed, ReplaceOutcome, Repository, Rule};
@@ -290,6 +291,7 @@ fn main() -> ExitCode {
             match e {
                 Error::NotFound(_) | Error::KeyNotFound(_) => ExitCode::from(2),
                 Error::Forbidden { .. } => ExitCode::from(4),
+                Error::Unauthorized(_) => ExitCode::from(5),
                 _ => ExitCode::from(1),
             }
         }

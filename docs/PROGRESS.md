@@ -19,6 +19,8 @@
 - **v1 (2026-11-15):** first stable shapes. `Backend` lives in `pico2peta_core::backend`. It is create-only (`put_if_absent` with `PutSource::{Bytes, File}`) and adds `get_range(key, Range)`, `open` (streaming), `head`, `list -> Vec<BlobMeta>`, `delete` and `describe`. New error variants are `KeyNotFound(String)` and `Backend { transient, msg }`. `ObjectStore`/`Repository` take `&self` everywhere, and `open()` returns a `'static` streaming reader. Every backend must pass `backend::conformance::run_all`.
   These changes cover all three of the net session's "Requests for core" from 2026-11-15: streaming put, a backend error variant, and committing early.
 
+- **v1.1 (2026-11-15), additive:** `Error::Unauthorized(String)` (code `"unauthorized"`) for authn/authz failures, requested by net. The CLI exits with 5. Exhaustive `match`es on `Error` need the new arm.
+
 ## Production gaps
 - **Index in memory.** Every handle loads all `.idx` files into a HashMap, about 100 B/object, which is fine up to ~10^7–10^8 objects. Billions need a fan-out/on-disk index or a PostgreSQL index (an open question in the brief).
 - **Flat manifests.** A 100 GB object at a 64 KiB average chunk size has a ~64 MB manifest. This needs hierarchical manifests.

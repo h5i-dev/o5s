@@ -121,6 +121,7 @@ pub fn validate_key(key: &str) -> Result<()> {
 /// ```ignore
 /// pico2peta_core::backend::conformance::run_all(&my_backend);
 /// ```
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 pub mod conformance {
     use super::*;
 

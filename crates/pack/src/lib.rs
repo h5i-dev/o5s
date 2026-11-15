@@ -2,6 +2,7 @@
 //! bundling of small objects, FastCDC chunking of large ones, crash
 //! recovery, and multi-process safety. Sealed packs live on any
 //! [`pico2peta_core::backend::Backend`].
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod format;
 pub mod store;

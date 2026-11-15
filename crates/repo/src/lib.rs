@@ -12,6 +12,7 @@
 //! Any number of `LocalRepo` handles, in any number of processes, can use one
 //! root at the same time. See `pico2peta-pack` and `pico2peta-refs` for the
 //! concurrency protocols.
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod gc;
 
