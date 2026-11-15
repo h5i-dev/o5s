@@ -264,3 +264,28 @@ fn read_verify_via_cli() {
     }
     assert!(!run(&d.path().join("x"), &["init", "--read-verify", "fast"]).status.success());
 }
+
+/// search / lineage / retention through the CLI.
+#[test]
+fn search_and_retention_via_cli() {
+    let d = tempfile::tempdir().unwrap();
+    let repo = d.path().join("r");
+    ok(&repo, &["init", "--profile", "pkgs=keep_versions:1", "--namespace", "pypi/=pkgs"]);
+    for v in ["1.0", "1.1"] {
+        let f = d.path().join(format!("w{v}"));
+        std::fs::write(&f, format!("wheel {v}")).unwrap();
+        let h = ok(&repo, &["put", f.to_str().unwrap()]).trim().to_string();
+        ok(&repo, &["replace", &format!("pypi/torchlite/{v}"), &h, "--expect", "absent"]);
+    }
+    let out = ok(&repo, &["search", "--prefix", "pypi"]);
+    assert_eq!(out.lines().count(), 2, "{out}");
+    let out = ok(&repo, &["search", "torchlite"]);
+    assert_eq!(out.lines().count(), 2, "{out}");
+    assert!(ok(&repo, &["lineage", "pypi/torchlite/1.1"]).trim().is_empty(), "no provenance yet");
+    let dry = ok(&repo, &["retention", "--dry-run"]);
+    assert_eq!(dry.trim(), "would-delete pypi/torchlite/1.0");
+    assert!(run(&repo, &["resolve", "pypi/torchlite/1.0"]).status.success());
+    assert_eq!(ok(&repo, &["retention"]).trim(), "deleted pypi/torchlite/1.0");
+    assert_eq!(run(&repo, &["resolve", "pypi/torchlite/1.0"]).status.code(), Some(2));
+    assert!(!run(&d.path().join("x"), &["init", "--profile", "p=keep_versions:many"]).status.success());
+}

@@ -188,3 +188,29 @@ impl SearchIndex {
         self.records
     }
 }
+
+/// Cross-domain lineage by name: everything the object `name` points at was
+/// (transitively) derived from, with the names currently pointing at each.
+/// Names are front-neutral, e.g. `git/...` → `pypi/...` → `oci/...` → `hf/...`.
+pub fn lineage_named(repo: &dyn Repository, log_ref: &Name, name: &Name) -> Result<Vec<Hit>> {
+    named(repo, log_ref, name, true)
+}
+
+/// Cross-domain impact by name: everything (transitively) derived from the
+/// object `name` points at, i.e. what must be re-verified if it turns out bad.
+pub fn impact_named(repo: &dyn Repository, log_ref: &Name, name: &Name) -> Result<Vec<Hit>> {
+    named(repo, log_ref, name, false)
+}
+
+fn named(repo: &dyn Repository, log_ref: &Name, name: &Name, lineage: bool) -> Result<Vec<Hit>> {
+    let Some(v) = repo.resolve(name)? else { return Err(pico2peta_core::Error::NotFound(Hash([0; 32]))) };
+    let p = crate::Provenance::load(repo, log_ref)?;
+    let set = if lineage { p.lineage(&v.hash)? } else { p.impact(&v.hash)? };
+    let mut by_hash: HashMap<Hash, Vec<String>> = HashMap::new();
+    for (n, rv) in repo.list_refs("")? {
+        if set.contains(&rv.hash) {
+            by_hash.entry(rv.hash).or_default().push(n.to_string());
+        }
+    }
+    Ok(set.into_iter().map(|h| Hit { hash: h, names: by_hash.remove(&h).unwrap_or_default() }).collect())
+}

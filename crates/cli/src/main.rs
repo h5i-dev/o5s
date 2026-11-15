@@ -57,8 +57,8 @@ enum Cmd {
         /// Chunker for everything else (default fastcdc).
         #[arg(long, value_name = "CHUNKER")]
         chunk_default: Option<String>,
-        /// A domain profile, as NAME=key:value,... with keys front, chunker and
-        /// derive (none|previous). Example:
+        /// A domain profile, as NAME=key:value,... with keys front, chunker,
+        /// derive (none|previous), keep_versions (N) and only_if_regenerable. Example:
         /// `--profile weights=front:safetensors,derive:previous`. Repeatable.
         #[arg(long = "profile", value_name = "NAME=SPEC")]
         profile: Vec<String>,
@@ -111,6 +111,23 @@ enum Cmd {
         /// "eof" needs `[read] allow_eof`. Default: the repository's setting.
         #[arg(long, value_name = "strict|eof")]
         read_verify: Option<String>,
+    },
+    /// Search names and metadata: full text (all words must match), or
+    /// `--prefix P` for names under a prefix. Prints `<hash> <names...>`.
+    Search {
+        #[arg(long, conflicts_with = "words")]
+        prefix: Option<String>,
+        words: Vec<String>,
+    },
+    /// Everything NAME's object was derived from (provenance, across fronts).
+    Lineage { name: Name },
+    /// Everything derived from NAME's object (what to re-verify if it's bad).
+    Impact { name: Name },
+    /// Apply the profiles' retention (keep_versions, only_if_regenerable):
+    /// delete old versions' names so GC can collect them. Local only.
+    Retention {
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Print an object's size in bytes.
     Size { hash: Hash },
@@ -299,6 +316,17 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                             _ => return Err(Error::Parse(format!("--profile {spec:?}: derive is none or previous"))),
                         }
                     }
+                    "keep_versions" => {
+                        p.keep_versions = Some(
+                            v.parse()
+                                .map_err(|_| Error::Parse(format!("--profile {spec:?}: keep_versions is a number")))?,
+                        )
+                    }
+                    "only_if_regenerable" => {
+                        p.only_if_regenerable = v.parse().map_err(|_| {
+                            Error::Parse(format!("--profile {spec:?}: only_if_regenerable is true or false"))
+                        })?
+                    }
                     _ => return Err(Error::Parse(format!("--profile {spec:?}: unknown key {k:?}"))),
                 }
             }
@@ -422,6 +450,53 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             }
         }
         Cmd::Size { hash } => writeln!(out, "{}", r.size(&hash)?)?,
+        Cmd::Search { prefix, words } => {
+            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
+            let idx = pico2peta_prov::search::SearchIndex::build(r, &log)?;
+            match prefix {
+                Some(p) => {
+                    for (n, h) in idx.prefix(&p) {
+                        writeln!(out, "{h} {n}")?;
+                    }
+                }
+                None => {
+                    for hit in idx.text(&words.join(" ")) {
+                        writeln!(out, "{} {}", hit.hash, hit.names.join(" "))?;
+                    }
+                }
+            }
+        }
+        Cmd::Lineage { name } => {
+            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
+            for hit in pico2peta_prov::search::lineage_named(r, &log, &name)? {
+                writeln!(out, "{} {}", hit.hash, hit.names.join(" "))?;
+            }
+        }
+        Cmd::Impact { name } => {
+            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
+            for hit in pico2peta_prov::search::impact_named(r, &log, &name)? {
+                writeln!(out, "{} {}", hit.hash, hit.names.join(" "))?;
+            }
+        }
+        Cmd::Retention { dry_run } => {
+            let Some(l) = &local else {
+                return Err(Error::Unsupported("retention is only available for local repositories"));
+            };
+            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
+            let rep = pico2peta_prov::retention::apply(l, &log, dry_run)?;
+            for n in &rep.deleted {
+                writeln!(out, "{} {n}", if dry_run { "would-delete" } else { "deleted" })?;
+            }
+            for n in &rep.kept_by_rule {
+                writeln!(out, "kept-by-rule {n}")?;
+            }
+            for n in &rep.kept_not_regenerable {
+                writeln!(out, "kept-not-regenerable {n}")?;
+            }
+            for n in &rep.conflicts {
+                writeln!(out, "conflict {n}")?;
+            }
+        }
         Cmd::Resolve { name } => match r.resolve(&name)? {
             Some(v) => writeln!(out, "{} {}", v.hash, v.version)?,
             None => return Ok(Outcome::Absent),

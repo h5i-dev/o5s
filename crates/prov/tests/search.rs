@@ -62,3 +62,55 @@ fn names_metadata_and_provenance_are_searchable_and_refresh_incrementally() {
     assert!(s.metadata(&pkg).iter().any(|(op, k, _)| op == "meta" && k == "keywords"));
     assert_eq!(tokens("Torch-Lite_v2.0"), vec!["torch", "lite", "v2", "0"]);
 }
+
+/// Provenance across fronts: a Git commit is built into a wheel, the wheel is
+/// installed into an OCI image layer, the image trains a model. Lineage of the
+/// model reaches the commit; impact of the commit reaches the model. All by
+/// name, through one API.
+#[test]
+fn lineage_and_impact_across_domains_by_name() {
+    use pico2peta_prov::search::{impact_named, lineage_named};
+    let d = tempfile::tempdir().unwrap();
+    let r = LocalRepo::init(d.path(), &PackConfig::default()).unwrap();
+    let log = n("_prov/log");
+    let put_named = |name: &str, data: &[u8]| {
+        let h = r.put(data).unwrap();
+        r.replace(&n(name), &[(n(name), Observed::Absent)], h).unwrap();
+        h
+    };
+    let commit = put_named("git/acme/lib/refs/heads/main", b"commit tree");
+    let wheel = put_named("pypi/acmelib/1.0/acmelib-1.0-py3-none-any.whl", b"wheel");
+    let layer = put_named("oci/acme/trainer/blobs/sha256-abc", b"layer");
+    let model = put_named("hf/models/acme/m/main", b"checkpoint");
+    let unrelated = put_named("npm/other/1.0.0", b"tarball");
+    let step = |op: &str, i: (&str, pico2peta_core::Hash), o: (&str, pico2peta_core::Hash)| Record {
+        op: op.into(),
+        inputs: [(i.0.to_string(), i.1)].into_iter().collect(),
+        outputs: [(o.0.to_string(), o.1)].into_iter().collect(),
+        ..Default::default()
+    };
+    pico2peta_prov::record(
+        &r,
+        &log,
+        &[
+            step("build", ("source", commit), ("wheel", wheel)),
+            step("image", ("wheel", wheel), ("layer", layer)),
+            step("train", ("image", layer), ("checkpoint", model)),
+        ],
+    )
+    .unwrap();
+    let lin = lineage_named(&r, &log, &n("hf/models/acme/m/main")).unwrap();
+    let names: Vec<String> = lin.iter().flat_map(|h| h.names.clone()).collect();
+    for want in [
+        "git/acme/lib/refs/heads/main",
+        "pypi/acmelib/1.0/acmelib-1.0-py3-none-any.whl",
+        "oci/acme/trainer/blobs/sha256-abc",
+    ] {
+        assert!(names.iter().any(|x| x == want), "lineage misses {want}: {names:?}");
+    }
+    assert!(!lin.iter().any(|h| h.hash == unrelated));
+    let imp = impact_named(&r, &log, &n("git/acme/lib/refs/heads/main")).unwrap();
+    assert!(imp.iter().any(|h| h.hash == model), "a bad commit impacts the model");
+    assert!(imp.iter().any(|h| h.hash == layer) && imp.iter().any(|h| h.hash == wheel));
+    assert!(lineage_named(&r, &log, &n("nope/x")).is_err());
+}
