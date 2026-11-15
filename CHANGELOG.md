@@ -6,7 +6,7 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 
 ### Added
 - Streaming `put_stream` pipeline (chunker → parallel hash/dedup/compress/encode → in-order committer, with the whole-object hash on its own thread and bounded memory): about 2.3× faster on CPU-bound storage. Compressibility probe (`pack.compress_probe`, default on). Incremental pack hashing, so sealing no longer re-reads the pack.
-- Byte-grouped record codec (codec 2) for model weights: `put` of safetensors and `put --delta-from-ref` group bf16/fp16/fp32 bytes into planes before zstd (fine-tune deltas −9.5% on SmolLM2-135M). `--no-byte-group` opts out. Older readers reject codec 2 rather than misread it.
+- Byte-grouped record codec (codec 2) for model weights: `put` of safetensors and `put --delta-from-ref` group bf16/fp16/fp32 bytes into planes before zstd (fine-tune deltas −10.6%, base −6.0% on SmolLM2-135M at the default `pack.grouped_zstd_level = 6`; `init --grouped-zstd-level`). `--no-byte-group` opts out. Older readers reject codec 2 rather than misread it.
 - Per-namespace chunking: `[chunking]` in config.toml (`init --chunk PREFIX=xet|fastcdc`, `put --for-name`), with a byte-exact Hugging Face Xet chunker (from `crates/chunk`). FastCDC remains the default; reads are unaffected.
 - Core API v1: `ObjectStore`, `Repository` and `Backend` traits, plus `LocalDisk` and the backend conformance suite.
 - Pack store:

@@ -155,6 +155,13 @@ pub struct PackSection {
     /// See [`PackConfig::compress_probe`] (optional; default on).
     #[serde(default = "default_true")]
     pub compress_probe: bool,
+    /// See [`PackConfig::grouped_zstd_level`] (optional; default 6).
+    #[serde(default = "default_grouped_level")]
+    pub grouped_zstd_level: i32,
+}
+
+fn default_grouped_level() -> i32 {
+    pico2peta_pack::store::DEFAULT_GROUPED_ZSTD_LEVEL
 }
 
 fn default_true() -> bool {
@@ -176,6 +183,7 @@ impl From<&PackConfig> for PackSection {
             zstd_level: c.zstd_level,
             manifest_fanout: c.manifest_fanout,
             compress_probe: c.compress_probe,
+            grouped_zstd_level: c.grouped_zstd_level,
         }
     }
 }
@@ -191,6 +199,7 @@ impl From<&PackSection> for PackConfig {
             zstd_level: c.zstd_level,
             manifest_fanout: c.manifest_fanout,
             compress_probe: c.compress_probe,
+            grouped_zstd_level: c.grouped_zstd_level,
         }
     }
 }
@@ -550,6 +559,7 @@ mod config_compat {
         let c = super::LocalRepo::read_config(d.path()).unwrap();
         assert_eq!(c.pack.manifest_fanout, pico2peta_pack::store::DEFAULT_MANIFEST_FANOUT);
         assert!(c.pack.compress_probe);
+        assert_eq!(c.pack.grouped_zstd_level, pico2peta_pack::store::DEFAULT_GROUPED_ZSTD_LEVEL);
         assert_eq!(c.chunking, super::ChunkingSection::default());
     }
 

@@ -702,6 +702,7 @@ fn compressibility_probe_picks_raw_or_zstd() {
         zstd_level: 3,
         manifest_fanout: 64,
         compress_probe: probe,
+        grouped_zstd_level: 3,
     };
     let text: Vec<u8> = (0..4_000_000u32).map(|i| b"fn main() { let x = 42; }\n"[(i % 26) as usize]).collect();
     // Random head, zeros after: the probe sees only the head and stores raw;

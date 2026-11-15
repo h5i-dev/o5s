@@ -41,6 +41,10 @@ enum Cmd {
         /// zstd level for pack records (0 = off).
         #[arg(long)]
         zstd_level: Option<i32>,
+        /// zstd level for byte-grouped model-weight records (default 6; 15 gets
+        /// about the full per-tensor gain on bf16 at ~12 MB/s per core).
+        #[arg(long)]
+        grouped_zstd_level: Option<i32>,
         /// Store refs as a create-only log on the object backend instead of a
         /// local journal (lets several hosts write one repository on shared storage).
         #[arg(long)]
@@ -214,12 +218,24 @@ enum Outcome {
 }
 
 fn run(cli: Cli) -> Result<Outcome, Error> {
-    if let Cmd::Init { chunk_threshold, pack_cap, zstd_level, refs_on_backend, chunk, chunk_default } = &cli.cmd {
+    if let Cmd::Init {
+        chunk_threshold,
+        pack_cap,
+        zstd_level,
+        grouped_zstd_level,
+        refs_on_backend,
+        chunk,
+        chunk_default,
+    } = &cli.cmd
+    {
         if cli.remote.is_some() {
             return Err(Error::Unsupported("init is only available for local repositories"));
         }
         let mut cfg = pico2peta_repo::PackConfig::default();
         cfg.apply_overrides(*chunk_threshold, *pack_cap, *zstd_level);
+        if let Some(l) = grouped_zstd_level {
+            cfg.grouped_zstd_level = *l;
+        }
         let store =
             if *refs_on_backend { pico2peta_repo::RefsStore::Backend } else { pico2peta_repo::RefsStore::Local };
         let parse = |c: &str| match c {
