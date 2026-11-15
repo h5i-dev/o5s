@@ -13,7 +13,7 @@
 Milestones M0–M9 are complete. `scripts/check.sh` passes.
 
 **Speed-up work (`docs/RESEARCH_SPEEDUP.md`, from the human; split with net on 2026-11-15)**
-- **§1 (core): done.** Streaming put pipeline, compressibility probe, incremental pack hash. On tmpfs (CPU-bound), incompressible `put_stream` went from 281 to 655 MB/s (median of 5 interleaved runs; best 791) and dedup re-put from ~570 to ~1010 MB/s; on NVMe incompressible stays at the device's ~200 MB/s fsync ceiling, so §1a's ≥ 800 MB/s target only applies to the CPU-bound case and was **not** reached as a median on this shared 4-vCPU host. The probe gave no measurable gain (zstd already bails out fast on random data). Details and profiles: `docs/BENCH.md`.
+- **§1 (core): done.** Streaming put pipeline, compressibility probe, incremental pack hash. On tmpfs (CPU-bound), incompressible `put_stream` went from 331 to **739 MB/s** (2.2×; median of 5 interleaved reps on a loaded host, load 2.9–5.2), text from 228 to 328 MB/s, dedup re-put from ~630 to ~900 MB/s. On NVMe, incompressible stays at the device's ~200 MB/s fsync ceiling. **§1a's ≥ 800 MB/s target was not met** (best run 791 MB/s); text is compression-bound in the workers. The probe gave no measurable gain (zstd already bails out fast on random data). Details, profiles and the ablation: `docs/BENCH.md`.
 - **§2 byte grouping: done.** Net built the transform (`crates/weights/src/bytegroup.rs`) and measured it; the core added record codec 2 `GroupedZstd` (`width | zstd(group(chunk))`) and the hint plumbing (API v1.12). Measured end to end through the CLI on SmolLM2-135M → -Instruct (real bf16, 269 MB each; byte-exact round trip, fsck clean, identical hashes with and without):
 
   | stored bytes (zstd-3) | plain | grouped | change |

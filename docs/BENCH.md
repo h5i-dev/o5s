@@ -8,7 +8,74 @@ cargo build --release -p pico2peta-micro
 $CARGO_TARGET_DIR/release/p2p-bench $SCRATCH/bench-micro 1024
 ```
 
+Other modes: `p2p-bench stream <dir> [MiB]` (put_stream only; `P2P_BENCH_NO_PROBE=1`, `P2P_BENCH_ONLY=random|text`),
+`p2p-bench weights <dir> [MiB]`, `p2p-bench chunkers <A> <B>` (FastCDC vs Xet chunk counts and dedup, sizes only), and
+`p2p-bench bytegroup-gran <safetensors>` (byte-grouping gain per block vs per tensor). Hold `bench.lock` for timing runs.
+
 Comparisons against Git storage size are in `docs/EXP1.md` (Experiment 1).
+
+## 2026-11-15: streaming put pipeline (RESEARCH_SPEEDUP §1), before/after
+
+`p2p-bench stream <dir> 512` puts 512 MiB twice (the second put is all dedup hits) and reads it back with
+verification, for incompressible and code-like input. Inputs are generated once into files in `/dev/shm` and
+streamed from the page cache, so the source costs about a memcpy. "Before" is the previous `put_chunks`
+(64-chunk batches with a barrier, serial hashing), built from the parent commit with the same bench source.
+"After" is the current code. Both variants were interleaved within each of 5 reps, all under
+`flock /mnt/scratch/pico2peta/bench.lock`. Medians, with the range in brackets.
+
+- **Host:** the shared 4-vCPU EPYC 7R32, **not quiet.** Load average was 2.9–5.2 during the run (net's Exp1c steps
+  ran between our reps, and a root-owned python process used about one core throughout). CPU-bound numbers are
+  therefore conservative and noisy.
+- **Disclosure:** the "after" binary was rebuilt once during the run, for unrelated bench modes. Its only change on
+  the put path is a codec branch that isn't taken without a byte-grouping hint.
+
+| put_stream 512 MiB | target | before | after | speed-up |
+|---|---|---|---|---|
+| incompressible | tmpfs (`/dev/shm`) | 331 MB/s [250–332] | **739 MB/s** [678–756] | 2.2× |
+| code-like text | tmpfs | 228 MB/s [179–233] | 328 MB/s [296–332] | 1.4× |
+| incompressible | NVMe (fsync'd) | 181 MB/s [172–254] | 206 MB/s [205–266] | (device-bound) |
+| code-like text | NVMe | 221 MB/s [152–228] | 307 MB/s [257–316] | 1.4× |
+| re-put, all dedup hits | tmpfs | 628 MB/s | 902 MB/s | 1.4× |
+| open + read, verified | tmpfs | 915 MB/s | 855 MB/s | (unchanged path; noise) |
+| peak RSS (whole run) | | 24 MB | 20 MB | |
+
+**Against the §1a target (≥ 800 MB/s incompressible on 4 cores): not met.** The median was 739 MB/s, and the best of
+all runs across the A/B series was 791 MB/s, on this loaded host.
+- On NVMe, durable writes are capped by the device: `dd` with `conv=fsync` does about 200 MB/s on this volume, so
+  no pipeline change can lift the NVMe incompressible row.
+- The tmpfs number is the CPU-bound one.
+
+**What changed (and what the profiles showed).** Profiles use `perf record -e cpu-clock:u` (no call graphs:
+`perf_event_paranoid=2`).
+- *Before:* zstd 29%, BLAKE3 20%, FastCDC 7%, and memmove; the stages never overlapped because of the batch barrier.
+- *First pipeline version (incompressible):* the in-order committer was the bottleneck. It was busy about 1.35 s of
+  a 2.0 s put, while each worker was about 4% busy. It ran three serial BLAKE3 passes (the whole object, the
+  manifest top level, and the pack), plus record encoding and CRC.
+- *Fixes:*
+  - The whole-object hash runs on its own thread, publishing snapshots at fanout^k chunks, the only points the tree needs.
+  - The manifest top level reuses the whole-object hash, so objects under 4096 chunks (256 MiB) are hashed twice, not three times.
+  - Workers build the complete record, including its CRC.
+  - zstd contexts are reused per thread.
+- *Text after:* compression-bound in the workers, while the committer (2.5% of samples) and the hash thread (2%)
+  are nearly idle.
+  - The three workers were each busy about 55% of the put. The pipeline wasn't limiting; with this host's other
+    load, they were runnable but not scheduled.
+  - zstd-3 on this generated text runs at about 170 MB/s per core, slower than RESEARCH_SPEEDUP §0's code-like
+    sample (570 MB/s).
+
+**Compressibility probe (§1b): no measurable gain here** (ablation `P2P_BENCH_NO_PROBE=1`, 5 reps):
+
+| tmpfs | probe on | probe off |
+|---|---|---|
+| incompressible | 655 MB/s [598–791] | 608 MB/s [598–775] |
+| code-like text | 251 MB/s [217–329] | 263 MB/s [257–347] |
+
+zstd already gives up quickly on random blocks, so skipping it saves little. On compressible data the probe adds a
+4 KiB zstd-1 pass per chunk. The differences are within the noise. The probe stays on (default) because it is
+deterministic and cheap. `pack.compress_probe = false` turns it off.
+
+**Sealing (§1c):** the open pack keeps an incremental BLAKE3, so seal no longer reads the pack back. Before sealing,
+the file is truncated to the hashed length, which covers torn half-records left by failed writes.
 
 ## 2026-11-15: quiet host (final)
 
