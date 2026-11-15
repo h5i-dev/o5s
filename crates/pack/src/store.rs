@@ -2333,7 +2333,7 @@ struct ChunkReader {
     /// Whole-object reads also verify the reassembled hash at EOF.
     verify: Option<(blake3::Hasher, Hash)>,
     /// Large whole reads hash on a separate thread instead.
-    hasher: Option<(std::sync::mpsc::SyncSender<Arc<Vec<u8>>>, std::thread::JoinHandle<blake3::Hasher>, Hash)>,
+    hasher: Option<VerifyThread>,
     depth_limit: usize,
     /// Chunks requested but not yet returned, in order.
     pending: std::collections::VecDeque<std::sync::mpsc::Receiver<Result<Vec<u8>>>>,
@@ -2342,6 +2342,10 @@ struct ChunkReader {
     /// Bytes this reader will return (decides whether read-ahead pays off).
     span: u64,
 }
+
+/// A whole-object hash running on its own thread: chunk sender, the thread,
+/// and the expected hash.
+type VerifyThread = (std::sync::mpsc::SyncSender<Arc<Vec<u8>>>, std::thread::JoinHandle<blake3::Hasher>, Hash);
 
 /// One read-ahead job: fetch and verify chunk `hash`, return bytes `[a, b)`.
 struct ChunkJob {
