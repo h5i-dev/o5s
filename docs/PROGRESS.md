@@ -9,7 +9,7 @@
 | M2 Pack store | done | `crates/pack` |
 | M3 Ref store | done | `crates/refs` |
 | M4 Local repo + CLI | done; local and `--remote` | `crates/repo`, `crates/cli` |
-| M5 Experiment 1 | **running**: ripgrep and jq done (V2 at 0.85× and 0.93×); redis and git in progress | `docs/EXP1.md`, `scripts/exp1-report.py` |
+| M5 Experiment 1 | **FAIL** by the pre-registered rules: redis V2 = 1.336× > 1.30 (ripgrep 0.85×, jq 0.93×; the V3 ceiling is 0.71–0.84×). git.git is still running for completeness. **Exp1b** (delta vs previous version, §4.8) is registered and queued after it | `docs/EXP1.md`, `scripts/exp1-report.py`, `scripts/exp1b.sh` |
 | M6 GC / repack | done, including grouped repack | `crates/repo/src/gc.rs` |
 | N1–N5 (net) | done: S3, server, client, CI, deploy, Git + OCI adapters | `docs/NET_PROGRESS.md`, `docs/API.md` |
 | M7 Hardening | done except quiet-host benchmark numbers | `fuzz/`, `docs/BENCH.md` |
@@ -81,4 +81,4 @@
 ## Questions for human
 - **Disk budget:** `/mnt/scratch` has much less headroom than the ~31 GB in AGENT_TASK.md (24 GB → 13 GB → 0 during this session, partly from other directories). Could you free or extend space, or say which of these may be deleted: the Exp1 mirrors and spill (`bench-data`, ~1.5 GB), the fuzz build cache, the nightly toolchain (`rustup-nightly`)?
 - **Disk headroom** is still tight: it has dipped below 8 GB twice. Both sessions now clean their build caches regularly.
-- **Exp1 verdict use (decision rule).** If Exp1 passes, PLAN.md says grouped packing becomes the default repack strategy for the "source code" kind. My default plan is the server's `[gc] grouped = true` for Git-adapter namespaces (net has wired that) plus documentation. Tell me if you'd rather keep it opt-in.
+- **Exp1 failed**, so grouped repack stays opt-in (`[gc] grouped = false` by default, per the pre-registered rule), and Exp1b is queued. Nothing is needed from you unless you want to override the pre-registered consequences.

@@ -58,7 +58,40 @@ scripts/exp1-report.py $BENCH_DATA/exp1/results.jsonl
 
 ## Results
 
-*(Filled in from `scripts/exp1-report.py` when all four repos are complete.)*
+*(git.git is still running. The table is regenerated from `results.jsonl` at the end. The verdict below is
+already determined by the redis result and can't change.)*
+
+Interim (ripgrep, jq, redis):
+
+| repo | objects | git --aggressive (B) | V0 | V1 | V2 | V3 (ceiling) |
+|---|---|---|---|---|---|---|
+| ripgrep | 23,245 | 6,227,408 | 8.262 | 4.850 | 0.850 | 0.708 |
+| jq | 24,771 | 16,161,931 | 5.914 | 2.703 | 0.928 | 0.754 |
+| redis | 274,683 | 268,625,488 | 8.487 | 6.709 | **1.336** | 0.840 |
+
+Secondary metrics for V2: p50 reads 0.38–0.43 ms and p99 3.3–5.2 ms (all well within 5 / 25 ms). Peak
+RSS ≤ 0.7 GB. Build time ratio vs `git gc --aggressive`: ripgrep 1.01, jq 0.92, **redis 1.30**.
+
+### Verdict: **FAIL** (pre-registered rules, §4.5)
+
+V\* = V2. V1 is far worse everywhere: per-object compression, even with dictionaries, is 2.7–6.7×. On
+redis, V2's R = 1.336 exceeds the PASS limit of 1.30 for every individual repo, so the verdict is FAIL
+whatever git.git's result. V2 also misses the build-time threshold on redis (1.30 > 1.0) and,
+marginally, on ripgrep (1.01).
+
+What the numbers say:
+- **Grouping works, but 4 MiB frames are too small for big histories.** On the small repos V2 beats
+  `git --aggressive` (0.85×, 0.93×). On redis, whose large C files have thousands of versions, a 4 MiB frame
+  holds only a few consecutive versions of a big file, so most redundancy across versions falls outside
+  the window.
+- **The ceiling is below Git.** V3 (one long-window stream per partition, so not random access) reaches
+  0.71–0.84× of Git everywhere. Similarity grouping *can* beat delta packing on size. The cost is random
+  access, which is what the frame cap buys.
+- Per the pre-registered consequence, grouped packing does **not** become the default repack strategy
+  for source code (the net session switched `[gc] grouped` to opt-in), and **Experiment 1b** runs:
+  explicit delta against the previous version of the same path, then zstd (PLAN.md §4.8, registered
+  before any 1b code). A sanity run of the 1b harness on ripgrep (V4 1.166×, V5 1.667×) was made to
+  check correctness before the official run; the official 1b numbers come from a fresh full run.
 
 ## Production cross-check (not part of the pre-registered verdict)
 
