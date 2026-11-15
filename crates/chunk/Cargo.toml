@@ -1,0 +1,13 @@
+[package]
+name = "pico2peta-chunk"
+description = "Content-defined chunkers (byte-exact Hugging Face Xet, FastCDC v2020) behind a streaming trait"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fastcdc.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+fastcdc.workspace = true

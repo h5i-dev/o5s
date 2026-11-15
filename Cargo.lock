@@ -1108,6 +1108,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pico2peta-chunk"
+version = "0.1.0"
+dependencies = [
+ "fastcdc",
+ "proptest",
+]
+
+[[package]]
 name = "pico2peta-cli"
 version = "0.1.0"
 dependencies = [

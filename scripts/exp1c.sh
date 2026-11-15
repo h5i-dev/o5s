@@ -19,7 +19,8 @@ EXP1C=$T/release/exp1c
 REPOS=("$@"); [ ${#REPOS[@]} -eq 0 ] && REPOS=(ripgrep jq redis git)
 for r in "${REPOS[@]}"; do
   rm -rf "$W/$r"
-  "$EXP1C" extract "$MIRRORS/$r.git" "$W/$r" > "$W/$r-extract.log" 2>&1
+  # Extraction is CPU-heavy too: hold the shared bench lock for it as well.
+  flock "$LOCK" "$EXP1C" extract "$MIRRORS/$r.git" "$W/$r" > "$W/$r-extract.log" 2>&1
   for v in v6 v7; do
     line=$(flock "$LOCK" "$EXP1C" run "$W/$r" $v 4 10000)
     echo "{\"repo\":\"$r\",${line#\{}" | tee -a "$OUT"
