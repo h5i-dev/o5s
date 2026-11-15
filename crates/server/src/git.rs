@@ -2244,6 +2244,9 @@ pub struct GitTracer {
     /// Git LFS index (sha256 → content), written by the HF front.
     lfs: SegMap,
     lfs_root: Root,
+    /// sha256 → Xet file record (for Xet downloads of files uploaded through Xet).
+    xetsha: SegMap,
+    xetsha_root: Root,
 }
 
 impl GitTracer {
@@ -2253,9 +2256,12 @@ impl GitTracer {
         let oidmap = SegMap::new(repo.clone(), n, Arc::new(SegCache::default()));
         let root = oidmap.root_blocking()?.1;
         let n = Name::new("git/_lfs").unwrap_or_else(|_| unreachable!("static name is valid"));
-        let lfs = SegMap::new(repo, n, Arc::new(SegCache::default()));
+        let lfs = SegMap::new(repo.clone(), n, Arc::new(SegCache::default()));
         let lfs_root = lfs.root_blocking()?.1;
-        Ok(GitTracer { oidmap, root, lfs, lfs_root })
+        let n = Name::new("git/_xetsha").unwrap_or_else(|_| unreachable!("static name is valid"));
+        let xetsha = SegMap::new(repo, n, Arc::new(SegCache::default()));
+        let xetsha_root = xetsha.root_blocking()?.1;
+        Ok(GitTracer { oidmap, root, lfs, lfs_root, xetsha, xetsha_root })
     }
 
     /// Children of a canonical git object, or `None` if `h` is not one.
@@ -2278,9 +2284,16 @@ impl GitTracer {
                 let bytes = store.get(h, None)?;
                 if let Some((sha, _)) = crate::hf::parse_lfs_pointer(&bytes[hl..])
                     && let Some(k) = crate::hf::sha_key(&sha)
-                    && let Some(v) = self.lfs.get_in(&self.lfs_root, &k)?
                 {
-                    return Ok(Some(vec![v.hash]));
+                    let mut kids = Vec::new();
+                    if let Some(v) = self.lfs.get_in(&self.lfs_root, &k)? {
+                        kids.push(v.hash);
+                    }
+                    // The Xet file record (it references the same content).
+                    if let Some(v) = self.xetsha.get_in(&self.xetsha_root, &k)? {
+                        kids.push(v.hash);
+                    }
+                    return Ok(Some(kids));
                 }
             }
             return Ok(Some(Vec::new()));

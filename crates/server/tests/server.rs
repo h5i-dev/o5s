@@ -751,7 +751,9 @@ fn grouped_upload_saves_space_on_bf16_like_data() {
 fn early_rejection_closes_the_connection() {
     let s = TestServer::start(|_| {});
     let http = reqwest::blocking::Client::new();
-    let r = http.put(format!("{}/v1/objects", s.url())).bearer_auth("wrong").body(vec![7u8; 4 << 20]).send().unwrap();
+    // 64 KiB: unread by the server, but small enough for the client to finish writing (a
+    // bigger body races the server's close and surfaces as a broken pipe instead).
+    let r = http.put(format!("{}/v1/objects", s.url())).bearer_auth("wrong").body(vec![7u8; 64 << 10]).send().unwrap();
     assert_eq!(r.status(), 401);
     assert_eq!(r.headers().get("connection").map(|v| v.to_str().unwrap()), Some("close"));
     // A request whose body was read keeps the connection.

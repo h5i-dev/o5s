@@ -51,6 +51,12 @@ const MAX_CHUNK: usize = 128 * 1024;
 pub const MAX_XORB_BODY: usize = 80 << 20;
 pub const MAX_SHARD_BODY: usize = 128 << 20;
 const XORB_RECORD_MAGIC: &[u8; 8] = b"P2PXORB1";
+const FILE_RECORD_MAGIC: &[u8; 8] = b"P2PXFIL1";
+const FILE_RECORD_HEAD: usize = 8 + 32 + 32 + 32 + 4;
+/// Downloads present each file as "virtual xorbs" of at most this many chunks and bytes
+/// (the limits of real xorbs).
+const VXORB_CHUNKS: usize = 8 * 1024;
+const VXORB_BYTES: u64 = 64 << 20;
 
 // ---------------------------------------------------------------------------
 // Hashing (byte-exact with xet-core's merklehash)
@@ -260,6 +266,11 @@ impl XorbRecord {
 /// GC: the content object a xorb record references, if `head` (the object's first bytes) and
 /// `size` describe one.
 pub fn record_child(h: &Hash, head: &[u8], size: u64, store: &dyn pico2peta_core::ObjectStore) -> Result<Option<Hash>> {
+    let head_size = FILE_RECORD_HEAD as u64;
+    if head.starts_with(FILE_RECORD_MAGIC) && size >= head_size && (size - head_size).is_multiple_of(40) {
+        let b = store.get(h, Some(0..40))?;
+        return Ok(Some(Hash(b[8..40].try_into().map_err(|_| bad("file record"))?)));
+    }
     if !head.starts_with(XORB_RECORD_MAGIC) || size < 44 || !(size - 44).is_multiple_of(36) {
         return Ok(None);
     }
@@ -415,8 +426,184 @@ pub(crate) fn put_shard(hf: &HfState, repo: &RepoId, body: &[u8]) -> Result<usiz
             return Err(bad(format!("file content is sha256 {got}, shard says {want}")));
         }
         hf.register_lfs(repo, &want, content, total)?;
+        // For Xet downloads: the file's chunk list, next to its content.
+        let mut ends = Vec::with_capacity(chunk_list.len());
+        let mut off = 0u64;
+        for (h, l) in &chunk_list {
+            off += l;
+            ends.push((*h, off));
+        }
+        let rec = FileRecord { content, file_hash: f.hash, sha256: sha_bytes(&want)?, chunks: ends };
+        let rh = hf.git_repo().put(&rec.encode())?;
+        let v = crate::segmap::Value { hash: rh, aux: total };
+        hf.xetfile.insert_blocking(vec![(f.hash, v)])?;
+        hf.xetsha.insert_blocking(vec![(rec.sha256, v)])?;
     }
     Ok(files.len())
+}
+
+fn sha_bytes(hex64: &str) -> Result<[u8; 32]> {
+    crate::hf::sha_key(hex64).ok_or_else(|| bad("bad sha256"))
+}
+
+// ---------------------------------------------------------------------------
+// Downloads: file records and virtual xorbs
+// ---------------------------------------------------------------------------
+
+/// A file uploaded through Xet: its content object, ids, and Xet chunks (hash, end offset).
+pub(crate) struct FileRecord {
+    pub content: Hash,
+    pub file_hash: MerkleHash,
+    /// Plain sha256 bytes.
+    pub sha256: [u8; 32],
+    pub chunks: Vec<(MerkleHash, u64)>,
+}
+
+impl FileRecord {
+    fn encode(&self) -> Vec<u8> {
+        let mut v = Vec::with_capacity(FILE_RECORD_HEAD + 40 * self.chunks.len());
+        v.extend_from_slice(FILE_RECORD_MAGIC);
+        v.extend_from_slice(self.content.as_bytes());
+        v.extend_from_slice(&self.file_hash);
+        v.extend_from_slice(&self.sha256);
+        v.extend_from_slice(&(self.chunks.len() as u32).to_le_bytes());
+        for (h, end) in &self.chunks {
+            v.extend_from_slice(h);
+            v.extend_from_slice(&end.to_le_bytes());
+        }
+        v
+    }
+
+    pub(crate) fn decode(b: &[u8]) -> Option<FileRecord> {
+        if !b.starts_with(FILE_RECORD_MAGIC) || b.len() < FILE_RECORD_HEAD {
+            return None;
+        }
+        let n = u32::from_le_bytes(b[104..108].try_into().ok()?) as usize;
+        if b.len() != FILE_RECORD_HEAD + 40 * n {
+            return None;
+        }
+        let chunks = b[FILE_RECORD_HEAD..]
+            .as_chunks::<40>()
+            .0
+            .iter()
+            .map(|c| {
+                let (h, e) = c.split_at(32);
+                (h.try_into().unwrap_or([0; 32]), u64::from_le_bytes(e.try_into().unwrap_or([0; 8])))
+            })
+            .collect();
+        Some(FileRecord {
+            content: Hash(b[8..40].try_into().ok()?),
+            file_hash: b[40..72].try_into().ok()?,
+            sha256: b[72..104].try_into().ok()?,
+            chunks,
+        })
+    }
+
+    fn start(&self, i: usize) -> u64 {
+        if i == 0 { 0 } else { self.chunks[i - 1].1 }
+    }
+
+    /// Virtual xorbs: consecutive chunk index ranges within the xorb limits.
+    pub(crate) fn groups(&self) -> Vec<std::ops::Range<usize>> {
+        let mut out = Vec::new();
+        let mut a = 0;
+        while a < self.chunks.len() {
+            let mut b = a + 1;
+            while b < self.chunks.len() && b - a < VXORB_CHUNKS && self.chunks[b].1 - self.start(a) <= VXORB_BYTES {
+                b += 1;
+            }
+            out.push(a..b);
+            a = b;
+        }
+        out
+    }
+
+    /// The Merkle hash of a virtual xorb (what a real xorb of these chunks would be called).
+    pub(crate) fn group_hash(&self, g: &std::ops::Range<usize>) -> MerkleHash {
+        let hs: Vec<(MerkleHash, u64)> =
+            g.clone().map(|i| (self.chunks[i].0, self.chunks[i].1 - self.start(i))).collect();
+        xorb_hash(&hs)
+    }
+
+    /// Byte offset of chunk `k` (relative to the group start) in the group's serialization:
+    /// every chunk is an 8-byte header plus its uncompressed bytes.
+    fn ser_offset(&self, g: &std::ops::Range<usize>, k: usize) -> u64 {
+        (g.start..g.start + k).map(|i| 8 + self.chunks[i].1 - self.start(i)).sum()
+    }
+
+    /// V1 reconstruction for bytes `[from, to)` of the file. `url(group index)` names the fetch URL.
+    pub(crate) fn reconstruction(&self, from: u64, to: u64, url: &dyn Fn(usize) -> String) -> serde_json::Value {
+        let mut terms = Vec::new();
+        let mut fetch = serde_json::Map::new();
+        let mut offset_into_first = 0;
+        for (gi, g) in self.groups().into_iter().enumerate() {
+            let (gs, ge) = (self.start(g.start), self.chunks[g.end - 1].1);
+            if ge <= from || gs >= to {
+                continue;
+            }
+            // Chunks of this group overlapping the range.
+            let a = (g.start..g.end).find(|&i| self.chunks[i].1 > from).unwrap_or(g.start);
+            let b = (a..g.end).find(|&i| self.chunks[i].1 >= to).map_or(g.end, |i| i + 1);
+            if terms.is_empty() {
+                offset_into_first = from.saturating_sub(self.start(a));
+            }
+            let hash = to_hex(&self.group_hash(&g));
+            let (la, lb) = (a - g.start, b - g.start);
+            terms.push(serde_json::json!({
+                "hash": hash, "unpacked_length": self.chunks[b - 1].1 - self.start(a),
+                "range": { "start": la, "end": lb },
+            }));
+            let (bs, be) = (self.ser_offset(&g, la), self.ser_offset(&g, lb));
+            fetch.entry(hash).or_insert_with(|| serde_json::json!([])).as_array_mut().into_iter().for_each(|v| {
+                v.push(serde_json::json!({
+                    "range": { "start": la, "end": lb }, "url": url(gi),
+                    "url_range": { "start": bs, "end": be - 1 },
+                }))
+            });
+        }
+        serde_json::json!({ "offset_into_first_range": offset_into_first, "terms": terms, "fetch_info": fetch })
+    }
+
+    /// Bytes `[bs, be)` of virtual xorb `gi`'s serialization (chunk aligned, as we hand out).
+    pub(crate) fn serialize_range(
+        &self,
+        store: &dyn pico2peta_core::Repository,
+        gi: usize,
+        bs: u64,
+        be: u64,
+    ) -> Result<Vec<u8>> {
+        let groups = self.groups();
+        let g = groups.get(gi).ok_or_else(|| bad("no such xorb"))?.clone();
+        let mut out = Vec::with_capacity((be - bs) as usize);
+        let mut pos = 0u64;
+        let mut first = None;
+        let mut last = g.start;
+        for i in g.clone() {
+            let len = self.chunks[i].1 - self.start(i);
+            if pos + 8 + len > bs && pos < be {
+                first.get_or_insert(i);
+                last = i + 1;
+            }
+            pos += 8 + len;
+        }
+        let Some(first) = first else { return Ok(out) };
+        let data = store.get(&self.content, Some(self.start(first)..self.chunks[last - 1].1))?;
+        let base = self.start(first);
+        let mut ser_pos = self.ser_offset(&g, first - g.start);
+        for i in first..last {
+            let (s, e) = (self.start(i) - base, self.chunks[i].1 - base);
+            let len = (e - s) as u32;
+            let l = len.to_le_bytes();
+            let mut piece = vec![0u8, l[0], l[1], l[2], 0, l[0], l[1], l[2]];
+            piece.extend_from_slice(&data[s as usize..e as usize]);
+            // Clip to the requested range (normally chunk aligned, so whole pieces).
+            let (ps, pe) = (ser_pos, ser_pos + piece.len() as u64);
+            let (cs, ce) = (bs.max(ps) - ps, be.min(pe) - ps);
+            out.extend_from_slice(&piece[cs as usize..ce as usize]);
+            ser_pos = pe;
+        }
+        Ok(out)
+    }
 }
 
 /// Reads byte ranges of core objects back to back, hashing them with sha256.

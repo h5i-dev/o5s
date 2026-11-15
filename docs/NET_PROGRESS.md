@@ -282,7 +282,24 @@ The contended run checks that no update is lost: the final version equals the nu
     - 19% is `encode_delta`.
     - The core's `Index::get` is 0.4%, so lookups are not the cost, as the core lead measured.
   - Not done: a served-pack cache (it would double Git storage, so I'm not doing it without a decision).
-- Next: the PyPI/npm/Maven/HF follow-ups listed under each front.
+- **HF Xet downloads: DONE.** Files uploaded through Xet are now downloaded through Xet by the default client.
+  - Protocol:
+    - `resolve` sends `X-Xet-Hash` and `X-Xet-Refresh-Route`.
+    - `xet-read-token` answers in JSON (for hf_xet) and in `X-Xet-*` headers (for huggingface_hub).
+    - `v1/reconstructions/<file>` (with `Range`) returns terms over "virtual xorbs". `v2` answers 404, and the client falls back to v1.
+    - Xorb bytes come from signed, credential-free URLs `/xet/xorb/<capability>`, like presigned S3 URLs.
+  - Storage:
+    - At shard time each file gets a `P2PXFIL1` record: content hash, Xet file hash, sha256 and the file's Xet chunk list. It is indexed in `git/_xetfile` (by file hash) and `git/_xetsha` (by sha256).
+    - A virtual xorb is a run of ≤ 8192 chunks / 64 MiB of that list, named by its real Merkle hash. It is served as uncompressed xorb chunks read from the file's content object, so nothing is stored twice and the uploaded xorbs can be collected.
+    - GC: an LFS pointer keeps its file record alive, and the record keeps the content.
+  - Authorization: the token's repo must be allowed to read the file (the LFS ACL).
+  - Tests (`huggingface_hub_round_trip_over_xet`):
+    - the real client downloads through `/xet`, which the metrics show;
+    - after a zero-grace GC, a hand-run download (resolve → token → reconstruction → ranges) rebuilds the exact sha256;
+    - v2 gives 404 and a forged xorb URL gives 403.
+  - Files uploaded over LFS still download over plain HTTP; they have no Xet chunk list.
+- Root disk rule (the human, 2026-11-15): nothing under /home or /tmp beyond sources. perf's build-id cache is set to `/mnt/scratch/pico2peta/perf-buildid`.
+- Next: the PyPI/npm/Maven follow-ups listed under each front (PEP 658 metadata, npm dist-tag/unpublish).
 
 ## Design: Git and OCI hash mapping (goal 6; AGREED with core lead 2026-11-15; amendment: per-blob mappings in segment maps, not refs)
 
