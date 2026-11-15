@@ -477,6 +477,21 @@ fn small(dir: &str, n: usize) -> Result<(), Box<dyn std::error::Error>> {
         let _ = repo.get(h, None)?;
     }
     let get1 = n as f64 / t.elapsed().as_secs_f64();
+    // Re-put of already-stored objects (all dedup hits), then ensure_live on each:
+    // what a front does when the same content is pushed again.
+    let t = Instant::now();
+    for o in &objs {
+        repo.put(o)?;
+    }
+    repo.flush()?;
+    let reput = n as f64 / t.elapsed().as_secs_f64();
+    let t = Instant::now();
+    for h in &hashes {
+        repo.ensure_live(h)?;
+    }
+    let live = n as f64 / t.elapsed().as_secs_f64();
+    println!("| re-put (all dedup) | {:.1}k/s | |", reput / 1e3);
+    println!("| ensure_live | {:.1}k/s | |", live / 1e3);
     // 4 threads: distinct objects per thread.
     let objs4: Vec<Vec<u8>> = (0..n).map(|i| bytes(10_000_000 + i as u64, 1024)).collect();
     let t = Instant::now();

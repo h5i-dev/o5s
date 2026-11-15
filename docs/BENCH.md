@@ -66,6 +66,27 @@ Before, 4-thread puts were *slower* than 1-thread puts. The profile showed three
 The remaining small-put cost is BLAKE3 on 1 KiB inputs (single-block path, ~33 %): once for identity and once
 for the incremental pack hash.
 
+**(d) Group commit for the ref journal (`p2p-bench commits <dir> 20000`: durable `replace` of distinct names, N threads on one handle; one run each, load ~1.5).**
+
+| threads | before (one fsync per commit) | after (group commit) |
+|---|---|---|
+| 1 | 7,566/s | 7,916/s |
+| 4 | 7,081/s | **12,472/s** (1.76×) |
+| 8 | 7,151/s | **14,604/s** (2.04×) |
+
+- **How it works:** concurrent commits of one process share fsyncs. The leader holds the exclusive flock for the
+  whole batch and repeats the fsync until it covers every appended record, so durability and visibility are
+  unchanged: no ack, and no reader here or in another process sees a record, before an fsync covers it. A single
+  thread is unchanged, since it is bound by the fsync.
+- **Contention between processes:** separate handles still serialize on the flock, as before.
+- **Bug found and fixed before shipping:** the crash-sweep tests hung, and the human spotted the flock wait. The
+  fsync-failure path reloaded state via `load_generation`, which takes an exclusive flock on a *new* open file
+  description while the batch still held ours. Those tests now run under a 120 s deadline.
+
+**Re-push of stored content (net's report: a second redis push is ~6× slower than the first).** The core paths
+are fast on a fresh store with 300k × 1 KiB objects: re-put of already-stored objects runs at 697k/s, and
+`ensure_live` at 2.9M/s. The cause is being profiled on the server, with net.
+
 ## 2026-11-15: streaming put pipeline (RESEARCH_SPEEDUP §1), before/after
 
 `p2p-bench stream <dir> 512` puts 512 MiB twice (the second put is all dedup hits) and reads it back with
