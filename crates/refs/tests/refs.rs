@@ -583,3 +583,39 @@ fn delete_rules_tombstones_and_persistence() {
     let z = n("zz");
     assert_eq!(r.delete(&z, &[(z.clone(), Observed::Absent)]).unwrap(), ReplaceOutcome::Ok { version: 0 });
 }
+
+#[test]
+fn update_many_mixes_sets_and_deletes_atomically() {
+    let d = tempfile::tempdir().unwrap();
+    let r = RefStore::open(d.path()).unwrap();
+    r.set_rule("tags", Rule::ImmutableAfterPublish).unwrap();
+    let (a, b, t) = (n("heads/a"), n("heads/b"), n("tags/v1"));
+    r.replace(&a, &[(a.clone(), Observed::Absent)], h(1), &yes).unwrap();
+    r.replace(&t, &[(t.clone(), Observed::Absent)], h(1), &yes).unwrap();
+    // Delete a, create b, in one transaction.
+    let out = r
+        .update_many(
+            &[(a.clone(), None), (b.clone(), Some(h(2)))],
+            &[(a.clone(), Observed::Version(1)), (b.clone(), Observed::Absent)],
+            &yes,
+        )
+        .unwrap();
+    assert_eq!(out, pico2peta_core::ReplaceManyOutcome::Ok { versions: vec![1, 1] });
+    assert_eq!(r.resolve(&a).unwrap(), None);
+    // A forbidden delete of an immutable tag aborts the whole transaction.
+    let e = r.update_many(
+        &[(b.clone(), None), (t.clone(), None)],
+        &[(b.clone(), Observed::Version(1)), (t.clone(), Observed::Version(1))],
+        &yes,
+    );
+    assert!(matches!(e, Err(Error::Forbidden { .. })));
+    assert!(r.resolve(&b).unwrap().is_some(), "nothing applied");
+    // Persisted (and through compaction).
+    r.compact().unwrap();
+    let r2 = RefStore::open(d.path()).unwrap();
+    assert_eq!(r2.resolve(&b).unwrap().unwrap().hash, h(2));
+    assert_eq!(
+        r2.replace(&a, &[(a.clone(), Observed::Absent)], h(3), &yes).unwrap(),
+        ReplaceOutcome::Ok { version: 2 }
+    );
+}

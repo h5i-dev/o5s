@@ -253,6 +253,21 @@ pub trait Repository: ObjectStore {
             _ => Err(Error::Unsupported("replace_many is not supported by this repository")),
         }
     }
+    /// Atomic multi-name update where `None` deletes (API v1.6), e.g. for
+    /// `git push --atomic` with deletions. Same validation as `replace_many`.
+    /// Each entry follows the single-name rules. Default: if every entry is
+    /// `Some`, delegates to `replace_many`; otherwise `Unsupported`.
+    fn update_many(
+        &self,
+        updates: &[(Name, Option<Hash>)],
+        read_set: &[(Name, Observed)],
+    ) -> Result<ReplaceManyOutcome> {
+        let sets: Option<Vec<(Name, Hash)>> = updates.iter().map(|(n, h)| h.map(|h| (n.clone(), h))).collect();
+        match sets {
+            Some(sets) => self.replace_many(&sets, read_set),
+            None => Err(Error::Unsupported("update_many with deletes is not supported by this repository")),
+        }
+    }
     /// OCC delete of a ref (API v1.5). It obeys namespace rules: create-once
     /// names can't be deleted. Re-creating a deleted name continues its
     /// version sequence. Deleting an absent name is `Ok { version: 0 }`.
