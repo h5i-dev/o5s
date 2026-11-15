@@ -107,6 +107,7 @@
 
 - S3 default credential chain (env, web identity, IMDSv2) with background refresh.
 - Separate metrics listener, and per-principal rate limiting (429 with `Retry-After`, `p2p_rate_limited_total`).
+- Git wire deltas: upload-pack deltifies blobs and trees against the previously sent version of the same path. A ripgrep clone (release) transfers 33.8 MB → **6.1 MB**, takes 3.65 s → 2.91 s, refs are identical and fsck is clean.
 
 ### Next
 - Goal 6: Git smart-HTTP and OCI distribution adapters. The hash-mapping design proposal is below, waiting for the lead's agreement.
@@ -190,7 +191,7 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
 - **Durability of server puts:** an unreferenced `put` becomes durable at the next replace or flush (core semantics, since the open pack is not fsynced per put). If the server crashes before that, the client's later `replace` gets `MissingObject` and must re-put. Clients needing durability without a replace call `POST /v1/flush`.
 - **Git adapter limits:**
   - SHA-1 repos only (no `object-format=sha256`). No protocol v2 server side (clients fall back to v0), and no shallow or partial clones.
-  - Served packs carry full objects, with no delta compression on the wire, so clones transfer more bytes than from git.
+  - Served packs use OFS deltas against the previously sent version at the same path (greedy block matching, depth ≤ 50). They are not as tight as git's sliding-window search: a ripgrep clone transfers 6.1 MB vs git's 3.4 MB aggressive pack. Thin packs against the client's haves are not used.
   - Upload-pack walks the full reachable set per request (no bitmaps or commit-graph), which is O(history) per fetch.
   - Each push object is held in memory (cap 1 GiB per object).
   - Ref names outside the core grammar (`[A-Za-z0-9._+-]` segments) are rejected with `ng`.
