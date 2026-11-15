@@ -151,15 +151,30 @@ pub struct PackStats {
 /// A large sealed pack whose index is memory-mapped instead of loaded.
 struct BigPack {
     pid: u32,
+    name: String,
     view: IdxV3View<memmap2::Mmap>,
 }
+
+/// An installed multi-pack index and its mapping onto `Index::big`.
+struct MidxState {
+    view: MidxView<memmap2::Mmap>,
+    /// For each MIDX pack ordinal, the position in `Index::big` (None if gone).
+    ord_to_big: Vec<Option<usize>>,
+    /// Per `Index::big` position: covered by the MIDX (so not searched individually).
+    covered: Vec<bool>,
+}
+
+/// Build a multi-pack index once there are at least this many large packs...
+const MIDX_MIN_PACKS: usize = 8;
 
 #[derive(Default)]
 struct Index {
     /// Locations from small sealed packs and from this handle's open pack.
     map: HashMap<Hash, Loc>,
     /// Large sealed packs, searched through their mapped v3 indexes.
-    big: Vec<BigPack>,
+    big: Vec<Arc<BigPack>>,
+    /// Multi-pack index over (most of) `big`.
+    midx: Option<MidxState>,
     /// Sealed pack names (hex), indexed by `PackRef::Sealed`.
     sealed: Vec<String>,
     known: HashSet<String>,
@@ -189,16 +204,32 @@ impl Index {
         if best.as_ref().is_some_and(|l| rank(self, l) == 0) {
             return best;
         }
-        for b in &self.big {
-            if let Ok(Some(e)) = b.view.find(hash) {
-                let l = loc_of(b.pid, &e);
-                let better = best.as_ref().is_none_or(|old| rank(self, &l) < rank(self, old));
-                if better {
-                    best = Some(l);
-                    if rank(self, &l) == 0 {
-                        break;
-                    }
+        let consider = |l: Loc, best: &mut Option<Loc>| -> bool {
+            if best.as_ref().is_none_or(|old| rank(self, &l) < rank(self, old)) {
+                *best = Some(l);
+            }
+            best.as_ref().is_some_and(|b| rank(self, b) == 0)
+        };
+        if let Some(m) = &self.midx {
+            for (ord, ent) in m.view.find_all(hash) {
+                if let Some(Some(bi)) = m.ord_to_big.get(ord as usize)
+                    && let Some(b) = self.big.get(*bi)
+                    && let Ok(e) = b.view.entry(ent as usize)
+                    && e.hash == *hash
+                    && consider(loc_of(b.pid, &e), &mut best)
+                {
+                    return best;
                 }
+            }
+        }
+        for (bi, b) in self.big.iter().enumerate() {
+            if self.midx.as_ref().is_some_and(|m| m.covered.get(bi).copied().unwrap_or(false)) {
+                continue;
+            }
+            if let Ok(Some(e)) = b.view.find(hash)
+                && consider(loc_of(b.pid, &e), &mut best)
+            {
+                break;
             }
         }
         best
@@ -484,11 +515,11 @@ impl PackStore {
             let pid = match idx.sealed.iter().position(|x| *x == name) {
                 Some(p) => p as u32,
                 None => {
-                    idx.sealed.push(name);
+                    idx.sealed.push(name.clone());
                     (idx.sealed.len() - 1) as u32
                 }
             };
-            idx.big.push(BigPack { pid, view });
+            idx.big.push(Arc::new(BigPack { pid, name, view }));
         }
         for (name, entries) in loaded {
             if !idx.known.insert(name.clone()) {
@@ -515,7 +546,79 @@ impl PackStore {
             }
         }
         idx.last_refresh = Some(std::time::Instant::now());
+        let nbig = idx.big.len();
+        if let Some(m) = idx.midx.as_mut() {
+            // New big packs were appended: they're not covered.
+            m.covered.resize(nbig, false);
+        }
+        drop(idx);
+        self.maybe_build_midx()?;
         Ok(n)
+    }
+
+    /// Builds (or maps a cached) multi-pack index once enough large packs are
+    /// uncovered, outside the index lock (the views are shared through `Arc`).
+    fn maybe_build_midx(&self) -> Result<()> {
+        let packs: Vec<Arc<BigPack>> = {
+            let idx = self.inner.index.read().map_err(poisoned)?;
+            let uncovered = match &idx.midx {
+                Some(m) => m.covered.iter().filter(|c| !**c).count(),
+                None => idx.big.len(),
+            };
+            if idx.big.len() < MIDX_MIN_PACKS || uncovered * 10 <= idx.big.len() {
+                return Ok(());
+            }
+            idx.big.clone()
+        };
+        let mut names: Vec<&str> = packs.iter().map(|b| b.name.as_str()).collect();
+        names.sort();
+        let tag = blake3::hash(names.join("\n").as_bytes()).to_hex()[..24].to_string();
+        let dir = self.inner.staging_dir.with_file_name("idx-cache");
+        fs::create_dir_all(&dir)?;
+        let path = dir.join(format!("midx-{tag}.midx"));
+        if !path.exists() {
+            let mut sorted: Vec<&Arc<BigPack>> = packs.iter().collect();
+            sorted.sort_by(|a, b| a.name.cmp(&b.name));
+            let views: Vec<(&str, &IdxV3View<memmap2::Mmap>)> =
+                sorted.iter().map(|b| (b.name.as_str(), &b.view)).collect();
+            let tmp = dir.join(format!(".midx-{tag}.{}.tmp", unique_id()));
+            let f = File::create(&tmp)?;
+            write_midx(&views, &f)?;
+            f.sync_all()?;
+            fs::rename(&tmp, &path)?;
+            fsync_dir(&dir)?;
+        }
+        let f = File::open(&path)?;
+        // SAFETY: as for pack index caches, MIDX files are written once
+        // (temp file + rename) and never modified while mapped.
+        let map = unsafe { memmap2::Mmap::map(&f)? };
+        let view = match MidxView::new(map) {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = fs::remove_file(&path);
+                return Err(e);
+            }
+        };
+        let mut idx = self.inner.index.write().map_err(poisoned)?;
+        let pos: HashMap<&str, usize> = idx.big.iter().enumerate().map(|(i, b)| (b.name.as_str(), i)).collect();
+        let ord_to_big: Vec<Option<usize>> = view.names().iter().map(|n| pos.get(n.as_str()).copied()).collect();
+        let mut covered = vec![false; idx.big.len()];
+        for bi in ord_to_big.iter().flatten() {
+            covered[*bi] = true;
+        }
+        drop(pos);
+        idx.midx = Some(MidxState { view, ord_to_big, covered });
+        drop(idx);
+        // Remove superseded MIDX files.
+        if let Ok(rd) = fs::read_dir(&dir) {
+            for ent in rd.flatten() {
+                let n = ent.file_name().to_string_lossy().to_string();
+                if n.starts_with("midx-") && n.ends_with(".midx") && n != format!("midx-{tag}.midx") {
+                    let _ = fs::remove_file(ent.path());
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Fetches a (large) pack index into the local index cache, verifying it
