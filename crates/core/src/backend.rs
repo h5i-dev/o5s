@@ -290,7 +290,9 @@ impl Backend for LocalDisk {
         if path.is_file() {
             return Ok(PutOutcome::AlreadyExists);
         }
-        if path.exists() {
+        // `is_dir`, not `exists`: a concurrent creator may have just made the file.
+        // Any remaining race is settled by the atomic link below.
+        if path.is_dir() {
             return Err(Error::Parse(format!("key {key} names a directory")));
         }
         let dir = path.parent().ok_or_else(|| Error::Parse(format!("bad key {key}")))?.to_path_buf();
