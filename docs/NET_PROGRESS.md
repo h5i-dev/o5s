@@ -120,6 +120,7 @@ User docs are in `docs/API.md` and `deploy/README.md`.
 - Separate metrics listener, and per-principal rate limiting (429 with `Retry-After`, `p2p_rate_limited_total`).
 - Audit log rotation with a continuous hash chain across files.
 - Token admin API (create, list, revoke) over `auth.token_file`.
+- **Multi-host serving:** `[repo] refs = "backend"` creates the repository with the core's backend ref log. Several servers with separate local directories can then share one S3 bucket and prefix. MinIO test (`two_servers_share_a_repo_via_s3`): two servers, four writers contending on one name, 60 commits and 64 OCC conflicts, final version exactly 60 on both servers, and an object written through one server referenced through the other. A config/repo engine mismatch is refused at startup.
 - OIDC/JWT authentication (`tests/oidc.rs` against a mock issuer: valid token, wrong audience, expired, bad signature, tampered token, key rotation, unknown kid, static tokens alongside).
 - Git protocol v2 for fetch (git's default). `tests/git.rs` now runs on v2 by default and checks v0 and v2 for identical results.
 - Git wire deltas: upload-pack deltifies blobs and trees against the previously sent version of the same path. A ripgrep clone (release) transfers 33.8 MB → **6.1 MB**, takes 3.65 s → 2.91 s, refs are identical and fsck is clean.

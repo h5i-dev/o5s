@@ -15,6 +15,7 @@
 //! [repo]
 //! path = "/var/lib/pico2peta/repo"
 //! create = true                      # init the repo if missing
+//! refs = "local"                     # or "backend": refs on S3, several servers per repo
 //!
 //! [backend]                          # optional; default: packs on local disk
 //! type = "s3"
@@ -225,6 +226,11 @@ pub struct RepoSection {
     pub path: PathBuf,
     #[serde(default)]
     pub create: bool,
+    /// Ref store chosen when the repository is created: `local` (journal under
+    /// `path`, one host) or `backend` (create-only log on the pack backend, so
+    /// several servers sharing one S3 bucket/prefix can serve the repository).
+    #[serde(default)]
+    pub refs: pico2peta_repo::RefsStore,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

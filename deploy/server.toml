@@ -18,6 +18,7 @@ trust_forwarded_for = false        # true behind a reverse proxy that sets X-For
 [repo]
 path = "/var/lib/pico2peta/repo"
 create = true                      # initialize on first start
+refs = "local"                     # "backend": refs on S3, so several servers can share the repo
 
 # Sealed packs on S3 (staging and refs stay on local disk under repo.path).
 # Credentials come from AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN.

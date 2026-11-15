@@ -38,7 +38,7 @@ impl TestServer {
         let dir = tempfile::tempdir().unwrap();
         let mut cfg = Config {
             server: Default::default(),
-            repo: RepoSection { path: dir.path().join("repo"), create: true },
+            repo: RepoSection { path: dir.path().join("repo"), create: true, refs: Default::default() },
             backend: Default::default(),
             auth: AuthSection {
                 allow_anonymous: false,
