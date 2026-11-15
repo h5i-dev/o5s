@@ -1,0 +1,17 @@
+[package]
+name = "pico2peta-pack"
+description = "Physical layer: append-only packs, index, bundling, FastCDC chunking, storage backends"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pico2peta-core.workspace = true
+blake3.workspace = true
+fastcdc.workspace = true
+zstd.workspace = true
+crc32fast.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+proptest.workspace = true

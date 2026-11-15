@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 pub mod backend;
+pub mod fault;
 
 use std::fmt;
 use std::io::Read;
