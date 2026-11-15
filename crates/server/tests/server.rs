@@ -674,3 +674,40 @@ fn backend_refs_require_conditional_writes() {
     let e = cfg.unwrap().validate().unwrap_err();
     assert!(e.to_string().contains("conditional_writes"), "{e}");
 }
+
+/// Named uploads use the namespace's chunker (API v1.11): Xet for `alice/models/`,
+/// FastCDC otherwise. Verified by counting the chunk records the pack store wrote.
+#[test]
+fn put_for_name_uses_namespace_chunker() {
+    use pico2peta_chunk::{FastCdcChunker, XetChunker, chunk_lengths};
+    let s = TestServer::start(|c| {
+        let mut prefixes = std::collections::BTreeMap::new();
+        prefixes.insert("alice/models/".to_string(), pico2peta_repo::ChunkerChoice::Xet);
+        let rc = pico2peta_repo::RepoConfig {
+            format: pico2peta_repo::FORMAT_VERSION,
+            pack: (&pico2peta_pack::PackConfig::default()).into(),
+            refs: Default::default(),
+            chunking: pico2peta_repo::ChunkingSection { default: pico2peta_repo::ChunkerChoice::Fastcdc, prefixes },
+        };
+        pico2peta_repo::LocalRepo::init_config(&c.repo.path, &rc).unwrap();
+    });
+    let c = s.client(ALICE);
+    let chunk_records = || {
+        let r = pico2peta_repo::LocalRepo::open(s.dir.path().join("repo")).unwrap();
+        r.pack_stats().unwrap().blobs
+    };
+    let d1 = data(4 << 20, 21);
+    let d2 = data(4 << 20, 22);
+    let before = chunk_records();
+    let h1 = c.put_stream_for(&n("alice/models/m1"), &mut &d1[..]).unwrap();
+    c.flush().unwrap();
+    let xet = chunk_records() - before;
+    let h2 = c.put_stream_for(&n("alice/code/x"), &mut &d2[..]).unwrap();
+    c.flush().unwrap();
+    let fast = chunk_records() - before - xet;
+    assert_eq!(xet, chunk_lengths(&mut XetChunker::new(), &d1).len(), "Xet chunk count for alice/models/");
+    assert_eq!(fast, chunk_lengths(&mut FastCdcChunker::pack_default(), &d2).len(), "FastCDC elsewhere");
+    assert!(c.get(&h1, None).unwrap() == d1 && c.get(&h2, None).unwrap() == d2);
+    // Writing for a name needs write access to that name.
+    assert!(matches!(s.client(READER).put_stream_for(&n("shared/x"), &mut &b"x"[..]), Err(Error::Unauthorized(_))));
+}

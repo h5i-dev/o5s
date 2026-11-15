@@ -804,9 +804,15 @@ async fn finish_upload(
         None => {
             let r = st.repo.clone();
             let path = u.path.clone();
+            // Chunk with the namespace's chunker (e.g. Xet for `oci/models/...`, API v1.11).
+            let local = st.local.clone();
+            let ns_name = name(ns(repo))?;
             let h = blocking(move || {
                 let mut f = std::fs::File::open(&path)?;
-                r.put_stream(&mut f)
+                match local {
+                    Some(l) => l.put_stream_for(&ns_name, &mut f),
+                    None => r.put_stream(&mut f),
+                }
             })
             .await?;
             oci.index(&hex, h, size).await?;

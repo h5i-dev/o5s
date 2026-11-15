@@ -294,6 +294,12 @@ impl RemoteRepo {
         self.block(put_result(resp, local))
     }
 
+    /// Streams an object in using the chunker configured for `name`'s namespace on the
+    /// server (API v1.11). Doesn't create the name. Needs write access to `name`.
+    pub fn put_stream_for(&self, name: &Name, src: &mut dyn Read) -> Result<Hash> {
+        self.put_stream_to(format!("/v1/objects?for_name={}", name), src)
+    }
+
     /// Base URL of the server.
     pub fn url(&self) -> &str {
         &self.inner.base

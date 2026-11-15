@@ -404,6 +404,9 @@ struct PutQuery {
     /// Store as an XOR delta against this object (API v1.7, model weights).
     #[serde(default)]
     delta_base: Option<String>,
+    /// The name the object is for: selects that namespace's chunker (API v1.11).
+    #[serde(default)]
+    for_name: Option<String>,
 }
 
 async fn put_object(
@@ -421,7 +424,17 @@ async fn put_object(
         }
         None => None,
     };
-    st.require(st.authz.allows_somewhere(&p, Access::Write), &p, &c, "put", "objects")?;
+    let for_name = match &q.for_name {
+        Some(n) => {
+            let n = parse_name(n)?;
+            st.require(st.authz.allows(&p, n.as_str(), Access::Write), &p, &c, "put", n.as_str())?;
+            Some(n)
+        }
+        None => {
+            st.require(st.authz.allows_somewhere(&p, Access::Write), &p, &c, "put", "objects")?;
+            None
+        }
+    };
     st.require_audit_healthy()?;
     let max = st.max_upload_bytes;
     if let Some(cl) =
@@ -469,11 +482,13 @@ async fn put_object(
         }
     });
     let repo = st.repo.clone();
+    let local = st.local.clone();
     let res = blocking(move || {
         let mut r = ChannelReader { rx, cur: Bytes::new() };
-        match delta_base {
-            Some(b) => repo.put_delta(&b, &mut r),
-            None => repo.put_stream(&mut r),
+        match (delta_base, for_name, local) {
+            (Some(b), _, _) => repo.put_delta(&b, &mut r),
+            (None, Some(n), Some(l)) => l.put_stream_for(&n, &mut r),
+            _ => repo.put_stream(&mut r),
         }
     })
     .await;

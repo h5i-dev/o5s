@@ -2,7 +2,7 @@
 //!
 //! | Method | Path | Body / response |
 //! |---|---|---|
-//! | `PUT` | `/v1/objects[?delta_base=<hash>]` | raw bytes (streamed) → [`PutResponse`]. Optional `x-p2p-expect-hash`; `delta_base` stores an XOR delta (v1.7) |
+//! | `PUT` | `/v1/objects[?delta_base=<hash>][&for_name=<name>]` | raw bytes (streamed) → [`PutResponse`]. Optional `x-p2p-expect-hash`; `delta_base` stores an XOR delta (v1.7) |
 //! | `GET` | `/v1/objects/{hash}` | raw bytes; `Range: bytes=a-b` → 206 |
 //! | `HEAD` | `/v1/objects/{hash}` | `content-length` = object size |
 //! | `POST` | `/v1/flush` | makes earlier puts durable and visible to other handles |
