@@ -769,6 +769,13 @@ async fn fetch_upstream(
     }
 }
 
+/// Fuzzing: name and version parsing on arbitrary input.
+pub fn fuzz_names(s: &str) -> bool {
+    let p = Pkg::parse(s).map(|p| (p.full(), p.seg(), p.url_part(), p.tarball(s)));
+    let _ = version_key(s);
+    p.is_some() && valid_version(s) && valid_tag(s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

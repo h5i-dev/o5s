@@ -788,6 +788,12 @@ async fn fetch_upstream(
     }
 }
 
+/// Fuzzing: name handling on arbitrary input.
+pub fn fuzz_names(s: &str) -> bool {
+    let n = normalize(s);
+    valid_project(s) && valid_index(s) && valid_filename(s, &n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

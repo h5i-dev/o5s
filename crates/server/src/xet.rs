@@ -634,6 +634,25 @@ impl<I: Iterator<Item = (Hash, std::ops::Range<u64>)>> Read for Concat<'_, I> {
     }
 }
 
+/// Fuzzing: every parser of untrusted Xet bytes (must never panic).
+pub fn fuzz_parsers(data: &[u8]) {
+    if let Ok(chunks) = parse_xorb(data) {
+        let hs: Vec<(MerkleHash, u64)> = chunks.iter().map(|c| (chunk_hash(c), c.len() as u64)).collect();
+        let _ = (xorb_hash(&hs), file_hash(&hs));
+    }
+    let _ = parse_shard(data);
+    let _ = XorbRecord::decode(data);
+    if let Some(r) = FileRecord::decode(data) {
+        // Records come from our own store, but decoding must stay safe on any bytes.
+        if r.chunks.windows(2).all(|w| w[0].1 < w[1].1) && r.chunks.first().is_none_or(|c| c.1 > 0) {
+            let size = r.chunks.last().map_or(0, |c| c.1);
+            let _ = r.reconstruction(0, size, &|g| format!("u{g}"));
+        }
+    }
+    let _ = from_hex(std::str::from_utf8(data).unwrap_or(""));
+    let _ = bg4_regroup(data);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

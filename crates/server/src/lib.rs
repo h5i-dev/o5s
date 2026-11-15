@@ -463,6 +463,21 @@ pub mod fuzzing {
         crate::oci::fuzz_parsers(data);
     }
 
+    /// HF (LFS pointers, Xet xorbs/shards/records), PyPI (names, wheel zip) and npm (names) parsers.
+    pub fn pkg_parsers(data: &[u8]) {
+        crate::xet::fuzz_parsers(data);
+        let _ = crate::hf::parse_lfs_pointer(data);
+        let text = String::from_utf8_lossy(data);
+        let _ = crate::pypi::fuzz_names(&text);
+        let _ = crate::npm::fuzz_names(&text);
+        let read = |r: std::ops::Range<u64>| -> pico2peta_core::Result<Vec<u8>> {
+            data.get(r.start as usize..r.end as usize)
+                .map(<[u8]>::to_vec)
+                .ok_or_else(|| pico2peta_core::Error::Corrupt("out of range".into()))
+        };
+        let _ = crate::pkg::wheel_metadata_with(data.len() as u64, &read);
+    }
+
     pub fn range(header: &str, size: u64) {
         if let Ok(v) = axum::http::HeaderValue::from_str(header)
             && let Ok(Some(r)) = crate::api::parse_range(Some(&v), size)

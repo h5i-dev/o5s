@@ -201,6 +201,14 @@ pub(crate) fn create_once(
 /// central directory, one entry), so a multi-gigabyte wheel is never loaded. `None` when the
 /// wheel has no such file, or uses zip64 / an unsupported method, or it is over 16 MiB.
 pub(crate) fn wheel_metadata(store: &dyn Repository, h: &Hash, size: u64) -> Result<Option<Vec<u8>>> {
+    wheel_metadata_with(size, &|r| store.get(h, Some(r)))
+}
+
+/// [`wheel_metadata`] over any ranged reader (`read(range)` returns exactly those bytes).
+pub(crate) fn wheel_metadata_with(
+    size: u64,
+    read: &dyn Fn(std::ops::Range<u64>) -> Result<Vec<u8>>,
+) -> Result<Option<Vec<u8>>> {
     use std::io::Read as _;
     let u16_at = |b: &[u8], o: usize| u16::from_le_bytes([b[o], b[o + 1]]) as usize;
     let u32_at = |b: &[u8], o: usize| u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]) as u64;
@@ -208,7 +216,7 @@ pub(crate) fn wheel_metadata(store: &dyn Repository, h: &Hash, size: u64) -> Res
     if tail_len < 22 {
         return Ok(None);
     }
-    let tail = store.get(h, Some(size - tail_len..size))?;
+    let tail = read(size - tail_len..size)?;
     let Some(e) = (0..=tail.len() - 22).rev().find(|&i| tail[i..i + 4] == [0x50, 0x4b, 0x05, 0x06]) else {
         return Ok(None);
     };
@@ -216,7 +224,7 @@ pub(crate) fn wheel_metadata(store: &dyn Repository, h: &Hash, size: u64) -> Res
     if cd_size == 0xffff_ffff || cd_off == 0xffff_ffff || cd_off + cd_size > size || cd_size > 64 << 20 {
         return Ok(None);
     }
-    let cd = store.get(h, Some(cd_off..cd_off + cd_size))?;
+    let cd = read(cd_off..cd_off + cd_size)?;
     let mut i = 0;
     while i + 46 <= cd.len() && cd[i..i + 4] == [0x50, 0x4b, 0x01, 0x02] {
         let (method, csize, usize_) = (u16_at(&cd, i + 10), u32_at(&cd, i + 20), u32_at(&cd, i + 24));
@@ -231,7 +239,7 @@ pub(crate) fn wheel_metadata(store: &dyn Repository, h: &Hash, size: u64) -> Res
         if usize_ > 16 << 20 || csize > 16 << 20 || local + 30 > size {
             return Ok(None);
         }
-        let lh = store.get(h, Some(local..local + 30))?;
+        let lh = read(local..local + 30)?;
         if lh[..4] != [0x50, 0x4b, 0x03, 0x04] {
             return Ok(None);
         }
@@ -239,7 +247,7 @@ pub(crate) fn wheel_metadata(store: &dyn Repository, h: &Hash, size: u64) -> Res
         if start + csize > size {
             return Ok(None);
         }
-        let data = store.get(h, Some(start..start + csize))?;
+        let data = read(start..start + csize)?;
         return Ok(match method {
             0 => Some(data),
             8 => {
