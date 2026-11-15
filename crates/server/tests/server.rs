@@ -424,3 +424,22 @@ fn replace_many_is_atomic_over_http() {
     ));
     assert_eq!(c.resolve(&a).unwrap().unwrap().hash, h1);
 }
+
+#[test]
+fn delete_ref_over_http() {
+    let s = TestServer::start(|_| {});
+    let c = s.client(ALICE);
+    let h = c.put(b"d").unwrap();
+    let a = n("alice/d");
+    c.replace(&a, &[(a.clone(), Observed::Absent)], h).unwrap();
+    // Stale read set conflicts; current one deletes.
+    assert!(matches!(c.delete_ref(&a, &[(a.clone(), Observed::Absent)]).unwrap(), ReplaceOutcome::Conflict { .. }));
+    assert!(matches!(c.delete_ref(&a, &[(a.clone(), Observed::Version(1))]).unwrap(), ReplaceOutcome::Ok { .. }));
+    assert_eq!(c.resolve(&a).unwrap(), None);
+    // Version sequence continues after re-creation.
+    match c.replace(&a, &[(a.clone(), Observed::Absent)], h).unwrap() {
+        ReplaceOutcome::Ok { version } => assert!(version > 1, "{version}"),
+        o => panic!("{o:?}"),
+    }
+    assert!(matches!(c.delete_ref(&n("shared/x"), &[(n("shared/x"), Observed::Absent)]), Err(Error::Unauthorized(_))));
+}

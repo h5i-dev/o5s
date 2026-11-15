@@ -9,6 +9,7 @@
 //! | `GET` | `/v1/refs/{name}` | [`RefJson`] or 404 |
 //! | `GET` | `/v1/refs?prefix=p` | [`RefList`] (only names the caller may read) |
 //! | `POST` | `/v1/replace` | [`ReplaceRequest`] → 200/409 [`ReplaceResponse`] |
+//! | `DELETE` | `/v1/refs/{name}` | [`DeleteRefRequest`] → 200/409 [`ReplaceResponse`] (OCC, rules apply) |
 //! | `POST` | `/v1/replace_many` | [`ReplaceManyRequest`] → 200/409 [`ReplaceManyResponse`] (atomic) |
 //! | `GET` | `/v1/namespaces` | [`RuleList`] |
 //! | `PUT` | `/v1/namespaces/{prefix}` | [`SetRuleRequest`] (admin) |
@@ -83,6 +84,12 @@ pub struct ReplaceRequest {
 pub enum ReplaceResponse {
     Ok { version: u64 },
     Conflict { stale: Vec<ReadSetEntry> },
+}
+
+/// OCC delete: the target must be in `read_set`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeleteRefRequest {
+    pub read_set: Vec<ReadSetEntry>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

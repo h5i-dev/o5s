@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the OCI distribution-spec conformance suite against a throwaway
-# pico2peta-server (pull, push, content discovery; deletion is unsupported).
+# pico2peta-server (all four workflows: pull, push, content discovery, content management).
 #   scripts/oci-conformance.sh <pico2peta-server binary> [workdir]
 # Needs Go (builds the suite from the pinned spec release on first use).
 set -euo pipefail
@@ -44,5 +44,5 @@ for _ in $(seq 1 50); do curl -sf "http://127.0.0.1:$PORT/healthz" >/dev/null &&
 cd "$SRV"
 OCI_ROOT_URL="http://127.0.0.1:$PORT" OCI_NAMESPACE=conformance/repo OCI_CROSSMOUNT_NAMESPACE=conformance/other \
 OCI_USERNAME=ci OCI_PASSWORD="$TOKEN" OCI_TEST_PULL=1 OCI_TEST_PUSH=1 OCI_TEST_CONTENT_DISCOVERY=1 \
-OCI_TEST_CONTENT_MANAGEMENT=0 OCI_HIDE_SKIPPED_WORKFLOWS=1 OCI_REPORT_DIR="$SRV" "$SUITE"
+OCI_TEST_CONTENT_MANAGEMENT=1 OCI_HIDE_SKIPPED_WORKFLOWS=1 OCI_REPORT_DIR="$SRV" "$SUITE"
 "$BIN" verify-audit "$SRV/audit.jsonl"

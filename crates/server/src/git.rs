@@ -19,7 +19,7 @@
 //!   only from refs.
 //!
 //! Limits of this version (also in the production gaps): SHA-1 repositories
-//! only, no shallow clones, no protocol v2, no ref deletion, full objects
+//! only, no shallow clones, no protocol v2, full objects
 //! (no deltas) in served packs, and delta bases resolved in a bounded
 //! in-memory cache.
 
@@ -365,7 +365,16 @@ fn advertisement(st: &GitState, repo: &str, service: &str) -> Result<Vec<u8>> {
     out.extend_from_slice(FLUSH);
     let mut caps = match service {
         "git-upload-pack" => vec!["side-band-64k", "no-progress", "ofs-delta", "object-format=sha1", AGENT],
-        _ => vec!["report-status", "side-band-64k", "atomic", "ofs-delta", "quiet", "object-format=sha1", AGENT],
+        _ => vec![
+            "report-status",
+            "delete-refs",
+            "side-band-64k",
+            "atomic",
+            "ofs-delta",
+            "quiet",
+            "object-format=sha1",
+            AGENT,
+        ],
     }
     .into_iter()
     .map(str::to_string)
@@ -1336,12 +1345,21 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
     }
     // Validate commands.
     let mut statuses: Vec<(String, std::result::Result<(), String>)> = Vec::new();
-    let mut updates: Vec<(Name, Hash, Observed, usize)> = Vec::new();
+    // `None` hash = delete.
+    let mut updates: Vec<(Name, Option<Hash>, Observed, usize)> = Vec::new();
     for (i, c) in cmds.iter().enumerate() {
-        let check = (|| -> std::result::Result<(Name, Hash, Observed), String> {
+        let check = (|| -> std::result::Result<(Name, Option<Hash>, Observed), String> {
             let name = ref_name(repo, &c.gitref).ok_or("unsupported ref name")?;
             if c.new == ZERO_OID {
-                return Err("deleting refs is not supported".into());
+                let cur = git.repo.resolve(&name).map_err(|e| e.to_string())?;
+                let cur_oid = match &cur {
+                    Some(v) => Some(oid_of(&git.repo.get(&v.hash, None).map_err(|e| e.to_string())?)),
+                    None => None,
+                };
+                if cur_oid != Some(c.old) && c.old != ZERO_OID {
+                    return Err("fetch first (stale old value)".into());
+                }
+                return Ok((name, None, RefValue::observed(cur)));
             }
             let (kind, h) = view.lookup(&c.new).map_err(|e| e.to_string())?.ok_or("missing new object")?;
             // Not in this push: the client assumes we have it, so make sure it stays.
@@ -1360,7 +1378,7 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
             if cur_oid != expected {
                 return Err("fetch first (stale old value)".into());
             }
-            Ok((name, h, RefValue::observed(cur)))
+            Ok((name, Some(h), RefValue::observed(cur)))
         })();
         match check {
             Ok((n, h, o)) => {
@@ -1379,8 +1397,15 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
             }
             return Ok(PushResult { unpack, statuses, sideband });
         }
+        if updates.iter().any(|u| u.1.is_none()) {
+            // replace_many cannot delete; refuse rather than lose atomicity.
+            for s in statuses.iter_mut() {
+                s.1 = Err("atomic pushes cannot delete refs".into());
+            }
+            return Ok(PushResult { unpack, statuses, sideband });
+        }
         if !updates.is_empty() {
-            let u: Vec<(Name, Hash)> = updates.iter().map(|x| (x.0.clone(), x.1)).collect();
+            let u: Vec<(Name, Hash)> = updates.iter().filter_map(|x| Some((x.0.clone(), x.1?))).collect();
             let rs: Vec<(Name, Observed)> = updates.iter().map(|x| (x.0.clone(), x.2)).collect();
             let why = match git.repo.replace_many(&u, &rs) {
                 Ok(ReplaceManyOutcome::Ok { .. }) => None,
@@ -1396,7 +1421,11 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
         }
     } else {
         for (n, h, o, i) in updates {
-            let r = match git.repo.replace(&n, &[(n.clone(), o)], h) {
+            let res = match h {
+                Some(h) => git.repo.replace(&n, &[(n.clone(), o)], h),
+                None => git.repo.delete_ref(&n, &[(n.clone(), o)]),
+            };
+            let r = match res {
                 Ok(ReplaceOutcome::Ok { .. }) => Ok(()),
                 Ok(ReplaceOutcome::Conflict { .. }) => Err("fetch first (concurrent update)".to_string()),
                 Err(Error::Forbidden { .. }) => Err("ref is immutable".to_string()),
@@ -1602,8 +1631,10 @@ pub(crate) fn fuzz_push(repo: Arc<pico2peta_repo::LocalRepo>, spool: &std::path:
             for (r, s) in &res.statuses {
                 if s.is_ok() {
                     let n = ref_name("fuzz/repo", r).unwrap_or_else(|| panic!("accepted bad ref {r}"));
-                    let v = st.repo.resolve(&n).ok().flatten().unwrap_or_else(|| panic!("ok ref {r} not set"));
-                    assert!(st.repo.contains(&v.hash).unwrap_or(false));
+                    // An accepted update (not a delete) must point at a stored object.
+                    if let Some(v) = st.repo.resolve(&n).ok().flatten() {
+                        assert!(st.repo.contains(&v.hash).unwrap_or(false), "ok ref {r} points at a missing object");
+                    }
                 }
             }
         }

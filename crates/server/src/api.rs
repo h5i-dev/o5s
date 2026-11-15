@@ -108,7 +108,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/objects/{hash}", get(get_object).head(head_object))
         .route("/v1/flush", post(flush))
         .route("/v1/refs", get(list_refs))
-        .route("/v1/refs/{*name}", get(resolve))
+        .route("/v1/refs/{*name}", get(resolve).delete(delete_ref))
         .route("/v1/replace", post(replace))
         .route("/v1/replace_many", post(replace_many))
         .route("/v1/namespaces", get(list_rules))
@@ -663,6 +663,50 @@ async fn replace(
         target: name.to_string(),
         outcome: outcome.into(),
         detail: Some(detail),
+        remote: c.remote.clone(),
+    })
+    .await?;
+    let out = res?;
+    let status =
+        if matches!(out, pico2peta_core::ReplaceOutcome::Ok { .. }) { StatusCode::OK } else { StatusCode::CONFLICT };
+    Ok((status, Json(wire::ReplaceResponse::from_core(&out))).into_response())
+}
+
+async fn delete_ref(
+    State(st): St,
+    Extension(p): Extension<Principal>,
+    Extension(c): Extension<Caller>,
+    Path(name): Path<String>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let name = parse_name(&name)?;
+    let req: wire::DeleteRefRequest =
+        serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("bad delete request: {e}")))?;
+    let read_set =
+        req.read_set.iter().map(wire::ReadSetEntry::to_core).collect::<Result<Vec<_>, _>>().map_err(ApiError::from)?;
+    st.require(st.authz.allows(&p, name.as_str(), Access::Write), &p, &c, "delete_ref", name.as_str())?;
+    if is_reserved(name.as_str()) {
+        st.require(st.authz.allows(&p, "", Access::Admin), &p, &c, "delete_reserved", name.as_str())?;
+    }
+    for (n, _) in &read_set {
+        st.require(st.authz.allows(&p, n.as_str(), Access::Read), &p, &c, "delete_ref", n.as_str())?;
+    }
+    st.require_audit_healthy()?;
+    let repo = st.repo.clone();
+    let (n, rs) = (name.clone(), read_set.clone());
+    let res = blocking(move || repo.delete_ref(&n, &rs)).await;
+    let outcome = match &res {
+        Ok(pico2peta_core::ReplaceOutcome::Ok { .. }) => "ok",
+        Ok(pico2peta_core::ReplaceOutcome::Conflict { .. }) => "conflict",
+        Err(_) => "rejected",
+    };
+    st.audit_mutation(Event {
+        request_id: c.request_id.clone(),
+        principal: p.name.clone(),
+        action: "delete_ref",
+        target: name.to_string(),
+        outcome: outcome.into(),
+        detail: None,
         remote: c.remote.clone(),
     })
     .await?;

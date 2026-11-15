@@ -145,9 +145,10 @@ fn atomic_push_and_immutable_tags() {
     // Without the bad ref, an atomic push of two branches succeeds.
     ok(&a, &["push", "-q", "--atomic", &u, "main", "side"]);
     assert!(s.client(ALICE).resolve(&n("git/team/t/refs/heads/side")).unwrap().is_some());
-    // Deleting refs is not supported.
-    let (pushed, _) = git(&a, &["push", &u, ":side"]);
-    assert!(!pushed);
+    // Deleting a mutable branch works; an immutable tag cannot be deleted.
+    ok(&a, &["push", "-q", &u, ":side"]);
+    let (pushed, out) = git(&a, &["push", &u, ":refs/tags/v1"]);
+    assert!(!pushed, "{out}");
 }
 
 #[test]
@@ -277,4 +278,26 @@ fn grouped_repack_vs_git() {
     let list = |d: &Path| ok(d, &["for-each-ref", "--format=%(objectname) %(refname)", "refs/heads", "refs/tags"]);
     assert_eq!(list(&mirror), list(&w.path().join("c")));
     ok(&w.path().join("c"), &["fsck", "--full"]);
+}
+
+#[test]
+fn branch_deletion() {
+    if !have_git() {
+        eprintln!("skipping: git not installed");
+        return;
+    }
+    let s = git_server();
+    let w = tempfile::tempdir().unwrap();
+    let a = w.path().join("a");
+    std::fs::create_dir(&a).unwrap();
+    ok(&a, &["init", "-q"]);
+    commit(&a, "f", "1", "one");
+    let u = url(&s, ALICE, "team/del");
+    ok(&a, &["branch", "tmp"]);
+    ok(&a, &["push", "-q", &u, "main", "tmp"]);
+    ok(&a, &["push", "-q", &u, ":tmp"]);
+    assert!(s.client(ALICE).resolve(&n("git/team/del/refs/heads/tmp")).unwrap().is_none());
+    // Re-create after delete.
+    ok(&a, &["push", "-q", &u, "tmp"]);
+    assert!(s.client(ALICE).resolve(&n("git/team/del/refs/heads/tmp")).unwrap().is_some());
 }
