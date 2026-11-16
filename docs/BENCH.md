@@ -97,6 +97,13 @@ After the fix (3 interleaved rounds each, before vs after, load 1.8–2.1):
 
 A proptest also covers every mix of inline and offloaded segments (`any_offload_pattern_equals_serial`).
 
+**Tried and reverted: parallel Xet cutting on upload (19bccb9).** The upload stream was cut in 32 MiB windows on 2
+threads (net's `xet_lengths_parallel`; the cuts are exactly the serial chunker's, tested across window
+boundaries). Net's interleaved A/B: LFS upload server busy time 0.48–0.51 s, against 0.372 s with the serial
+chunker, and server CPU 1.03 s against 0.93 s. No chunk left the window until the whole window had arrived from
+the socket, so the encode stage idled and the pipeline lost its overlap. The serial chunker is back; the
+exactness test stays. A double-buffered version (cut window i while window i+1 is read) is possible later.
+
 **The ≥ 0.50× target is not reached.** Warm `cat` here is a page-cache copy at about 11.7 GB/s, so 0.50× needs
 about 5.8 GB/s of verified bytes. Strict hashes every byte twice (per chunk and whole object), which needs
 11.6 GB/s of BLAKE3 on top of the reads and copies; the 4 cores give about half of that. Eof hashes once and
