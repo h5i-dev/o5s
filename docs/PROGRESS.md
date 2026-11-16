@@ -204,6 +204,12 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
   acted on: anything still regressing is a real regression, fixed before H4.
 
 ## Questions for human
+- **Verified-read target (H4, 2026-11-16).** Multi-core whole-object BLAKE3 is in (exactly the serial hash,
+  proptested; `strict` unchanged). It brings §6.4's verified read from 0.17× to 0.22× of warm `cat` (strict) and
+  from 0.18× to 0.32× (eof) on this 4-core host, short of 0.50× (BENCH.md, H4 core). Strict hashes every byte
+  twice; on 4 cores that caps it at roughly 0.25–0.3×. Options: accept the measured ratio for this host; judge
+  the target on a host with more cores; or redefine `strict` so that for whole reads the per-chunk hashes are
+  checked as part of one pass. No change is made until you decide; the safe default is to keep `strict` as it is.
 - **Disk budget:** `/mnt/scratch` has much less headroom than the ~31 GB in AGENT_TASK.md (24 GB → 13 GB → 0 during this session, partly from other directories). Could you free or extend space, or say which of these may be deleted: the Exp1 mirrors and spill (`bench-data`, ~1.5 GB), the fuzz build cache, the nightly toolchain (`rustup-nightly`)?
 - **Disk headroom** is still tight: it has dipped below 8 GB twice. Both sessions now clean their build caches regularly.
 - **Exp1 failed**, so grouped repack stays opt-in (`[gc] grouped = false` by default, per the pre-registered rule), and Exp1b is queued. Nothing is needed from you unless you want to override the pre-registered consequences.

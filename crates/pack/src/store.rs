@@ -1456,7 +1456,7 @@ impl PackStore {
         // bytes. Frames keep it (one CRC covers all members, and decompression
         // dominates their cost).
         let (_, data) = self.read_record(hash, loc, loc.frame.is_some())?;
-        if !digest_ok(hash, &Hash::of(&data)) {
+        if !digest_ok(hash, &crate::phash::hash(&data, hash_threads())) {
             return Err(Error::Corrupt(format!("content hash mismatch for {hash}")));
         }
         Ok(data)
@@ -2913,9 +2913,16 @@ struct ChunkReader {
     verify_chunks: bool,
 }
 
-/// A whole-object hash running on its own thread: chunk sender, the thread,
-/// and the expected hash.
-type VerifyThread = (std::sync::mpsc::SyncSender<Arc<Vec<u8>>>, std::thread::JoinHandle<blake3::Hasher>, Hash);
+/// A whole-object hash running on its own thread: chunk sender, the thread
+/// (its result is the hash of exactly `span` bytes, or `None`), and the expected hash.
+type VerifyThread = (std::sync::mpsc::SyncSender<Arc<Vec<u8>>>, std::thread::JoinHandle<Option<Hash>>, Hash);
+
+/// Threads for one whole-object hash ([`crate::phash`]): half the cores, at most 4. The
+/// read-ahead workers (which also hash, per chunk, in strict mode) and the reader itself need
+/// the rest: on 4 cores, 2 hash threads beat 4 (BENCH.md, H4).
+fn hash_threads() -> usize {
+    (std::thread::available_parallelism().map_or(1, |n| n.get()) / 2).clamp(1, 4)
+}
 
 /// One read-ahead job: fetch and verify chunk `hash`, return bytes `[a, b)`.
 struct ChunkJob {
@@ -2953,18 +2960,14 @@ impl ChunkReader {
     fn new(store: PackStore, pieces: Vec<(Hash, u64, u64)>, verify: Option<Hash>, span: u64, mode: ReadVerify) -> Self {
         // Per-chunk hashes may be skipped only when the whole object is verified at EOF.
         let verify_chunks = !(mode == ReadVerify::Eof && verify.is_some());
-        // Large whole reads: hash on a separate thread, fed the same buffers.
+        // Large whole reads: hash on a separate thread, fed the same buffers. Objects of more
+        // than two segments are hashed on several cores (`phash`), exactly equal to the serial
+        // hash; `span` is the object's length here (whole reads only).
         let hasher = verify.filter(|_| span >= READAHEAD_MIN).and_then(|want| {
             let (tx, rx) = std::sync::mpsc::sync_channel::<Arc<Vec<u8>>>(READAHEAD_PER_WORKER * 4);
             std::thread::Builder::new()
                 .name("p2p-verify".into())
-                .spawn(move || {
-                    let mut h = blake3::Hasher::new();
-                    for c in rx {
-                        h.update(&c);
-                    }
-                    h
-                })
+                .spawn(move || crate::phash::hash_stream(rx, span, hash_threads()))
                 .ok()
                 .map(|j| (tx, j, want))
         });
@@ -3104,7 +3107,8 @@ impl Read for ChunkReader {
                     if let Some((tx, join, want)) = self.hasher.take() {
                         drop(tx);
                         let hs = join.join().map_err(|_| io_err(Error::Corrupt("verify thread panicked".into())))?;
-                        if !digest_ok(&want, &Hash(*hs.finalize().as_bytes())) {
+                        // `None`: the bytes returned were not the object's length.
+                        if !hs.is_some_and(|got| digest_ok(&want, &got)) {
                             return Err(io_err(Error::Corrupt(format!("reassembled hash mismatch for {want}"))));
                         }
                     }
