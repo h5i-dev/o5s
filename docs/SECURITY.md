@@ -82,6 +82,23 @@ Remaining by design:
   - Pack indexes are content-named and create-only, so a re-created pack has identical index bytes.
   - Every mapping is checksum-verified.
 
+## Object reads by hash: reachability (core building block `o5s_repo::reach`)
+
+The server authorizes a read of an object by hash only if a name the principal may read reaches it (net's
+authz kernel, proven in `verify/net`). The core's part is the per-cell reach index; the properties it must hold
+for that rule to be sound:
+- **No stale grants.** A delete or move marks the cell dirty while the commit returns, and the next query on that
+  cell recomputes it exactly. An object becomes unreadable as soon as its last readable name is deleted or moved.
+- **No missed reachability.** A created name queues its target for its cell, and a query drains the queue first,
+  so read-your-writes holds. The walk follows ref targets, manifest chunks, delta bases, frame references and
+  front children, the same traversal as GC's mark. A hash reached only as a chunk is a member without being
+  traced; a hash that is also a front object is still traced when its object edge arrives, so nothing a front
+  references is missed (`crates/repo/tests/front.rs`).
+- **An unreferenced object is unreadable** through the server, even right after its `put`. A missing object and
+  a forbidden one get the same answer.
+- **Limit:** writes to the repository from other processes or hosts are not observed. The server must be the
+  repository's only writer for the index to be exact.
+
 ## Findings fixed in this review
 
 1. Zstd-compressed manifest and delta records were decompressed without a
