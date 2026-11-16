@@ -2,7 +2,7 @@
 
 Why do we need a separate GitHub for source code, JFrog for build outputs, Hugging Face for LLM weights, and
 so on? They are all just data: sequences of 0s and 1s. Why not treat them all the same way? All the
-operations we really have are **push**, **pull**, and **overwrite**.
+operations we really have are push, pull, and overwrite.
 
 o5s is one content-addressed, immutable store for all of it: source code, packages, container images and model
 weights. The clients you already use (`git`, `docker`, `pip`, `npm`, `mvn`, `huggingface_hub`) talk to it
@@ -44,12 +44,12 @@ alias o5s=target/release/o5s
 R=/data/repo
 
 o5s -C $R init
-H=$(o5s -C $R put model.safetensors)               # push: prints the BLAKE3 hash
-o5s -C $R get $H > model.safetensors               # pull: every read is verified
+H=$(o5s -C $R put model.safetensors)               # stores the file, prints its BLAKE3 hash
+o5s -C $R get $H > model.safetensors               # every read is verified against the hash
 o5s -C $R get $H --range 0..1024 > head.bin
 
 o5s -C $R replace models/acme/main $H --expect absent   # a name moves only by compare-and-swap; prints "ok 1"
-o5s -C $R replace models/acme/main $H2 --expect 1       # overwrite version 1 (exit 3 if someone else moved it)
+o5s -C $R replace models/acme/main $H2 --expect 1       # move it from version 1 (exit 3 if someone else moved it)
 o5s -C $R ns set releases immutable                     # published names never move
 
 o5s -C $R prov record train --in data=$D --out model=$H # provenance
