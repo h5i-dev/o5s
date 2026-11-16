@@ -48,6 +48,42 @@ pre-registered metric was plain RSS, so it is reported as **missed**; the split 
   292 B/object projection was stopped early, as soon as the 10⁷ disk number showed it could not fit.
 - The bench's disk number now counts each inode once.
 
+## 2026-11-16: H4 core, multi-core whole-object BLAKE3 for verified reads (dev check)
+
+**Change.** `pico2peta_pack::phash` builds the whole-object hash of a verified read from 1 MiB segments
+hashed on several threads (`blake3::hazmat`: each segment followed by more input is a complete subtree at
+its offset) and combined in input order by BLAKE3's own stack rule.
+- It is **exactly** `blake3::hash` of the bytes: a proptest at lengths around segment and chunk boundaries,
+  with random buffer splits and 1–4 threads (`crates/pack/tests/phash.rs`), and fixed cases at
+  exact multiples ±1 byte or chunk. Both planted combiner bugs (a wrong merge condition; a missing tail merge)
+  fail it.
+- A stream whose bytes do not add up to the object's length never yields a hash (`None`), which counts as a
+  mismatch, just as the serial hash of other bytes would.
+- `strict` is unchanged: per-chunk BLAKE3 before any byte is returned, and the whole-object hash checked at EOF.
+- Segments are slices of the reader's own buffers (no copy). The hash uses half the cores, at most 4: on this
+  4-core host, 2 hash threads beat 4, because the read-ahead workers also hash in strict mode.
+- `read_blob` (whole unchunked records over 2 MiB) uses the same function.
+
+**Dev A/B** (`p2p-bench`, before vs after, interleaved under the lock, the other session paused):
+
+| case (64 MiB random object, `reads`) | before (3 rounds) | after (3 rounds) | change (medians) |
+|---|---|---|---|
+| `get` MB/s | 1287 / 1298 / 1317 | 1294 / 1291 / 1288 | −0.5 % |
+| `open` strict MB/s | 1971 / 1970 / 1969 | 2460 / 2497 / 2481 | +26 % |
+| `open` eof MB/s | 2126 / 2134 / 2114 | 3361 / 3265 / 3258 | +54 % |
+
+| §6.4 generic (1 GiB, 2 rounds) | before | after |
+|---|---|---|
+| verified read, strict, vs warm `cat` | 0.173×, 0.170× | 0.225×, 0.220× |
+| verified read, eof, vs warm `cat` | 0.185×, 0.183× | 0.319×, 0.314× |
+
+**The ≥ 0.50× target is not reached.** Warm `cat` here is a page-cache copy at about 11.7 GB/s, so 0.50× needs
+about 5.8 GB/s of verified bytes. Strict hashes every byte twice (per chunk and whole object), which needs
+11.6 GB/s of BLAKE3 on top of the reads and copies; the 4 cores give about half of that. Eof hashes once and
+reaches 0.32×. Closing the rest would take more cores, or a change to what `strict` checks. That is the
+human's decision (PROGRESS, Questions), not something to change here. The official numbers come from the
+final batch (§6.8).
+
 ## 2026-11-16: H3 no-regression rerun, core side (PLAN §6.8), on `cbbbb8a`
 
 **Verdict by the letter of §6.8: three FAILs, all flagged to the human.** The A/B evidence below

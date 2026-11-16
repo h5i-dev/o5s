@@ -7,6 +7,7 @@
 
 pub mod bytegroup;
 pub mod format;
+pub mod phash;
 pub mod store;
 
 pub use format::IdxEntry;
