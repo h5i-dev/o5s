@@ -7,7 +7,7 @@ dist = f"{mod}-{version}.dist-info"
 files = {
     f"{mod}/__init__.py": f"VALUE = {value}\n".encode(),
     f"{dist}/METADATA": f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\nRequires-Python: >=3.8\n".encode(),
-    f"{dist}/WHEEL": b"Wheel-Version: 1.0\nGenerator: pico2peta-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+    f"{dist}/WHEEL": b"Wheel-Version: 1.0\nGenerator: o5s-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
 }
 record = ""
 for p, b in files.items():

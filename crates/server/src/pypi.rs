@@ -11,7 +11,7 @@
 //!   upstream is down, come from the store.
 //!
 //! **Storage.** File `f` of project `p` in index `i` is the name `pypi/<i>/<p>/<f>` → a small
-//! record object (`P2PPYPI1`, content hash, JSON metadata). The content is a core object
+//! record object (`O5SPYPI1`, content hash, JSON metadata). The content is a core object
 //! stored with namespace `pypi/<i>/<p>`'s encoding profile. The `pypi` front claims `pypi/`,
 //! and its GC tracer follows record → content. Authorization is on `pypi/<i>`.
 
@@ -28,14 +28,14 @@ use axum::extract::{FromRequest, Multipart, Path, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
-use pico2peta_core::{Error, Hash, Name, ObjectStore, Repository, Result};
+use o5s_core::{Error, Hash, Name, ObjectStore, Repository, Result};
 use sha2::Digest as _;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const RECORD_MAGIC: &[u8; 8] = b"P2PPYPI1";
-const YANK_MAGIC: &[u8; 8] = b"P2PPYYK1";
+const RECORD_MAGIC: &[u8; 8] = b"O5SPYPI1";
+const YANK_MAGIC: &[u8; 8] = b"O5SPYYK1";
 const JSON_TYPE: &str = "application/vnd.pypi.simple.v1+json";
 
 pub struct PypiState {
@@ -51,7 +51,7 @@ pub struct PypiState {
 impl PypiState {
     pub fn new(
         repo: Arc<dyn Repository>,
-        local: Option<pico2peta_repo::LocalRepo>,
+        local: Option<o5s_repo::LocalRepo>,
         upstreams: BTreeMap<String, Upstream>,
     ) -> std::result::Result<PypiState, String> {
         let http = crate::pkg::http_client(&upstreams.values().collect::<Vec<_>>())?;
@@ -199,7 +199,7 @@ fn check(st: &AppState, p: &Principal, c: &Caller, index: &str, need: Access) ->
     if p.name == crate::auth::ANONYMOUS {
         // pip and twine send credentials only after a Basic challenge.
         let mut r = err(StatusCode::UNAUTHORIZED, "authentication required");
-        r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"pico2peta\""));
+        r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"o5s\""));
         return Err(r);
     }
     Err(err(
@@ -727,13 +727,13 @@ async fn yank(
         let h = if on { Some(py2.repo.put(&[YANK_MAGIC.as_slice(), &reason].concat())?) } else { None };
         for _ in 0..8 {
             let cur = py2.repo.resolve(&y2)?;
-            let obs = cur.map_or(pico2peta_core::Observed::Absent, |c| pico2peta_core::Observed::Version(c.version));
+            let obs = cur.map_or(o5s_core::Observed::Absent, |c| o5s_core::Observed::Version(c.version));
             let out = match (h, cur) {
                 (Some(h), _) => py2.repo.replace(&y2, &[(y2.clone(), obs)], h)?,
                 (None, Some(_)) => py2.repo.delete_ref(&y2, &[(y2.clone(), obs)])?,
                 (None, None) => return Ok(true),
             };
-            if let pico2peta_core::ReplaceOutcome::Ok { .. } = out {
+            if let o5s_core::ReplaceOutcome::Ok { .. } = out {
                 return Ok(true);
             }
         }

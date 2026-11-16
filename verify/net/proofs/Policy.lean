@@ -1,4 +1,4 @@
-import Pico2petaNetKernel
+import O5sNetKernel
 import H5iAppLib
 /-!
 # The access policy: what the extracted `permits` and `visible` compute
@@ -14,9 +14,9 @@ command's writes are `permits`-ted and its rows `visible`; this file says what t
   covers the ref's cell), that is: iff the object is reachable from a name the principal may
   read.
 -/
-open Aeneas Aeneas.Std Result H5iAppLib pico2peta_net_kernel
+open Aeneas Aeneas.Std Result H5iAppLib o5s_net_kernel
 
-namespace pico2peta_net_kernel.Spec.Policy
+namespace o5s_net_kernel.Spec.Policy
 
 abbrev B (l : List U8) : List Nat := l.map (·.val)
 
@@ -205,4 +205,4 @@ theorem permits_spec (actor : access.Principal) (s : access.Snapshot) (n : alloc
   step*
   all_goals simp_all [access.WRITE, vec_deref_val]
 
-end pico2peta_net_kernel.Spec.Policy
+end o5s_net_kernel.Spec.Policy

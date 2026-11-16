@@ -9,7 +9,7 @@ W=$BENCH_DATA/exp1
 OUT=$W/results.jsonl
 EXP1=$CARGO_TARGET_DIR/release/exp1
 mkdir -p "$W"
-(cd "$(dirname "$0")/.." && cargo build -q --release -p pico2peta-exp1)
+(cd "$(dirname "$0")/.." && cargo build -q --release -p o5s-exp1)
 REPOS=("$@"); [ ${#REPOS[@]} -eq 0 ] && REPOS=(ripgrep jq redis git)
 
 timed() { # timed <logfile> cmd... ; prints "wall_secs peak_rss_kb"

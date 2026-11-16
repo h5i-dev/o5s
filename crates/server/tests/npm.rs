@@ -1,16 +1,16 @@
 //! The npm front against the real, unmodified npm CLI: publish (plain and scoped), install,
 //! create-once versions, and the upstream proxy-cache (a second server proxying the first).
-//! Skipped when `npm`/`node` are absent (`PICO2PETA_NPM` overrides the npm path).
+//! Skipped when `npm`/`node` are absent (`O5S_NPM` overrides the npm path).
 
 mod common;
 
 use common::*;
-use pico2peta_server::config::{Access, Upstream};
+use o5s_server::config::{Access, Upstream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn npm_bin() -> Option<String> {
-    let p = std::env::var("PICO2PETA_NPM").unwrap_or_else(|_| "npm".into());
+    let p = std::env::var("O5S_NPM").unwrap_or_else(|_| "npm".into());
     let ok = Command::new(&p).arg("--version").output().is_ok_and(|o| o.status.success())
         && Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success());
     if ok {
@@ -170,9 +170,9 @@ fn npm_publish_install_and_proxy_cache() {
     // The upstream goes away; GC (zero grace) runs; cached versions still install.
     up.stop.take().map(|s| s.send(()));
     drop(up);
-    let repo = pico2peta_repo::LocalRepo::open(proxy.dir.path().join("repo")).unwrap();
-    let fronts = pico2peta_server::fronts::Fronts::open(repo).unwrap();
-    let opts = pico2peta_repo::GcOptions {
+    let repo = o5s_repo::LocalRepo::open(proxy.dir.path().join("repo")).unwrap();
+    let fronts = o5s_server::fronts::Fronts::open(repo).unwrap();
+    let opts = o5s_repo::GcOptions {
         grace: std::time::Duration::ZERO,
         allow_short_grace: true,
         repack_all: true,
@@ -180,7 +180,7 @@ fn npm_publish_install_and_proxy_cache() {
     };
     for _ in 0..3 {
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        let prov = pico2peta_prov::ProvTracer { inner: pico2peta_server::fronts::Leaves };
+        let prov = o5s_prov::ProvTracer { inner: o5s_server::fronts::Leaves };
         fronts.repo.gc_with_fronts(&opts, Some(&prov), false).unwrap();
     }
     // `latest` offline is the newest cached version (1.1.0 was never fetched).
@@ -191,6 +191,6 @@ fn npm_publish_install_and_proxy_cache() {
 
 /// Makes every name under `ns` create-once (admin rule).
 fn s_rule(srv: &TestServer, ns: &str) {
-    use pico2peta_core::Repository;
-    srv.client(ADMIN).set_rule(ns, pico2peta_core::Rule::ImmutableAfterPublish).unwrap();
+    use o5s_core::Repository;
+    srv.client(ADMIN).set_rule(ns, o5s_core::Rule::ImmutableAfterPublish).unwrap();
 }

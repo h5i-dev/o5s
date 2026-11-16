@@ -6,11 +6,11 @@
 //! so the node itself is built here). Indexing, text/prefix search and
 //! lineage/impact must return errors, never panic or loop.
 use libfuzzer_sys::fuzz_target;
-use pico2peta_core::{Name, Observed, ObjectStore, Repository};
+use o5s_core::{Name, Observed, ObjectStore, Repository};
 
 fuzz_target!(|data: &[u8]| {
     let dir = tempfile::tempdir().unwrap();
-    let repo = pico2peta_repo::LocalRepo::init(dir.path(), &Default::default()).unwrap();
+    let repo = o5s_repo::LocalRepo::init(dir.path(), &Default::default()).unwrap();
     let mut parts: Vec<&[u8]> = Vec::new();
     let mut rest = data;
     while let Some(i) = rest.windows(2).position(|w| w == b"\xff\xfe") {
@@ -24,11 +24,11 @@ fuzz_target!(|data: &[u8]| {
     let checkpoint_bytes = parts.pop().unwrap();
     let records: Vec<_> = parts.iter().map(|p| repo.put(p).unwrap()).collect();
     let checkpoint = (!checkpoint_bytes.is_empty()).then(|| repo.put(checkpoint_bytes).unwrap());
-    let node = pico2peta_prov::LogNode { prev: None, records: records.clone(), checkpoint, total: records.len() as u64 };
+    let node = o5s_prov::LogNode { prev: None, records: records.clone(), checkpoint, total: records.len() as u64 };
     let head = repo.put(&node.encode()).unwrap();
-    let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF).unwrap();
+    let log = Name::new(o5s_prov::DEFAULT_LOG_REF).unwrap();
     repo.replace(&log, &[(log.clone(), Observed::Absent)], head).unwrap();
-    if let Ok(idx) = pico2peta_prov::search::SearchIndex::build(&repo, &log) {
+    if let Ok(idx) = o5s_prov::search::SearchIndex::build(&repo, &log) {
         let q = String::from_utf8_lossy(data);
         let _ = idx.text(&q);
         let _ = idx.prefix(&q);
@@ -36,7 +36,7 @@ fuzz_target!(|data: &[u8]| {
             let _ = idx.metadata(r);
         }
     }
-    if let Ok(p) = pico2peta_prov::Provenance::load(&repo, &log) {
+    if let Ok(p) = o5s_prov::Provenance::load(&repo, &log) {
         for h in records.iter().chain([head].iter()) {
             let _ = p.lineage(h);
             let _ = p.impact(h);

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: SemVer; on-disk formats carry their own version magic (`P2PPACK1`, `P2PIDX01`, `P2PREFJ1`, `config.toml format = 1`).
+All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: SemVer; on-disk formats carry their own version magic (`O5SPACK1`, `O5SIDX01`, `O5SREFJ1`, `config.toml format = 1`).
 
 ## [Unreleased]
 
@@ -15,7 +15,20 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
   argument order).
 - **Object reads by hash are authorized by reachability** (with net's authz kernel): a principal reads an object
   only if a name it may read reaches it. An object that no name references is not readable through the server,
-  so `put` then `get` by hash needs a name first. The core building block is `pico2peta_repo::reach`.
+  so `put` then `get` by hash needs a name first. The core building block is `o5s_repo::reach`:
+  - commits never traverse; created names queue their targets for a background worker, and a query settles its
+    cell first, so answers are exact;
+  - deletes and moves still revoke at once (the cell is recomputed by its next query);
+  - the walk skips the tracer on chunk edges and keeps a separate traced set, so a hash that is both a chunk and
+    a front object is still traced; GC's mark uses the same rule.
+- **h5i v0.5.5 everywhere:** every h5i crate comes from crates.io, pinned `=0.5.5`; the CLI is the official v0.5.5
+  release; Lean `h5i_app_lib` stays at the v0.5.5 tag (`verify/core/README.md`, Toolchain).
+
+### Performance (H4)
+- **Verified reads hash the whole object on several cores** (`o5s_pack::phash`): 1 MiB segments are hashed
+  at their offsets and combined by BLAKE3's tree rule, giving exactly the serial hash (proptested). `strict` is
+  unchanged, and the extra threads engage only when hashing is the bottleneck. On a 4-core host, 64 MiB
+  incompressible reads: strict `open` +24 %, eof `open` +50 %; compressible reads are unchanged.
 
 ### Changed (breaking before v0.1)
 - **CLI cleanup (plumbing over a domain-agnostic core).**
@@ -41,14 +54,14 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 - Ref store: append-only checksummed journal, exclusive-flock commit point, OCC `replace` over read sets, namespace rules whose immutability can't be retracted.
 - `LocalRepo` combining both stores, and `open_with_backend` for S3.
 - GC/repack: plan → sweep → delete with grace periods; condemn-aware dedup; rescue of resurrected objects.
-- CLI `pico2peta` with local and `--remote` modes.
+- CLI `o5s` with local and `--remote` modes.
 - S3 backend, HTTP server and client (net session; see docs/NET_PROGRESS.md):
-  - `pico2peta-backend-s3`: SigV4, `If-None-Match` create-only writes, multipart from memory or file, resumable streaming reads, jittered retries with a retry budget, bounded connections. Passes the backend conformance suite on MinIO, including fault injection.
-  - `pico2peta-server`: HTTP API v1 with bearer and Basic authn, per-namespace authz, a hash-chained fsync'd audit log, Prometheus metrics, health and readiness endpoints, graceful drain, load shedding, bounded-memory streaming, and admin GC.
+  - `o5s-backend-s3`: SigV4, `If-None-Match` create-only writes, multipart from memory or file, resumable streaming reads, jittered retries with a retry budget, bounded connections. Passes the backend conformance suite on MinIO, including fault injection.
+  - `o5s-server`: HTTP API v1 with bearer and Basic authn, per-namespace authz, a hash-chained fsync'd audit log, Prometheus metrics, health and readiness endpoints, graceful drain, load shedding, bounded-memory streaming, and admin GC.
   - OCI distribution `/v2`: passes distribution-spec v1.1.1 conformance (64/64).
   - Git smart HTTP `/git`: v0/v1 fetch and push, thin packs, atomic pushes.
-  - Segment maps (`P2PSEG01`/`P2PMAP01`) for scalable digest and oid maps.
-  - `pico2peta-client`: `RemoteRepo` implements `Repository`, with end-to-end BLAKE3 verification.
+  - Segment maps (`O5SSEG01`/`O5SMAP01`) for scalable digest and oid maps.
+  - `o5s-client`: `RemoteRepo` implements `Repository`, with end-to-end BLAKE3 verification.
   - CI workflow (fmt, clippy, test, docs, MinIO, OCI conformance) and `deploy/` (Dockerfile, systemd, configs).
 - Experiment 1 harness (`bench/exp1`, `scripts/exp1.sh`).
 - Fuzz targets for every decoder, plus never-panic proptests on stable.
@@ -58,22 +71,22 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 - Hierarchical manifest trees (`pack.manifest_fanout`), and lazy streaming reads with a manifest cache.
 - Frame records for similarity-grouped compression, and grouped repack via `Grouper`.
 - Memory-mapped v3 pack indexes for large packs, plus a multi-pack index.
-- Provenance layer (`pico2peta-prov`) and CLI `prov`.
+- Provenance layer (`o5s-prov`) and CLI `prov`.
 - Lean 4 model: P1–P5 proofs, an executable model, and a Rust↔Lean differential test.
 - GC crash sweep at every fault point.
 - `docs/EXP1.md`, `docs/BENCH.md`, and `scripts/exp1-report.py`.
 
 ### On-disk formats
-- Pack `P2PPACK2`: header nonce (fixes pack-name aliasing). `P2PPACK1` is still read.
-- Index `P2PIDX03` (shared record table, ~44 B/entry). `P2PIDX01`/`P2PIDX02` are still read.
+- Pack `O5SPACK2`: header nonce (fixes pack-name aliasing). `O5SPACK1` is still read.
+- Index `O5SIDX03` (shared record table, ~44 B/entry). `O5SIDX01`/`O5SIDX02` are still read.
 - Record kinds `Frame2` (lengths-only directory) and `Delta`. `Frame` (v1) is still read.
-- Ref journal records: `Txn`, `Delete`, `Rotated`. Snapshot `P2PREFS1`.
-- Local caches: `idx-cache/*.idx3` and `midx-*.midx` (`P2PMIDX1`), derived and safe to delete.
+- Ref journal records: `Txn`, `Delete`, `Rotated`. Snapshot `O5SREFS1`.
+- Local caches: `idx-cache/*.idx3` and `midx-*.midx` (`O5SMIDX1`), derived and safe to delete.
 - Record kind `Frame3` (5): a frame compressed against a reference object (similarity repack; the reference is a GC child).
 - Record codec `GroupedZstd` (2): byte-grouped weights. Readers that predate it refuse it.
 - `Delta` records with segment maps (chunk-anchored XOR deltas).
-- Provenance: records `P2PPROV1`, log nodes `P2PPLOG2` (`P2PPLOG1` read) with checkpoint indexes `P2PPIDX1`. Attestations are provenance records (op `attest`).
-- Front id maps: segment maps `P2PSEG01` / `P2PMAP01`.
+- Provenance: records `O5SPROV1`, log nodes `O5SPLOG2` (`O5SPLOG1` read) with checkpoint indexes `O5SPIDX1`. Attestations are provenance records (op `attest`).
+- Front id maps: segment maps `O5SSEG01` / `O5SMAP01`.
 - Compatibility and upgrade policy: docs/RELEASE.md.
 
 ### Fixed (second review and net session, 2026-11-15)

@@ -1579,6 +1579,280 @@ dependencies = [
 ]
 
 [[package]]
+name = "o5s-attest"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "o5s-core",
+ "o5s-kernel",
+ "o5s-prov",
+ "o5s-repo",
+ "proptest",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+]
+
+[[package]]
+name = "o5s-backend-s3"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "fastrand",
+ "futures-util",
+ "hmac 0.12.1",
+ "md-5 0.10.6",
+ "o5s-core",
+ "o5s-refs",
+ "proptest",
+ "quick-xml",
+ "reqwest",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "o5s-chunk"
+version = "0.1.0"
+dependencies = [
+ "fastcdc",
+ "proptest",
+]
+
+[[package]]
+name = "o5s-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "o5s-attest",
+ "o5s-client",
+ "o5s-core",
+ "o5s-prov",
+ "o5s-repo",
+ "o5s-weights",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "o5s-client"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "bytes",
+ "fastrand",
+ "futures-util",
+ "o5s-attest",
+ "o5s-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "o5s-core"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "o5s-kernel",
+ "thiserror",
+]
+
+[[package]]
+name = "o5s-exp1"
+version = "0.1.0"
+dependencies = [
+ "sha1_smol",
+ "zstd",
+]
+
+[[package]]
+name = "o5s-exp1c"
+version = "0.1.0"
+dependencies = [
+ "sha1_smol",
+ "zstd",
+]
+
+[[package]]
+name = "o5s-exp3"
+version = "0.1.0"
+dependencies = [
+ "o5s-order",
+ "o5s-weights",
+ "sha1_smol",
+ "zstd",
+]
+
+[[package]]
+name = "o5s-kernel"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
+name = "o5s-micro"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "o5s-chunk",
+ "o5s-core",
+ "o5s-prov",
+ "o5s-repo",
+ "o5s-weights",
+ "zstd",
+]
+
+[[package]]
+name = "o5s-net-kernel"
+version = "0.1.0"
+dependencies = [
+ "h5i-app-core",
+ "h5i-app-std",
+]
+
+[[package]]
+name = "o5s-order"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
+name = "o5s-pack"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "crc32fast",
+ "fastcdc",
+ "memmap2",
+ "o5s-chunk",
+ "o5s-core",
+ "o5s-kernel",
+ "proptest",
+ "tempfile",
+ "zstd",
+]
+
+[[package]]
+name = "o5s-prov"
+version = "0.1.0"
+dependencies = [
+ "o5s-core",
+ "o5s-kernel",
+ "o5s-refs",
+ "o5s-repo",
+ "proptest",
+ "tempfile",
+]
+
+[[package]]
+name = "o5s-refs"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "crc32fast",
+ "o5s-core",
+ "o5s-kernel",
+ "proptest",
+ "tempfile",
+]
+
+[[package]]
+name = "o5s-repo"
+version = "0.1.0"
+dependencies = [
+ "o5s-chunk",
+ "o5s-core",
+ "o5s-kernel",
+ "o5s-order",
+ "o5s-pack",
+ "o5s-refs",
+ "proptest",
+ "serde",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
+name = "o5s-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "blake3",
+ "bytes",
+ "clap",
+ "fastrand",
+ "flate2",
+ "futures-util",
+ "getrandom 0.3.4",
+ "h5i-app-core",
+ "h5i-app-http",
+ "h5i-app-json",
+ "h5i-app-pg",
+ "h5i-app-std",
+ "h5i-app-token",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "jsonwebtoken",
+ "libcrux-hmac",
+ "lz4_flex",
+ "md-5 0.10.6",
+ "o5s-attest",
+ "o5s-backend-s3",
+ "o5s-chunk",
+ "o5s-client",
+ "o5s-core",
+ "o5s-net-kernel",
+ "o5s-pack",
+ "o5s-prov",
+ "o5s-repo",
+ "o5s-weights",
+ "prometheus-client",
+ "proptest",
+ "reqwest",
+ "rustls",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-rustls",
+ "toml",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "o5s-weights"
+version = "0.1.0"
+dependencies = [
+ "o5s-core",
+ "o5s-pack",
+ "o5s-repo",
+ "proptest",
+ "serde_json",
+ "tempfile",
+ "zstd",
+]
+
+[[package]]
 name = "objc2-core-foundation"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1664,280 +1938,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e57fef6bc5981e38c2ce2d63bfa546861309f875b8a75f092d1d54ae2d64f266"
 dependencies = [
  "siphasher",
-]
-
-[[package]]
-name = "pico2peta-attest"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "ed25519-dalek",
- "pico2peta-core",
- "pico2peta-kernel",
- "pico2peta-prov",
- "pico2peta-repo",
- "proptest",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
-]
-
-[[package]]
-name = "pico2peta-backend-s3"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "fastrand",
- "futures-util",
- "hmac 0.12.1",
- "md-5 0.10.6",
- "pico2peta-core",
- "pico2peta-refs",
- "proptest",
- "quick-xml",
- "reqwest",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "pico2peta-chunk"
-version = "0.1.0"
-dependencies = [
- "fastcdc",
- "proptest",
-]
-
-[[package]]
-name = "pico2peta-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "pico2peta-attest",
- "pico2peta-client",
- "pico2peta-core",
- "pico2peta-prov",
- "pico2peta-repo",
- "pico2peta-weights",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "pico2peta-client"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "bytes",
- "fastrand",
- "futures-util",
- "pico2peta-attest",
- "pico2peta-core",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "pico2peta-core"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "pico2peta-kernel",
- "thiserror",
-]
-
-[[package]]
-name = "pico2peta-exp1"
-version = "0.1.0"
-dependencies = [
- "sha1_smol",
- "zstd",
-]
-
-[[package]]
-name = "pico2peta-exp1c"
-version = "0.1.0"
-dependencies = [
- "sha1_smol",
- "zstd",
-]
-
-[[package]]
-name = "pico2peta-exp3"
-version = "0.1.0"
-dependencies = [
- "pico2peta-order",
- "pico2peta-weights",
- "sha1_smol",
- "zstd",
-]
-
-[[package]]
-name = "pico2peta-kernel"
-version = "0.1.0"
-dependencies = [
- "proptest",
-]
-
-[[package]]
-name = "pico2peta-micro"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "pico2peta-chunk",
- "pico2peta-core",
- "pico2peta-prov",
- "pico2peta-repo",
- "pico2peta-weights",
- "zstd",
-]
-
-[[package]]
-name = "pico2peta-net-kernel"
-version = "0.1.0"
-dependencies = [
- "h5i-app-core",
- "h5i-app-std",
-]
-
-[[package]]
-name = "pico2peta-order"
-version = "0.1.0"
-dependencies = [
- "proptest",
-]
-
-[[package]]
-name = "pico2peta-pack"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "crc32fast",
- "fastcdc",
- "memmap2",
- "pico2peta-chunk",
- "pico2peta-core",
- "pico2peta-kernel",
- "proptest",
- "tempfile",
- "zstd",
-]
-
-[[package]]
-name = "pico2peta-prov"
-version = "0.1.0"
-dependencies = [
- "pico2peta-core",
- "pico2peta-kernel",
- "pico2peta-refs",
- "pico2peta-repo",
- "proptest",
- "tempfile",
-]
-
-[[package]]
-name = "pico2peta-refs"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "crc32fast",
- "pico2peta-core",
- "pico2peta-kernel",
- "proptest",
- "tempfile",
-]
-
-[[package]]
-name = "pico2peta-repo"
-version = "0.1.0"
-dependencies = [
- "pico2peta-chunk",
- "pico2peta-core",
- "pico2peta-kernel",
- "pico2peta-order",
- "pico2peta-pack",
- "pico2peta-refs",
- "proptest",
- "serde",
- "tempfile",
- "toml",
-]
-
-[[package]]
-name = "pico2peta-server"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "blake3",
- "bytes",
- "clap",
- "fastrand",
- "flate2",
- "futures-util",
- "getrandom 0.3.4",
- "h5i-app-core",
- "h5i-app-http",
- "h5i-app-json",
- "h5i-app-pg",
- "h5i-app-std",
- "h5i-app-token",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-util",
- "jsonwebtoken",
- "libcrux-hmac",
- "lz4_flex",
- "md-5 0.10.6",
- "pico2peta-attest",
- "pico2peta-backend-s3",
- "pico2peta-chunk",
- "pico2peta-client",
- "pico2peta-core",
- "pico2peta-net-kernel",
- "pico2peta-pack",
- "pico2peta-prov",
- "pico2peta-repo",
- "pico2peta-weights",
- "prometheus-client",
- "proptest",
- "reqwest",
- "rustls",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "sha1",
- "sha2 0.10.9",
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-rustls",
- "toml",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "pico2peta-weights"
-version = "0.1.0"
-dependencies = [
- "pico2peta-core",
- "pico2peta-pack",
- "pico2peta-repo",
- "proptest",
- "serde_json",
- "tempfile",
- "zstd",
 ]
 
 [[package]]

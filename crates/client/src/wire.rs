@@ -1,8 +1,8 @@
-//! HTTP API v1 wire format, shared by `pico2peta-server` and this client.
+//! HTTP API v1 wire format, shared by `o5s-server` and this client.
 //!
 //! | Method | Path | Body / response |
 //! |---|---|---|
-//! | `PUT` | `/v1/objects[?delta_base=<hash>][&for_name=<name>][&group_width=2\|4]` | raw bytes (streamed) → [`PutResponse`]. Optional `x-p2p-expect-hash`; `delta_base` stores an XOR delta (v1.7) |
+//! | `PUT` | `/v1/objects[?delta_base=<hash>][&for_name=<name>][&group_width=2\|4]` | raw bytes (streamed) → [`PutResponse`]. Optional `x-o5s-expect-hash`; `delta_base` stores an XOR delta (v1.7) |
 //! | `GET` | `/v1/objects/{hash}` | raw bytes; `Range: bytes=a-b` → 206 |
 //! | `HEAD` | `/v1/objects/{hash}` | `content-length` = object size |
 //! | `POST` | `/v1/flush` | makes earlier puts durable and visible to other handles |
@@ -22,15 +22,15 @@
 //! newly put object within that period, or put it again.
 //!
 //! Errors are `4xx/5xx` with an [`ErrorBody`]; `error.code` is
-//! `pico2peta_core::Error::code()` or one of the HTTP-only codes in [`codes`].
+//! `o5s_core::Error::code()` or one of the HTTP-only codes in [`codes`].
 
-use pico2peta_core::{Error, Hash, Name, Observed, RefValue, ReplaceManyOutcome, ReplaceOutcome, Rule};
+use o5s_core::{Error, Hash, Name, Observed, RefValue, ReplaceManyOutcome, ReplaceOutcome, Rule};
 use serde::{Deserialize, Serialize};
 
 /// API version prefix.
 pub const API_PREFIX: &str = "/v1";
 /// Optional request header on `PUT /v1/objects`: the expected BLAKE3 hash (hex).
-pub const EXPECT_HASH_HEADER: &str = "x-p2p-expect-hash";
+pub const EXPECT_HASH_HEADER: &str = "x-o5s-expect-hash";
 /// Response header with the server-assigned request id.
 pub const REQUEST_ID_HEADER: &str = "x-request-id";
 
@@ -250,7 +250,7 @@ pub struct SearchResults {
     pub results: Vec<SearchResult>,
 }
 
-/// Result of one GC invocation (see `pico2peta_repo::GcReport`).
+/// Result of one GC invocation (see `o5s_repo::GcReport`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GcReportJson {
     pub dry_run: bool,

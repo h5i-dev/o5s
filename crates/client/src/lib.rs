@@ -1,6 +1,6 @@
-//! Rust client for `pico2peta-server`.
+//! Rust client for `o5s-server`.
 //!
-//! [`RemoteRepo`] implements `pico2peta_core::Repository` over the HTTP API
+//! [`RemoteRepo`] implements `o5s_core::Repository` over the HTTP API
 //! (see [`wire`]), so code written against the trait works the same on a
 //! local repository and on a server. The CLI's `--remote` mode uses it.
 //!
@@ -22,7 +22,7 @@
 pub mod wire;
 
 use bytes::Bytes;
-use pico2peta_core::{
+use o5s_core::{
     Error, Hash, Name, ObjectStore, Observed, RefValue, ReplaceManyOutcome, ReplaceOutcome, Repository, Result, Rule,
 };
 use reqwest::{Method, StatusCode};
@@ -58,7 +58,7 @@ impl Default for ClientConfig {
     }
 }
 
-/// A `Repository` served by `pico2peta-server`. Cheap to clone.
+/// A `Repository` served by `o5s-server`. Cheap to clone.
 #[derive(Clone)]
 pub struct RemoteRepo {
     inner: Arc<Inner>,
@@ -157,7 +157,7 @@ async fn error_from(resp: reqwest::Response, ctx: &Ctx<'_>) -> Error {
 }
 
 impl RemoteRepo {
-    /// Builds a client for `url` (e.g. `https://p2p.example.com`) without contacting it.
+    /// Builds a client for `url` (e.g. `https://o5s.example.com`) without contacting it.
     pub fn new(url: &str, token: Option<String>, cfg: ClientConfig) -> Result<RemoteRepo> {
         let base = url.trim_end_matches('/').to_string();
         if !(base.starts_with("http://") || base.starts_with("https://")) {
@@ -178,7 +178,7 @@ impl RemoteRepo {
             .map_err(|e| Error::Backend { transient: false, msg: format!("http client: {e}") })?;
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
-            .thread_name("p2p-client")
+            .thread_name("o5s-client")
             .enable_all()
             .build()?;
         Ok(RemoteRepo { inner: Arc::new(Inner { base, token, http, cfg, rt: Some(rt) }) })
@@ -324,7 +324,7 @@ impl RemoteRepo {
     /// `POST /v1/attestations`: stores a DSSE envelope and links it to its subjects. Returns the
     /// stored envelope's hash and the server-trusted keys that verify it (possibly none: any
     /// writer may attest, and promotion only counts trusted keys).
-    pub fn attest(&self, envelope: &pico2peta_attest::Envelope) -> Result<(Hash, Vec<String>)> {
+    pub fn attest(&self, envelope: &o5s_attest::Envelope) -> Result<(Hash, Vec<String>)> {
         #[derive(serde::Deserialize)]
         struct Resp {
             envelope: String,
@@ -343,7 +343,7 @@ impl RemoteRepo {
     /// `GET /v1/attestations?ref=<id>`: the envelopes about an object (`ref_id` is an external
     /// id such as `name:<name>`, `blake3:<hex>`, `git:<repo>@<oid>`), each with its hash and the
     /// server-trusted keys that verify it.
-    pub fn attestations(&self, ref_id: &str) -> Result<Vec<(Hash, pico2peta_attest::Envelope, Vec<String>)>> {
+    pub fn attestations(&self, ref_id: &str) -> Result<Vec<(Hash, o5s_attest::Envelope, Vec<String>)>> {
         #[derive(serde::Deserialize)]
         struct Item {
             hash: String,
@@ -359,7 +359,7 @@ impl RemoteRepo {
             .into_iter()
             .map(|i| {
                 let raw = serde_json::to_vec(&i.envelope).map_err(|e| Error::Parse(format!("envelope: {e}")))?;
-                Ok((i.hash.parse()?, pico2peta_attest::Envelope::from_json(&raw)?, i.trusted_keys))
+                Ok((i.hash.parse()?, o5s_attest::Envelope::from_json(&raw)?, i.trusted_keys))
             })
             .collect()
     }
@@ -367,8 +367,8 @@ impl RemoteRepo {
     /// `POST /v1/promote`: points `dst` at what `src` names if the server's `[[promotion]]` rule
     /// for `dst` holds. A refusal by the policy is `Ok(Refused(reasons))`; missing access or no
     /// rule covering `dst` is an error.
-    pub fn promote(&self, src: &Name, dst: &Name) -> Result<pico2peta_attest::PromoteOutcome> {
-        use pico2peta_attest::PromoteOutcome;
+    pub fn promote(&self, src: &Name, dst: &Name) -> Result<o5s_attest::PromoteOutcome> {
+        use o5s_attest::PromoteOutcome;
         #[derive(serde::Deserialize)]
         struct Resp {
             promoted: Option<String>,
@@ -633,7 +633,7 @@ impl ObjectStore for RemoteRepo {
         &self,
         hash: &Hash,
         range: Option<Range<u64>>,
-        verify: pico2peta_core::ReadVerify,
+        verify: o5s_core::ReadVerify,
     ) -> Result<Box<dyn Read + Send>> {
         self.open_with(hash, range, Some(verify))
     }
@@ -866,7 +866,7 @@ impl Repository for RemoteRepo {
     }
 
     fn set_rule(&self, prefix: &str, rule: Rule) -> Result<()> {
-        pico2peta_core::validate_path(prefix)?;
+        o5s_core::validate_path(prefix)?;
         let body = serde_json::to_vec(&wire::SetRuleRequest { rule: rule.as_str().to_string() })
             .map_err(|e| Error::Parse(e.to_string()))?;
         let this = self.clone();
@@ -899,7 +899,7 @@ impl RemoteRepo {
         &self,
         hash: &Hash,
         range: Option<Range<u64>>,
-        verify: Option<pico2peta_core::ReadVerify>,
+        verify: Option<o5s_core::ReadVerify>,
     ) -> Result<Box<dyn Read + Send>> {
         let hash = *hash;
         if let Some(r) = &range {
@@ -909,7 +909,7 @@ impl RemoteRepo {
             if r.start == r.end {
                 // HTTP cannot express an empty range; validate against the size.
                 let len = self.size(&hash)?;
-                pico2peta_core::check_range(Some(r.clone()), len)?;
+                o5s_core::check_range(Some(r.clone()), len)?;
                 return Ok(Box::new(std::io::empty()));
             }
         }

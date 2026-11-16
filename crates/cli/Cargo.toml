@@ -1,22 +1,22 @@
 [package]
-name = "pico2peta-cli"
-description = "The pico2peta command-line tool"
+name = "o5s-cli"
+description = "The o5s command-line tool"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "pico2peta"
+name = "o5s"
 path = "src/main.rs"
 
 [dependencies]
-pico2peta-core.workspace = true
-pico2peta-repo.workspace = true
-pico2peta-prov.workspace = true
-pico2peta-weights.workspace = true
-pico2peta-attest.workspace = true
+o5s-core.workspace = true
+o5s-repo.workspace = true
+o5s-prov.workspace = true
+o5s-weights.workspace = true
+o5s-attest.workspace = true
 serde_json = "1"
-pico2peta-client = { path = "../client" }
+o5s-client = { path = "../client" }
 clap.workspace = true
 
 [dev-dependencies]

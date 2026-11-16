@@ -1,4 +1,4 @@
-import Pico2petaNetKernel
+import O5sNetKernel
 import H5iAppLib
 import ParseSpec
 /-!
@@ -10,11 +10,11 @@ most 512 bytes; the first line is `version https://git-lfs.github.com/spec/v1`; 
 the last valid `oid sha256:<64 hex>` and the last valid `size <strict decimal u64>` win (other
 lines, extensions included, say nothing). Both must be present.
 -/
-open Aeneas Aeneas.Std Result pico2peta_net_kernel H5iAppLib
+open Aeneas Aeneas.Std Result o5s_net_kernel H5iAppLib
 
-namespace pico2peta_net_kernel.Spec.Lfs
+namespace o5s_net_kernel.Spec.Lfs
 
-open pico2peta_net_kernel.Spec (B g nib hexDec decSpec allHex)
+open o5s_net_kernel.Spec (B g nib hexDec decSpec allHex)
 
 /-! ## The spec -/
 
@@ -426,4 +426,4 @@ theorem ptr_accepted (b : List Nat) (h : List Nat) (n : Nat) (hp : ptrS b = some
   split_ifs at hp with h1 h2
   exact ⟨by omega, h2.2.1, h2.2.2⟩
 
-end pico2peta_net_kernel.Spec.Lfs
+end o5s_net_kernel.Spec.Lfs

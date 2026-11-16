@@ -1,7 +1,7 @@
 #![no_main]
 //! Frame records (Frame, Frame2, Frame3 with a reference), full and prefix decoding.
 use libfuzzer_sys::fuzz_target;
-use pico2peta_pack::format::{decode_frame_bodies, decode_frame_prefix, decode_record, frame_members, frame_ref};
+use o5s_pack::format::{decode_frame_bodies, decode_frame_prefix, decode_record, frame_members, frame_ref};
 
 fuzz_target!(|data: &[u8]| {
     let Ok((h, p)) = decode_record(data) else { return };

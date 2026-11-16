@@ -18,7 +18,7 @@
 //!   referenced it since), then deletes each condemned pack's `.idx` followed
 //!   by its `.pack`, and finally the GC records.
 //!
-//! Writers re-list at least every [`pico2peta_pack::store::DEDUP_REFRESH_INTERVAL`]
+//! Writers re-list at least every [`o5s_pack::store::DEDUP_REFRESH_INTERVAL`]
 //! before trusting a dedup hit, and they ignore copies in condemned packs.
 //! Before committing a ref, `replace`/`replace_many` call
 //! [`ObjectStore::ensure_live`] on the target: it rewrites the object (and its
@@ -38,10 +38,10 @@
 //! adapters do.
 
 use crate::LocalRepo;
-use pico2peta_core::backend::PutSource;
-use pico2peta_core::{Error, Hash, ObjectStore, Repository, Result};
-use pico2peta_pack::format::Kind;
-use pico2peta_pack::{GC_PREFIX, read_name_list};
+use o5s_core::backend::PutSource;
+use o5s_core::{Error, Hash, ObjectStore, Repository, Result};
+use o5s_pack::format::Kind;
+use o5s_pack::{GC_PREFIX, read_name_list};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -79,7 +79,7 @@ impl Tracer for OpaqueObjects {
 }
 
 /// A front's ordering hint for one object in a grouped repack. The layout is
-/// decided by content similarity (`pico2peta_order`, docs/ORDERING.md); hints
+/// decided by content similarity (`o5s_order`, docs/ORDERING.md); hints
 /// only break ties between equally similar objects. Example (Git): group =
 /// file extension, order = path + commit time.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -119,7 +119,7 @@ pub struct GcOptions {
     /// zstd level for frames written by a grouped repack (Exp1: 19).
     pub frame_level: i32,
     /// Lay out repacked small objects by content similarity
-    /// (`pico2peta_order`, docs/ORDERING.md). **On by default for every
+    /// (`o5s_order`, docs/ORDERING.md). **On by default for every
     /// domain** (the human's decision on Experiment 3); a `Grouper` only adds
     /// tie-breaking hints. `false` copies live records verbatim.
     pub similarity_repack: bool,
@@ -139,7 +139,7 @@ impl Default for GcOptions {
             repack_all: false,
             similarity_repack: true,
             frame_level: 19,
-            frame_cap: pico2peta_order::frame::DEFAULT_CAP as usize,
+            frame_cap: o5s_order::frame::DEFAULT_CAP as usize,
         }
     }
 }
@@ -369,7 +369,7 @@ impl LocalRepo {
                 }
                 serving.push(sp.map(|p| p.into_bytes()));
             }
-            if !pico2peta_kernel::gc::delete_ok(&doomed_bytes, &serving) {
+            if !o5s_kernel::gc::delete_ok(&doomed_bytes, &serving) {
                 let h = first_bad.map_or_else(|| "?".to_string(), |h| h.to_string());
                 return Err(Error::Corrupt(format!("live object {h} still only in a condemned pack; aborting delete")));
             }
@@ -406,18 +406,18 @@ impl LocalRepo {
                     entries.iter().filter(|e| live.contains(&e.hash)).map(|e| e.stored_len as u64).sum();
                 let size = self.packs.pack_bytes(p)?;
                 // The victim rule is the extracted kernel's (`gc::is_victim`), in permille.
-                let t = pico2peta_kernel::gc::Thresholds {
+                let t = o5s_kernel::gc::Thresholds {
                     min_garbage_permille: (opts.min_garbage_ratio.clamp(0.0, 1.0) * 1000.0).round() as u64,
                     small_pack_bytes: opts.small_pack_bytes,
                     repack_all: opts.repack_all,
                 };
-                if pico2peta_kernel::gc::is_victim(&t, total, live_bytes, size) {
+                if o5s_kernel::gc::is_victim(&t, total, live_bytes, size) {
                     victims.push((p.clone(), entries));
                 }
             }
             // Consolidating a single small, fully live pack is pointless churn.
             let lone_live = victims.len() == 1 && victims[0].1.iter().all(|e| live.contains(&e.hash));
-            if pico2peta_kernel::gc::skip_lone_live(victims.len(), lone_live, opts.repack_all) {
+            if o5s_kernel::gc::skip_lone_live(victims.len(), lone_live, opts.repack_all) {
                 victims.clear();
             }
             if !opts.dry_run {
@@ -478,7 +478,7 @@ impl LocalRepo {
     /// keys only break ties), similarity-aware frames with reference prefixes.
     /// Returns the hashes written.
     fn write_grouped(&self, g: &dyn Grouper, set: &HashSet<Hash>, opts: &GcOptions) -> Result<HashSet<Hash>> {
-        use pico2peta_order::{FrameConfig, Hint, Item, features, frames, order};
+        use o5s_order::{FrameConfig, Hint, Item, features, frames, order};
         let keys = g.assign(self, set)?;
         let thr = self.packs.config().chunk_threshold as u64;
         let mut hs: Vec<Hash> = Vec::new();
@@ -502,7 +502,7 @@ impl LocalRepo {
         let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 8);
         // Features, in parallel (each object is read once here and once when framed).
         let per = hs.len().div_ceil(workers);
-        type FeatList = Vec<(u64, Option<pico2peta_order::Features>)>;
+        type FeatList = Vec<(u64, Option<o5s_order::Features>)>;
         let feats: Vec<Result<FeatList>> = std::thread::scope(|sc| {
             let hsr = &hs;
             let handles: Vec<_> = hsr

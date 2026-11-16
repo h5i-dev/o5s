@@ -1,5 +1,5 @@
-use pico2peta_core::{Hash, Name, ObjectStore, RefValue, ReplaceOutcome, Repository};
-use pico2peta_repo::{GcOptions, LocalRepo, OpaqueObjects, PackConfig};
+use o5s_core::{Hash, Name, ObjectStore, RefValue, ReplaceOutcome, Repository};
+use o5s_repo::{GcOptions, LocalRepo, OpaqueObjects, PackConfig};
 use std::time::Duration;
 
 fn opts() -> GcOptions {
@@ -200,18 +200,18 @@ fn ensure_live_rewrites_condemned_only_objects() {
 }
 
 struct OneFile(Vec<Hash>);
-impl pico2peta_repo::Grouper for OneFile {
+impl o5s_repo::Grouper for OneFile {
     fn assign(
         &self,
         _: &dyn Repository,
         live: &std::collections::HashSet<Hash>,
-    ) -> pico2peta_core::Result<std::collections::HashMap<Hash, pico2peta_repo::GroupKey>> {
+    ) -> o5s_core::Result<std::collections::HashMap<Hash, o5s_repo::GroupKey>> {
         Ok(self
             .0
             .iter()
             .enumerate()
             .filter(|(_, h)| live.contains(h))
-            .map(|(i, h)| (*h, pico2peta_repo::GroupKey { group: "file.rs".into(), order: format!("{i:06}") }))
+            .map(|(i, h)| (*h, o5s_repo::GroupKey { group: "file.rs".into(), order: format!("{i:06}") }))
             .collect())
     }
 }
@@ -275,8 +275,8 @@ fn slow_writer_after_delete_fails_cleanly() {
     // Force the stale handle to re-list (its refresh interval has not elapsed).
     w.packs().set_dedup_refresh_interval(Duration::ZERO);
     let n = Name::new("late").unwrap();
-    let res = w.replace(&n, &[(n.clone(), pico2peta_core::Observed::Absent)], x);
-    assert!(matches!(res, Err(pico2peta_core::Error::MissingObject(_))), "{res:?}");
+    let res = w.replace(&n, &[(n.clone(), o5s_core::Observed::Absent)], x);
+    assert!(matches!(res, Err(o5s_core::Error::MissingObject(_))), "{res:?}");
     assert_eq!(w.resolve(&n).unwrap(), None);
 }
 
@@ -285,8 +285,8 @@ fn slow_writer_after_delete_fails_cleanly() {
 /// intact, garbage is eventually collected, and no index points at a missing pack.
 #[test]
 fn gc_crash_at_every_fault_point() {
-    use pico2peta_core::backend::{Backend, LocalDisk};
-    use pico2peta_core::fault::Faults;
+    use o5s_core::backend::{Backend, LocalDisk};
+    use o5s_core::fault::Faults;
     use std::sync::Arc;
     let setup = |dir: &std::path::Path| -> (Vec<(Hash, Vec<u8>)>, Vec<Hash>) {
         let r = LocalRepo::init(dir, &PackConfig { pack_cap: 4096, ..PackConfig::tiny() }).unwrap();
@@ -467,12 +467,12 @@ fn gc_keeps_frame_references_alive() {
 #[test]
 fn grouped_repack_uses_similarity_order_without_hints() {
     struct NoHints;
-    impl pico2peta_repo::gc::Grouper for NoHints {
+    impl o5s_repo::gc::Grouper for NoHints {
         fn assign(
             &self,
-            _: &dyn pico2peta_core::Repository,
+            _: &dyn o5s_core::Repository,
             _: &std::collections::HashSet<Hash>,
-        ) -> pico2peta_core::Result<std::collections::HashMap<Hash, pico2peta_repo::gc::GroupKey>> {
+        ) -> o5s_core::Result<std::collections::HashMap<Hash, o5s_repo::gc::GroupKey>> {
             Ok(Default::default())
         }
     }

@@ -1,4 +1,4 @@
-//! GC decisions (`pico2peta-repo`'s GC; docs/ARCHITECTURE.md).
+//! GC decisions (`o5s-repo`'s GC; docs/ARCHITECTURE.md).
 //!
 //! The shell marks (walks refs, manifests, deltas, Frame3 references and
 //! front children: trusted I/O over up to 10^8 objects) and asks the kernel:

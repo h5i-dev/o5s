@@ -1,7 +1,7 @@
-use pico2peta_core::backend::{Backend, LocalDisk};
-use pico2peta_core::fault::Faults;
-use pico2peta_core::{Error, Hash, MemStore, ObjectStore};
-use pico2peta_pack::{PackConfig, PackStore};
+use o5s_core::backend::{Backend, LocalDisk};
+use o5s_core::fault::Faults;
+use o5s_core::{Error, Hash, MemStore, ObjectStore};
+use o5s_pack::{PackConfig, PackStore};
 use proptest::prelude::*;
 use std::io::Read;
 use std::path::Path;
@@ -373,10 +373,10 @@ fn identical_record_sets_never_alias_one_pack_name() {
 fn v1_staging_files_are_still_recovered() {
     let d = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(d.path().join("staging")).unwrap();
-    let mut f = pico2peta_pack::format::PACK_MAGIC_V1.to_vec();
-    f.extend_from_slice(&pico2peta_pack::format::encode_record(
-        pico2peta_pack::format::Kind::Blob,
-        pico2peta_pack::format::Codec::Raw,
+    let mut f = o5s_pack::format::PACK_MAGIC_V1.to_vec();
+    f.extend_from_slice(&o5s_pack::format::encode_record(
+        o5s_pack::format::Kind::Blob,
+        o5s_pack::format::Codec::Raw,
         &Hash::of(b"v1"),
         2,
         b"v1",
@@ -448,9 +448,9 @@ fn multi_pack_index_covers_many_mapped_packs() {
 fn unsafe_env_threshold_zero(f: impl FnOnce()) {
     // SAFETY: test-only; the variable is read at PackStore::open. Other tests
     // may observe it, which only switches them to the (equally correct) mmap path.
-    unsafe { std::env::set_var("P2P_MMAP_INDEX_BYTES", "0") };
+    unsafe { std::env::set_var("O5S_MMAP_INDEX_BYTES", "0") };
     f();
-    unsafe { std::env::remove_var("P2P_MMAP_INDEX_BYTES") };
+    unsafe { std::env::remove_var("O5S_MMAP_INDEX_BYTES") };
 }
 
 #[test]
@@ -594,11 +594,11 @@ fn corrupt_index_length_is_an_error_not_a_panic() {
         .map(|e| e.unwrap().path())
         .find(|p| p.extension().is_some_and(|x| x == "idx"))
         .unwrap();
-    let mut es = pico2peta_pack::format::decode_index(&std::fs::read(&idx).unwrap()).unwrap();
+    let mut es = o5s_pack::format::decode_index(&std::fs::read(&idx).unwrap()).unwrap();
     for e in es.iter_mut() {
         e.raw_len += 1000;
     }
-    std::fs::write(&idx, pico2peta_pack::format::encode_index(&mut es)).unwrap();
+    std::fs::write(&idx, o5s_pack::format::encode_index(&mut es)).unwrap();
     let s = open(d.path(), cfg);
     assert!(matches!(s.get(&h, Some(0..1010)), Err(Error::Corrupt(_))));
     assert!(matches!(s.get(&h, None), Err(Error::Corrupt(_))));
@@ -608,7 +608,7 @@ fn corrupt_index_length_is_an_error_not_a_panic() {
 /// (the store still opens); an index whose pack is gone is skipped, not fatal.
 #[test]
 fn bad_orphans_are_quarantined_and_missing_packs_skipped() {
-    use pico2peta_pack::format::*;
+    use o5s_pack::format::*;
     let d = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(d.path().join("staging")).unwrap();
     // A frame record whose directory claims more bytes than the frame holds.
@@ -734,7 +734,7 @@ fn compressibility_probe_picks_raw_or_zstd() {
 /// as with FastCDC, and a too-small chunk threshold is refused.
 #[test]
 fn put_stream_with_xet_chunker() {
-    use pico2peta_pack::ChunkerKind;
+    use o5s_pack::ChunkerKind;
     let d = tempfile::tempdir().unwrap();
     let cfg = PackConfig { chunk_threshold: 1 << 20, ..PackConfig::default() };
     let s = open(d.path(), cfg);
@@ -743,8 +743,8 @@ fn put_stream_with_xet_chunker() {
     assert_eq!(h, Hash::of(&data));
     assert_eq!(s.get(&h, None).unwrap(), data);
     assert_eq!(s.get(&h, Some(70_000..4_100_000)).unwrap(), data[70_000..4_100_000]);
-    let lens = pico2peta_chunk::chunk_lengths(&mut pico2peta_chunk::XetChunker::new(), &data);
-    assert!(lens.len() > 20 && lens.iter().all(|&l| l <= pico2peta_chunk::XET_MAX));
+    let lens = o5s_chunk::chunk_lengths(&mut o5s_chunk::XetChunker::new(), &data);
+    assert!(lens.len() > 20 && lens.iter().all(|&l| l <= o5s_chunk::XET_MAX));
     let mut off = 0;
     for l in lens {
         assert!(s.contains(&Hash::of(&data[off..off + l])).unwrap(), "Xet chunk at {off}+{l} not stored");
@@ -1006,7 +1006,7 @@ fn frame_prefix_decoding_reads_exact_and_verified() {
 /// a small fraction of a full copy; a small object falls back cleanly.
 #[test]
 fn anchored_xor_deltas_handle_edits_and_shifts() {
-    use pico2peta_core::{Derive, Encoding, PatchFormat};
+    use o5s_core::{Derive, Encoding, PatchFormat};
     let d = tempfile::tempdir().unwrap();
     let cfg = PackConfig { chunk_threshold: 1 << 20, pack_cap: 1 << 30, ..PackConfig::default() };
     let base = pseudo(8 << 20, 41);
@@ -1079,8 +1079,8 @@ fn anchored_xor_deltas_handle_edits_and_shifts() {
 /// corruption fails in both modes. Ranged reads are strict even in eof mode.
 #[test]
 fn read_verify_strict_vs_eof() {
-    use pico2peta_core::ReadVerify;
-    use pico2peta_pack::format::{REC_HEADER, REC_TRAILER};
+    use o5s_core::ReadVerify;
+    use o5s_pack::format::{REC_HEADER, REC_TRAILER};
     let d = tempfile::tempdir().unwrap();
     let cfg = PackConfig { chunk_threshold: 1 << 20, zstd_level: 0, pack_cap: 1 << 30, ..PackConfig::default() };
     let data = pseudo(6 << 20, 88);
@@ -1348,7 +1348,7 @@ fn put_chunked_keeps_the_given_boundaries() {
 /// run (max-size cuts) across a window boundary.
 #[test]
 fn put_stream_xet_parallel_windows_cut_exactly_like_serial() {
-    use pico2peta_pack::ChunkerKind;
+    use o5s_pack::ChunkerKind;
     struct Jagged<'a>(&'a [u8], u64);
     impl std::io::Read for Jagged<'_> {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
@@ -1371,7 +1371,7 @@ fn put_stream_xet_parallel_windows_cut_exactly_like_serial() {
         let s = open(d.path(), PackConfig { chunk_threshold: 1 << 20, ..PackConfig::default() });
         let h = s.put_stream_with(ChunkerKind::Xet, &mut Jagged(&data, 0x9e37 + i as u64)).unwrap();
         assert_eq!(h, Hash::of(&data));
-        let lens = pico2peta_chunk::chunk_lengths(&mut pico2peta_chunk::XetChunker::new(), &data);
+        let lens = o5s_chunk::chunk_lengths(&mut o5s_chunk::XetChunker::new(), &data);
         let mut off = 0;
         for l in lens {
             assert!(

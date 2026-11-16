@@ -1,6 +1,6 @@
 # Vision (from the human, 2026-11-15). This overrides any "pick a battlefield" framing.
 
-**It is wrong that Git, Hugging Face, JFrog Artifactory, container registries, package indexes and so on are separate systems.** pico2peta replaces all of them with **one** store, and every kind of data is handled **the same way** in the core.
+**It is wrong that Git, Hugging Face, JFrog Artifactory, container registries, package indexes and so on are separate systems.** o5s replaces all of them with **one** store, and every kind of data is handled **the same way** in the core.
 
 There is no "main battlefield." We do not give up on source code because a generic compressor lost to Git, and we do not specialize the product on model weights. Every domain must be served at least as well as its specialist system does it.
 

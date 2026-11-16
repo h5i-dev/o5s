@@ -12,11 +12,11 @@
 //! data: losing it costs speed, not correctness.
 
 use crate::git::{Kind, Oid};
-use pico2peta_core::{Error, Hash, Name, Observed, Repository, Result};
+use o5s_core::{Error, Hash, Name, Observed, Repository, Result};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-const MAGIC: &[u8; 8] = b"P2PCGR01";
+const MAGIC: &[u8; 8] = b"O5SCGR01";
 /// Nodes kept in memory across repositories (about 150 bytes each).
 const MAX_NODES: usize = 4 << 20;
 

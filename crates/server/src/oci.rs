@@ -34,7 +34,7 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use futures_util::StreamExt;
-use pico2peta_core::{Error, Hash, Name, Observed, ReplaceOutcome, Repository};
+use o5s_core::{Error, Hash, Name, Observed, ReplaceOutcome, Repository};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -365,7 +365,7 @@ fn tag_name(repo: &str, tag: &str) -> OciResult<Name> {
     name(format!("oci/{repo}/tags/{tag}"))
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> pico2peta_core::Result<T> + Send + 'static) -> OciResult<T> {
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> o5s_core::Result<T> + Send + 'static) -> OciResult<T> {
     match tokio::task::spawn_blocking(f).await {
         Ok(r) => r.map_err(OciError::from),
         Err(e) => Err(oe(StatusCode::INTERNAL_SERVER_ERROR, "UNKNOWN", format!("worker panicked: {e}"))),
@@ -412,7 +412,7 @@ async fn set_tag(repo: &Arc<dyn Repository>, n: Name, h: Hash) -> OciResult<()> 
         if cur.is_some_and(|v| v.hash == h) {
             return Ok(());
         }
-        let observed = pico2peta_core::RefValue::observed(cur);
+        let observed = o5s_core::RefValue::observed(cur);
         let r = repo.clone();
         let n2 = n.clone();
         match blocking(move || r.replace(&n2, &[(n2.clone(), observed)], h)).await {
@@ -926,7 +926,7 @@ async fn put_manifest(
     // The push rule is the extracted kernel's (`net-kernel/src/publish.rs`, `decide_manifest`):
     // a digest reference must be the body's digest, a tag must be valid, and every referenced
     // blob and child manifest must be present.
-    use pico2peta_net_kernel::publish::{ManifestNg, decide_manifest};
+    use o5s_net_kernel::publish::{ManifestNg, decide_manifest};
     let by_digest = reference.strip_prefix("sha256:");
     let digest_ok = by_digest == Some(hex.as_str());
     let tag_ok = by_digest.is_none() && valid_tag(reference);
@@ -1214,11 +1214,7 @@ impl OciTracer {
     }
 
     /// Children of `h` if this tracer recognizes it.
-    pub fn children_of(
-        &self,
-        h: &Hash,
-        store: &dyn pico2peta_core::ObjectStore,
-    ) -> pico2peta_core::Result<Option<Vec<Hash>>> {
+    pub fn children_of(&self, h: &Hash, store: &dyn o5s_core::ObjectStore) -> o5s_core::Result<Option<Vec<Hash>>> {
         let size = store.size(h)?;
         let head = store.get(h, Some(0..size.min(16)))?;
         if let Some(c) = crate::segmap::map_children(&head, h, store)? {
@@ -1255,8 +1251,8 @@ impl OciTracer {
     }
 }
 
-impl pico2peta_repo::Tracer for OciTracer {
-    fn children(&self, h: &Hash, store: &dyn pico2peta_core::ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+impl o5s_repo::Tracer for OciTracer {
+    fn children(&self, h: &Hash, store: &dyn o5s_core::ObjectStore) -> o5s_core::Result<Vec<Hash>> {
         Ok(self.children_of(h, store)?.unwrap_or_default())
     }
 }

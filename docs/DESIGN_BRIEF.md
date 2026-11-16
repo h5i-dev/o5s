@@ -1,4 +1,4 @@
-# pico2peta — Design Brief
+# o5s — Design Brief
 
 Source: summary of prior design discussions (originally in Japanese; translated and condensed here).
 
@@ -80,4 +80,4 @@ Recommended first reads: Git is for Data, ZipLLM, Cedar.
 
 ## Naming
 
-Working name is `pico2peta` (repo name). `divrem` was rejected (taken on crates.io, collides with arithmetic functions). Decide a final public name after benchmarks show the headline feature.
+Working name is `o5s` (repo name). `divrem` was rejected (taken on crates.io, collides with arithmetic functions). Decide a final public name after benchmarks show the headline feature.

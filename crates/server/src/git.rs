@@ -35,7 +35,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
-use pico2peta_core::{
+use o5s_core::{
     Error, Hash, Name, ObjectStore, Observed, RefValue, ReplaceManyOutcome, ReplaceOutcome, Repository, Result,
 };
 use sha1::{Digest, Sha1};
@@ -151,7 +151,7 @@ impl PackHasher {
         }
     }
 }
-const AGENT: &str = "agent=pico2peta/0.1";
+const AGENT: &str = "agent=o5s/0.1";
 /// Largest single object accepted in a push.
 const MAX_OBJECT: usize = 1 << 30;
 const MAX_DELTA_DEPTH: usize = 10_000;
@@ -415,7 +415,7 @@ impl GitState {
     /// The object format of repository `repo` (fixed by configuration: git announces it
     /// before the first push, so it can't be learned from the push).
     pub(crate) fn fmt_for(&self, repo: &str) -> Fmt {
-        if self.sha256.iter().any(|p| pico2peta_core::is_under(repo, p)) { Fmt::Sha256 } else { Fmt::Sha1 }
+        if self.sha256.iter().any(|p| o5s_core::is_under(repo, p)) { Fmt::Sha256 } else { Fmt::Sha1 }
     }
 }
 
@@ -1804,7 +1804,7 @@ pub async fn dispatch(
     let repo = repo.strip_suffix(".git").unwrap_or(repo).to_string();
     if repo.is_empty()
         || repo.starts_with('_')
-        || pico2peta_core::validate_path(&repo).is_err()
+        || o5s_core::validate_path(&repo).is_err()
         || repo.split('/').any(|s| s.starts_with('_'))
     {
         return git_error(StatusCode::BAD_REQUEST, "invalid repository name");
@@ -2352,7 +2352,7 @@ fn par_map<T: Send>(n: usize, workers: usize, f: impl Fn(usize) -> Result<T> + S
 }
 
 /// Magic of a cached clone pack: magic, 32-byte key, then the pack bytes.
-const CLONE_PACK_MAGIC: &[u8; 8] = b"P2PCPK01";
+const CLONE_PACK_MAGIC: &[u8; 8] = b"O5SCPK01";
 
 /// The pack for `wants` with nothing in common, no shallow and no filter is a function of the
 /// wants alone (and the repository format), so it can be cached under this key.
@@ -2361,7 +2361,7 @@ fn clone_pack_key(fmt: Fmt, wants: &[Oid]) -> [u8; 32] {
     w.sort();
     w.dedup();
     let mut h = blake3::Hasher::new();
-    h.update(b"p2p git clone pack v1\0");
+    h.update(b"o5s git clone pack v1\0");
     h.update(fmt.name().as_bytes());
     for o in w {
         h.update(&[o.len() as u8]);
@@ -2933,7 +2933,7 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
     }
     // Validate commands: the shell gathers each command's facts, the extracted kernel decides
     // (`net-kernel/src/gitpush.rs`, `verify/net/proofs`), including `--atomic`.
-    use pico2peta_net_kernel::gitpush::{Accept, Ng, PushCmd, decide_push};
+    use o5s_net_kernel::gitpush::{Accept, Ng, PushCmd, decide_push};
     let mut statuses: Vec<(String, std::result::Result<(), String>)> = Vec::new();
     // `None` hash = delete.
     let mut updates: Vec<(Name, Option<Hash>, Observed, usize)> = Vec::new();
@@ -3096,7 +3096,7 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
 // Grouped repack hints
 // ---------------------------------------------------------------------------
 
-/// Ordering **hints** for git content (`pico2peta_repo::Grouper`; docs/ORDERING.md). Since API
+/// Ordering **hints** for git content (`o5s_repo::Grouper`; docs/ORDERING.md). Since API
 /// v1.15 the core orders every small live object by content similarity itself; these keys only
 /// break ties between equally similar objects, and objects without a key are ordered too.
 /// The keys are the Experiment 1 V2 layout:
@@ -3135,9 +3135,9 @@ fn blob_group(path: &str) -> String {
     }
 }
 
-impl pico2peta_repo::Grouper for GitGrouper {
-    fn assign(&self, repo: &dyn Repository, live: &HashSet<Hash>) -> Result<HashMap<Hash, pico2peta_repo::GroupKey>> {
-        use pico2peta_repo::GroupKey;
+impl o5s_repo::Grouper for GitGrouper {
+    fn assign(&self, repo: &dyn Repository, live: &HashSet<Hash>) -> Result<HashMap<Hash, o5s_repo::GroupKey>> {
+        use o5s_repo::GroupKey;
         let mut out: HashMap<Hash, GroupKey> = HashMap::new();
         let n = Name::new("git/_oidmap").unwrap_or_else(|_| unreachable!("static name is valid"));
         let Some(rv) = repo.resolve(&n)? else { return Ok(out) };
@@ -3279,7 +3279,7 @@ impl OidLookup<'_> {
 // Fuzzing hooks (see `crate::fuzzing`)
 // ---------------------------------------------------------------------------
 
-pub(crate) fn fuzz_push(repo: Arc<pico2peta_repo::LocalRepo>, spool: &std::path::Path, data: &[u8]) {
+pub(crate) fn fuzz_push(repo: Arc<o5s_repo::LocalRepo>, spool: &std::path::Path, data: &[u8]) {
     let Ok(st) = GitState::new(repo, spool.join("spool"), 1 << 30) else { return };
     let p = spool.join("req");
     if std::fs::write(&p, data).is_err() {
@@ -3413,7 +3413,7 @@ impl GitTracer {
         // (object index, key) for every oid reference of the wave's commits and trees.
         let mut want: Vec<(usize, Key)> = Vec::new();
         let leaves: Vec<bool> = {
-            let m = self.memo.lock().map_err(|_| pico2peta_core::Error::Corrupt("git tracer memo poisoned".into()))?;
+            let m = self.memo.lock().map_err(|_| o5s_core::Error::Corrupt("git tracer memo poisoned".into()))?;
             hs.iter().map(|h| m.leaves.contains(h)).collect()
         };
         for (i, h) in hs.iter().enumerate() {
@@ -3429,8 +3429,7 @@ impl GitTracer {
         if want.is_empty() {
             return Ok(out);
         }
-        let mut memo =
-            self.memo.lock().map_err(|_| pico2peta_core::Error::Corrupt("git tracer memo poisoned".into()))?;
+        let mut memo = self.memo.lock().map_err(|_| o5s_core::Error::Corrupt("git tracer memo poisoned".into()))?;
         let mut miss: Vec<Key> = want.iter().map(|(_, k)| *k).filter(|k| !memo.oids.contains_key(k)).collect();
         miss.sort_unstable();
         miss.dedup();

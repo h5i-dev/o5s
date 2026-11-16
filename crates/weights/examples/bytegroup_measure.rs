@@ -1,6 +1,6 @@
 //! Measures zstd on safetensors data with and without byte grouping.
 //!
-//!   cargo run --release -p pico2peta-weights --example bytegroup_measure -- <base.safetensors> [new.safetensors]
+//!   cargo run --release -p o5s-weights --example bytegroup_measure -- <base.safetensors> [new.safetensors]
 //!
 //! With two files, it measures the tensor-aligned XOR delta (new ^ base), which is what
 //! `put_checkpoint` stores. With one file, it measures the raw tensors (a first upload). Each
@@ -8,7 +8,7 @@
 //! at zstd levels 3 and 19. Grouping width comes from the tensor dtype (bf16/f16 2, f32 4).
 //! Run timing-sensitive invocations under the shared bench lock.
 
-use pico2peta_weights::bytegroup::{group, ungroup, width_for_dtype};
+use o5s_weights::bytegroup::{group, ungroup, width_for_dtype};
 use std::collections::HashMap;
 use std::time::Instant;
 

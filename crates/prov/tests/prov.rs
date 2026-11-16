@@ -1,6 +1,6 @@
-use pico2peta_core::{Hash, Name, ObjectStore, Observed, Repository};
-use pico2peta_prov::{DEFAULT_LOG_REF, LogNode, ProvTracer, Provenance, Record, record};
-use pico2peta_repo::{GcOptions, LocalRepo, OpaqueObjects, PackConfig};
+use o5s_core::{Hash, Name, ObjectStore, Observed, Repository};
+use o5s_prov::{DEFAULT_LOG_REF, LogNode, ProvTracer, Provenance, Record, record};
+use o5s_repo::{GcOptions, LocalRepo, OpaqueObjects, PackConfig};
 use proptest::prelude::*;
 use std::collections::BTreeMap;
 use std::time::Duration;

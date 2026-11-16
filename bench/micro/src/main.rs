@@ -1,9 +1,9 @@
-//! `p2p-bench <scratch-dir>`: local-repository benchmarks. Prints a Markdown
+//! `o5s-bench <scratch-dir>`: local-repository benchmarks. Prints a Markdown
 //! table. Deterministic inputs (seeded xorshift), so runs are reproducible.
 //! Run with `--release`. Record results in docs/BENCH.md with the host description.
 
-use pico2peta_core::{Hash, Name, ObjectStore, Observed, RefValue, ReplaceOutcome, Repository};
-use pico2peta_repo::{LocalRepo, PackConfig};
+use o5s_core::{Hash, Name, ObjectStore, Observed, RefValue, ReplaceOutcome, Repository};
+use o5s_repo::{LocalRepo, PackConfig};
 use std::io::Read;
 use std::time::Instant;
 
@@ -82,7 +82,7 @@ fn weights(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
         }
         walk(&p.join("objects"))
     };
-    println!("| version | change | logical MiB | full copies MiB | pico2peta MiB | ratio |");
+    println!("| version | change | logical MiB | full copies MiB | o5s MiB | ratio |");
     println!("|---|---|---|---|---|---|");
     let mut full = 0u64;
     let mut prev_blob: Vec<u8> = Vec::new();
@@ -149,13 +149,13 @@ fn weights(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     // v6: the same tensors, written in a different order with an edited header (a typical
-    // re-export by another tool). Offset-aligned delta vs tensor-aligned delta (pico2peta-weights).
+    // re-export by another tool). Offset-aligned delta vs tensor-aligned delta (o5s-weights).
     let mut perm: Vec<usize> = (0..tensors).rev().collect();
     perm.swap(0, tensors / 2);
     let v6 = build_ordered(&ts, &perm, "re-exported");
     let v5 = prev_blob.clone();
     for (label, aligned) in
-        [("offset-aligned `put_delta`", false), ("tensor-aligned `put --delta-*` (pico2peta-weights)", true)]
+        [("offset-aligned `put_delta`", false), ("tensor-aligned `put --delta-*` (o5s-weights)", true)]
     {
         let r3root = root.with_extension(if aligned { "t" } else { "o" });
         let r3 = LocalRepo::init(&r3root, &PackConfig::default())?;
@@ -163,7 +163,7 @@ fn weights(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
         r3.flush()?;
         let before = disk(&r3root);
         if aligned {
-            pico2peta_weights::put_checkpoint(&r3, &hb, &mut &v6[..])?;
+            o5s_weights::put_checkpoint(&r3, &hb, &mut &v6[..])?;
         } else {
             r3.put_delta(&hb, &mut &v6[..])?;
         }
@@ -213,24 +213,24 @@ impl Read for TextGen {
     }
 }
 
-/// `p2p-bench stream <dir> <MiB>`: put_stream throughput only, on incompressible
+/// `o5s-bench stream <dir> <MiB>`: put_stream throughput only, on incompressible
 /// and code-like input (for profiling the put pipeline).
 fn stream(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
     let total = (mib << 20) as u64;
-    // Inputs are generated once into files in tmpfs (P2P_BENCH_INPUTS, default
+    // Inputs are generated once into files in tmpfs (O5S_BENCH_INPUTS, default
     // /dev/shm) and streamed back, like a real `put` of a cached file: the
     // source then costs about a memcpy, doesn't count toward peak RSS, and its
     // writeback can't compete with the repo's writes.
-    let base = std::env::var("P2P_BENCH_INPUTS").unwrap_or_else(|_| "/dev/shm".into());
-    let inputs = std::path::Path::new(&base).join(format!("p2p-inputs-{}", std::process::id()));
+    let base = std::env::var("O5S_BENCH_INPUTS").unwrap_or_else(|_| "/dev/shm".into());
+    let inputs = std::path::Path::new(&base).join(format!("o5s-inputs-{}", std::process::id()));
     std::fs::create_dir_all(&inputs)?;
     let cfg = PackConfig {
-        compress_probe: std::env::var_os("P2P_BENCH_NO_PROBE").is_none(), // ablation
+        compress_probe: std::env::var_os("O5S_BENCH_NO_PROBE").is_none(), // ablation
         ..PackConfig::default()
     };
     println!("| input | put_stream {mib} MiB | re-put (dedup) | open+read (verified) |");
     println!("|---|---|---|---|");
-    let only = std::env::var("P2P_BENCH_ONLY").ok(); // "random" or "text", for profiling
+    let only = std::env::var("O5S_BENCH_ONLY").ok(); // "random" or "text", for profiling
     for (label, text) in [("incompressible", false), ("code-like text", true)] {
         if only.as_deref().is_some_and(|o| o != if text { "text" } else { "random" }) {
             continue;
@@ -268,11 +268,11 @@ fn stream(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// `p2p-bench chunkers <A> <B>`: chunk counts, sizes and dedup of B against A
+/// `o5s-bench chunkers <A> <B>`: chunk counts, sizes and dedup of B against A
 /// for each chunker (sizes only, no timing). Also reports B' = A with 777
 /// bytes inserted at 1 MiB, the classic boundary-shift case.
 fn chunkers(a: &str, b: &str) -> Result<(), Box<dyn std::error::Error>> {
-    use pico2peta_chunk::{Chunker, FastCdcChunker, XetChunker, chunk_lengths};
+    use o5s_chunk::{Chunker, FastCdcChunker, XetChunker, chunk_lengths};
     use std::collections::HashSet;
     let a = std::fs::read(a)?;
     let b = std::fs::read(b)?;
@@ -321,15 +321,15 @@ fn chunkers(a: &str, b: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// `p2p-bench bytegroup-gran <safetensors>`: zstd-3 size of the tensor data
+/// `o5s-bench bytegroup-gran <safetensors>`: zstd-3 size of the tensor data
 /// in 64 KiB blocks, (a) plain, (b) byte-grouped per block (what the
 /// GroupedZstd record codec does per chunk), (c) grouped per whole tensor and
 /// then cut into blocks (planes span the tensor; not record-local).
 fn bytegroup_gran(path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    use pico2peta_weights::bytegroup::group;
+    use o5s_weights::bytegroup::group;
     let f = std::fs::read(path)?;
-    let w = pico2peta_weights::group_width(&f).ok_or("not a groupable safetensors file")? as usize;
-    let layout = pico2peta_weights::parse_layout(&f).ok_or("bad header")?;
+    let w = o5s_weights::group_width(&f).ok_or("not a groupable safetensors file")? as usize;
+    let layout = o5s_weights::parse_layout(&f).ok_or("bad header")?;
     const B: usize = 64 << 10;
     let z = |b: &[u8]| zstd::bulk::compress(b, 3).map_or(b.len(), |c| c.len().min(b.len()));
     let (mut raw, mut a, mut b, mut c) = (0usize, 0usize, 0usize, 0usize);
@@ -356,14 +356,14 @@ fn bytegroup_gran(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// `p2p-bench group-levels <safetensors> [MiB]`: per-64 KiB-block grouped zstd
+/// `o5s-bench group-levels <safetensors> [MiB]`: per-64 KiB-block grouped zstd
 /// size and single-thread compress speed by level, over the first MiB of tensor
 /// data (what codec 2 stores at each `pack.zstd_level`).
 fn group_levels(path: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
-    use pico2peta_weights::bytegroup::group;
+    use o5s_weights::bytegroup::group;
     let f = std::fs::read(path)?;
-    let w = pico2peta_weights::group_width(&f).ok_or("not a groupable safetensors file")? as usize;
-    let layout = pico2peta_weights::parse_layout(&f).ok_or("bad header")?;
+    let w = o5s_weights::group_width(&f).ok_or("not a groupable safetensors file")? as usize;
+    let layout = o5s_weights::parse_layout(&f).ok_or("bad header")?;
     let start = layout.data_start as usize;
     let data = &f[start..(start + (mib << 20)).min(f.len())];
     let blocks: Vec<Vec<u8>> = data.chunks(64 << 10).map(|b| group(b, w)).collect::<Result<_, _>>()?;
@@ -392,17 +392,17 @@ fn group_levels(path: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
-/// `p2p-bench group-align <safetensors> <level>`: grouped zstd size of the
+/// `o5s-bench group-align <safetensors> <level>`: grouped zstd size of the
 /// whole file under three cuttings: FastCDC over the whole file (what the
 /// store does today), FastCDC restarted inside each tensor (tensor-aligned
 /// CDC), and tensor-aligned fixed 64 KiB blocks. Header and gaps are counted
 /// plain in the tensor-aligned cases.
 fn group_align(path: &str, level: i32) -> Result<(), Box<dyn std::error::Error>> {
-    use pico2peta_chunk::{FastCdcChunker, chunk_lengths};
-    use pico2peta_weights::bytegroup::group;
+    use o5s_chunk::{FastCdcChunker, chunk_lengths};
+    use o5s_weights::bytegroup::group;
     let f = std::fs::read(path)?;
-    let w = pico2peta_weights::group_width(&f).ok_or("not a groupable safetensors file")? as usize;
-    let layout = pico2peta_weights::parse_layout(&f).ok_or("bad header")?;
+    let w = o5s_weights::group_width(&f).ok_or("not a groupable safetensors file")? as usize;
+    let layout = o5s_weights::parse_layout(&f).ok_or("bad header")?;
     let z = |b: &[u8], g: bool| -> usize {
         let src = if g { group(b, w).unwrap_or_else(|_| b.to_vec()) } else { b.to_vec() };
         zstd::bulk::compress(&src, level).map_or(b.len(), |c| c.len().min(b.len()))
@@ -457,7 +457,7 @@ fn group_align(path: &str, level: i32) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
-/// `p2p-bench small <dir> [n]`: n × 1 KiB distinct puts then one flush, and n
+/// `o5s-bench small <dir> [n]`: n × 1 KiB distinct puts then one flush, and n
 /// random gets (warm), single thread, plus 4-thread puts and gets.
 fn small(dir: &str, n: usize) -> Result<(), Box<dyn std::error::Error>> {
     let root = std::path::Path::new(dir).join(format!("small-{}", std::process::id()));
@@ -527,7 +527,7 @@ fn small(dir: &str, n: usize) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// `p2p-bench commits <dir> [n]`: durable `replace` throughput on one repository
+/// `o5s-bench commits <dir> [n]`: durable `replace` throughput on one repository
 /// handle, with 1, 4 and 8 threads committing to distinct names (group commit
 /// batches concurrent commits of one process into shared fsyncs).
 fn commits(dir: &str, n: usize) -> Result<(), Box<dyn std::error::Error>> {
@@ -556,7 +556,7 @@ fn commits(dir: &str, n: usize) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// `p2p-bench generic <dir> [MiB]`: the generic front's pre-registered metrics
+/// `o5s-bench generic <dir> [MiB]`: the generic front's pre-registered metrics
 /// (PLAN §6.4), each with its baseline measured here on the same volume:
 /// durable write vs `dd conv=fsync`, verified read vs `cat`, 4 KiB range-read
 /// p99, and storage of 10 versions (scattered 0.1 % edits; 1 MiB insertions).
@@ -567,7 +567,7 @@ fn generic(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
     let base = std::path::Path::new(dir).join(format!("generic-{}", std::process::id()));
     std::fs::create_dir_all(&base)?;
     // Input: incompressible, generated into tmpfs (so the source isn't the bottleneck).
-    let input = std::path::Path::new("/dev/shm").join(format!("p2p-generic-{}", std::process::id()));
+    let input = std::path::Path::new("/dev/shm").join(format!("o5s-generic-{}", std::process::id()));
     std::io::copy(&mut Gen(77).take(size), &mut std::io::BufWriter::new(std::fs::File::create(&input)?))?;
     let secs =
         |f: &mut dyn FnMut() -> Result<(), Box<dyn std::error::Error>>| -> Result<f64, Box<dyn std::error::Error>> {
@@ -600,7 +600,7 @@ fn generic(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::remove_file(&ddout)?;
     // Store: durable write (put_stream + flush) and verified read (warm).
     // Both read modes are measured (PLAN §6.4's read row), so eof reads are allowed here.
-    let mut rcfg = pico2peta_repo::RepoConfig::new(&PackConfig::default());
+    let mut rcfg = o5s_repo::RepoConfig::new(&PackConfig::default());
     rcfg.read.allow_eof = true;
     let repo = LocalRepo::init_config(base.join("repo"), &rcfg)?;
     let mut h = None;
@@ -613,15 +613,15 @@ fn generic(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
     let mut sink = Vec::new();
     repo.open(&h, None)?.read_to_end(&mut sink)?; // warm
     drop(sink);
-    let read_with = |mode: pico2peta_core::ReadVerify| -> Result<f64, Box<dyn std::error::Error>> {
+    let read_with = |mode: o5s_core::ReadVerify| -> Result<f64, Box<dyn std::error::Error>> {
         let t = Instant::now();
         let mut r = repo.open_verified(&h, None, mode)?;
         let mut b = vec![0u8; 1 << 20];
         while r.read(&mut b)? > 0 {}
         Ok(t.elapsed().as_secs_f64())
     };
-    let get_s = read_with(pico2peta_core::ReadVerify::Strict)?;
-    let get_eof_s = read_with(pico2peta_core::ReadVerify::Eof)?;
+    let get_s = read_with(o5s_core::ReadVerify::Strict)?;
+    let get_eof_s = read_with(o5s_core::ReadVerify::Eof)?;
     // 4 KiB range reads, warm, uniform offsets.
     let mut lat = Vec::new();
     let mut x = 0x2545_F491_4F6C_DD1Du64;
@@ -651,10 +651,10 @@ fn generic(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
         let root = base.join(name);
         // The generic front's profile: new versions derive from the previous one
         // (chunk-anchored XOR), for any data format.
-        let mut cfg = pico2peta_repo::RepoConfig::new(&PackConfig::default());
+        let mut cfg = o5s_repo::RepoConfig::new(&PackConfig::default());
         cfg.profiles.insert(
             "generic".into(),
-            pico2peta_repo::Profile { derive: pico2peta_repo::DerivePolicy::Previous, ..Default::default() },
+            o5s_repo::Profile { derive: o5s_repo::DerivePolicy::Previous, ..Default::default() },
         );
         cfg.namespaces.insert("data/".into(), "generic".into());
         let r = LocalRepo::init_config(&root, &cfg)?;
@@ -667,7 +667,7 @@ fn generic(dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
             let hv = r.put_named(&n, &mut &cur[..])?;
             let obs = RefValue::observed(r.resolve(&n)?);
             r.replace(&n, &[(n.clone(), obs)], hv)?;
-            if std::env::var_os("P2P_BENCH_VERBOSE").is_some() {
+            if std::env::var_os("O5S_BENCH_VERBOSE").is_some() {
                 r.flush()?;
                 eprintln!("{name} v{v}: {} bytes stored so far", disk(&root.join("objects")));
             }
@@ -749,7 +749,7 @@ fn pct(v: &mut [f64], p: f64) -> f64 {
     v.get(((v.len() as f64 - 1.0) * p).round() as usize).copied().unwrap_or(f64::NAN)
 }
 
-/// `p2p-bench scale <dir> <objects|names|prov|gc> <count>` (PLAN §6.7): one JSON line.
+/// `o5s-bench scale <dir> <objects|names|prov|gc> <count>` (PLAN §6.7): one JSON line.
 /// `objects` creates (or reuses) `<dir>/scale-objects-<count>`; `gc` runs on it.
 fn scale(dir: &str, part: &str, count: u64) -> Result<(), Box<dyn std::error::Error>> {
     // Bytes on disk, counting each inode once (idx-cache entries may be hard links).
@@ -883,7 +883,7 @@ fn scale(dir: &str, part: &str, count: u64) -> Result<(), Box<dyn std::error::Er
         "prov" => {
             let root = std::path::Path::new(dir).join(format!("scale-prov-{count}"));
             let repo = LocalRepo::init(&root, &PackConfig::default())?;
-            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
+            let log = Name::new(o5s_prov::DEFAULT_LOG_REF)?;
             let t = Instant::now();
             let mut i = 0u64;
             while i < count {
@@ -893,8 +893,8 @@ fn scale(dir: &str, part: &str, count: u64) -> Result<(), Box<dyn std::error::Er
                     repo.put(&scale_obj(k))?;
                     repo.put(&scale_obj(k + count))?;
                 }
-                let recs: Vec<pico2peta_prov::Record> = (i..end)
-                    .map(|k| pico2peta_prov::Record {
+                let recs: Vec<o5s_prov::Record> = (i..end)
+                    .map(|k| o5s_prov::Record {
                         op: "build".into(),
                         inputs: [("src".to_string(), Hash::of(&scale_obj(k)))].into_iter().collect(),
                         outputs: [("out".to_string(), Hash::of(&scale_obj(k + count)))].into_iter().collect(),
@@ -902,14 +902,14 @@ fn scale(dir: &str, part: &str, count: u64) -> Result<(), Box<dyn std::error::Er
                         params: None,
                     })
                     .collect();
-                pico2peta_prov::record(&repo, &log, &recs)?;
+                o5s_prov::record(&repo, &log, &recs)?;
                 i = end;
             }
             let record_s = t.elapsed().as_secs_f64();
             drop(repo);
             let repo = LocalRepo::open(&root)?;
             let t = Instant::now();
-            let p = pico2peta_prov::Provenance::load(&repo, &log)?;
+            let p = o5s_prov::Provenance::load(&repo, &log)?;
             let load_s = t.elapsed().as_secs_f64();
             let lin = p.lineage(&Hash::of(&scale_obj(count / 2 + count)))?;
             assert!(lin.contains(&Hash::of(&scale_obj(count / 2))));
@@ -925,8 +925,8 @@ fn scale(dir: &str, part: &str, count: u64) -> Result<(), Box<dyn std::error::Er
             // On the objects repository of the same count: every object is live, via a
             // tracer that lists them all as children of one root (no materialized list).
             struct All(u64, Hash);
-            impl pico2peta_repo::Tracer for All {
-                fn children(&self, h: &Hash, _: &dyn ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+            impl o5s_repo::Tracer for All {
+                fn children(&self, h: &Hash, _: &dyn ObjectStore) -> o5s_core::Result<Vec<Hash>> {
                     Ok(if *h == self.1 { (0..self.0).map(|i| Hash::of(&scale_obj(i))).collect() } else { Vec::new() })
                 }
             }
@@ -936,10 +936,10 @@ fn scale(dir: &str, part: &str, count: u64) -> Result<(), Box<dyn std::error::Er
             let rn = Name::new("scale/root")?;
             let _ = repo.replace(&rn, &[(rn.clone(), RefValue::observed(repo.resolve(&rn)?))], rootobj)?;
             repo.flush()?;
-            let opts = pico2peta_repo::GcOptions {
+            let opts = o5s_repo::GcOptions {
                 grace: std::time::Duration::ZERO,
                 allow_short_grace: true,
-                ..pico2peta_repo::GcOptions::default()
+                ..o5s_repo::GcOptions::default()
             };
             let t = Instant::now();
             for _ in 0..3 {
@@ -977,7 +977,7 @@ fn catfile_objects(path: &str, max: usize) -> Result<Vec<Vec<u8>>, Box<dyn std::
     Ok(out)
 }
 
-/// `p2p-bench ingest <catfile dump> <dir> [MiB]`: small-object ingest of real
+/// `o5s-bench ingest <catfile dump> <dir> [MiB]`: small-object ingest of real
 /// objects. Per zstd level: single-thread compress MB/s and stored ratio; then
 /// `put` one at a time vs `put_many` (64 MiB batches) into fresh repositories.
 fn ingest(dump: &str, dir: &str, mib: usize) -> Result<(), Box<dyn std::error::Error>> {
@@ -1003,8 +1003,8 @@ fn ingest(dump: &str, dir: &str, mib: usize) -> Result<(), Box<dyn std::error::E
         // Stored bytes after ingest at level L, and after a full similarity repack
         // (`repack_all`, zero grace): what a fast ingest level costs before and after GC.
         struct All(Hash, Vec<Hash>);
-        impl pico2peta_repo::Tracer for All {
-            fn children(&self, h: &Hash, _: &dyn ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+        impl o5s_repo::Tracer for All {
+            fn children(&self, h: &Hash, _: &dyn ObjectStore) -> o5s_core::Result<Vec<Hash>> {
                 Ok(if *h == self.0 { self.1.clone() } else { Vec::new() })
             }
         }
@@ -1032,11 +1032,11 @@ fn ingest(dump: &str, dir: &str, mib: usize) -> Result<(), Box<dyn std::error::E
             let rn = Name::new("ingest/root")?;
             repo.replace(&rn, &[(rn.clone(), Observed::Absent)], rootobj)?;
             repo.flush()?;
-            let opts = pico2peta_repo::GcOptions {
+            let opts = o5s_repo::GcOptions {
                 grace: std::time::Duration::ZERO,
                 allow_short_grace: true,
                 repack_all: true,
-                ..pico2peta_repo::GcOptions::default()
+                ..o5s_repo::GcOptions::default()
             };
             let t = Instant::now();
             let tracer = All(rootobj, hs);
@@ -1095,20 +1095,20 @@ fn ingest(dump: &str, dir: &str, mib: usize) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
-/// `p2p-bench reads <dir>`: whole-object `get` and streaming `open` + 1 MiB reads,
+/// `o5s-bench reads <dir>`: whole-object `get` and streaming `open` + 1 MiB reads,
 /// strict and eof verification, over objects of 4 KiB to 64 MiB (code-like text
 /// and incompressible), warm page cache, one thread. One JSON line per case.
 fn reads(dir: &str) -> Result<(), Box<dyn std::error::Error>> {
-    use pico2peta_core::ReadVerify;
+    use o5s_core::ReadVerify;
     let root = std::path::Path::new(dir).join(format!("reads-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
-    let mut cfg = pico2peta_repo::RepoConfig::default();
+    let mut cfg = o5s_repo::RepoConfig::default();
     cfg.read.allow_eof = true;
     let repo = LocalRepo::init_config(&root, &cfg)?;
     let cases: [(usize, usize); 5] =
         [(4 << 10, 20_000), (64 << 10, 2_000), (512 << 10, 256), (4 << 20, 32), (64 << 20, 4)];
-    // P2P_READS_ONLY=text:4096 runs one case (for profiling).
-    let only = std::env::var("P2P_READS_ONLY").ok();
+    // O5S_READS_ONLY=text:4096 runs one case (for profiling).
+    let only = std::env::var("O5S_READS_ONLY").ok();
     for text in [true, false] {
         for &(size, n) in &cases {
             if only.as_deref().is_some_and(|o| o != format!("{}:{}", if text { "text" } else { "random" }, size >> 10))
@@ -1162,66 +1162,66 @@ fn reads(dir: &str) -> Result<(), Box<dyn std::error::Error>> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().nth(1).as_deref() == Some("reads") {
-        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench reads <dir>")?;
+        let dir = std::env::args().nth(2).ok_or("usage: o5s-bench reads <dir>")?;
         return reads(&dir);
     }
     if std::env::args().nth(1).as_deref() == Some("ingest") {
-        let dump = std::env::args().nth(2).ok_or("usage: p2p-bench ingest <catfile dump> <dir> [MiB]")?;
+        let dump = std::env::args().nth(2).ok_or("usage: o5s-bench ingest <catfile dump> <dir> [MiB]")?;
         let dir = std::env::args().nth(3).ok_or("dir")?;
         let mib = std::env::args().nth(4).and_then(|s| s.parse().ok()).unwrap_or(1024);
         return ingest(&dump, &dir, mib);
     }
     if std::env::args().nth(1).as_deref() == Some("scale") {
-        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench scale <dir> <objects|names|prov|gc> <count>")?;
+        let dir = std::env::args().nth(2).ok_or("usage: o5s-bench scale <dir> <objects|names|prov|gc> <count>")?;
         let part = std::env::args().nth(3).ok_or("part")?;
         let count = std::env::args().nth(4).and_then(|s| s.parse().ok()).ok_or("count")?;
         return scale(&dir, &part, count);
     }
     if std::env::args().nth(1).as_deref() == Some("generic") {
-        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench generic <dir> [MiB]")?;
+        let dir = std::env::args().nth(2).ok_or("usage: o5s-bench generic <dir> [MiB]")?;
         let mib = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(1024);
         return generic(&dir, mib);
     }
     if std::env::args().nth(1).as_deref() == Some("commits") {
-        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench commits <dir> [n]")?;
+        let dir = std::env::args().nth(2).ok_or("usage: o5s-bench commits <dir> [n]")?;
         let n = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(20_000);
         return commits(&dir, n);
     }
     if std::env::args().nth(1).as_deref() == Some("small") {
-        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench small <dir> [n]")?;
+        let dir = std::env::args().nth(2).ok_or("usage: o5s-bench small <dir> [n]")?;
         let n = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(100_000);
         return small(&dir, n);
     }
     if std::env::args().nth(1).as_deref() == Some("group-align") {
-        let f = std::env::args().nth(2).ok_or("usage: p2p-bench group-align <safetensors> <level>")?;
+        let f = std::env::args().nth(2).ok_or("usage: o5s-bench group-align <safetensors> <level>")?;
         let level = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(6);
         return group_align(&f, level);
     }
     if std::env::args().nth(1).as_deref() == Some("group-levels") {
-        let f = std::env::args().nth(2).ok_or("usage: p2p-bench group-levels <safetensors> [MiB]")?;
+        let f = std::env::args().nth(2).ok_or("usage: o5s-bench group-levels <safetensors> [MiB]")?;
         let mib = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(64);
         return group_levels(&f, mib);
     }
     if std::env::args().nth(1).as_deref() == Some("bytegroup-gran") {
-        let f = std::env::args().nth(2).ok_or("usage: p2p-bench bytegroup-gran <safetensors>")?;
+        let f = std::env::args().nth(2).ok_or("usage: o5s-bench bytegroup-gran <safetensors>")?;
         return bytegroup_gran(&f);
     }
     if std::env::args().nth(1).as_deref() == Some("chunkers") {
-        let a = std::env::args().nth(2).ok_or("usage: p2p-bench chunkers <A> <B>")?;
-        let b = std::env::args().nth(3).ok_or("usage: p2p-bench chunkers <A> <B>")?;
+        let a = std::env::args().nth(2).ok_or("usage: o5s-bench chunkers <A> <B>")?;
+        let b = std::env::args().nth(3).ok_or("usage: o5s-bench chunkers <A> <B>")?;
         return chunkers(&a, &b);
     }
     if std::env::args().nth(1).as_deref() == Some("stream") {
-        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench stream <dir> [MiB]")?;
+        let dir = std::env::args().nth(2).ok_or("usage: o5s-bench stream <dir> [MiB]")?;
         let mib = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(1024);
         return stream(&dir, mib);
     }
     if std::env::args().nth(1).as_deref() == Some("weights") {
-        let dir = std::env::args().nth(2).ok_or("usage: p2p-bench weights <scratch-dir> [MiB]")?;
+        let dir = std::env::args().nth(2).ok_or("usage: o5s-bench weights <scratch-dir> [MiB]")?;
         let mib = std::env::args().nth(3).and_then(|s| s.parse().ok()).unwrap_or(256);
         return weights(&dir, mib);
     }
-    let dir = std::env::args().nth(1).ok_or("usage: p2p-bench <scratch-dir> [large-MiB] | weights <dir> [MiB]")?;
+    let dir = std::env::args().nth(1).ok_or("usage: o5s-bench <scratch-dir> [large-MiB] | weights <dir> [MiB]")?;
     let large_mib: usize = std::env::args().nth(2).and_then(|s| s.parse().ok()).unwrap_or(1024);
     let root = std::path::Path::new(&dir).join(format!("bench-{}", std::process::id()));
     let repo = LocalRepo::init(&root, &PackConfig::default())?;

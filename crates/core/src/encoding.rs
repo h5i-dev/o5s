@@ -1,7 +1,7 @@
 //! How one put is encoded: the domain-agnostic vocabulary of the Front API.
 //!
 //! The core never decides *why* an encoding is chosen. A front (see
-//! `pico2peta_repo::front`) looks at the name and the content and returns an
+//! `o5s_repo::front`) looks at the name and the content and returns an
 //! [`Encoding`]. Every encoding is a storage choice only: the stored object's
 //! identity is always the BLAKE3 of the bytes `get` returns, and reads never
 //! depend on how the object was written.

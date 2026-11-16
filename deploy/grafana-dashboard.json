@@ -1,6 +1,6 @@
 {
-  "title": "pico2peta",
-  "uid": "pico2peta-server",
+  "title": "o5s",
+  "uid": "o5s-server",
   "schemaVersion": 39,
   "version": 1,
   "editable": true,
@@ -10,7 +10,7 @@
   },
   "refresh": "30s",
   "tags": [
-    "pico2peta"
+    "o5s"
   ],
   "templating": {
     "list": [
@@ -27,7 +27,7 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "query": "label_values(p2p_http_requests_total, job)",
+        "query": "label_values(o5s_http_requests_total, job)",
         "includeAll": true,
         "multi": true,
         "current": {
@@ -60,7 +60,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (route) (rate(p2p_http_requests_total{job=~\"$job\"}[5m]))",
+          "expr": "sum by (route) (rate(o5s_http_requests_total{job=~\"$job\"}[5m]))",
           "legendFormat": "{{route}}",
           "refId": "A"
         }
@@ -88,7 +88,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (route) (rate(p2p_http_requests_total{job=~\"$job\",status=~\"5..\"}[5m]))",
+          "expr": "sum by (route) (rate(o5s_http_requests_total{job=~\"$job\",status=~\"5..\"}[5m]))",
           "legendFormat": "{{route}}",
           "refId": "A"
         }
@@ -116,12 +116,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le, route) (rate(p2p_http_request_duration_seconds_bucket{job=~\"$job\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le, route) (rate(o5s_http_request_duration_seconds_bucket{job=~\"$job\"}[5m])))",
           "legendFormat": "p50 {{route}}",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le, route) (rate(p2p_http_request_duration_seconds_bucket{job=~\"$job\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le, route) (rate(o5s_http_request_duration_seconds_bucket{job=~\"$job\"}[5m])))",
           "legendFormat": "p99 {{route}}",
           "refId": "B"
         }
@@ -149,7 +149,7 @@
       },
       "targets": [
         {
-          "expr": "sum(p2p_http_in_flight{job=~\"$job\"})",
+          "expr": "sum(o5s_http_in_flight{job=~\"$job\"})",
           "legendFormat": "in flight",
           "refId": "A"
         }
@@ -177,12 +177,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(p2p_object_bytes_uploaded_total{job=~\"$job\"}[5m]))",
+          "expr": "sum(rate(o5s_object_bytes_uploaded_total{job=~\"$job\"}[5m]))",
           "legendFormat": "uploaded",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(p2p_object_bytes_downloaded_total{job=~\"$job\"}[5m]))",
+          "expr": "sum(rate(o5s_object_bytes_downloaded_total{job=~\"$job\"}[5m]))",
           "legendFormat": "downloaded",
           "refId": "B"
         }
@@ -210,7 +210,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (outcome) (rate(p2p_replace_total{job=~\"$job\"}[5m]))",
+          "expr": "sum by (outcome) (rate(o5s_replace_total{job=~\"$job\"}[5m]))",
           "legendFormat": "{{outcome}}",
           "refId": "A"
         }
@@ -238,17 +238,17 @@
       },
       "targets": [
         {
-          "expr": "sum by (outcome) (rate(p2p_auth_failures_total{job=~\"$job\"}[5m]))",
+          "expr": "sum by (outcome) (rate(o5s_auth_failures_total{job=~\"$job\"}[5m]))",
           "legendFormat": "auth {{outcome}}",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(p2p_authz_denied_total{job=~\"$job\"}[5m]))",
+          "expr": "sum(rate(o5s_authz_denied_total{job=~\"$job\"}[5m]))",
           "legendFormat": "authz denied",
           "refId": "B"
         },
         {
-          "expr": "sum(rate(p2p_rate_limited_total{job=~\"$job\"}[5m]))",
+          "expr": "sum(rate(o5s_rate_limited_total{job=~\"$job\"}[5m]))",
           "legendFormat": "rate limited",
           "refId": "C"
         }
@@ -276,7 +276,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(p2p_audit_write_failures_total{job=~\"$job\"}[15m]))",
+          "expr": "sum(increase(o5s_audit_write_failures_total{job=~\"$job\"}[15m]))",
           "legendFormat": "failures",
           "refId": "A"
         }
@@ -304,12 +304,12 @@
       },
       "targets": [
         {
-          "expr": "sum by (outcome) (increase(p2p_gc_runs_total{job=~\"$job\"}[1h]))",
+          "expr": "sum by (outcome) (increase(o5s_gc_runs_total{job=~\"$job\"}[1h]))",
           "legendFormat": "runs {{outcome}}",
           "refId": "A"
         },
         {
-          "expr": "sum(increase(p2p_gc_deleted_bytes_total{job=~\"$job\"}[1h]))",
+          "expr": "sum(increase(o5s_gc_deleted_bytes_total{job=~\"$job\"}[1h]))",
           "legendFormat": "deleted bytes / h",
           "refId": "B"
         }
@@ -337,7 +337,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (front) (rate(p2p_upstream_fetches_total{job=~\"$job\"}[5m]))",
+          "expr": "sum by (front) (rate(o5s_upstream_fetches_total{job=~\"$job\"}[5m]))",
           "legendFormat": "{{front}}",
           "refId": "A"
         }
@@ -365,22 +365,22 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(p2p_s3_requests_total{job=~\"$job\"}[5m]))",
+          "expr": "sum(rate(o5s_s3_requests_total{job=~\"$job\"}[5m]))",
           "legendFormat": "requests",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(p2p_s3_retries_total{job=~\"$job\"}[5m]))",
+          "expr": "sum(rate(o5s_s3_retries_total{job=~\"$job\"}[5m]))",
           "legendFormat": "retries",
           "refId": "B"
         },
         {
-          "expr": "sum(rate(p2p_s3_throttled_total{job=~\"$job\"}[5m]))",
+          "expr": "sum(rate(o5s_s3_throttled_total{job=~\"$job\"}[5m]))",
           "legendFormat": "throttled",
           "refId": "C"
         },
         {
-          "expr": "sum(rate(p2p_s3_failures_total{job=~\"$job\"}[5m]))",
+          "expr": "sum(rate(o5s_s3_failures_total{job=~\"$job\"}[5m]))",
           "legendFormat": "failures",
           "refId": "D"
         }
@@ -408,12 +408,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(p2p_s3_bytes_sent_total{job=~\"$job\"}[5m]))",
+          "expr": "sum(rate(o5s_s3_bytes_sent_total{job=~\"$job\"}[5m]))",
           "legendFormat": "sent",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(p2p_s3_bytes_received_total{job=~\"$job\"}[5m]))",
+          "expr": "sum(rate(o5s_s3_bytes_received_total{job=~\"$job\"}[5m]))",
           "legendFormat": "received",
           "refId": "B"
         }

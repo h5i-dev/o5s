@@ -14,7 +14,7 @@
 User docs are in `docs/API.md` and `deploy/README.md`.
 
 ### Goal 1: S3 backend (`crates/backend-s3`). Done.
-- `S3Client` (async) and `S3Backend` (sync `pico2peta_core::backend::Backend`, with its own tokio runtime).
+- `S3Client` (async) and `S3Backend` (sync `o5s_core::backend::Backend`, with its own tokio runtime).
 - SigV4 signing is implemented in-crate. It is checked against the AWS documentation test vectors (GET with Range, PUT, ListObjects). Payloads are signed with their SHA-256, so the server verifies body integrity.
 - Create-only writes use `PUT` with `If-None-Match: *`, and `412` maps to `AlreadyExists`. If a response is lost and the retry gets `412`, the client compares the stored ETag with the body's MD5 and reports `Created` when the stored object is ours.
 - Multipart upload kicks in at `multipart_threshold` (64 MiB by default), from memory or straight from a file (`PutSource::File`).
@@ -32,17 +32,17 @@ User docs are in `docs/API.md` and `deploy/README.md`.
 - Counters (`S3Stats`: requests, retries, throttled, failures, bytes) are ready for Prometheus export by the server.
 - Tests:
   - 19 unit tests: SigV4 vectors, XML parsing including malformed input, backoff and budget, config, and the multipart ETag.
-  - 17 MinIO integration tests in `tests/minio.rs`. They are skipped cleanly when `P2P_S3_ENDPOINT` is unset.
+  - 17 MinIO integration tests in `tests/minio.rs`. They are skipped cleanly when `O5S_S3_ENDPOINT` is unset.
   - The core conformance suite runs in single-part, forced-multipart and no-conditional-writes modes.
   - Also covered: multipart from bytes and from a file, a multipart create-only race, pagination over 1100 keys, and a 20 MiB stream.
   - Failure injection goes through a fault proxy (`tests/common/mod.rs`): 5xx/429/SlowDown, TCP RST, lost PUT response, lost CompleteMultipartUpload response, truncated ranged read, truncated stream with resume, persistent 503 (gives up with `transient=true`), 403 not retried, stalled server times out, bad credentials.
 - Local MinIO: `scripts/minio-test.sh start|stop|env`.
   - The binary lives at `/mnt/scratch/pico2peta/minio/minio`, built from source tag `RELEASE.2025-09-07T16-13-09Z`, because MinIO no longer publishes community binaries (dl.min.io returns 410).
-  - To run the tests: `eval "$(scripts/minio-test.sh env)"; cargo test -p pico2peta-backend-s3`.
+  - To run the tests: `eval "$(scripts/minio-test.sh env)"; cargo test -p o5s-backend-s3`.
 
-### Goal 2: server (`crates/server`, binary `pico2peta-server`). Done.
+### Goal 2: server (`crates/server`, binary `o5s-server`). Done.
 - HTTP API v1 on axum. The table is in `crates/client/src/wire.rs`.
-  - `PUT /v1/objects` streams the upload, with an optional `x-p2p-expect-hash` check.
+  - `PUT /v1/objects` streams the upload, with an optional `x-o5s-expect-hash` check.
   - `GET`/`HEAD /v1/objects/{hash}` support single `Range` (`a-b`, `a-`, `-n`) and return 206 or 416 with `Content-Range: */n`, plus an ETag and an immutable cache header.
   - Also: `GET /v1/refs/{name}`, `GET /v1/refs?prefix=`, `POST /v1/replace` (200 for Ok, 409 for Conflict), `GET`/`PUT /v1/namespaces[/{prefix}]`, `POST /v1/flush` and `GET /v1/whoami`.
   - Errors are JSON `{error:{code,message,rule?,subject?}}`. `code` is the core `Error::code()` or an HTTP-only code.
@@ -55,7 +55,7 @@ User docs are in `docs/API.md` and `deploy/README.md`.
   - A writer thread group-commits with fdatasync. Mutations wait until their record is durable before replying.
   - Denials and (optionally) reads are logged too. Records carry the request id and client address (TCP peer, or `X-Forwarded-For` with `trust_forwarded_for`).
   - A torn tail is truncated at open. After a write failure the server refuses all mutations and `/readyz` returns 503.
-  - `pico2peta-server verify-audit` checks the chain.
+  - `o5s-server verify-audit` checks the chain.
 - **Ops:**
   - Prometheus `/metrics`: HTTP count, latency histogram, in-flight, bytes, replace outcomes, auth failures, denials, audit failures, and S3 client counters.
   - `/healthz` and `/readyz`.
@@ -78,7 +78,7 @@ User docs are in `docs/API.md` and `deploy/README.md`.
   - Whole-object `get`/`open` re-hash at EOF and fail with `Error::Corrupt`.
 - Idempotent calls retry with jitter on transport errors and 502/503/504. `replace` retries only on connect failures, and `put_stream` never retries (its source is one-shot).
 - Typed core errors are rebuilt from wire codes, including `Forbidden{rule}`, `MissingObject`, `InvalidRange{len}` and `TargetNotInReadSet`.
-- The lead plans `pico2peta --remote URL`, with the token from `--token` or `P2P_TOKEN`.
+- The lead plans `o5s --remote URL`, with the token from `--token` or `O5S_TOKEN`.
 
 ### Goal 4: CI (`.github/workflows/ci.yml`). Done.
 - Jobs: rustfmt check, clippy `--workspace --all-targets -D warnings`, `cargo test --workspace --locked`, rustdoc `-D warnings`, and a MinIO integration job.
@@ -99,7 +99,7 @@ User docs are in `docs/API.md` and `deploy/README.md`.
   - Groups are `blob:<ext>` (or `blob:<basename>`), `tree`, `commit` and `tag`.
   - Order is path, then the time of the oldest commit that contains the object. Every git repo's refs are walked, oldest commits first.
 - **Opt-in** through `[gc] grouped = true`. The default is false because Experiment 1 failed its pre-registered verdict (redis 1.336× git-aggressive, above the 1.30 per-repo maximum), and so did Experiment 1b (patch-from deltas: ripgrep 1.16×, jq 1.09×, redis 1.35×). See docs/EXP1.md. Per the pre-registration, the recommendation for source code stays Git-compatible storage through the git adapter, with grouped repack as an opt-in. and `repack_all`, or per call with `POST /v1/admin/gc?repack_all=true`.
-- **Measured on ripgrep** (heads + tags, 14,190 objects), with `cargo test --release -p pico2peta-server --test git grouped_repack -- --ignored`:
+- **Measured on ripgrep** (heads + tags, 14,190 objects), with `cargo test --release -p o5s-server --test git grouped_repack -- --ignored`:
 
   | | bytes | vs git `--aggressive` |
   |---|---|---|
@@ -109,7 +109,7 @@ User docs are in `docs/API.md` and `deploy/README.md`.
 
   - The repack takes 52 s on a release build; `git gc --aggressive` takes 7 s.
   - **After the core's frame v2 and idx v3 (demo b3d66e8)**, the same unchanged test gives **1.078× total and 1.021× payload**, with a 34.8 s repack on a loaded host (the lead's run). The rest is mostly index: 44 vs 28 B/object, of which 12 B is BLAKE3 vs SHA-1.
-  - Full mirror including refs/pull/* (`P2P_GIT_ALL_REFS=1`, pre-v2 formats): 1.248× total, 1.135× payload.
+  - Full mirror including refs/pull/* (`O5S_GIT_ALL_REFS=1`, pre-v2 formats): 1.248× total, 1.135× payload.
   - After the repack the repo clones back with identical refs and passes `git fsck --full`.
 - This does **not** reproduce EXP1's predicted ~0.85× on ripgrep. Both parts contribute:
   - Payload: 1.15× vs git pack.
@@ -117,7 +117,7 @@ User docs are in `docs/API.md` and `deploy/README.md`.
 - I've reported this to the core lead to reconcile with the Exp1 harness (`bench/exp1`). Possible causes: frame boundaries, grouping keys that differ from the harness, and the cost of the index format.
 
 - S3 default credential chain (env, web identity, IMDSv2) with background refresh.
-- Separate metrics listener, and per-principal rate limiting (429 with `Retry-After`, `p2p_rate_limited_total`).
+- Separate metrics listener, and per-principal rate limiting (429 with `Retry-After`, `o5s_rate_limited_total`).
 - Audit log rotation with a continuous hash chain across files.
 - Token admin API (create, list, revoke) over `auth.token_file`.
 - **Multi-host serving:** `[repo] refs = "backend"` creates the repository with the core's backend ref log. Several servers with separate local directories can then share one S3 bucket and prefix. MinIO test (`two_servers_share_a_repo_via_s3`): two servers, four writers contending on one name, 60 commits and 64 OCC conflicts, final version exactly 60 on both servers, and an object written through one server referenced through the other. A config/repo engine mismatch is refused at startup.
@@ -126,7 +126,7 @@ User docs are in `docs/API.md` and `deploy/README.md`.
 - Git wire deltas: upload-pack deltifies blobs and trees against the previously sent version of the same path. A ripgrep clone (release) transfers 33.8 MB → **6.1 MB**, takes 3.65 s → 2.91 s, refs are identical and fsck is clean.
 
 ### Server load benchmark (`crates/server/tests/load.rs`)
-Run with `cargo test --release -p pico2peta-server --test load -- --ignored --nocapture`. Client and server share one 4-core host over loopback. Quiet host (load average 0.9 at start, 2026-11-15); the earlier run under Exp1 load is in parentheses.
+Run with `cargo test --release -p o5s-server --test load -- --ignored --nocapture`. Client and server share one 4-core host over loopback. Quiet host (load average 0.9 at start, 2026-11-15); the earlier run under Exp1 load is in parentheses.
 
 | workload | throughput | p50 | p99 |
 |---|---|---|---|
@@ -202,7 +202,7 @@ The contended run checks that no update is lost: the final version equals the nu
 - **HF Xet upload protocol: DONE** (`crates/server/src/xet.rs`). Tested with the real default client (`huggingface_hub` 2.4.0 with `hf_xet` 1.8.0, no env overrides): round-trip, then zero-grace GC, then re-download.
   - Upload flow:
     - `xet-write-token` issues an HMAC capability.
-    - Xorbs: chunks are decompressed (none, LZ4 frame, BG4+LZ4), then the chunk hashes and the Merkle xorb hash are recomputed byte-exact with xet-core. The decompressed bytes are stored as one core object, with a `P2PXORB1` record in `git/_xet`.
+    - Xorbs: chunks are decompressed (none, LZ4 frame, BG4+LZ4), then the chunk hashes and the Merkle xorb hash are recomputed byte-exact with xet-core. The decompressed bytes are stored as one core object, with a `O5SXORB1` record in `git/_xet`.
     - Shards: segments are checked against their verification range hashes, then each file is rebuilt into a core object and checked against its Xet file hash and sha256 (which xet stores word-swapped). It is then registered like an LFS upload.
   - GC follows record → content.
   - Negative tests: tampered xorb gives 400, forged token 401, read token 403.
@@ -222,14 +222,14 @@ The contended run checks that no update is lost: the final version equals the nu
   - Server GC is `gc_with_fronts`, with provenance as the extra tracer.
   - Claims are now enforced by the core and not just by the `/v1` check: the plain repository refuses `git/` and `oci/` names. Global admins (`/v1` replace, delete, multi-update) and namespace admins (`set_rule`, e.g. immutable git tags) act through the owning front's handle. A multi-update spanning two fronts is refused.
   - Tests: `tests/fronts.rs`. The HF GC tests now use the real server GC path.
-  - `segmap` is now a re-export of `pico2peta_repo::idmap` (same on-disk format); the server keeps only an `AsyncMap` extension trait for its async handlers.
+  - `segmap` is now a re-export of `o5s_repo::idmap` (same on-disk format); the server keeps only an `AsyncMap` extension trait for its async handlers.
 - **PyPI front: DONE** (`crates/server/src/pypi.rs`, `tests/pypi.rs`).
   - Tested with real twine 6.1, pip 26 and uv 0.13:
     - upload; reader 403; identical re-upload OK; replacement 409;
     - pip install latest, pinned, and with a non-normalized name; anonymous gets a 401 Basic challenge;
     - uv install.
   - Proxy-cache, tested with a second server proxying the first: local uploads and upstream files are merged on one index. The cached file installs after the upstream is stopped and a zero-grace GC is run; a never-fetched file fails (502).
-  - Storage: `pypi/<i>/<p>/<file>` → `P2PPYPI1` record → content. The `pypi` front claims `pypi/` and its GC follows record → content.
+  - Storage: `pypi/<i>/<p>/<file>` → `O5SPYPI1` record → content. The `pypi` front claims `pypi/` and its GC follows record → content.
   - PEP 658/714 core metadata: DONE.
     - On wheel upload, `*.dist-info/METADATA` is read with range reads of the stored wheel (EOCD, central directory, one entry; no full load) and stored create-once as `<file>.metadata`.
     - Pages advertise `core-metadata` and `data-dist-info-metadata` (JSON and HTML).
@@ -237,7 +237,7 @@ The contended run checks that no update is lost: the final version equals the nu
     - Tested: sha256 equality, and a proxy pass-through used by pip, including offline.
   - PEP 592 yank/unyank: DONE (`/pypi/<i>/-/yank/<p>/<f>`, a mutable note over the create-once record). Tested with pip: an unpinned install skips the yanked file and an exact pin installs it.
   - Proxy semantics when the upstream fails ("stale-if-error"): pages list only locally cached files, all of which install. I tried serving the stale upstream listing and reverted it: it advertises never-cached versions, and pip and npm pick those (the newest) and fail, when a cached older one would have worked. Maven serves the stale `maven-metadata.xml`, which is right for a mutable index file.
-  - Per-tool auth with one pico2peta token: pip, uv and twine use Basic (password = token, after a 401 Basic challenge); npm uses `_authToken` (Bearer); Maven uses settings.xml `<server>` (Basic); git uses Basic in the URL; docker, oras and crane use Basic. Tokens come from `pico2peta-server gen-token` / `/v1/admin/tokens`. `npm login` / `npm adduser` are not supported.
+  - Per-tool auth with one o5s token: pip, uv and twine use Basic (password = token, after a 401 Basic challenge); npm uses `_authToken` (Bearer); Maven uses settings.xml `<server>` (Basic); git uses Basic in the URL; docker, oras and crane use Basic. Tokens come from `o5s-server gen-token` / `/v1/admin/tokens`. `npm login` / `npm adduser` are not supported.
   - Maven: no yank or unpublish (the Maven protocol has none); releases stay create-once by design.
   - Not done: the `/pypi/<i>/simple/` root listing of upstream projects (only local projects are listed).
 - Fix: early-rejected uploads (LFS capability, PyPI authz) now send `Connection: close`. Before, a client's pooled connection could be reset mid-body, which made one HF test flaky.
@@ -247,7 +247,7 @@ The contended run checks that no update is lost: the final version equals the nu
     - publish, plain and scoped (`@team/util`); reader 403; republishing a version 409;
     - install latest, pinned and scoped.
   - Proxy-cache, tested with a second server proxying the first: local and upstream packages are merged. After the upstream stops and a zero-grace GC runs, cached versions still install, `latest` falls back to the newest cached version, and a never-fetched version fails.
-  - Storage: `npm/<r>/<seg>/<v>` → `P2PNPMV1` record (manifest + digests) → tarball; dist-tags are `npm/<r>/<seg>/_tags/<t>`. The `npm` front claims `npm/`.
+  - Storage: `npm/<r>/<seg>/<v>` → `O5SNPMV1` record (manifest + digests) → tarball; dist-tags are `npm/<r>/<seg>/_tags/<t>`. The `npm` front claims `npm/`.
   - Shared plumbing with PyPI lives in `pkg.rs`: a streaming put with sha1/sha256/sha512, create-once, and the HTTP client.
   - Dist-tag API (`npm dist-tag ls|add|rm`): DONE, tested with the real npm (install by tag; readers and unknown versions refused).
   - Deprecate and unpublish: DONE, tested with the real npm.
@@ -256,11 +256,11 @@ The contended run checks that no update is lost: the final version equals the nu
     - Versions follow the namespace's rules: under `immutable`, unpublish is refused. Packuments carry `_rev`; a stale one gets 409.
   - Not done: search.
 - **Maven front: DONE** (`crates/server/src/maven.rs`, `tests/maven.rs`).
-  - Tested with the real Maven 3.9.9; its plugins come from Maven Central through a pico2peta proxy:
+  - Tested with the real Maven 3.9.9; its plugins come from Maven Central through a o5s proxy:
     - `deploy:deploy-file` of a release; two snapshots (mutable); release overwrite 409; reader 403;
     - `dependency:get` of the release and of the latest snapshot.
   - Proxy chain test: server B proxies server A's Central proxy and A's releases. A fresh client resolves through B; then A is stopped and B runs a zero-grace GC, and a fresh client still resolves the plugins and the artifact entirely from B.
-  - Storage: `maven/<repo>/<path>` → `P2PMVN01` record → content. The `maven` front claims `maven/`.
+  - Storage: `maven/<repo>/<path>` → `O5SMVN01` record → content. The `maven` front claims `maven/`.
   - The test needs network access to Maven Central and skips without it. The Maven distribution is at `/mnt/scratch/pico2peta/tools/maven` (sha512-verified 3.9.9).
 - The 401 for unauthenticated `/pypi/` and `/maven/` requests now carries a Basic challenge, as `/git/` already did: pip and Maven send credentials only after one.
 - **All Phase 3 (3) fronts are DONE:** HF (LFS + Xet upload), PyPI, npm, Maven, and OCI (conformance 73/0), each tested with its real client.
@@ -283,7 +283,7 @@ The contended run checks that no update is lost: the final version equals the nu
       - The front adds nothing measurable (same `stream_reader` as `/v1`). The core plans multi-core whole-object BLAKE3 per stream after the RC.
     - **HF: FAIL** on transfer times, 6/6 functional checks; storage is STRONG PASS (family 0.91× of Xet dedup).
       - Times vs curl `/v1`: LFS upload 2.08×, LFS download 2.35×, Xet upload 7.66×, Xet download 1.56×.
-      - Server-side they are ~1.0× (downloads) and 1.27× (LFS PUT, mostly the Xet-chunker profile); see "HF transfers vs /v1". The end-to-end gap is the HF clients' own hashing, chunking and disk writes, which this protocol counts against pico2peta.
+      - Server-side they are ~1.0× (downloads) and 1.27× (LFS PUT, mostly the Xet-chunker profile); see "HF transfers vs /v1". The end-to-end gap is the HF clients' own hashing, chunking and disk writes, which this protocol counts against o5s.
     - **PyPI: PASS** (cold 1.02×, hot 1.19×, storage 0.47×). **npm: PASS** (1.05×, 1.06×, storage 0.11×). **Maven: PASS** (cold 0.99×, hot 1.01×, storage 0.93×; 3/3 functional checks).
     - **This batch is the pre-h5i baseline** (H5I_PLAN H0). Committed: raw rows `bench/results/fronts-baseline-pre-h5i.jsonl`, the report `bench/results/fronts-baseline-pre-h5i-report.md`, and per-metric run-to-run ranges `bench/results/fronts-baseline-pre-h5i-ranges.md` (for the no-regression rule).
   - Earlier batch (superseded) — **windows 1–2 (2026-11-15), window 3 (Maven) pending.** Report: `/mnt/scratch/pico2peta/bench-fronts-report-w2.md` (§6.5 tiers, medians of 3, with load averages of 2.8–5.0 on 4 cores, which is why the core's builds ran at nice/-j1). Git rows are window 2's rerun; window 1's are kept as superseded. These are the binaries from before the idmap merge-join and the batched git walk.
@@ -296,7 +296,7 @@ The contended run checks that no update is lost: the final version equals the nu
     - OCI, HF, PyPI, npm, Maven: not run (rerun in the final batch).
     - Two findings from the partial redis rows, recorded as leads, not results:
       - repeat pushes slow down (see "Requests for core");
-      - pico2peta's redis clone took ~370 s, against ~13 s for git daemon. Mostly the same large-segment lookup cost as the re-push (see "Requests for core"); the front's single-threaded encoding is now parallel.
+      - o5s's redis clone took ~370 s, against ~13 s for git daemon. Mostly the same large-segment lookup cost as the re-push (see "Requests for core"); the front's single-threaded encoding is now parallel.
   - Smoke runs (one run each, not the measurement): the package proxies are at about parity, while throughput-bound transfers (Git push and clone, OCI, HF) are 1.7–2.6× the specialist. That matches the store's put/get pipeline throughput and is relayed to the core.
   - Deviations from the §6.5 wording:
     - PyPI timing uses pip (uv is covered functionally in `tests/pypi.rs`).
@@ -324,7 +324,7 @@ The contended run checks that no update is lost: the final version equals the nu
     - `v1/reconstructions/<file>` (with `Range`) returns terms over "virtual xorbs". `v2` answers 404, and the client falls back to v1.
     - Xorb bytes come from signed, credential-free URLs `/xet/xorb/<capability>`, like presigned S3 URLs.
   - Storage:
-    - At shard time each file gets a `P2PXFIL1` record: content hash, Xet file hash, sha256 and the file's Xet chunk list. It is indexed in `git/_xetfile` (by file hash) and `git/_xetsha` (by sha256).
+    - At shard time each file gets a `O5SXFIL1` record: content hash, Xet file hash, sha256 and the file's Xet chunk list. It is indexed in `git/_xetfile` (by file hash) and `git/_xetsha` (by sha256).
     - A virtual xorb is a run of ≤ 8192 chunks / 64 MiB of that list, named by its real Merkle hash. It is served as uncompressed xorb chunks read from the file's content object, so nothing is stored twice and the uploaded xorbs can be collected.
     - GC: an LFS pointer keeps its file record alive, and the record keeps the content.
   - Authorization: the token's repo must be allowed to read the file (the LFS ACL).
@@ -358,11 +358,11 @@ The contended run checks that no update is lost: the final version equals the nu
 - ROADMAP Net 7 (ops), part 1: DONE.
   - `deploy/grafana-dashboard.json`: 12 panels over every exported metric.
   - `deploy/prometheus-alerts.yml`: 9 rules, validated YAML.
-  - `deploy/k8s/`: `local.yaml` (1-replica StatefulSet + PV) and `s3.yaml` (N replicas on S3 with backend refs, IRSA ServiceAccount, GC CronJob). Both embedded configs pass `pico2peta-server check-config`.
+  - `deploy/k8s/`: `local.yaml` (1-replica StatefulSet + PV) and `s3.yaml` (N replicas on S3 with backend refs, IRSA ServiceAccount, GC CronJob). Both embedded configs pass `o5s-server check-config`.
   - Per-namespace rate limits and storage quotas: DONE (`[[limits]]`, `crates/server/src/limits.rs`; deploy/README "Capacity notes").
     - Rate: one token bucket per rule, shared by all callers, applied after authorization in every front and in the `/v1` name operations.
     - Quota: a background scan every `server.limits_scan_secs` sums the logical bytes reachable from the namespace's names, through the fronts' GC tracers. Writes at or over the quota get 507 `quota_exceeded`. Reads, `/v1` ref deletes, OCI manifest deletes and global admins are exempt.
-    - Metric `p2p_namespace_limited_total{outcome}`. Tests: unit `longest_prefix_rate_and_quota`, end-to-end `namespace_rate_and_quota`.
+    - Metric `o5s_namespace_limited_total{outcome}`. Tests: unit `longest_prefix_rate_and_quota`, end-to-end `namespace_rate_and_quota`.
     - Limits: usage is as fresh as the last scan, and shared content is charged to every namespace that references it.
   - S3 deployment guide: DONE (deploy/README "S3 deployment guide": bucket and encryption, VPC endpoint, identity, local vs backend refs and the conditional-create requirement, storage classes vs GC, throughput and throttling, cost model, monitoring, backup/DR and failover with fsck, a pre-launch check).
   - Remaining: a Helm chart (not planned: plain manifests cover it).
@@ -437,7 +437,7 @@ The contended run checks that no update is lost: the final version equals the nu
   - **Access kernel** (`access.rs` + `authz_kernel!`): every authorization decision runs behind `h5i_app_std::authz::guard_viewed`.
     - `h5i_authz` proves `guarded_transition.authorized`: writes are permitted, disclosed rows are stored and visible, and read-only commands are noninterfering with what the view hides. It also proves `read_only_sound`.
     - The policy itself is specified and proven: `is_under_spec`, `allows_spec`, `reads_some_spec`, `cells_of_spec`, and the two rules: `visible_object_spec` (an object row is visible iff the snapshot lists cells reaching it and the actor may read one) and `permits_spec` (a ref write iff the actor holds write on the name). `Authorizer::allows` calls the kernel's `allows`.
-    - h5i's `[authz]` pipeline requires a PostgreSQL Storage theorem, so `Authz.lean` instantiates `h5i_authz` by hand. Storage is pico2peta's own store (trusted infrastructure).
+    - h5i's `[authz]` pipeline requires a PostgreSQL Storage theorem, so `Authz.lean` instantiates `h5i_authz` by hand. Storage is o5s's own store (trusted infrastructure).
   - **Object-read authorization (the human's gap): DONE.** `GET`/`HEAD /v1/objects/<h>` only serve an object reachable from a name the caller may read.
     - Mechanism: the shell asks core's `reach::ReachIndex::cells_reaching_many` which of the caller's readable cells reach the hash, then the kernel decides `ReadObject`.
     - Unauthorized and nonexistent get the same 404 body, decided before any store access, so the same timing class.
@@ -479,7 +479,7 @@ The contended run checks that no update is lost: the final version equals the nu
     - virtual-xorb downloads are streamed in 4 MiB windows, instead of materialising ~64 MiB per range, and without a per-chunk allocation.
   - **Server-side** (curl, to `/dev/null`, so no client or disk effects; medians of 6–7):
 
-    | path | pico2peta | /v1 reference | ratio |
+    | path | o5s | /v1 reference | ratio |
     |---|---|---|---|
     | LFS download (resolve) | 0.277 s | 0.273 s | **1.01×** |
     | Xet download (reconstruction + 5 xorb ranges, 8 parallel) | 0.276 s | 0.278 s | **0.99×** (was 0.340 s, 1.23×) |
@@ -518,13 +518,13 @@ The contended run checks that no update is lost: the final version equals the nu
 
     That is 1.08–1.15× git daemon, from ~2.7×. Phases now: pass 1 2.2–2.6 s; resolve+store 10–12 s at ~33 CPU-seconds total. The rest is CPU-bound in zstd (the core's level-3 default; level 1 is the human's decision, see the core's BENCH "put/get pass").
 - **Git clone/fetch vs git daemon (human's priority 1): DONE, target met** (≤1.2× on redis, cold and warm). It took three changes, each chosen by measurement:
-  1. **Clone pack cache.** A clone with no haves, no shallow and no filter produces a pack that is a function of (object format, sorted wants). The front keeps the last one per repository as an object (`P2PCPK01` + key + pack) behind `git/_clonepack/<repo>`, and streams it when the key matches. The ref keeps it alive for GC, and a stale one is simply replaced. It is filled when a clone misses, and refreshed in the background after every push (heads+tags wants), so the first clone after a push is a hit too. Config `[git] clone_pack_cache` (default on). Cost: one pack of storage per cloned repository.
+  1. **Clone pack cache.** A clone with no haves, no shallow and no filter produces a pack that is a function of (object format, sorted wants). The front keeps the last one per repository as an object (`O5SCPK01` + key + pack) behind `git/_clonepack/<repo>`, and streams it when the key matches. The ref keeps it alive for GC, and a stale one is simply replaced. It is filled when a clone misses, and refreshed in the background after every push (heads+tags wants), so the first clone after a push is a hit too. Config `[git] clone_pack_cache` (default on). Cost: one pack of storage per cloned repository.
      - Of options (a)–(c), (c) alone gets clones below git daemon. (a)/(b) would cost extra per-object storage for little gain once (c) and the commit graph are in.
   2. **Commit graph** (`crates/server/src/gitgraph.rs`). Each commit's tree, parents and time, and each tag's target, plus the core hash. Kept in memory (bounded), and persisted per repository behind `git/_commitgraph/<repo>`, rewritten in the background after pushes and loaded once per process.
      - Negotiation, the "client has" walk, shallow cuts and the commit waves read no commit objects.
      - `list_refs` no longer reads and SHA-1s every ref's object on every request (556 refs on redis).
   3. **Edge-only tree exclusion, without blob reads** (it used to load every blob of 16 common trees), and the fix to `get_many`'s dense-scan path (see "Small fixes made to core crates"). That scan used to read whole oid-map segments past the page cache on every wave; it was the top of the warm fetch profile.
-  - Dev check (redis heads+tags, under the bench lock; cold = fresh process + `drop_caches`). Seconds, pico2peta vs git daemon:
+  - Dev check (redis heads+tags, under the bench lock; cold = fresh process + `drop_caches`). Seconds, o5s vs git daemon:
 
     | | before | after | git daemon |
     |---|---|---|---|
@@ -646,7 +646,7 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
   | fp32 raw: GPT-2 (548 MB) | −0.6% | −7.8% | −8.0% | −9.8% |
 
   - At zstd level 3, per-block grouping only pays off on XOR deltas. At level 19 it recovers most of the tensor-grouped gain on raw weights as well. If the codec runs at a low level, raising the level for grouped records, or object-level grouping, is where the remaining gain lies.
-  - Scope of the numbers: they are whole-file (every tensor), but *blocks are tensor-aligned*: each tensor is cut into 64 KiB blocks from its own start. The store's content-defined chunks are not tensor-aligned. End to end, the core measures base −6.0% and delta −10.6% at its default `grouped_zstd_level = 6`. So my per-block column is an upper bound for chunk-level grouping. The core then tested my hypothesis that tensor alignment is the lever (p2p-bench group-align, SmolLM2 base, whole file). At L6: whole-file CDC −6.0%, CDC inside each tensor −5.9%, tensor-aligned fixed 64 KiB blocks −4.9%. At L19: −5.8% / −6.0% / −9.9%. The −10% therefore needs **both** fixed tensor-aligned blocks **and** L19 (about 6 MB/s/core). Tensor-aligned CDC alone gives nothing, so **my hypothesis is refuted** and the core's L6 default stands.
+  - Scope of the numbers: they are whole-file (every tensor), but *blocks are tensor-aligned*: each tensor is cut into 64 KiB blocks from its own start. The store's content-defined chunks are not tensor-aligned. End to end, the core measures base −6.0% and delta −10.6% at its default `grouped_zstd_level = 6`. So my per-block column is an upper bound for chunk-level grouping. The core then tested my hypothesis that tensor alignment is the lever (o5s-bench group-align, SmolLM2 base, whole file). At L6: whole-file CDC −6.0%, CDC inside each tensor −5.9%, tensor-aligned fixed 64 KiB blocks −4.9%. At L19: −5.8% / −6.0% / −9.9%. The −10% therefore needs **both** fixed tensor-aligned blocks **and** L19 (about 6 MB/s/core). Tensor-aligned CDC alone gives nothing, so **my hypothesis is refuted** and the core's L6 default stands.
   - The transform runs at 0.9–1.2 GB/s on one core, round trip verified.
   - There is no fp32 fine-tune pair, so the fp32 delta case is unmeasured.
 - **RESOLVED (2026-11-15):** a ref-log double-Ok regression (core 8e845fd) was caught by `two_servers_share_a_repo_via_s3`. 60 acknowledged commits had produced only 50–54 versions, because identical CAS records from two writers were both treated as "ours".
@@ -667,7 +667,7 @@ Plan: OCI first (smaller and well specified). It will be validated with the offi
   - large segments are split recursively around probe entries (through the page cache) until a sub-range holds about one key per 64 KiB page, or fits one 4 MiB window; that range is then read sequentially in 4 MiB-aligned ranged reads (bypassing the page cache) and merged;
   - results come back in input order.
   - Follow-up (same file, lead told): the dense-scan path reads through the page cache. Runs of missing 64 KiB pages are fetched with one ranged read of ≤4 MiB each. `PAGE_CACHE_BYTES` went from 64 to 128 MiB.
-  - Proptest `get_many_matches_per_key_lookups` (1–4 segments of up to 3 × `CACHE_WHOLE` entries, overrides by newer segments, misses, duplicates, dense and sparse batches) checks it against per-key `get_in`, plus a deterministic edge test. `proptest` became a dev-dependency of `pico2peta-repo`.
+  - Proptest `get_many_matches_per_key_lookups` (1–4 segments of up to 3 × `CACHE_WHOLE` entries, overrides by newer segments, misses, duplicates, dense and sparse batches) checks it against per-key `get_in`, plus a deterministic edge test. `proptest` became a dev-dependency of `o5s-repo`.
 - `crates/cli/src/main.rs`: wrapped a bare URL in a doc comment in `<…>` so that `cargo doc -D warnings` (CI docs job) passes.
 
 ## Questions for human

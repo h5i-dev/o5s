@@ -1,11 +1,11 @@
-# Task for the backends & server session (`pico2peta-net`)
+# Task for the backends & server session (`o5s-net`)
 
-You work autonomously in tmux session `pico2peta-net`, in git worktree
+You work autonomously in tmux session `o5s-net`, in git worktree
 `/home/ec2-user/Dev/pico2peta-net` on branch `net`. The human may be disconnected for long periods.
 
 Read first: `docs/DESIGN_BRIEF.md`, `docs/AGENT_TASK.md` (esp. "Quality bar" and "Team"), `docs/PLAN.md`, `docs/PROGRESS.md`.
 
-This is a **production-grade** product, not a demo. The core lead (session `pico2peta`, branch `demo`) owns the storage core and its traits. You build on top of them.
+This is a **production-grade** product, not a demo. The core lead (session `o5s`, branch `demo`) owns the storage core and its traits. You build on top of them.
 
 ## You own
 `crates/backend-s3`, `crates/server`, `crates/client`, `deploy/`, `.github/workflows/`, `docs/NET_PROGRESS.md`. Don't edit core crates. Ask for trait or API changes under "Requests for core" in `docs/NET_PROGRESS.md`. Small, obviously correct fixes to core are OK if you list them there so the lead sees them on merge.
@@ -21,7 +21,7 @@ This is a **production-grade** product, not a demo. The core lead (session `pico
    - An append-only audit log.
    - Prometheus metrics, `tracing` structured logs, health and readiness endpoints, graceful shutdown, and a TOML config file.
    - Bounded memory under large uploads, and backpressure.
-3. **Client (`crates/client`)**: a Rust client library plus a remote mode for the `pico2peta` CLI. Coordinate with the lead for the CLI wiring.
+3. **Client (`crates/client`)**: a Rust client library plus a remote mode for the `o5s` CLI. Coordinate with the lead for the CLI wiring.
 4. **CI (`.github/workflows/`)**: fmt, clippy `-D warnings`, test, and the MinIO integration job.
 5. **Deploy (`deploy/`)**: Dockerfile, a sample config, and a systemd unit.
 6. Later: the Git smart-HTTP and OCI distribution adapters (compatibility layer). Agree the hash-mapping design with the lead first, and write it down in `docs/NET_PROGRESS.md`.

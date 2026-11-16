@@ -23,7 +23,7 @@ pub enum Ng {
 /// The facts about one push command.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PushCmd {
-    /// The ref name maps to a pico2peta name.
+    /// The ref name maps to a o5s name.
     pub ref_ok: bool,
     /// The ref is a branch (`refs/heads/...`).
     pub is_branch: bool,

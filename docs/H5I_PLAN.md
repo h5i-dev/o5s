@@ -1,7 +1,7 @@
-# Rebuilding pico2peta on h5i-app (from the human, 2026-11-16). This overrides the verification approach.
+# Rebuilding o5s on h5i-app (from the human, 2026-11-16). This overrides the verification approach.
 
 ## Correction
-The intent was always the following. **pico2peta is implemented with `h5i-app`. Its decision logic is written as h5i-app kernels: pure Rust functions that Charon/Aeneas extract to Lean 4. The theorems are proved about the extracted code.**
+The intent was always the following. **o5s is implemented with `h5i-app`. Its decision logic is written as h5i-app kernels: pure Rust functions that Charon/Aeneas extract to Lean 4. The theorems are proved about the extracted code.**
 
 A hand-written Lean model plus a differential test against the Rust is **worth nothing** for this project, and it will be removed. That approach was never part of the brief; our original task file failed to state the intent.
 
@@ -34,7 +34,7 @@ Restructure so that every **decision** is an h5i-app kernel (`transition(actor, 
 - **Fronts:** front ownership guard (owned prefixes), promotion (`attest::promote` decision and policy check), retention decision, and GC decisions (mark/sweep/delete verify-before-delete, `ensure_live`, protected children incl. Frame3 references).
 - **Proofs on the extracted Lean:** prove P1–P7 (VERIFICATION/lean README list) about the extracted functions. Use `h5i_app_lib` obligations where they fit (panic-freedom, read-only soundness).
   - Run `h5i app mutate` and record its sensitivity.
-  - **Delete** the hand-written `lean/Pico2peta/*` model and `crates/refs/tests/lean_diff.rs` once the extracted proofs cover them.
+  - **Delete** the hand-written `lean/O5s/*` model and `crates/refs/tests/lean_diff.rs` once the extracted proofs cover them.
 - **Extractable parsers/decoders where feasible:** pack record header, index entries, manifest/delta/Frame3 directories, ref-journal records. Prove panic-freedom and round-trip/spec equality, as h5i does for h1/token/json.
 
 **Net session**

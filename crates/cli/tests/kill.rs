@@ -1,4 +1,4 @@
-//! Real crash test: SIGKILL `pico2peta` processes at random moments while they
+//! Real crash test: SIGKILL `o5s` processes at random moments while they
 //! stream objects in, move refs, and run GC. Afterwards `fsck` must pass, every
 //! acknowledged ref must be readable, and the repository must stay writable.
 use std::io::Write;
@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 fn bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_pico2peta"))
+    Command::new(env!("CARGO_BIN_EXE_o5s"))
 }
 
 fn ok(repo: &Path, args: &[&str]) -> String {
@@ -26,7 +26,7 @@ fn sigkill_at_random_points_keeps_repo_consistent() {
     // Deterministic inputs (fixed xorshift seed); kill *timing* varies run to run.
     let d = tempfile::tempdir().unwrap();
     let repo = d.path().join("r");
-    if let Ok(keep) = std::env::var("P2P_KILL_KEEP") {
+    if let Ok(keep) = std::env::var("O5S_KILL_KEEP") {
         // Debug aid: keep the repository for inspection.
         let _ = std::fs::remove_dir_all(&keep);
         std::fs::create_dir_all(&keep).unwrap();

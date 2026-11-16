@@ -6,7 +6,7 @@ proptest! {
 
     #[test]
     fn xml_total(d in proptest::collection::vec(any::<u8>(), 0..400)) {
-        pico2peta_backend_s3::fuzzing::xml(&d);
+        o5s_backend_s3::fuzzing::xml(&d);
     }
 
     #[test]
@@ -16,6 +16,6 @@ proptest! {
         for t in &tags { s.push_str(&format!("<{t}>")); }
         s.push_str(&text);
         for t in tags.iter().rev() { s.push_str(&format!("</{t}>")); }
-        pico2peta_backend_s3::fuzzing::xml(s.as_bytes());
+        o5s_backend_s3::fuzzing::xml(s.as_bytes());
     }
 }

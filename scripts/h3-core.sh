@@ -8,7 +8,7 @@
 #   scripts/h3-core.sh retime    # Exp3 build re-time (ripgrep, jq: the ±20 % pairs of the baseline)
 #   scripts/h3-core.sh report    # the §6.8 comparison against bench/baseline/*
 #   scripts/h3-core.sh recheck   # PLAN §6.8 amendment 2026-11-16: the three controlled re-measurements
-#     (needs the baseline-pre-h5i binaries: BASE_BENCH, BASE_EXP3; default $SCRATCH/tmp/{p2p-bench,exp3}-base)
+#     (needs the baseline-pre-h5i binaries: BASE_BENCH, BASE_EXP3; default $SCRATCH/tmp/{o5s-bench,exp3}-base)
 #   scripts/h3-core.sh recheck-report
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
@@ -22,10 +22,10 @@ case "${1:-}" in
     OUT=$OUT/core "$ROOT/scripts/baseline-core.sh" scale
     ;;
   generic)
-    (cd "$ROOT" && nice cargo build -q --release -j2 -p pico2peta-micro)
+    (cd "$ROOT" && nice cargo build -q --release -j2 -p o5s-micro)
     for i in 1 2 3; do
       { echo "load $(cut -d' ' -f1 /proc/loadavg) commit $COMMIT"
-        flock "$SCRATCH/bench.lock" "$CARGO_TARGET_DIR/release/p2p-bench" generic "$SCRATCH/bench-micro" 1024; } >> "$OUT/generic.txt"
+        flock "$SCRATCH/bench.lock" "$CARGO_TARGET_DIR/release/o5s-bench" generic "$SCRATCH/bench-micro" 1024; } >> "$OUT/generic.txt"
     done
     ;;
   exp3)
@@ -59,11 +59,11 @@ print(f"exp3 sizes: {len(base) - bad}/{len(base)} byte-identical")
 PY
     ;;
   recheck)
-    BB=${BASE_BENCH:-$SCRATCH/tmp/p2p-bench-base}
+    BB=${BASE_BENCH:-$SCRATCH/tmp/o5s-bench-base}
     BE=${BASE_EXP3:-$SCRATCH/tmp/exp3-base}
-    NB=$CARGO_TARGET_DIR/release/p2p-bench
+    NB=$CARGO_TARGET_DIR/release/o5s-bench
     NE=$CARGO_TARGET_DIR/release/exp3
-    (cd "$ROOT" && nice cargo build -q --release -j2 -p pico2peta-micro -p pico2peta-exp3)
+    (cd "$ROOT" && nice cargo build -q --release -j2 -p o5s-micro -p o5s-exp3)
     [ -x "$BB" ] && [ -x "$BE" ] || { echo "baseline binaries missing: $BB $BE" >&2; exit 1; }
     ( while true; do echo "## $(date -Is) load $(cut -d' ' -f1-3 /proc/loadavg)"; ps -eo pcpu,user,comm --sort=-pcpu | head -6; sleep 10; done ) > "$OUT/recheck-top.log" 2>&1 &
     SAMPLER=$!

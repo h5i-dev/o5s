@@ -1,13 +1,13 @@
 [package]
-name = "pico2peta-client"
-description = "Rust client for the pico2peta server; implements the Repository trait over HTTP"
+name = "o5s-client"
+description = "Rust client for the o5s server; implements the Repository trait over HTTP"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-pico2peta-core.workspace = true
-pico2peta-attest = { path = "../attest" }
+o5s-core.workspace = true
+o5s-attest = { path = "../attest" }
 serde.workspace = true
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }

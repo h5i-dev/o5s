@@ -1,7 +1,7 @@
 //! Default credential chain against mock IMDS and STS servers.
 
-use pico2peta_backend_s3::CredentialsProvider;
-use pico2peta_backend_s3::credentials::{RefreshingCredentials, Source, fetch};
+use o5s_backend_s3::CredentialsProvider;
+use o5s_backend_s3::credentials::{RefreshingCredentials, Source, fetch};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime};

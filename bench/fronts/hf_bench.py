@@ -1,18 +1,18 @@
-"""PLAN §6.5, HF/Xet: pico2peta's HF front with the real huggingface_hub (default hf_xet
+"""PLAN §6.5, HF/Xet: o5s's HF front with the real huggingface_hub (default hf_xet
 install, and HF_HUB_DISABLE_XET=1) vs the same files as plain objects through /v1.
 
 - upload / download time of SmolLM2-135M (270 MB) vs the /v1 reference (curl PUT / GET);
 - storage of the family (SmolLM2-135M + -Instruct) vs Xet chunk dedup of the same files
   (examples/xet_dedup: what HF's Xet storage keeps), with the Xet chunker on `hf/`.
 
-usage: hf_bench.py <pico2peta-server binary> <xet_dedup binary>
+usage: hf_bench.py <o5s-server binary> <xet_dedup binary>
 """
 import json
 import os
 import subprocess
 import sys
 
-from common import (RUNS, SCRATCH, TOKEN, TOOLS, busy, check, du, log, log_lines, pico_server, record, run, server_cpu,
+from common import (RUNS, SCRATCH, TOKEN, TOOLS, busy, check, du, log, log_lines, o5s_server, record, run, server_cpu,
                     server_intervals, sha256_file, timed, workdir)
 
 PY = f"{TOOLS}/venv/bin/python"
@@ -39,10 +39,10 @@ def main():
     want = sha256_file(BASE)
     with workdir("hf") as d:
         # Reference: plain objects through /v1.
-        p2p = os.path.join(d, "ref")
-        os.makedirs(p2p)
-        slog = os.path.join(p2p, "server.log")
-        with pico_server(p2p, server_bin, **LOG) as (base, _):
+        o5s = os.path.join(d, "ref")
+        os.makedirs(o5s)
+        slog = os.path.join(o5s, "server.log")
+        with o5s_server(o5s, server_bin, **LOG) as (base, _):
             for i in range(RUNS):
                 n0, c0 = log_lines(slog), server_cpu(base)
                 t = timed(["curl", "-sf", "-o", os.path.join(d, "put.json"), "-H", f"Authorization: Bearer {TOKEN}", "-T", BASE, f"{base}/v1/objects"])
@@ -62,28 +62,28 @@ def main():
                 record("hf", "download_server_s", "v1-reference", busy(server_intervals(slog, n0)), "s", run=i)
                 record("hf", "download_server_cpu_s", "v1-reference", server_cpu(base) - c0, "s", run=i)
                 os.remove(out)
-        run(["rm", "-rf", p2p])
+        run(["rm", "-rf", o5s])
         for mode, xet in (("xet", True), ("lfs", False)):
-            p2p = os.path.join(d, f"p2p-{mode}")
-            os.makedirs(p2p)
-            slog = os.path.join(p2p, "server.log")
-            with pico_server(p2p, server_bin, repo_toml=REPO_TOML, **LOG) as (base, repo):
+            o5s = os.path.join(d, f"o5s-{mode}")
+            os.makedirs(o5s)
+            slog = os.path.join(o5s, "server.log")
+            with o5s_server(o5s, server_bin, repo_toml=REPO_TOML, **LOG) as (base, repo):
                 for i in range(RUNS):
                     # create_repo runs before the client's timer: not in the operation's server time.
                     n0, c0 = log_lines(slog), server_cpu(base)
                     r = client(base, d, xet, "upload", f"bench/base-{i}", BASE, "model.safetensors")
                     iv = [x for x in server_intervals(slog, n0) if not x[2].endswith("/repos/create")]
-                    record("hf", "upload_s", f"pico2peta-{mode}", r["s"], "s", run=i)
-                    record("hf", "upload_server_s", f"pico2peta-{mode}", busy(iv), "s", run=i)
-                    record("hf", "upload_client_cpu_s", f"pico2peta-{mode}", r["cpu_s"], "s", run=i)
-                    record("hf", "upload_server_cpu_s", f"pico2peta-{mode}", server_cpu(base) - c0, "s", run=i)
+                    record("hf", "upload_s", f"o5s-{mode}", r["s"], "s", run=i)
+                    record("hf", "upload_server_s", f"o5s-{mode}", busy(iv), "s", run=i)
+                    record("hf", "upload_client_cpu_s", f"o5s-{mode}", r["cpu_s"], "s", run=i)
+                    record("hf", "upload_server_cpu_s", f"o5s-{mode}", server_cpu(base) - c0, "s", run=i)
                     cache = os.path.join(d, f"cache-{mode}-{i}")
                     n0, c0 = log_lines(slog), server_cpu(base)
                     r = client(base, d, xet, "download", f"bench/base-{i}", "model.safetensors", cache)
-                    record("hf", "download_s", f"pico2peta-{mode}", r["s"], "s", run=i)
-                    record("hf", "download_server_s", f"pico2peta-{mode}", busy(server_intervals(slog, n0)), "s", run=i)
-                    record("hf", "download_client_cpu_s", f"pico2peta-{mode}", r["cpu_s"], "s", run=i)
-                    record("hf", "download_server_cpu_s", f"pico2peta-{mode}", server_cpu(base) - c0, "s", run=i)
+                    record("hf", "download_s", f"o5s-{mode}", r["s"], "s", run=i)
+                    record("hf", "download_server_s", f"o5s-{mode}", busy(server_intervals(slog, n0)), "s", run=i)
+                    record("hf", "download_client_cpu_s", f"o5s-{mode}", r["cpu_s"], "s", run=i)
+                    record("hf", "download_server_cpu_s", f"o5s-{mode}", server_cpu(base) - c0, "s", run=i)
                     check("hf", f"download_sha256_{mode}_{i}", r["sha256"] == want)
                     run(["rm", "-rf", cache, os.path.join(d, "hfhome")])
                 if mode == "xet":
@@ -91,16 +91,16 @@ def main():
                     before = du(repo)
                     client(base, d, xet, "upload", "bench/family-base", BASE, "model.safetensors")
                     client(base, d, xet, "upload", "bench/family-instruct", INSTRUCT, "model.safetensors")
-                    record("hf", "family_added_bytes", "pico2peta-xet", du(repo) - before, "B",
+                    record("hf", "family_added_bytes", "o5s-xet", du(repo) - before, "B",
                            note="growth of the repo for base+instruct; base content was already stored by the timing runs")
-            run(["rm", "-rf", p2p])
+            run(["rm", "-rf", o5s])
         # Storage of the family alone (fresh server, nothing else stored).
-        p2p = os.path.join(d, "p2p-family")
-        os.makedirs(p2p)
-        with pico_server(p2p, server_bin, repo_toml=REPO_TOML) as (base, repo):
+        o5s = os.path.join(d, "o5s-family")
+        os.makedirs(o5s)
+        with o5s_server(o5s, server_bin, repo_toml=REPO_TOML) as (base, repo):
             client(base, d, True, "upload", "bench/base", BASE, "model.safetensors")
             client(base, d, True, "upload", "bench/instruct", INSTRUCT, "model.safetensors")
-            record("hf", "family_stored_bytes", "pico2peta-xet", du(repo), "B")
+            record("hf", "family_stored_bytes", "o5s-xet", du(repo), "B")
         ref = json.loads(subprocess.run([dedup_bin, BASE, INSTRUCT], capture_output=True, text=True, check=True).stdout)
         record("hf", "family_stored_bytes", "xet-dedup", ref["xet_stored_bytes"], "B", **{k: v for k, v in ref.items() if k != "xet_stored_bytes"})
         record("hf", "family_raw_bytes", "source", os.path.getsize(BASE) + os.path.getsize(INSTRUCT), "B")

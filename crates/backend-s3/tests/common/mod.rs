@@ -1,7 +1,7 @@
 //! Test helpers: environment discovery and a fault-injecting TCP proxy.
 #![allow(dead_code)]
 
-use pico2peta_backend_s3::{Credentials, S3Backend, S3Client, S3Config};
+use o5s_backend_s3::{Credentials, S3Backend, S3Client, S3Config};
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -19,18 +19,18 @@ pub struct Env {
 
 /// `None` (and a note on stderr) when no S3 endpoint is configured; tests then skip.
 pub fn env() -> Option<Env> {
-    let endpoint = std::env::var("P2P_S3_ENDPOINT").ok()?;
+    let endpoint = std::env::var("O5S_S3_ENDPOINT").ok()?;
     let creds = match Credentials::from_env() {
         Ok(c) => c,
         Err(_) => {
-            eprintln!("P2P_S3_ENDPOINT set but AWS credentials missing; skipping");
+            eprintln!("O5S_S3_ENDPOINT set but AWS credentials missing; skipping");
             return None;
         }
     };
     Some(Env {
         endpoint,
-        bucket: std::env::var("P2P_S3_BUCKET").unwrap_or_else(|_| "p2p-test".into()),
-        region: std::env::var("P2P_S3_REGION").unwrap_or_else(|_| "us-east-1".into()),
+        bucket: std::env::var("O5S_S3_BUCKET").unwrap_or_else(|_| "o5s-test".into()),
+        region: std::env::var("O5S_S3_REGION").unwrap_or_else(|_| "us-east-1".into()),
         creds,
     })
 }
@@ -41,7 +41,7 @@ macro_rules! require_s3 {
         match common::env() {
             Some(e) => e,
             None => {
-                eprintln!("skipping: set P2P_S3_ENDPOINT (see scripts/minio-test.sh)");
+                eprintln!("skipping: set O5S_S3_ENDPOINT (see scripts/minio-test.sh)");
                 return;
             }
         }

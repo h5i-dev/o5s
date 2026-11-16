@@ -1,13 +1,13 @@
 [package]
-name = "pico2peta-refs"
+name = "o5s-refs"
 description = "Name layer: journaled refs with OCC replace and per-namespace update rules"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-pico2peta-core.workspace = true
-pico2peta-kernel.workspace = true
+o5s-core.workspace = true
+o5s-kernel.workspace = true
 crc32fast.workspace = true
 blake3.workspace = true
 

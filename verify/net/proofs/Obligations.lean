@@ -1,4 +1,4 @@
-import Pico2petaNetKernel
+import O5sNetKernel
 import H5iAppLib
 import Policy
 /-!
@@ -11,9 +11,9 @@ import Policy
 * `read_only_sound`: a command `read_only` calls read-only (`ReadObject`, `ReadRef`) writes
   nothing when accepted.
 -/
-open Aeneas Aeneas.Std Result H5iAppLib pico2peta_net_kernel
+open Aeneas Aeneas.Std Result H5iAppLib o5s_net_kernel
 
-namespace pico2peta_net_kernel.Spec.Obligations
+namespace o5s_net_kernel.Spec.Obligations
 
 /-- The value of ref `n` in the snapshot (the first entry for `n`). -/
 def refS (s : access.Snapshot) (n : alloc.vec.Vec U8) : Option (alloc.vec.Vec U8) :=
@@ -82,4 +82,4 @@ theorem read_only_sound :
   all_goals (unfold transition; step*)
   all_goals (simp_all [OnOk])
 
-end pico2peta_net_kernel.Spec.Obligations
+end o5s_net_kernel.Spec.Obligations

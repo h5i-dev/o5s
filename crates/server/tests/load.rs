@@ -1,5 +1,5 @@
 //! Opt-in load benchmark (release build recommended):
-//!   cargo test --release -p pico2peta-server --test load -- --ignored --nocapture
+//!   cargo test --release -p o5s-server --test load -- --ignored --nocapture
 //! Reports throughput and latency percentiles for the native API over loopback.
 
 mod common;
@@ -91,7 +91,7 @@ fn load() {
                         .map(|_| {
                             let t0 = Instant::now();
                             loop {
-                                let obs = pico2peta_core::RefValue::observed(c.resolve(&hot).unwrap());
+                                let obs = o5s_core::RefValue::observed(c.resolve(&hot).unwrap());
                                 match c.replace(&hot, &[(hot.clone(), obs)], h).unwrap() {
                                     ReplaceOutcome::Ok { .. } => break,
                                     ReplaceOutcome::Conflict { .. } => conflicts += 1,

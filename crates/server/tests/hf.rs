@@ -1,6 +1,6 @@
 //! The HF front against the real `huggingface_hub` client.
 //!
-//! Needs a Python with `huggingface_hub` (`PICO2PETA_HF_PYTHON`, default the shared tools
+//! Needs a Python with `huggingface_hub` (`O5S_HF_PYTHON`, default the shared tools
 //! venv). Skipped, with a message, when it is absent. CI installs it.
 
 mod common;
@@ -14,13 +14,12 @@ fn sha256_hex(b: &[u8]) -> String {
 }
 
 fn python() -> Option<String> {
-    let p =
-        std::env::var("PICO2PETA_HF_PYTHON").unwrap_or_else(|_| "/mnt/scratch/pico2peta/tools/venv/bin/python".into());
+    let p = std::env::var("O5S_HF_PYTHON").unwrap_or_else(|_| "/mnt/scratch/pico2peta/tools/venv/bin/python".into());
     let ok = Command::new(&p).args(["-c", "import huggingface_hub"]).output().is_ok_and(|o| o.status.success());
     if ok {
         Some(p)
     } else {
-        eprintln!("skipping: no python with huggingface_hub at {p} (set PICO2PETA_HF_PYTHON)");
+        eprintln!("skipping: no python with huggingface_hub at {p} (set O5S_HF_PYTHON)");
         None
     }
 }
@@ -57,7 +56,7 @@ fn huggingface_hub_round_trip_over_lfs() {
     let Some(py) = python() else { return };
     let srv = TestServer::start(|cfg| {
         for t in ["models", "datasets", "spaces"] {
-            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), pico2peta_server::config::Access::Write));
+            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), o5s_server::config::Access::Write));
         }
     });
     let out = run_client(&py, &srv, ALICE, "alice/tiny-model", false);
@@ -87,9 +86,9 @@ fn huggingface_hub_round_trip_over_lfs() {
     assert!(batch(&orphan_sha, orphan.len())["objects"][0].get("actions").is_none(), "now present");
 
     // GC (zero grace, condemn + delete phases) must keep LFS content reachable through pointers.
-    let repo = pico2peta_repo::LocalRepo::open(srv.dir.path().join("repo")).unwrap();
-    let fronts = pico2peta_server::fronts::Fronts::open(repo.clone()).unwrap();
-    let opts = pico2peta_repo::GcOptions {
+    let repo = o5s_repo::LocalRepo::open(srv.dir.path().join("repo")).unwrap();
+    let fronts = o5s_server::fronts::Fronts::open(repo.clone()).unwrap();
+    let opts = o5s_repo::GcOptions {
         grace: std::time::Duration::ZERO,
         allow_short_grace: true,
         repack_all: true,
@@ -98,7 +97,7 @@ fn huggingface_hub_round_trip_over_lfs() {
     for _ in 0..3 {
         std::thread::sleep(std::time::Duration::from_millis(1100));
         // The server's GC path: every front's per-run snapshot tracer, plus provenance.
-        let prov = pico2peta_prov::ProvTracer { inner: pico2peta_server::fronts::Leaves };
+        let prov = o5s_prov::ProvTracer { inner: o5s_server::fronts::Leaves };
         let r = fronts.repo.gc_with_fronts(&opts, Some(&prov), false).unwrap();
         assert!(r.dangling_refs.is_empty(), "{r:?}");
     }
@@ -130,7 +129,7 @@ fn hf_repo_is_a_git_repo() {
     }
     let srv = TestServer::start(|cfg| {
         for t in ["models", "datasets", "spaces"] {
-            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), pico2peta_server::config::Access::Write));
+            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), o5s_server::config::Access::Write));
         }
     });
     let out = run_client(&py, &srv, ALICE, "alice/both", false);
@@ -190,20 +189,20 @@ fn huggingface_hub_round_trip_over_xet() {
     }
     let srv = TestServer::start(|cfg| {
         for t in ["models", "datasets", "spaces"] {
-            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), pico2peta_server::config::Access::Write));
+            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), o5s_server::config::Access::Write));
         }
     });
     let out = run_client(&py, &srv, ALICE, "alice/xet-model", true);
     let (so, se) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     assert!(out.status.success() && so.contains("OK"), "client failed\nstdout:\n{so}\nstderr:\n{se}");
     // The upload really went through Xet: xorbs were indexed.
-    let repo = pico2peta_repo::LocalRepo::open(srv.dir.path().join("repo")).unwrap();
-    let fronts = pico2peta_server::fronts::Fronts::open(repo.clone()).unwrap();
+    let repo = o5s_repo::LocalRepo::open(srv.dir.path().join("repo")).unwrap();
+    let fronts = o5s_server::fronts::Fronts::open(repo.clone()).unwrap();
     assert!(
-        pico2peta_core::Repository::resolve(&repo, &pico2peta_core::Name::new("git/_xet").unwrap()).unwrap().is_some(),
+        o5s_core::Repository::resolve(&repo, &o5s_core::Name::new("git/_xet").unwrap()).unwrap().is_some(),
         "no xorbs were uploaded"
     );
-    let opts = pico2peta_repo::GcOptions {
+    let opts = o5s_repo::GcOptions {
         grace: std::time::Duration::ZERO,
         allow_short_grace: true,
         repack_all: true,
@@ -212,7 +211,7 @@ fn huggingface_hub_round_trip_over_xet() {
     for _ in 0..3 {
         std::thread::sleep(std::time::Duration::from_millis(1100));
         // The server's GC path: every front's per-run snapshot tracer, plus provenance.
-        let prov = pico2peta_prov::ProvTracer { inner: pico2peta_server::fronts::Leaves };
+        let prov = o5s_prov::ProvTracer { inner: o5s_server::fronts::Leaves };
         fronts.repo.gc_with_fronts(&opts, Some(&prov), false).unwrap();
     }
     let out = run_phase(&py, &srv, ALICE, "alice/xet-model", true, "verify");
@@ -229,7 +228,7 @@ fn huggingface_hub_round_trip_over_xet() {
     let xet_gets: f64 = m
         .lines()
         .filter(|l| {
-            l.starts_with("p2p_http_requests") && l.contains("method=\"GET\"") && l.contains("route=\"/xet/{*rest}\"")
+            l.starts_with("o5s_http_requests") && l.contains("method=\"GET\"") && l.contains("route=\"/xet/{*rest}\"")
         })
         .filter_map(|l| l.rsplit(' ').next()?.parse::<f64>().ok())
         .sum();
@@ -298,9 +297,9 @@ fn lfs_objects_are_scoped_to_their_repo() {
     let Some(py) = python() else { return };
     let srv = TestServer::start(|cfg| {
         for t in ["models", "datasets", "spaces"] {
-            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), pico2peta_server::config::Access::Write));
+            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), o5s_server::config::Access::Write));
         }
-        cfg.policy.push(grant("reader", "git/hf/models/reader", pico2peta_server::config::Access::Write));
+        cfg.policy.push(grant("reader", "git/hf/models/reader", o5s_server::config::Access::Write));
     });
     let out = run_client(&py, &srv, ALICE, "alice/private", false);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
@@ -352,7 +351,7 @@ fn lfs_objects_are_scoped_to_their_repo() {
 fn xet_rejects_bad_xorbs_and_tokens() {
     let srv = TestServer::start(|cfg| {
         for t in ["models", "datasets", "spaces"] {
-            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), pico2peta_server::config::Access::Write));
+            cfg.policy.push(grant("alice", &format!("git/hf/{t}/alice"), o5s_server::config::Access::Write));
         }
     });
     let http = reqwest::blocking::Client::new();

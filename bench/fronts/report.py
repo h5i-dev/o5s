@@ -7,6 +7,7 @@ usage: report.py <results.jsonl>   (prints Markdown)
 """
 import collections
 import json
+import re
 import statistics
 import sys
 
@@ -42,6 +43,8 @@ def fmt(v, unit):
 
 def main():
     rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+    for r in rows:  # rows recorded before the rename (2026-11-16) name the system "pico2peta"
+        r["system"] = re.sub(r"^pico2peta", "o5s", r["system"])
     vals = collections.defaultdict(list)
     loads = collections.defaultdict(list)
     units = {}
@@ -56,13 +59,13 @@ def main():
             loads[key].append(r["load1"])
         units[(r["front"], r["metric"])] = r["unit"]
     med = {k: statistics.median(v) for k, v in vals.items()}
-    out = ["| front | metric | corpus | pico2peta | specialist | ratio | tier | load (max of both) |", "|---|---|---|---|---|---|---|---|"]
+    out = ["| front | metric | corpus | o5s | specialist | ratio | tier | load (max of both) |", "|---|---|---|---|---|---|---|---|"]
     verdict = {}
     for front, metrics in TIERED.items():
         fails = [n for n, ok, _ in func.get(front, []) if not ok]
         worst = "STRONG PASS"
         for (f, m, corpus, system), v in sorted(med.items()):
-            if f != front or m not in metrics or not system.startswith("pico2peta"):
+            if f != front or m not in metrics or not system.startswith("o5s"):
                 continue
             base_sys = HF_BASE.get(m) if front == "hf" else BASELINE[front]
             b = med.get((f, m, corpus, base_sys))
@@ -88,7 +91,7 @@ def main():
     for (f, m, base_sys) in [("git", "first_push_s", "git-daemon"), ("hf", "upload_s", "v1-reference"), ("hf", "download_s", "v1-reference"),
                              ("hf", "download_server_s", "v1-reference"), ("hf", "upload_server_cpu_s", "v1-reference")]:
         for (f2, m2, corpus, system), v in sorted(med.items()):
-            if (f2, m2) == (f, m) and system.startswith("pico2peta") and (f, m, corpus, base_sys) in med:
+            if (f2, m2) == (f, m) and system.startswith("o5s") and (f, m, corpus, base_sys) in med:
                 b = med[(f, m, corpus, base_sys)]
                 print(f"\n(untiered) {f} {m} {corpus}: {v:.3f} s vs {b:.3f} s ({base_sys}) = {v / b:.2f}x")
     # Untiered context (e.g. HF LFS-mode times, cold/hot totals).

@@ -1,20 +1,20 @@
 [package]
-name = "pico2peta-attest"
+name = "o5s-attest"
 description = "Signed attestations (in-toto Statement v1 in DSSE envelopes) and policy-gated promotion between namespaces"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-pico2peta-kernel.workspace = true
-pico2peta-core.workspace = true
-pico2peta-prov.workspace = true
+o5s-kernel.workspace = true
+o5s-core.workspace = true
+o5s-prov.workspace = true
 serde_json = "1"
 base64 = "0.22"
 sha2 = "0.10"
 ed25519-dalek = "2"
 
 [dev-dependencies]
-pico2peta-repo.workspace = true
+o5s-repo.workspace = true
 tempfile.workspace = true
 proptest.workspace = true

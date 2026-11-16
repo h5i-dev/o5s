@@ -1,4 +1,4 @@
-use pico2peta_chunk::{Chunker, FastCdcChunker, XET_MAX, XET_MIN, XetChunker, chunk_lengths};
+use o5s_chunk::{Chunker, FastCdcChunker, XET_MAX, XET_MIN, XetChunker, chunk_lengths};
 use proptest::prelude::*;
 
 proptest! {

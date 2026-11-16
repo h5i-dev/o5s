@@ -1,61 +1,61 @@
-# Prometheus alerting rules for pico2peta-server (load with `rule_files:`).
+# Prometheus alerting rules for o5s-server (load with `rule_files:`).
 # Metric names: see deploy/README.md "Observability". `job` is your scrape job's name.
 groups:
-  - name: pico2peta
+  - name: o5s
     rules:
-      - alert: Pico2petaDown
-        expr: up{job=~"pico2peta.*"} == 0
+      - alert: O5sDown
+        expr: up{job=~"o5s.*"} == 0
         for: 2m
         labels: { severity: critical }
         annotations:
-          summary: "pico2peta {{ $labels.instance }} is down"
-      - alert: Pico2petaAuditWriteFailing
+          summary: "o5s {{ $labels.instance }} is down"
+      - alert: O5sAuditWriteFailing
         # The server refuses every mutation while the audit log can't be written.
-        expr: increase(p2p_audit_write_failures_total[5m]) > 0
+        expr: increase(o5s_audit_write_failures_total[5m]) > 0
         labels: { severity: critical }
         annotations:
           summary: "audit log writes failing on {{ $labels.instance }}: mutations are refused"
           description: "Check the audit volume (disk full, permissions)."
-      - alert: Pico2petaHigh5xxRate
+      - alert: O5sHigh5xxRate
         expr: |
-          sum by (instance) (rate(p2p_http_requests_total{status=~"5.."}[5m]))
-            / clamp_min(sum by (instance) (rate(p2p_http_requests_total[5m])), 1e-9) > 0.02
+          sum by (instance) (rate(o5s_http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum by (instance) (rate(o5s_http_requests_total[5m])), 1e-9) > 0.02
         for: 10m
         labels: { severity: warning }
         annotations:
           summary: "more than 2% of requests on {{ $labels.instance }} fail with 5xx"
-      - alert: Pico2petaSlowRequests
+      - alert: O5sSlowRequests
         expr: |
-          histogram_quantile(0.99, sum by (le, instance) (rate(p2p_http_request_duration_seconds_bucket{route!~"/git/.*|/v2/.*|/v1/objects.*|/api/.*|/pypi/.*|/npm/.*|/maven/.*|/xet/.*"}[10m]))) > 2
+          histogram_quantile(0.99, sum by (le, instance) (rate(o5s_http_request_duration_seconds_bucket{route!~"/git/.*|/v2/.*|/v1/objects.*|/api/.*|/pypi/.*|/npm/.*|/maven/.*|/xet/.*"}[10m]))) > 2
         for: 15m
         labels: { severity: warning }
         annotations:
           summary: "p99 latency of metadata requests on {{ $labels.instance }} is above 2 s"
-      - alert: Pico2petaGcFailing
-        expr: increase(p2p_gc_runs_total{outcome!="ok"}[6h]) > 0
+      - alert: O5sGcFailing
+        expr: increase(o5s_gc_runs_total{outcome!="ok"}[6h]) > 0
         labels: { severity: warning }
         annotations:
           summary: "GC on {{ $labels.instance }} ended with outcome {{ $labels.outcome }}"
           description: "`dangling_refs` means names point at missing objects: run fsck."
-      - alert: Pico2petaS3Failures
-        expr: increase(p2p_s3_failures_total[10m]) > 0
+      - alert: O5sS3Failures
+        expr: increase(o5s_s3_failures_total[10m]) > 0
         labels: { severity: warning }
         annotations:
           summary: "S3 requests failing after retries on {{ $labels.instance }}"
-      - alert: Pico2petaS3Throttled
-        expr: rate(p2p_s3_throttled_total[10m]) > 1
+      - alert: O5sS3Throttled
+        expr: rate(o5s_s3_throttled_total[10m]) > 1
         for: 15m
         labels: { severity: info }
         annotations:
           summary: "S3 is throttling {{ $labels.instance }} (consider prefixes / request rates)"
-      - alert: Pico2petaAuthFailureSpike
-        expr: sum by (instance) (rate(p2p_auth_failures_total[5m])) > 5
+      - alert: O5sAuthFailureSpike
+        expr: sum by (instance) (rate(o5s_auth_failures_total[5m])) > 5
         for: 10m
         labels: { severity: warning }
         annotations:
           summary: "many authentication failures on {{ $labels.instance }} (credential stuffing or a broken client?)"
-      - alert: Pico2petaInFlightHigh
-        expr: p2p_http_in_flight > 200
+      - alert: O5sInFlightHigh
+        expr: o5s_http_in_flight > 200
         for: 10m
         labels: { severity: warning }
         annotations:

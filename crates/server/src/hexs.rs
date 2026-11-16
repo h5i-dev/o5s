@@ -1,5 +1,5 @@
 //! Strict hex decoding for untrusted input (URLs, protocol lines, config): thin adapters over
-//! `pico2peta_net_kernel::parse`, whose code is extracted to Lean and proven to compute the
+//! `o5s_net_kernel::parse`, whose code is extracted to Lean and proven to compute the
 //! strict spec on every input (`verify/net/proofs/ParseSpec.lean`: `decode_hex_spec`,
 //! `pkt_len_spec`).
 //!
@@ -7,7 +7,7 @@
 //! offsets panics inside a multi-byte character. These helpers accept only ASCII hex digits,
 //! so every id has exactly one spelling and no input can panic.
 
-use pico2peta_net_kernel::parse;
+use o5s_net_kernel::parse;
 
 /// Decodes `s` (exactly `2 * out.len()` hex digits, either case) into `out`.
 pub(crate) fn decode_into(s: &[u8], out: &mut [u8]) -> Option<()> {

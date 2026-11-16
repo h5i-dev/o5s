@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dogfooding (ROADMAP net item 5): a long-lived pico2peta server on this host that the project
+# Dogfooding (ROADMAP net item 5): a long-lived o5s server on this host that the project
 # itself uses: this repo mirrored through the Git front, and pip/npm routed through the
 # PyPI and npm proxy-caches.
 #
@@ -9,7 +9,7 @@
 set -euo pipefail
 D=/mnt/scratch/pico2peta/dogfood
 PORT=${DOGFOOD_PORT:-18100}
-BIN=${DOGFOOD_BIN:-/mnt/scratch/pico2peta/dogfood/bin/pico2peta-server}
+BIN=${DOGFOOD_BIN:-/mnt/scratch/pico2peta/dogfood/bin/o5s-server}
 cd "$(dirname "$0")/.."
 
 init() {
@@ -68,7 +68,7 @@ case "${1:-status}" in
     init
     # A copy of the binary, so rebuilding the target dir doesn't change the running server.
     if [ ! -x "$BIN" ] || [ "${DOGFOOD_UPGRADE:-0}" = 1 ]; then
-      cp /mnt/scratch/pico2peta/cargo-target-net/release/pico2peta-server "$BIN"
+      cp /mnt/scratch/pico2peta/cargo-target-net/release/o5s-server "$BIN"
     fi
     nohup "$BIN" serve --config "$D/server.toml" >> "$D/server.log" 2>&1 &
     echo $! > "$D/pid"
@@ -83,15 +83,15 @@ case "${1:-status}" in
     ;;
   mirror)
     # Mirror this repo's branches (net, demo, main) and tags through the Git front.
-    git push -q "http://dogfood:$(cat "$D/token")@127.0.0.1:$PORT/git/pico2peta/pico2peta.git" \
+    git push -q "http://dogfood:$(cat "$D/token")@127.0.0.1:$PORT/git/o5s/o5s.git" \
       'refs/remotes/origin/*:refs/heads/*' 'refs/tags/*:refs/tags/*' 2>&1 | grep -v "^$" || true
-    echo "mirrored to git/pico2peta/pico2peta"
+    echo "mirrored to git/o5s/o5s"
     ;;
   drill)
     # Backup -> restore -> fsck drill (docs/ARCHITECTURE.md "Backup, restore and integrity"):
     # refs/ first, then objects/, while the server keeps running; then restore elsewhere,
     # fsck it, serve it on another port and clone the mirror from it.
-    CLI=${DOGFOOD_CLI:-/mnt/scratch/pico2peta/cargo-target-net/release/pico2peta}
+    CLI=${DOGFOOD_CLI:-/mnt/scratch/pico2peta/cargo-target-net/release/o5s}
     B="$D/drill"
     rm -rf "$B"; mkdir -p "$B/backup"
     t0=$(date +%s.%N)
@@ -109,10 +109,10 @@ case "${1:-status}" in
     pid=$!
     sleep 2
     t=$(cat "$D/token")
-    git clone -q --mirror "http://dogfood:$t@127.0.0.1:$((PORT + 1))/git/pico2peta/pico2peta.git" "$B/clone.git"
+    git clone -q --mirror "http://dogfood:$t@127.0.0.1:$((PORT + 1))/git/o5s/o5s.git" "$B/clone.git"
     git -C "$B/clone.git" fsck --full --no-progress && echo "git fsck of a clone from the restore: clean"
-    live=$(git ls-remote "http://dogfood:$t@127.0.0.1:$PORT/git/pico2peta/pico2peta.git" | sort | sha256sum)
-    rest=$(git ls-remote "http://dogfood:$t@127.0.0.1:$((PORT + 1))/git/pico2peta/pico2peta.git" | sort | sha256sum)
+    live=$(git ls-remote "http://dogfood:$t@127.0.0.1:$PORT/git/o5s/o5s.git" | sort | sha256sum)
+    rest=$(git ls-remote "http://dogfood:$t@127.0.0.1:$((PORT + 1))/git/o5s/o5s.git" | sort | sha256sum)
     [ "$live" = "$rest" ] && echo "refs: restore == live" || echo "refs DIFFER (writes after the backup?)"
     kill $pid
     ;;
@@ -120,13 +120,13 @@ case "${1:-status}" in
     # An old binary (DOGFOOD_OLD_BIN, e.g. built from origin/main) creates a repository and
     # writes through its fronts; the new binary then opens it, serves it and fscks it.
     OLD=${DOGFOOD_OLD_BIN:?set DOGFOOD_OLD_BIN}
-    CLI=${DOGFOOD_CLI:-/mnt/scratch/pico2peta/cargo-target-net/release/pico2peta}
+    CLI=${DOGFOOD_CLI:-/mnt/scratch/pico2peta/cargo-target-net/release/o5s}
     U="$D/upgrade"
     rm -rf "$U"; mkdir -p "$U"
     sed -e "s#$D/repo#$U/repo#; s#127.0.0.1:$PORT#127.0.0.1:$((PORT + 2))#; s#$D/audit/audit.jsonl#$U/audit.jsonl#; s#interval_secs = 21600#interval_secs = 0#" \
       "$D/server.toml" | grep -v "^rotate_bytes" > "$U/server.toml"
     t=$(cat "$D/token")
-    url="http://dogfood:$t@127.0.0.1:$((PORT + 2))/git/pico2peta/pico2peta.git"
+    url="http://dogfood:$t@127.0.0.1:$((PORT + 2))/git/o5s/o5s.git"
     "$OLD" serve --config "$U/server.toml" >> "$U/old.log" 2>&1 & pid=$!; sleep 2
     git push -q "$url" 'refs/remotes/origin/main:refs/heads/main' 2>&1 | grep -v "^$" || true
     curl -sf -H "Authorization: Bearer $t" -T README.md "http://127.0.0.1:$((PORT + 2))/v1/objects" > "$U/put.json"

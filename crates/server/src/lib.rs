@@ -1,6 +1,6 @@
-//! The pico2peta HTTP server.
+//! The o5s HTTP server.
 //!
-//! The API is in [`api`], and the wire format is in `pico2peta_client::wire`.
+//! The API is in [`api`], and the wire format is in `o5s_client::wire`.
 //! [`build_state`] opens the repository (local disk, or S3 for sealed packs) and
 //! the audit log, and [`serve`] runs the HTTP server until `shutdown` resolves,
 //! then drains in-flight requests and flushes.
@@ -32,9 +32,9 @@ pub mod xet;
 use crate::api::AppState;
 use crate::config::{BackendSection, Config};
 use axum::http::{HeaderName, Request};
-use pico2peta_core::Repository;
-use pico2peta_core::backend::Backend;
-use pico2peta_repo::LocalRepo;
+use o5s_core::Repository;
+use o5s_core::backend::Backend;
+use o5s_repo::LocalRepo;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,7 +48,7 @@ pub enum StartError {
     #[error("{0}")]
     Config(#[from] config::ConfigError),
     #[error("repository: {0}")]
-    Repo(#[from] pico2peta_core::Error),
+    Repo(#[from] o5s_core::Error),
     #[error("audit log {0}: {1}")]
     Audit(std::path::PathBuf, std::io::Error),
     #[error("s3 backend: {0}")]
@@ -64,7 +64,7 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
     let backend: Option<Arc<dyn Backend>> = match &cfg.backend {
         BackendSection::Local => None,
         BackendSection::S3(s) => {
-            let mut c = pico2peta_backend_s3::S3Config::new(&s.endpoint, &s.region, &s.bucket).with_prefix(&s.prefix);
+            let mut c = o5s_backend_s3::S3Config::new(&s.endpoint, &s.region, &s.bucket).with_prefix(&s.prefix);
             c.path_style = s.path_style;
             c.conditional_writes = s.conditional_writes;
             if let Some(n) = s.max_in_flight {
@@ -73,7 +73,7 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
                 c.multipart_concurrency = c.multipart_concurrency.min(n);
             }
             // Env keys, then web identity (EKS/OIDC), then the EC2 instance profile.
-            let b = Arc::new(pico2peta_backend_s3::S3Backend::with_default_chain(c, 2)?);
+            let b = Arc::new(o5s_backend_s3::S3Backend::with_default_chain(c, 2)?);
             let client = b.client().clone();
             metrics = metrics.with_s3(Arc::new(move || client.stats().snapshot()));
             Some(b)
@@ -82,24 +82,24 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
     let path = &cfg.repo.path;
     if !path.join("config.toml").exists() {
         if !cfg.repo.create {
-            return Err(StartError::Repo(pico2peta_core::Error::Parse(format!(
+            return Err(StartError::Repo(o5s_core::Error::Parse(format!(
                 "{} is not a repository (set repo.create = true to initialize it)",
                 path.display()
             ))));
         }
         info!(path = %path.display(), refs = ?cfg.repo.refs, "initializing repository");
-        drop(LocalRepo::init_with(path, &pico2peta_pack::PackConfig::default(), cfg.repo.refs)?);
+        drop(LocalRepo::init_with(path, &o5s_pack::PackConfig::default(), cfg.repo.refs)?);
     }
     let existing = LocalRepo::read_config(path)?;
     if existing.refs.store != cfg.repo.refs {
-        return Err(StartError::Repo(pico2peta_core::Error::Parse(format!(
+        return Err(StartError::Repo(o5s_core::Error::Parse(format!(
             "repo.refs = {:?} in the server config, but {} was created with refs = {:?}",
             cfg.repo.refs,
             path.display(),
             existing.refs.store
         ))));
     }
-    if existing.refs.store == pico2peta_repo::RefsStore::Backend && matches!(cfg.backend, BackendSection::Local) {
+    if existing.refs.store == o5s_repo::RefsStore::Backend && matches!(cfg.backend, BackendSection::Local) {
         warn!("refs on the backend with a local backend: only processes on this host can share the repository");
     }
     let local = match backend {
@@ -114,7 +114,7 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
     // index, kept current by this handle's ref writes). Opened after the fronts, whose tracers
     // it walks.
     let cells = api::policy_cells(&cfg.policy);
-    let reach = pico2peta_repo::reach::ReachIndex::open(&local, cells.clone())?;
+    let reach = o5s_repo::reach::ReachIndex::open(&local, cells.clone())?;
     let oci = if cfg.oci.enabled {
         let dir = cfg.oci.upload_dir.clone().unwrap_or_else(|| {
             let parent = path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| path.clone());
@@ -264,7 +264,7 @@ pub fn app(state: Arc<AppState>, request_timeout: Duration) -> axum::Router {
     use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
     use tower_http::timeout::TimeoutLayer;
     use tower_http::trace::TraceLayer;
-    let rid = HeaderName::from_static(pico2peta_client::wire::REQUEST_ID_HEADER);
+    let rid = HeaderName::from_static(o5s_client::wire::REQUEST_ID_HEADER);
     let trace = TraceLayer::new_for_http()
         .on_response(
             tower_http::trace::DefaultOnResponse::new()
@@ -522,7 +522,7 @@ async fn quota_loop(state: Arc<AppState>) {
             let r = tokio::task::spawn_blocking(move || {
                 let tracer = local.fronts().tracer(&local)?;
                 l.scan(&local, &tracer)?;
-                Ok::<_, pico2peta_core::Error>(l.usage())
+                Ok::<_, o5s_core::Error>(l.usage())
             })
             .await;
             match r {
@@ -608,15 +608,15 @@ pub mod fuzzing {
     use std::sync::Arc;
 
     /// A fresh local repository in a temp dir (kept alive by the returned guard).
-    pub fn temp_repo() -> (tempfile::TempDir, Arc<pico2peta_repo::LocalRepo>) {
+    pub fn temp_repo() -> (tempfile::TempDir, Arc<o5s_repo::LocalRepo>) {
         let d = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
-        let r = pico2peta_repo::LocalRepo::init(d.path().join("r"), &Default::default())
-            .unwrap_or_else(|e| panic!("init: {e}"));
+        let r =
+            o5s_repo::LocalRepo::init(d.path().join("r"), &Default::default()).unwrap_or_else(|e| panic!("init: {e}"));
         (d, Arc::new(r))
     }
 
     /// The whole receive-pack path (commands + pack) on raw request bytes.
-    pub fn git_push(repo: Arc<pico2peta_repo::LocalRepo>, spool: &std::path::Path, data: &[u8]) {
+    pub fn git_push(repo: Arc<o5s_repo::LocalRepo>, spool: &std::path::Path, data: &[u8]) {
         crate::git::fuzz_push(repo, spool, data);
     }
 
@@ -652,10 +652,10 @@ pub mod fuzzing {
         let text = String::from_utf8_lossy(data);
         let _ = crate::pypi::fuzz_names(&text);
         let _ = crate::npm::fuzz_names(&text);
-        let read = |r: std::ops::Range<u64>| -> pico2peta_core::Result<Vec<u8>> {
+        let read = |r: std::ops::Range<u64>| -> o5s_core::Result<Vec<u8>> {
             data.get(r.start as usize..r.end as usize)
                 .map(<[u8]>::to_vec)
-                .ok_or_else(|| pico2peta_core::Error::Corrupt("out of range".into()))
+                .ok_or_else(|| o5s_core::Error::Corrupt("out of range".into()))
         };
         let _ = crate::pkg::wheel_metadata_with(data.len() as u64, &read);
     }

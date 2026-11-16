@@ -1,28 +1,28 @@
-//! `pico2peta` command-line tool.
+//! `o5s` command-line tool.
 //!
 //! Exit codes: 0 success, 1 error, 2 not found / absent, 3 replace conflict,
 //! 4 forbidden by namespace rule, 5 unauthorized.
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use clap::{Parser, Subcommand};
-use pico2peta_core::{Error, Hash, Name, Observed, ReplaceOutcome, Repository, Rule};
-use pico2peta_repo::LocalRepo;
-use pico2peta_repo::PackConfigExt as _;
+use o5s_core::{Error, Hash, Name, Observed, ReplaceOutcome, Repository, Rule};
+use o5s_repo::LocalRepo;
+use o5s_repo::PackConfigExt as _;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 #[derive(Parser)]
-#[command(name = "pico2peta", version, about = "Content-addressed repository: put/get objects, move names with OCC")]
+#[command(name = "o5s", version, about = "Content-addressed repository: put/get objects, move names with OCC")]
 struct Cli {
     /// Repository directory.
-    #[arg(short = 'C', long, env = "PICO2PETA_REPO", default_value = ".")]
+    #[arg(short = 'C', long, env = "O5S_REPO", default_value = ".")]
     repo: PathBuf,
-    /// Talk to a pico2peta server instead of a local repository (e.g. <https://p2p.example.com>).
-    #[arg(long, env = "P2P_REMOTE")]
+    /// Talk to a o5s server instead of a local repository (e.g. <https://o5s.example.com>).
+    #[arg(long, env = "O5S_REMOTE")]
     remote: Option<String>,
     /// Bearer token for --remote.
-    #[arg(long, env = "P2P_TOKEN", hide_env_values = true)]
+    #[arg(long, env = "O5S_TOKEN", hide_env_values = true)]
     token: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
@@ -257,7 +257,7 @@ enum AttestCmd {
         #[arg(long = "key", value_name = "KEYFILE")]
         key: PathBuf,
         /// in-toto predicate type URI.
-        #[arg(long, default_value = "https://pico2peta.dev/attestation/v1")]
+        #[arg(long, default_value = "https://o5s.dev/attestation/v1")]
         predicate_type: String,
         /// Predicate JSON file (default `{}`).
         #[arg(long)]
@@ -340,19 +340,18 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
         if cli.remote.is_some() {
             return Err(Error::Unsupported("init is only available for local repositories"));
         }
-        let mut cfg = pico2peta_repo::PackConfig::default();
+        let mut cfg = o5s_repo::PackConfig::default();
         cfg.apply_overrides(*chunk_threshold, *pack_cap, *zstd_level);
         if let Some(l) = grouped_zstd_level {
             cfg.grouped_zstd_level = *l;
         }
-        let store =
-            if *refs_on_backend { pico2peta_repo::RefsStore::Backend } else { pico2peta_repo::RefsStore::Local };
+        let store = if *refs_on_backend { o5s_repo::RefsStore::Backend } else { o5s_repo::RefsStore::Local };
         let parse = |c: &str| match c {
-            "fastcdc" => Ok(pico2peta_repo::ChunkerChoice::Fastcdc),
-            "xet" => Ok(pico2peta_repo::ChunkerChoice::Xet),
+            "fastcdc" => Ok(o5s_repo::ChunkerChoice::Fastcdc),
+            "xet" => Ok(o5s_repo::ChunkerChoice::Xet),
             other => Err(Error::Parse(format!("unknown chunker {other:?} (fastcdc or xet)"))),
         };
-        let mut chunking = pico2peta_repo::ChunkingSection::default();
+        let mut chunking = o5s_repo::ChunkingSection::default();
         if let Some(c) = chunk_default {
             chunking.default = parse(c)?;
         }
@@ -367,7 +366,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             let (name, kv) = spec
                 .split_once('=')
                 .ok_or_else(|| Error::Parse(format!("--profile {spec:?}: expected NAME=key:value,...")))?;
-            let mut p = pico2peta_repo::Profile::default();
+            let mut p = o5s_repo::Profile::default();
             for item in kv.split(',').filter(|i| !i.is_empty()) {
                 let (k, v) = item
                     .split_once(':')
@@ -377,8 +376,8 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                     "chunker" => p.chunker = Some(v.to_string()),
                     "derive" => {
                         p.derive = match v {
-                            "none" => pico2peta_repo::DerivePolicy::None,
-                            "previous" => pico2peta_repo::DerivePolicy::Previous,
+                            "none" => o5s_repo::DerivePolicy::None,
+                            "previous" => o5s_repo::DerivePolicy::Previous,
                             _ => return Err(Error::Parse(format!("--profile {spec:?}: derive is none or previous"))),
                         }
                     }
@@ -414,17 +413,17 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
         }
         LocalRepo::init_config(
             &cli.repo,
-            &pico2peta_repo::RepoConfig {
-                format: pico2peta_repo::FORMAT_VERSION,
+            &o5s_repo::RepoConfig {
+                format: o5s_repo::FORMAT_VERSION,
                 pack: (&cfg).into(),
-                refs: pico2peta_repo::RefsSection { store },
+                refs: o5s_repo::RefsSection { store },
                 chunking,
                 profiles,
                 namespaces,
-                read: pico2peta_repo::ReadSection {
+                read: o5s_repo::ReadSection {
                     verify: match read_verify.as_deref() {
-                        None => pico2peta_core::ReadVerify::Strict,
-                        Some(m) => pico2peta_core::ReadVerify::parse(m)
+                        None => o5s_core::ReadVerify::Strict,
+                        Some(m) => o5s_core::ReadVerify::parse(m)
                             .ok_or_else(|| Error::Parse(format!("--read-verify {m:?}: expected strict or eof")))?,
                     },
                     allow_eof: *allow_eof_reads,
@@ -436,7 +435,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
         return Ok(Outcome::Ok);
     }
     let remote = match &cli.remote {
-        Some(url) => Some(pico2peta_client::RemoteRepo::connect(url, cli.token.clone())?),
+        Some(url) => Some(o5s_client::RemoteRepo::connect(url, cli.token.clone())?),
         None => None,
     };
     let local = if remote.is_none() { Some(LocalRepo::open(&cli.repo)?.with_fronts(builtin_fronts()?)?) } else { None };
@@ -471,7 +470,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             let mut src = match read_verify.as_deref() {
                 None => r.open(&hash, range)?,
                 Some(m) => {
-                    let mode = pico2peta_core::ReadVerify::parse(m)
+                    let mode = o5s_core::ReadVerify::parse(m)
                         .ok_or_else(|| Error::Parse(format!("--read-verify {m:?}: expected strict or eof")))?;
                     r.open_verified(&hash, range, mode)?
                 }
@@ -489,7 +488,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             match output {
                 Some(p) => {
                     // Write to a temp file and rename, so a failed or corrupt read leaves no partial file.
-                    let tmp = p.with_extension("p2p-partial");
+                    let tmp = p.with_extension("o5s-partial");
                     let mut f = std::fs::File::create(&tmp)?;
                     if let Err(e) = copy(&mut f) {
                         let _ = std::fs::remove_file(&tmp);
@@ -505,16 +504,16 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
         Cmd::Search { prefix, words } if remote.is_some() => {
             let Some(rr) = &remote else { unreachable!("guarded") };
             let q = match prefix {
-                Some(p) => pico2peta_client::Search::Prefix(p),
-                None => pico2peta_client::Search::Text(words.join(" ")),
+                Some(p) => o5s_client::Search::Prefix(p),
+                None => o5s_client::Search::Text(words.join(" ")),
             };
             for hit in rr.search(q)? {
                 writeln!(out, "{} {}", hit.object, hit.names.join(" "))?;
             }
         }
         Cmd::Search { prefix, words } => {
-            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
-            let idx = pico2peta_prov::search::SearchIndex::build(r, &log)?;
+            let log = Name::new(o5s_prov::DEFAULT_LOG_REF)?;
+            let idx = o5s_prov::search::SearchIndex::build(r, &log)?;
             match prefix {
                 Some(p) => {
                     for (n, h) in idx.prefix(&p) {
@@ -532,8 +531,8 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             let Some(l) = &local else {
                 return Err(Error::Unsupported("retention is only available for local repositories"));
             };
-            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
-            let rep = pico2peta_prov::retention::apply(l, &log, dry_run)?;
+            let log = Name::new(o5s_prov::DEFAULT_LOG_REF)?;
+            let rep = o5s_prov::retention::apply(l, &log, dry_run)?;
             for n in &rep.deleted {
                 writeln!(out, "{} {n}", if dry_run { "would-delete" } else { "deleted" })?;
             }
@@ -587,10 +586,10 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 rs.push((Name::new(n)?, parse_observed(o)?));
             }
             match r.update_many(&ups, &rs)? {
-                pico2peta_core::ReplaceManyOutcome::Ok { versions } => {
+                o5s_core::ReplaceManyOutcome::Ok { versions } => {
                     writeln!(out, "ok {}", versions.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(","))?
                 }
-                pico2peta_core::ReplaceManyOutcome::Conflict { stale } => {
+                o5s_core::ReplaceManyOutcome::Conflict { stale } => {
                     for (n, o) in stale {
                         let cur = match o {
                             Observed::Absent => "absent".to_string(),
@@ -626,7 +625,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
         }
         Cmd::Flush => r.flush()?,
         Cmd::Prov { cmd } => {
-            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
+            let log = Name::new(o5s_prov::DEFAULT_LOG_REF)?;
             let cmd_kind = match &cmd {
                 ProvCmd::Lineage { .. } => "lineage",
                 _ => "other",
@@ -651,9 +650,8 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                                 .ok_or_else(|| Error::Parse(format!("expected KEY=VALUE, got {e:?}")))
                         })
                         .collect::<Result<_, _>>()?;
-                    let rec =
-                        pico2peta_prov::Record { op, params, inputs: roles(inputs)?, outputs: roles(outputs)?, meta };
-                    for h in pico2peta_prov::record(r, &log, &[rec])? {
+                    let rec = o5s_prov::Record { op, params, inputs: roles(inputs)?, outputs: roles(outputs)?, meta };
+                    for h in o5s_prov::record(r, &log, &[rec])? {
                         writeln!(out, "{h}")?;
                     }
                 }
@@ -667,7 +665,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                         }
                         None => {
                             let h = resolve_target(r, &target)?;
-                            let p = pico2peta_prov::Provenance::load(r, &log)?;
+                            let p = o5s_prov::Provenance::load(r, &log)?;
                             if lineage { p.lineage(&h)? } else { p.impact(&h)? }
                         }
                     };
@@ -679,7 +677,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 }
                 ProvCmd::Why { target } => {
                     let hash = resolve_target(r, &target)?;
-                    let p = pico2peta_prov::Provenance::load(r, &log)?;
+                    let p = o5s_prov::Provenance::load(r, &log)?;
                     let producers = p.producers(&hash)?;
                     for (rh, rec) in &producers {
                         writeln!(out, "record {rh} op={}", rec.op)?;
@@ -697,14 +695,14 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             }
         }
         Cmd::Attest { cmd } => {
-            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
+            let log = Name::new(o5s_prov::DEFAULT_LOG_REF)?;
             match cmd {
                 AttestCmd::Keygen { file } => {
                     let mut seed = [0u8; 32];
                     std::fs::File::open("/dev/urandom")?.read_exact(&mut seed)?;
                     write_secret(&file, &hex(&seed))?;
-                    let signer = pico2peta_attest::Ed25519Signer::from_seed(&seed);
-                    use pico2peta_attest::Signer as _;
+                    let signer = o5s_attest::Ed25519Signer::from_seed(&seed);
+                    use o5s_attest::Signer as _;
                     writeln!(out, "{} {}", signer.keyid(), hex(&signer.verifier().public()))?;
                 }
                 AttestCmd::Create { target, key, predicate_type, predicate, subject_name } => {
@@ -715,16 +713,16 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                             .map_err(|e| Error::Parse(format!("--predicate: {e}")))?,
                         None => serde_json::json!({}),
                     };
-                    let st = pico2peta_attest::Statement {
-                        subjects: vec![pico2peta_attest::Subject { name: subject_name.unwrap_or(target), hash: h }],
+                    let st = o5s_attest::Statement {
+                        subjects: vec![o5s_attest::Subject { name: subject_name.unwrap_or(target), hash: h }],
                         predicate_type,
                         predicate,
                     };
-                    let signer = pico2peta_attest::Ed25519Signer::from_seed(&seed);
-                    let env = pico2peta_attest::Envelope::sign(&st, &[&signer]);
+                    let signer = o5s_attest::Ed25519Signer::from_seed(&seed);
+                    let env = o5s_attest::Envelope::sign(&st, &[&signer]);
                     match &remote {
                         Some(rr) => writeln!(out, "{}", rr.attest(&env)?.0)?,
-                        None => writeln!(out, "{}", pico2peta_attest::attest(r, &log, &env)?)?,
+                        None => writeln!(out, "{}", o5s_attest::attest(r, &log, &env)?)?,
                     }
                 }
                 AttestCmd::List { target } => {
@@ -736,8 +734,8 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 }
                 AttestCmd::Verify { target, trust } => {
                     let verifiers = trust.iter().map(|t| parse_pubkey(t)).collect::<Result<Vec<_>, _>>()?;
-                    let vs: Vec<&dyn pico2peta_attest::Verifier> =
-                        verifiers.iter().map(|v| v as &dyn pico2peta_attest::Verifier).collect();
+                    let vs: Vec<&dyn o5s_attest::Verifier> =
+                        verifiers.iter().map(|v| v as &dyn o5s_attest::Verifier).collect();
                     let mut any = false;
                     for env in envelopes(r, &remote, &log, &target)? {
                         let ok = env.verified_by(&vs);
@@ -755,7 +753,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             }
         }
         Cmd::Promote { src, dst, require_key, predicate_type, require_provenance, actor } => {
-            let log = Name::new(pico2peta_prov::DEFAULT_LOG_REF)?;
+            let log = Name::new(o5s_prov::DEFAULT_LOG_REF)?;
             let outcome = if let Some(rr) = &remote {
                 // The server applies its own [[promotion]] policy; local policy flags would
                 // suggest otherwise, so they are refused here rather than ignored.
@@ -767,21 +765,21 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 rr.promote(&src, &dst)?
             } else {
                 let verifiers = require_key.iter().map(|t| parse_pubkey(t)).collect::<Result<Vec<_>, _>>()?;
-                use pico2peta_attest::Verifier as _;
-                let policy = pico2peta_attest::Policy {
+                use o5s_attest::Verifier as _;
+                let policy = o5s_attest::Policy {
                     required_keys: verifiers.iter().map(|v| v.keyid()).collect(),
                     predicate_type,
                     require_provenance,
                 };
-                let vs: Vec<&dyn pico2peta_attest::Verifier> =
-                    verifiers.iter().map(|v| v as &dyn pico2peta_attest::Verifier).collect();
-                pico2peta_attest::promote(r, &log, &src, &dst, &policy, &vs, &actor)?
+                let vs: Vec<&dyn o5s_attest::Verifier> =
+                    verifiers.iter().map(|v| v as &dyn o5s_attest::Verifier).collect();
+                o5s_attest::promote(r, &log, &src, &dst, &policy, &vs, &actor)?
             };
             match outcome {
-                pico2peta_attest::PromoteOutcome::Promoted { object, record } => {
+                o5s_attest::PromoteOutcome::Promoted { object, record } => {
                     writeln!(out, "promoted {object} record {record}")?
                 }
-                pico2peta_attest::PromoteOutcome::Refused(why) => {
+                o5s_attest::PromoteOutcome::Refused(why) => {
                     for w in &why {
                         writeln!(out, "refused {w}")?;
                     }
@@ -792,7 +790,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                         why: "promotion policy not satisfied",
                     });
                 }
-                pico2peta_attest::PromoteOutcome::Conflict => {
+                o5s_attest::PromoteOutcome::Conflict => {
                     writeln!(out, "conflict")?;
                     return Ok(Outcome::Conflict);
                 }
@@ -801,7 +799,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
         Cmd::Gc { grace, unsafe_short_grace, dry_run, no_similarity_repack, repack_all } => {
             let repo = local_only("gc is only available for local repositories (run it on the server host)")?;
             let base = repo.gc_options();
-            let opts = pico2peta_repo::GcOptions {
+            let opts = o5s_repo::GcOptions {
                 grace: parse_duration(&grace)?,
                 allow_short_grace: unsafe_short_grace,
                 dry_run,
@@ -810,7 +808,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
                 ..base
             };
             // Provenance records keep their inputs alive (but not their outputs).
-            let tracer = pico2peta_prov::ProvTracer { inner: pico2peta_repo::OpaqueObjects };
+            let tracer = o5s_prov::ProvTracer { inner: o5s_repo::OpaqueObjects };
             let rep = repo.gc(&opts, &tracer)?;
             if let Some(p) = &rep.planned {
                 writeln!(out, "planned        {p}")?;
@@ -846,7 +844,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             writeln!(out, "objects        {} ({} blobs, {} manifests)", s.objects, s.blobs, s.manifests)?;
             writeln!(out, "logical_bytes  {}", s.logical_blob_bytes)?;
             writeln!(out, "refs           {}", r.list_refs("")?.len())?;
-            let g = pico2peta_repo::gc::gc_state(repo)?;
+            let g = o5s_repo::gc::gc_state(repo)?;
             writeln!(out, "gc_plans       {}", g.get("plans").copied().unwrap_or(0))?;
             writeln!(out, "gc_condemned   {}", g.get("condemned").copied().unwrap_or(0))?;
         }
@@ -875,7 +873,7 @@ fn main() -> ExitCode {
             {
                 return ExitCode::SUCCESS;
             }
-            eprintln!("pico2peta: {e}");
+            eprintln!("o5s: {e}");
             match e {
                 Error::NotFound(_) | Error::KeyNotFound(_) => ExitCode::from(2),
                 Error::Forbidden { .. } => ExitCode::from(4),
@@ -887,8 +885,8 @@ fn main() -> ExitCode {
 }
 
 /// The fronts the CLI opens repositories with.
-fn builtin_fronts() -> pico2peta_core::Result<pico2peta_repo::FrontRegistry> {
-    pico2peta_repo::FrontRegistry::new().with(std::sync::Arc::new(pico2peta_weights::SafetensorsFront))
+fn builtin_fronts() -> o5s_core::Result<o5s_repo::FrontRegistry> {
+    o5s_repo::FrontRegistry::new().with(std::sync::Arc::new(o5s_weights::SafetensorsFront))
 }
 
 /// A HASH (64 hex digits) or a NAME (resolved to the object it points at).
@@ -909,11 +907,11 @@ fn names_by_hash(r: &dyn Repository) -> Result<std::collections::HashMap<Hash, V
     Ok(m)
 }
 
-/// `--encoding KEY=VALUE...` → the Front API's [`pico2peta_core::Encoding`].
-fn parse_encoding(items: &[String]) -> Result<pico2peta_core::Encoding, Error> {
-    let mut enc = pico2peta_core::Encoding::default();
+/// `--encoding KEY=VALUE...` → the Front API's [`o5s_core::Encoding`].
+fn parse_encoding(items: &[String]) -> Result<o5s_core::Encoding, Error> {
+    let mut enc = o5s_core::Encoding::default();
     let mut derive_from: Option<Hash> = None;
-    let mut patch = pico2peta_core::PatchFormat::XorAnchored;
+    let mut patch = o5s_core::PatchFormat::XorAnchored;
     for it in items {
         let (k, v) =
             it.split_once('=').ok_or_else(|| Error::Parse(format!("--encoding wants KEY=VALUE, got {it:?}")))?;
@@ -925,8 +923,8 @@ fn parse_encoding(items: &[String]) -> Result<pico2peta_core::Encoding, Error> {
             "derive-from" => derive_from = Some(v.parse()?),
             "patch" => {
                 patch = match v {
-                    "xor" => pico2peta_core::PatchFormat::Xor,
-                    "xor-anchored" => pico2peta_core::PatchFormat::XorAnchored,
+                    "xor" => o5s_core::PatchFormat::Xor,
+                    "xor-anchored" => o5s_core::PatchFormat::XorAnchored,
                     _ => return Err(Error::Parse(format!("patch: {v:?} (xor or xor-anchored)"))),
                 }
             }
@@ -937,7 +935,7 @@ fn parse_encoding(items: &[String]) -> Result<pico2peta_core::Encoding, Error> {
             }
         }
     }
-    enc.derive = derive_from.map(|base| pico2peta_core::Derive { base, patch, segments: Vec::new() });
+    enc.derive = derive_from.map(|base| o5s_core::Derive { base, patch, segments: Vec::new() });
     Ok(enc)
 }
 
@@ -963,9 +961,9 @@ fn read_seed(p: &std::path::Path) -> Result<[u8; 32], Error> {
         .ok_or_else(|| Error::Parse(format!("{}: expected 64 hex digits", p.display())))
 }
 
-fn parse_pubkey(s: &str) -> Result<pico2peta_attest::Ed25519Verifier, Error> {
+fn parse_pubkey(s: &str) -> Result<o5s_attest::Ed25519Verifier, Error> {
     let b = unhex32(s).ok_or_else(|| Error::Parse(format!("public key {s:?}: expected 64 hex digits")))?;
-    pico2peta_attest::Ed25519Verifier::from_public(&b)
+    o5s_attest::Ed25519Verifier::from_public(&b)
 }
 
 /// Writes a secret file readable only by its owner (created new; never overwritten).
@@ -986,12 +984,12 @@ fn ref_id(t: &str) -> String {
 /// TARGET's attestation envelopes, locally or from the server.
 fn envelopes(
     r: &dyn Repository,
-    remote: &Option<pico2peta_client::RemoteRepo>,
+    remote: &Option<o5s_client::RemoteRepo>,
     log: &Name,
     target: &str,
-) -> Result<Vec<pico2peta_attest::Envelope>, Error> {
+) -> Result<Vec<o5s_attest::Envelope>, Error> {
     match remote {
         Some(rr) => Ok(rr.attestations(&ref_id(target))?.into_iter().map(|(_, e, _)| e).collect()),
-        None => pico2peta_attest::attestations(r, log, &resolve_target(r, target)?),
+        None => o5s_attest::attestations(r, log, &resolve_target(r, target)?),
     }
 }

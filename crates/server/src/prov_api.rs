@@ -23,8 +23,8 @@ use axum::Json;
 use axum::extract::{Extension, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use pico2peta_core::{Error, Hash, Name};
-use pico2peta_prov::{DEFAULT_LOG_REF, Provenance, Record};
+use o5s_core::{Error, Hash, Name};
+use o5s_prov::{DEFAULT_LOG_REF, Provenance, Record};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -33,7 +33,7 @@ pub(crate) fn log_ref() -> Name {
     Name::new(DEFAULT_LOG_REF).unwrap_or_else(|_| unreachable!("static name is valid"))
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> pico2peta_core::Result<T> + Send + 'static) -> ApiResult<T> {
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> o5s_core::Result<T> + Send + 'static) -> ApiResult<T> {
     match tokio::task::spawn_blocking(f).await {
         Ok(r) => r.map_err(ApiError::from),
         Err(e) => Err(ApiError::internal(format!("worker panicked: {e}"))),
@@ -81,7 +81,7 @@ pub(crate) fn record_publishes(
     tokio::task::spawn_blocking(move || {
         // At most 2^16 records per call (the provenance crate's limit).
         for batch in recs.chunks(1 << 16) {
-            if let Err(e) = pico2peta_prov::record(&*repo, &log_ref(), batch) {
+            if let Err(e) = o5s_prov::record(&*repo, &log_ref(), batch) {
                 tracing::warn!(front, error = %e, "provenance record of a publish failed");
             }
         }
@@ -155,7 +155,7 @@ pub(crate) async fn resolve_ref(st: &Arc<AppState>, p: &Principal, c: &Caller, r
                 Ok(match repo.resolve(&n)? {
                     Some(v) => {
                         let b = repo.get(&v.hash, Some(0..40))?;
-                        (b.len() == 40 && b.starts_with(b"P2P")).then(|| Hash(b[8..40].try_into().unwrap_or([0; 32])))
+                        (b.len() == 40 && b.starts_with(b"O5S")).then(|| Hash(b[8..40].try_into().unwrap_or([0; 32])))
                     }
                     None => None,
                 })
@@ -253,7 +253,7 @@ pub async fn post_provenance(
     st.require_audit_healthy()?;
     let rec = Record { op: req.op.clone(), inputs, outputs, meta, ..Default::default() };
     let repo = st.repo.clone();
-    let hashes = blocking(move || pico2peta_prov::record(&*repo, &log_ref(), &[rec])).await?;
+    let hashes = blocking(move || o5s_prov::record(&*repo, &log_ref(), &[rec])).await?;
     let rh = hashes.first().copied().ok_or_else(|| ApiError::internal("no record hash"))?;
     st.audit_mutation(Event {
         request_id: c.request_id.clone(),
@@ -294,7 +294,7 @@ pub async fn search(
         let mut g = idx.lock().map_err(|_| Error::Corrupt("search index lock poisoned".into()))?;
         match g.as_mut() {
             Some(i) => i.refresh(&*repo, &log_ref())?,
-            None => *g = Some(pico2peta_prov::search::SearchIndex::build(&*repo, &log_ref())?),
+            None => *g = Some(o5s_prov::search::SearchIndex::build(&*repo, &log_ref())?),
         }
         let i = g.as_ref().ok_or_else(|| Error::Corrupt("no search index".into()))?;
         let mut hits: Vec<(Hash, Vec<String>)> = Vec::new();
@@ -385,12 +385,12 @@ pub async fn audit_query(
 // ---------------------------------------------------------------------------
 
 /// Verifiers for every public key named by a promotion rule.
-fn verifiers(st: &AppState) -> Vec<pico2peta_attest::Ed25519Verifier> {
+fn verifiers(st: &AppState) -> Vec<o5s_attest::Ed25519Verifier> {
     let mut out = Vec::new();
     for r in &st.promotion {
         for k in &r.required_keys {
             if let Some(v) = parse_key(k)
-                && !out.iter().any(|x: &pico2peta_attest::Ed25519Verifier| x.public() == v.public())
+                && !out.iter().any(|x: &o5s_attest::Ed25519Verifier| x.public() == v.public())
             {
                 out.push(v);
             }
@@ -399,8 +399,8 @@ fn verifiers(st: &AppState) -> Vec<pico2peta_attest::Ed25519Verifier> {
     out
 }
 
-fn parse_key(hex: &str) -> Option<pico2peta_attest::Ed25519Verifier> {
-    pico2peta_attest::Ed25519Verifier::from_public(&crate::hexs::decode32(hex)?).ok()
+fn parse_key(hex: &str) -> Option<o5s_attest::Ed25519Verifier> {
+    o5s_attest::Ed25519Verifier::from_public(&crate::hexs::decode32(hex)?).ok()
 }
 
 /// `POST /v1/attestations`: stores a DSSE envelope (in-toto Statement) and links it to its
@@ -414,20 +414,19 @@ pub async fn post_attestation(
 ) -> ApiResult<Response> {
     st.require(st.authz.allows_somewhere(&p, Access::Write), &p, &c, "attest", "")?;
     st.require_audit_healthy()?;
-    if body.len() > pico2peta_attest::MAX_ENVELOPE {
+    if body.len() > o5s_attest::MAX_ENVELOPE {
         return Err(ApiError::bad_request("envelope too large"));
     }
-    let env = pico2peta_attest::Envelope::from_json(&body)
-        .map_err(|e| ApiError::bad_request(format!("bad envelope: {e}")))?;
+    let env =
+        o5s_attest::Envelope::from_json(&body).map_err(|e| ApiError::bad_request(format!("bad envelope: {e}")))?;
     let stmt = env.statement().map_err(|e| ApiError::bad_request(format!("bad statement: {e}")))?;
     let repo = st.repo.clone();
     let e2 = env.clone();
-    let eh = blocking(move || pico2peta_attest::attest(&*repo, &log_ref(), &e2)).await?;
+    let eh = blocking(move || o5s_attest::attest(&*repo, &log_ref(), &e2)).await?;
     // (Computed in a scope of its own: `&dyn Verifier` isn't `Send` across the await below.)
     let trusted = {
         let vs = verifiers(&st);
-        let dyn_vs: Vec<&dyn pico2peta_attest::Verifier> =
-            vs.iter().map(|v| v as &dyn pico2peta_attest::Verifier).collect();
+        let dyn_vs: Vec<&dyn o5s_attest::Verifier> = vs.iter().map(|v| v as &dyn o5s_attest::Verifier).collect();
         env.verified_by(&dyn_vs)
     };
     st.audit_mutation(Event {
@@ -458,10 +457,9 @@ pub async fn get_attestations(
 ) -> ApiResult<Response> {
     let h = resolve_ref(&st, &p, &c, &q.r).await?;
     let repo = st.repo.clone();
-    let envs = blocking(move || pico2peta_attest::attestations(&*repo, &log_ref(), &h)).await?;
+    let envs = blocking(move || o5s_attest::attestations(&*repo, &log_ref(), &h)).await?;
     let vs = verifiers(&st);
-    let dyn_vs: Vec<&dyn pico2peta_attest::Verifier> =
-        vs.iter().map(|v| v as &dyn pico2peta_attest::Verifier).collect();
+    let dyn_vs: Vec<&dyn o5s_attest::Verifier> = vs.iter().map(|v| v as &dyn o5s_attest::Verifier).collect();
     let out: Vec<Value> = envs
         .iter()
         .map(|e| {
@@ -493,21 +491,17 @@ pub async fn promote(
     st.require(st.authz.allows(&p, src.as_str(), Access::Read), &p, &c, "promote", src.as_str())?;
     st.require(st.authz.allows(&p, dst.as_str(), Access::Write), &p, &c, "promote", dst.as_str())?;
     st.require_audit_healthy()?;
-    let Some(rule) = st
-        .promotion
-        .iter()
-        .filter(|r| pico2peta_core::is_under(dst.as_str(), &r.dst))
-        .max_by_key(|r| r.dst.len())
-        .cloned()
+    let Some(rule) =
+        st.promotion.iter().filter(|r| o5s_core::is_under(dst.as_str(), &r.dst)).max_by_key(|r| r.dst.len()).cloned()
     else {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "forbidden", format!("no [[promotion]] rule covers {dst}")));
     };
     let mut required = Vec::new();
     for k in &rule.required_keys {
         let v = parse_key(k).ok_or_else(|| ApiError::internal(format!("bad promotion key {k}")))?;
-        required.push(pico2peta_attest::Verifier::keyid(&v));
+        required.push(o5s_attest::Verifier::keyid(&v));
     }
-    let policy = pico2peta_attest::Policy {
+    let policy = o5s_attest::Policy {
         required_keys: required,
         predicate_type: rule.predicate_type.clone(),
         require_provenance: rule.require_provenance,
@@ -517,19 +511,18 @@ pub async fn promote(
     let repo = st.repo_for([src.as_str(), dst.as_str()]);
     let (s2, d2, actor) = (src.clone(), dst.clone(), p.name.clone());
     let out = blocking(move || {
-        let dyn_vs: Vec<&dyn pico2peta_attest::Verifier> =
-            vs.iter().map(|v| v as &dyn pico2peta_attest::Verifier).collect();
-        pico2peta_attest::promote(&*repo, &log_ref(), &s2, &d2, &policy, &dyn_vs, &actor)
+        let dyn_vs: Vec<&dyn o5s_attest::Verifier> = vs.iter().map(|v| v as &dyn o5s_attest::Verifier).collect();
+        o5s_attest::promote(&*repo, &log_ref(), &s2, &d2, &policy, &dyn_vs, &actor)
     })
     .await?;
     let (status, outcome, body) = match &out {
-        pico2peta_attest::PromoteOutcome::Promoted { object, record } => {
+        o5s_attest::PromoteOutcome::Promoted { object, record } => {
             (StatusCode::OK, "ok", json!({ "promoted": object.to_hex(), "record": record.to_hex() }))
         }
-        pico2peta_attest::PromoteOutcome::Refused(reasons) => {
+        o5s_attest::PromoteOutcome::Refused(reasons) => {
             (StatusCode::FORBIDDEN, "refused", json!({ "refused": reasons }))
         }
-        pico2peta_attest::PromoteOutcome::Conflict => {
+        o5s_attest::PromoteOutcome::Conflict => {
             (StatusCode::CONFLICT, "conflict", json!({ "error": "src or dst moved concurrently" }))
         }
     };

@@ -1,8 +1,8 @@
 //! Front API: profiles, nested prefix claims, front handles, the union GC
 //! tracer, and config validation.
-use pico2peta_core::{Encoding, Error, Hash, Name, ObjectStore, Observed, ReplaceOutcome, Repository, Rule};
-use pico2peta_repo::gc::GcOptions;
-use pico2peta_repo::{
+use o5s_core::{Encoding, Error, Hash, Name, ObjectStore, Observed, ReplaceOutcome, Repository, Rule};
+use o5s_repo::gc::GcOptions;
+use o5s_repo::{
     ChunkingSection, DerivePolicy, FORMAT_VERSION, Front, FrontRegistry, LocalRepo, PackConfig, PlanCtx, Profile,
     RefsSection, RepoConfig,
 };
@@ -32,7 +32,7 @@ impl Front for Toy {
     fn prefixes(&self) -> Vec<String> {
         vec![self.prefix.to_string()]
     }
-    fn plan(&self, ctx: &PlanCtx<'_>, src: &mut dyn Read) -> pico2peta_core::Result<(Vec<u8>, Encoding)> {
+    fn plan(&self, ctx: &PlanCtx<'_>, src: &mut dyn Read) -> o5s_core::Result<(Vec<u8>, Encoding)> {
         // Reads 4 bytes (to prove consumed bytes are put back) and asks for grouping.
         let mut head = vec![0u8; 4];
         let n = src.read(&mut head)?;
@@ -40,7 +40,7 @@ impl Front for Toy {
         self.plans.lock().unwrap().push((ctx.name.map(|n| n.to_string()), ctx.previous));
         Ok((head, Encoding { group_width: Some(2), ..ctx.default.clone() }))
     }
-    fn children(&self, h: &Hash, store: &dyn ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+    fn children(&self, h: &Hash, store: &dyn ObjectStore) -> o5s_core::Result<Vec<Hash>> {
         let b = store.get(h, None)?;
         Ok(match b.strip_prefix(format!("{}LINKS:", self.id).as_bytes()) {
             Some(rest) => rest.as_chunks::<32>().0.iter().map(|c| Hash(*c)).collect(),
@@ -62,9 +62,9 @@ fn cfg(profiles: &[(&str, Profile)], namespaces: &[(&str, &str)]) -> RepoConfig 
     }
 }
 
-fn set(r: &dyn Repository, name: &str, h: Hash) -> pico2peta_core::Result<ReplaceOutcome> {
+fn set(r: &dyn Repository, name: &str, h: Hash) -> o5s_core::Result<ReplaceOutcome> {
     let n = Name::new(name).unwrap();
-    let obs = pico2peta_core::RefValue::observed(r.resolve(&n)?);
+    let obs = o5s_core::RefValue::observed(r.resolve(&n)?);
     r.replace(&n, &[(n.clone(), obs)], h)
 }
 
@@ -195,7 +195,7 @@ fn config_validation() {
 /// a front handle is 'static (fits in `Arc<dyn Repository>`).
 #[test]
 fn gc_snapshot_tracer_and_owned_handles() {
-    use pico2peta_repo::gc::Tracer;
+    use o5s_repo::gc::Tracer;
     struct Snap {
         root: Hash,
         leaf: Hash,
@@ -203,7 +203,7 @@ fn gc_snapshot_tracer_and_owned_handles() {
     }
     struct Fixed(Hash, Hash);
     impl Tracer for Fixed {
-        fn children(&self, h: &Hash, _: &dyn ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+        fn children(&self, h: &Hash, _: &dyn ObjectStore) -> o5s_core::Result<Vec<Hash>> {
             Ok(if *h == self.0 { vec![self.1] } else { Vec::new() })
         }
     }
@@ -214,11 +214,11 @@ fn gc_snapshot_tracer_and_owned_handles() {
         fn prefixes(&self) -> Vec<String> {
             vec!["snap/".into()]
         }
-        fn gc_tracer(&self, _: &dyn Repository) -> pico2peta_core::Result<Option<Box<dyn Tracer>>> {
+        fn gc_tracer(&self, _: &dyn Repository) -> o5s_core::Result<Option<Box<dyn Tracer>>> {
             *self.built.lock().unwrap() += 1;
             Ok(Some(Box::new(Fixed(self.root, self.leaf))))
         }
-        fn children(&self, _: &Hash, _: &dyn ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+        fn children(&self, _: &Hash, _: &dyn ObjectStore) -> o5s_core::Result<Vec<Hash>> {
             Ok(Vec::new()) // only the snapshot tracer knows the link
         }
     }
@@ -244,8 +244,8 @@ fn gc_snapshot_tracer_and_owned_handles() {
 /// round-trips through config.toml; strict is always available.
 #[test]
 fn read_verify_policy() {
-    use pico2peta_core::ReadVerify;
-    use pico2peta_repo::ReadSection;
+    use o5s_core::ReadVerify;
+    use o5s_repo::ReadSection;
     let data = vec![5u8; 3 << 20];
     let mk = |dir: &std::path::Path, read: ReadSection| {
         let mut c = RepoConfig::new(&PackConfig::default());
@@ -293,7 +293,7 @@ fn chunk_that_is_also_a_front_object_is_traced() {
         fn prefixes(&self) -> Vec<String> {
             vec!["links/".into()]
         }
-        fn children(&self, h: &Hash, _: &dyn ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+        fn children(&self, h: &Hash, _: &dyn ObjectStore) -> o5s_core::Result<Vec<Hash>> {
             Ok(self.0.iter().filter(|(p, _)| p == h).map(|(_, c)| *c).collect())
         }
     }
@@ -317,7 +317,7 @@ fn chunk_that_is_also_a_front_object_is_traced() {
     // root -> X (object edge), X -> C.
     let fronts = FrontRegistry::new().with(Arc::new(Links(vec![(root, xh), (xh, c)]))).unwrap();
     let r = r0.with_fronts(fronts).unwrap();
-    let idx = pico2peta_repo::reach::ReachIndex::open(&r, vec![String::new()]).unwrap();
+    let idx = o5s_repo::reach::ReachIndex::open(&r, vec![String::new()]).unwrap();
     let handle: Arc<dyn Repository> = Arc::new(r.front("links").unwrap());
     // Both walks meet X first as a chunk of A (wave 1), then as root's child.
     assert!(matches!(set(handle.as_ref(), "links/a", a).unwrap(), ReplaceOutcome::Ok { .. }));
@@ -332,6 +332,6 @@ fn chunk_that_is_also_a_front_object_is_traced() {
     assert!(!reopened.contains(&orphan).unwrap(), "gc deletes the unreferenced (the test is sensitive)");
     assert!(reopened.contains(&c).unwrap(), "gc: C survives (X traced as an object)");
     // A fresh index (a full mark, not the incremental path) agrees.
-    let idx2 = pico2peta_repo::reach::ReachIndex::open(&r, vec![String::new()]).unwrap();
+    let idx2 = o5s_repo::reach::ReachIndex::open(&r, vec![String::new()]).unwrap();
     assert_eq!(idx2.readable_many(&[c], &[0]).unwrap(), vec![true]);
 }

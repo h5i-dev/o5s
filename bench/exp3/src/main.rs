@@ -18,7 +18,7 @@
 //! Size = payload + 48 B/object modeled index (as Exp1) + 32 B per frame that
 //! has a reference prefix (its reference's id).
 
-use pico2peta_order::{Frame, FrameConfig, Hint, Item, features, frames, order};
+use o5s_order::{Frame, FrameConfig, Hint, Item, features, frames, order};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::FileExt;
@@ -69,7 +69,7 @@ fn spill_files(out: &Path, mode: &str, inputs: &[String]) -> R<()> {
         match mode {
             "tensors" => {
                 let f = std::fs::read(input)?;
-                let layout = pico2peta_weights::parse_layout(&f).ok_or_else(|| format!("{input}: not safetensors"))?;
+                let layout = o5s_weights::parse_layout(&f).ok_or_else(|| format!("{input}: not safetensors"))?;
                 let mut ts: Vec<(String, (u64, u64))> = layout.tensors.into_iter().collect();
                 ts.sort_by_key(|t| t.1);
                 for (name, (a, b)) in ts {
@@ -302,7 +302,7 @@ fn run(dir: &Path, variant: &str, threads: usize, samples: usize) -> R<()> {
     let respill_file =
         std::fs::OpenOptions::new().create(true).truncate(true).read(true).write(true).open(&respill_path)?;
     let w = Mutex::new((respill_file.try_clone()?, 0u64, vec![(0u64, 0u32); n]));
-    let feats: Vec<Mutex<Option<pico2peta_order::Features>>> = (0..n).map(|_| Mutex::new(None)).collect();
+    let feats: Vec<Mutex<Option<o5s_order::Features>>> = (0..n).map(|_| Mutex::new(None)).collect();
     let starts: Vec<usize> = parts
         .iter()
         .scan(0, |acc, p| {

@@ -1,9 +1,9 @@
 //! The kernel against a direct model of the original semantics (the
-//! pre-kernel `RefState::decide_*` and `pico2peta_core::{governing, mobility}`).
+//! pre-kernel `RefState::decide_*` and `o5s_core::{governing, mobility}`).
 
-use pico2peta_kernel::names::{governing, is_under, mobility_of, validate};
-use pico2peta_kernel::refs::{Decision, Effect, MAX_BATCH, Read, Refusal, Target, View, decide};
-use pico2peta_kernel::{Mobility, Observed, RefVal, Rule};
+use o5s_kernel::names::{governing, is_under, mobility_of, validate};
+use o5s_kernel::refs::{Decision, Effect, MAX_BATCH, Read, Refusal, Target, View, decide};
+use o5s_kernel::{Mobility, Observed, RefVal, Rule};
 use proptest::prelude::*;
 use std::collections::BTreeMap;
 

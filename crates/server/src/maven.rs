@@ -13,7 +13,7 @@
 //!   (metadata, snapshots) are refreshed after the upstream's TTL, and the cached copy is
 //!   served if that fails.
 //!
-//! **Storage.** `maven/<repo>/<path>` → a `P2PMVN01` record (content hash, digests). The
+//! **Storage.** `maven/<repo>/<path>` → a `O5SMVN01` record (content hash, digests). The
 //! `maven` front claims `maven/`, and GC follows record → content. Authorization is on
 //! `maven/<repo>`.
 
@@ -30,12 +30,12 @@ use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use pico2peta_core::{Error, Hash, Name, ObjectStore, Observed, ReplaceOutcome, Repository, Result};
+use o5s_core::{Error, Hash, Name, ObjectStore, Observed, ReplaceOutcome, Repository, Result};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-const RECORD_MAGIC: &[u8; 8] = b"P2PMVN01";
+const RECORD_MAGIC: &[u8; 8] = b"O5SMVN01";
 const CHECKSUMS: [&str; 4] = ["md5", "sha1", "sha256", "sha512"];
 
 pub struct MavenState {
@@ -48,7 +48,7 @@ pub struct MavenState {
 impl MavenState {
     pub fn new(
         repo: Arc<dyn Repository>,
-        local: Option<pico2peta_repo::LocalRepo>,
+        local: Option<o5s_repo::LocalRepo>,
         upstreams: BTreeMap<String, Upstream>,
     ) -> std::result::Result<MavenState, String> {
         Ok(MavenState {
@@ -163,7 +163,7 @@ fn check(st: &AppState, p: &Principal, c: &Caller, repo: &str, need: Access) -> 
     });
     let r = if p.name == crate::auth::ANONYMOUS {
         let mut r = err(StatusCode::UNAUTHORIZED, "authentication required");
-        r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"pico2peta\""));
+        r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"o5s\""));
         r
     } else {
         err(

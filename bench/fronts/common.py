@@ -1,7 +1,7 @@
 """Shared helpers for the PLAN §6.5 front benchmarks (stdlib only, Python 3.9+).
 
 Every front script:
-- starts a pico2peta-server (release build) and the specialist baseline, both local;
+- starts a o5s-server (release build) and the specialist baseline, both local;
 - drives them with the real, unmodified client;
 - appends one JSON line per measurement to the results file;
 - removes everything it created (disk budget).
@@ -50,7 +50,7 @@ def record(front, metric, system, value, unit, **extra):
 
 def check(front, name, ok, detail=""):
     """A functional check (pass/fail)."""
-    record(front, "functional:" + name, "pico2peta", bool(ok), "bool", detail=detail)
+    record(front, "functional:" + name, "o5s", bool(ok), "bool", detail=detail)
     if not ok:
         log(f"FUNCTIONAL FAIL {front} {name}: {detail}")
 
@@ -136,7 +136,7 @@ class Proc:
         self.log.close()
 
 
-# Base URL -> pid of each running pico_server (for `server_cpu`).
+# Base URL -> pid of each running o5s_server (for `server_cpu`).
 SERVER_PIDS = {}
 
 
@@ -147,8 +147,8 @@ def server_cpu(base):
 
 
 @contextlib.contextmanager
-def pico_server(d, server_bin, extra_toml="", repo_toml="", principal="bench", log_format="text", log_filter="warn"):
-    """A pico2peta-server in d with one admin token. Yields (base_url, repo_path). Its log is
+def o5s_server(d, server_bin, extra_toml="", repo_toml="", principal="bench", log_format="text", log_filter="warn"):
+    """A o5s-server in d with one admin token. Yields (base_url, repo_path). Its log is
     d/server.log (`log_filter = "info"` adds one line per response, with its latency)."""
     port = free_port()
     repo = os.path.join(d, "repo")

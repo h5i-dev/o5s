@@ -1,14 +1,14 @@
 //! On-disk decoders (docs/ARCHITECTURE.md): the pack record header.
 //!
-//! A record is `magic "P2PR" u32 | kind u8 | codec u8 | reserved u16 |
+//! A record is `magic "O5SR" u32 | kind u8 | codec u8 | reserved u16 |
 //! hash [32] | raw_len u64 | stored_len u32 | payload | crc u32`, little
 //! endian. The header decoder checks the magic, the kind and codec codes,
 //! and the length bounds before any allocation.
 
 /// Header length in bytes.
 pub const REC_HEADER: usize = 52;
-/// `"P2PR"` as a little-endian u32.
-pub const REC_MAGIC: u32 = 0x5250_3250;
+/// `"O5SR"` as a little-endian u32.
+pub const REC_MAGIC: u32 = 0x5253_354F;
 /// Largest blob.
 pub const MAX_BLOB: u64 = 1 << 31;
 /// Largest stored payload.
@@ -31,7 +31,7 @@ pub struct Header {
 pub enum HeaderError {
     /// Fewer than [`REC_HEADER`] bytes.
     Short,
-    /// Not `"P2PR"`.
+    /// Not `"O5SR"`.
     BadMagic,
     /// A kind code above 5.
     BadKind,

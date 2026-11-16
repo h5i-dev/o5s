@@ -1,9 +1,9 @@
-//! pico2peta's decision kernels (docs/H5I_PLAN.md, Phase H2).
+//! o5s's decision kernels (docs/H5I_PLAN.md, Phase H2).
 //!
 //! Every decision about names is made here: pure functions over a small
 //! view of the state, written in the Rust subset Charon and Aeneas extract
 //! to Lean, so the theorems in `verify/core` are about this code. The
-//! shells (`pico2peta-refs`'s `RefState` and journal, `pico2peta-repo`'s
+//! shells (`o5s-refs`'s `RefState` and journal, `o5s-repo`'s
 //! GC and fronts) build each view from their indexed state, call the
 //! kernel, and apply what it returns. They make no decision of their own.
 //!

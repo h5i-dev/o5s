@@ -1,4 +1,4 @@
-# pico2peta
+# o5s
 
 **One store for immutable, content-addressed data** (source code, packages, container images, model weights)
 that replaces Git hosting, Hugging Face, Artifactory and registries with a single, verified core
@@ -33,30 +33,30 @@ that replaces Git hosting, Hugging Face, Artifactory and registries with a singl
 
 ```sh
 cargo build --release
-alias p2p=target/release/pico2peta
+alias o5s=target/release/o5s
 R=/data/repo
 
 # A repository whose models/ namespace derives each new version from the previous one
 # (stored as a delta, planned by the safetensors front):
-p2p -C $R init --profile weights=front:safetensors,derive:previous --namespace models/=weights
-H=$(p2p -C $R put --for-name models/acme/main model.safetensors)   # stored per the profile; prints the hash
-p2p -C $R replace models/acme/main $H --expect absent              # names move only by OCC
-p2p -C $R get $H --range 0..1024 > head.bin                          # verified reads
+o5s -C $R init --profile weights=front:safetensors,derive:previous --namespace models/=weights
+H=$(o5s -C $R put --for-name models/acme/main model.safetensors)   # stored per the profile; prints the hash
+o5s -C $R replace models/acme/main $H --expect absent              # names move only by OCC
+o5s -C $R get $H --range 0..1024 > head.bin                          # verified reads
 
-p2p -C $R ns set releases immutable                                 # published names never move
-p2p -C $R update dev/app=$H prod/app=$H --expect dev/app=absent --expect prod/app=absent
+o5s -C $R ns set releases immutable                                 # published names never move
+o5s -C $R update dev/app=$H prod/app=$H --expect dev/app=absent --expect prod/app=absent
 
-p2p -C $R prov record train --in data=$D --out model=$H              # provenance
-p2p -C $R prov lineage models/acme/main                              # a HASH or a NAME
-p2p -C $R attest keygen ci.key                                      # prints "<keyid> <pubkey>"
-p2p -C $R attest create dev/app --key ci.key
-p2p -C $R promote dev/app prod/app --require-key $PUB --require-provenance
-p2p -C $R search tensor library                                     # names + metadata
-p2p -C $R gc                                                        # from cron; default grace 1h
+o5s -C $R prov record train --in data=$D --out model=$H              # provenance
+o5s -C $R prov lineage models/acme/main                              # a HASH or a NAME
+o5s -C $R attest keygen ci.key                                      # prints "<keyid> <pubkey>"
+o5s -C $R attest create dev/app --key ci.key
+o5s -C $R promote dev/app prod/app --require-key $PUB --require-provenance
+o5s -C $R search tensor library                                     # names + metadata
+o5s -C $R gc                                                        # from cron; default grace 1h
 
 # Against a server (domain clients such as git, pip, npm, docker and huggingface_hub talk to its fronts):
-export P2P_REMOTE=https://p2p.example.com P2P_TOKEN=p2p_...
-p2p put --for-name models/acme/main model.safetensors
+export O5S_REMOTE=https://o5s.example.com O5S_TOKEN=o5s_...
+o5s put --for-name models/acme/main model.safetensors
 ```
 
 CLI exit codes: 0 ok, 1 error, 2 not found/absent, 3 OCC conflict, 4 forbidden (namespace rule or promotion
@@ -65,9 +65,9 @@ policy), 5 unauthorized.
 ## Quick start for each front (server; details in `docs/API.md`, deployment in `deploy/README.md`)
 
 ```sh
-pico2peta-server gen-token admin      # prints the token once, plus a [[tokens]] entry for tokens.toml
-pico2peta-server serve --config deploy/server.toml
-export S=p2p.example.com TOKEN=p2p_...
+o5s-server gen-token admin      # prints the token once, plus a [[tokens]] entry for tokens.toml
+o5s-server serve --config deploy/server.toml
+export S=o5s.example.com TOKEN=o5s_...
 ```
 
 | front | the real client, unmodified |
@@ -77,7 +77,7 @@ export S=p2p.example.com TOKEN=p2p_...
 | **Hugging Face** | `export HF_ENDPOINT=https://$S HF_TOKEN=$TOKEN`; `hf upload team/tiny ./model`; `hf_hub_download` / `snapshot_download` (LFS and Xet) |
 | **PyPI** | `twine upload --repository-url https://$S/pypi/team/ -u token -p "$TOKEN" dist/*`; `pip install --index-url https://token:$TOKEN@$S/pypi/team/simple/ mypkg` |
 | **npm** | `.npmrc`: `registry=https://$S/npm/team/` and `//$S/npm/team/:_authToken=${TOKEN}`; `npm publish`, `npm install` |
-| **Maven** | `settings.xml` server `p2p` (user `token`, password = token); `mvn deploy -DaltDeploymentRepository=p2p::https://$S/maven/releases` |
+| **Maven** | `settings.xml` server `o5s` (user `token`, password = token); `mvn deploy -DaltDeploymentRepository=o5s::https://$S/maven/releases` |
 | **native** | `PUT /v1/objects`, `POST /v1/refs/...` (OCC), provenance/attestations/promotion/search under `/v1` |
 
 PyPI, npm and Maven can proxy-cache their public upstreams (`[pypi.upstream.<index>]` etc.). One provenance log,
@@ -87,18 +87,18 @@ audit log and policy cover every front.
 
 | crate | role |
 |---|---|
-| `pico2peta-core` | `Hash`, `Error`, `Encoding`, `ReadVerify`, the `ObjectStore`/`Repository`/`Backend` traits, LocalDisk, conformance suite, fault injection |
-| `pico2peta-pack` | pack store: packs, indexes, chunking, codecs, frames (incl. reference frames), derived objects, recovery |
-| `pico2peta-refs` | ref store: journal with group commit, or a create-only log on a backend; OCC; namespace rules |
-| `pico2peta-repo` | `LocalRepo`: profiles, the Front API, idmap, GC with similarity repack, fsck |
-| `pico2peta-order` | domain-agnostic similarity features, ordering and framing |
-| `pico2peta-chunk` | content-defined chunkers (FastCDC, byte-exact Xet) |
-| `pico2peta-prov` | provenance, search, retention |
-| `pico2peta-attest` | in-toto/DSSE attestations, Ed25519, policy-gated promotion |
-| `pico2peta-weights` | the safetensors front (tensor-aligned deltas, byte grouping) |
-| `pico2peta-cli` | the `pico2peta` binary |
-| `pico2peta-server`, `-client`, `-backend-s3` | HTTP server with every front, remote client, S3 backend |
-| `pico2peta-kernel` | the decision kernels (Aeneas subset), extracted and proved in `verify/core` |
+| `o5s-core` | `Hash`, `Error`, `Encoding`, `ReadVerify`, the `ObjectStore`/`Repository`/`Backend` traits, LocalDisk, conformance suite, fault injection |
+| `o5s-pack` | pack store: packs, indexes, chunking, codecs, frames (incl. reference frames), derived objects, recovery |
+| `o5s-refs` | ref store: journal with group commit, or a create-only log on a backend; OCC; namespace rules |
+| `o5s-repo` | `LocalRepo`: profiles, the Front API, idmap, GC with similarity repack, fsck |
+| `o5s-order` | domain-agnostic similarity features, ordering and framing |
+| `o5s-chunk` | content-defined chunkers (FastCDC, byte-exact Xet) |
+| `o5s-prov` | provenance, search, retention |
+| `o5s-attest` | in-toto/DSSE attestations, Ed25519, policy-gated promotion |
+| `o5s-weights` | the safetensors front (tensor-aligned deltas, byte grouping) |
+| `o5s-cli` | the `o5s` binary |
+| `o5s-server`, `-client`, `-backend-s3` | HTTP server with every front, remote client, S3 backend |
+| `o5s-kernel` | the decision kernels (Aeneas subset), extracted and proved in `verify/core` |
 | `bench/*`, `fuzz/`, `verify/` | experiments and benchmarks, fuzz targets, proofs about the extracted kernels |
 
 - **Design:** `docs/VISION.md`, `docs/ARCHITECTURE.md`, `docs/PLAN.md`.

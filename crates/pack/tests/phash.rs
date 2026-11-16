@@ -1,7 +1,7 @@
 //! The multi-core whole-object hash equals the serial BLAKE3 on every input.
 
-use pico2peta_core::Hash;
-use pico2peta_pack::phash::{self, SEGMENT};
+use o5s_core::Hash;
+use o5s_pack::phash::{self, SEGMENT};
 use proptest::prelude::*;
 use std::sync::Arc;
 

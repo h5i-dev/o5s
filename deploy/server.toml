@@ -1,5 +1,5 @@
-# pico2peta-server sample configuration (systemd install).
-# Check with: pico2peta-server check-config -c /etc/pico2peta/server.toml
+# o5s-server sample configuration (systemd install).
+# Check with: o5s-server check-config -c /etc/o5s/server.toml
 
 [server]
 listen = "127.0.0.1:8080"          # put TLS in front (nginx/envoy/ALB); see deploy/README.md
@@ -9,14 +9,14 @@ request_timeout_secs = 3600        # until response headers (covers whole upload
 shutdown_grace_secs = 30           # drain time after SIGTERM
 trust_forwarded_for = false        # true behind a reverse proxy that sets X-Forwarded-For
 # Native HTTPS instead of a TLS proxy (cert/key reloaded on SIGHUP):
-#tls = { cert = "/etc/pico2peta/tls.crt", key = "/etc/pico2peta/tls.key" }
+#tls = { cert = "/etc/o5s/tls.crt", key = "/etc/o5s/tls.key" }
 # Serve /metrics (and health) only on a private address for Prometheus:
 #metrics_listen = "10.0.0.5:9100"
 # Per-principal token bucket (anonymous callers keyed by client IP):
 #rate_limit = { per_sec = 50.0, burst = 200.0 }
 
 [repo]
-path = "/var/lib/pico2peta/repo"
+path = "/var/lib/o5s/repo"
 create = true                      # initialize on first start
 refs = "local"                     # "backend": refs on S3, so several servers can share the repo
 
@@ -27,7 +27,7 @@ refs = "local"                     # "backend": refs on S3, so several servers c
 #type = "s3"
 #endpoint = "https://s3.us-east-1.amazonaws.com"
 #region = "us-east-1"
-#bucket = "my-pico2peta-bucket"
+#bucket = "my-o5s-bucket"
 #prefix = "prod"
 #path_style = false                # true for MinIO / most S3-compatible stores
 #conditional_writes = true         # If-None-Match: *; disable only if the store rejects it.
@@ -39,11 +39,11 @@ allow_anonymous = false
 # OIDC: accept JWT bearer tokens from your identity provider as well.
 #[auth.oidc]
 #issuer = "https://accounts.example.com"
-#audience = "pico2peta"
+#audience = "o5s"
 #principal_claim = "email"         # policies then name principals "oidc:<email>"
 #principal_prefix = "oidc:"
 # Tokens live in a separate file (mode 0600). Create entries with:
-#   pico2peta-server gen-token <principal>
+#   o5s-server gen-token <principal>
 token_file = "tokens.toml"
 
 # Grants: principal (name, "*" = any authenticated, "anonymous"),
@@ -64,7 +64,7 @@ namespace = "pkgs"
 access = "read"
 
 [audit]
-path = "/var/log/pico2peta/audit.jsonl"
+path = "/var/log/o5s/audit.jsonl"
 log_reads = false                  # true: also audit every object read
 rotate_bytes = 1073741824          # rotate at 1 GiB; the hash chain continues
 

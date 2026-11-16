@@ -3,7 +3,7 @@
 
 mod common;
 use common::*;
-use pico2peta_core::ObjectStore;
+use o5s_core::ObjectStore;
 use std::io::Read;
 
 /// Peak RSS of this process in KiB (Linux only).

@@ -2,7 +2,7 @@
 # Start/stop a throwaway local MinIO for the S3 integration tests.
 #   scripts/minio-test.sh start   # prints the env vars to export
 #   eval "$(scripts/minio-test.sh env)"
-#   cargo test -p pico2peta-backend-s3 --test minio
+#   cargo test -p o5s-backend-s3 --test minio
 #   scripts/minio-test.sh stop
 # MinIO no longer ships community binaries; build one with `go build` from a
 # release tag, or set MINIO_BIN. Data lives on scratch, never on /.
@@ -11,12 +11,12 @@ SCRATCH=${SCRATCH:-/mnt/scratch/pico2peta}
 MINIO_BIN=${MINIO_BIN:-$SCRATCH/minio/minio}
 DIR=${MINIO_TEST_DIR:-$SCRATCH/minio-test}
 PORT=${MINIO_TEST_PORT:-19000}
-USER_=p2ptest
-PASS=p2ptest-secret-key
+USER_=o5stest
+PASS=o5stest-secret-key
 envs() {
-  echo "export P2P_S3_ENDPOINT=http://127.0.0.1:$PORT"
-  echo "export P2P_S3_BUCKET=p2p-test"
-  echo "export P2P_S3_REGION=us-east-1"
+  echo "export O5S_S3_ENDPOINT=http://127.0.0.1:$PORT"
+  echo "export O5S_S3_BUCKET=o5s-test"
+  echo "export O5S_S3_REGION=us-east-1"
   echo "export AWS_ACCESS_KEY_ID=$USER_"
   echo "export AWS_SECRET_ACCESS_KEY=$PASS"
 }

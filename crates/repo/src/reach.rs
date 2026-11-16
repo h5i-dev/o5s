@@ -3,7 +3,7 @@
 //! A principal may read an object only if it is reachable from a name the
 //! principal can read. Names are grouped into **cells**: the deepest cell
 //! prefix (net passes its policy prefixes, and `""` if it grants on it) that
-//! covers a name, segment-aligned as in `pico2peta_kernel::names::is_under`.
+//! covers a name, segment-aligned as in `o5s_kernel::names::is_under`.
 //! Readability depends only on cells, so this index keeps, per cell, the set of
 //! objects reachable from the cell's names, by the same traversal as GC's mark:
 //! ref targets, manifest chunks, delta bases, Frame3 references (all via
@@ -29,7 +29,7 @@
 //! be exact (the CLI on the server host writes through its own handle).
 
 use crate::{LocalRepo, Tracer};
-use pico2peta_core::{Error, Hash, Name, ObjectStore, Repository, Result};
+use o5s_core::{Error, Hash, Name, ObjectStore, Repository, Result};
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, Weak};
 
@@ -118,7 +118,7 @@ impl ReachIndex {
         let weak = Arc::downgrade(&idx.inner);
         let queue = idx.inner.queue.clone();
         std::thread::Builder::new()
-            .name("p2p-reach".into())
+            .name("o5s-reach".into())
             .spawn(move || worker(weak, queue))
             .map_err(|e| Error::Corrupt(format!("reach worker: {e}")))?;
         Ok(idx)
@@ -169,7 +169,7 @@ impl ReachIndex {
     pub fn cell_of(cells: &[String], name: &str) -> Option<CellId> {
         let mut best: Option<(usize, usize)> = None;
         for (i, p) in cells.iter().enumerate() {
-            if pico2peta_core::is_under(name, p) && best.is_none_or(|(_, l)| p.len() > l) {
+            if o5s_core::is_under(name, p) && best.is_none_or(|(_, l)| p.len() > l) {
                 best = Some((i, p.len()));
             }
         }

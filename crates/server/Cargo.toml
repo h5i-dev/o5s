@@ -1,23 +1,23 @@
 [package]
-name = "pico2peta-server"
-description = "pico2peta HTTP server: put/get/resolve/replace, authn/authz, audit log, metrics"
+name = "o5s-server"
+description = "o5s HTTP server: put/get/resolve/replace, authn/authz, audit log, metrics"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "pico2peta-server"
+name = "o5s-server"
 path = "src/main.rs"
 
 [dependencies]
-pico2peta-core.workspace = true
-pico2peta-repo.workspace = true
-pico2peta-pack.workspace = true
-pico2peta-prov.workspace = true
-pico2peta-weights.workspace = true
-pico2peta-attest = { path = "../attest" }
-pico2peta-client = { path = "../client" }
-pico2peta-net-kernel = { path = "../net-kernel" }
+o5s-core.workspace = true
+o5s-repo.workspace = true
+o5s-pack.workspace = true
+o5s-prov.workspace = true
+o5s-weights.workspace = true
+o5s-attest = { path = "../attest" }
+o5s-client = { path = "../client" }
+o5s-net-kernel = { path = "../net-kernel" }
 # Issued bearer tokens: h5i-app's token encoding and strict parser (extracted, proven), signed
 # with HMAC-SHA256 from libcrux (HACL*-verified), as h5i-app-http's `HmacAuth` does.
 h5i-app-token = "=0.5.5"
@@ -28,7 +28,7 @@ h5i-app-std = { workspace = true }
 h5i-app-json = "=0.5.5"
 h5i-app-pg = "=0.5.5"
 libcrux-hmac = "0.0.8"
-pico2peta-backend-s3 = { path = "../backend-s3" }
+o5s-backend-s3 = { path = "../backend-s3" }
 serde.workspace = true
 toml.workspace = true
 thiserror.workspace = true
@@ -64,7 +64,7 @@ hyper = { version = "1", features = ["server", "http1", "http2"] }
 hyper-util = { version = "0.1.21", features = ["server", "server-auto", "server-graceful", "service", "tokio", "http1", "http2"] }
 
 [dev-dependencies]
-pico2peta-chunk = { path = "../chunk" }
+o5s-chunk = { path = "../chunk" }
 jsonwebtoken = "9"
 proptest.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "blocking"] }

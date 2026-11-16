@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! <prefix>log/<seq:020>          one journal record per commit (create-only)
-//! <prefix>snap/<seq:020>-<ts>    full state after entries < seq (P2PREFS1); ts = unix seconds
+//! <prefix>snap/<seq:020>-<ts>    full state after entries < seq (O5SREFS1); ts = unix seconds
 //! ```
 //! **Commit point:** after catching up to the end of the log at `seq`, a writer
 //! decides against that state and calls `put_if_absent(log/<seq>)`. The backend
@@ -19,19 +19,19 @@
 //! acknowledging a write that nobody would read.
 
 use crate::{Error, Mutation, RefState, Result, decode_snapshot, encode_checked, encode_snapshot, parse_records};
-use pico2peta_core::backend::{Backend, PutOutcome, PutSource};
-use pico2peta_core::fault::FaultHandle;
+use o5s_core::backend::{Backend, PutOutcome, PutSource};
+use o5s_core::fault::FaultHandle;
 use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// Log entry framing: `"P2PLOGE1" | nonce[16] | journal record`. The nonce is
+/// Log entry framing: `"O5SLOGE1" | nonce[16] | journal record`. The nonce is
 /// unique per commit *attempt*, so two writers that make the same decision
 /// (same name, same observed version, same target, hence byte-identical
 /// records) still produce different entries, and at most one of them can
 /// recognise a stored entry as its own.
-const ENTRY_MAGIC: &[u8; 8] = b"P2PLOGE1";
+const ENTRY_MAGIC: &[u8; 8] = b"O5SLOGE1";
 
 fn entry_record(b: &[u8]) -> &[u8] {
     if b.len() >= 24 && &b[..8] == ENTRY_MAGIC { &b[24..] } else { b }

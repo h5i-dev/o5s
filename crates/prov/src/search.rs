@@ -15,7 +15,7 @@
 //! holds in memory. A query after `refresh` reflects the current ref log.
 
 use crate::{LogNode, Record};
-use pico2peta_core::{Hash, Name, Repository, Result};
+use o5s_core::{Hash, Name, Repository, Result};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Provenance op for plain metadata about an object.
@@ -203,7 +203,7 @@ pub fn impact_named(repo: &dyn Repository, log_ref: &Name, name: &Name) -> Resul
 }
 
 fn named(repo: &dyn Repository, log_ref: &Name, name: &Name, lineage: bool) -> Result<Vec<Hit>> {
-    let Some(v) = repo.resolve(name)? else { return Err(pico2peta_core::Error::NotFound(Hash([0; 32]))) };
+    let Some(v) = repo.resolve(name)? else { return Err(o5s_core::Error::NotFound(Hash([0; 32]))) };
     let p = crate::Provenance::load(repo, log_ref)?;
     let set = if lineage { p.lineage(&v.hash)? } else { p.impact(&v.hash)? };
     let mut by_hash: HashMap<Hash, Vec<String>> = HashMap::new();

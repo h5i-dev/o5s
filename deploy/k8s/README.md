@@ -9,10 +9,10 @@ root filesystem, probe `/readyz` and `/healthz`, and drain on SIGTERM.
 | `s3.yaml` | StatefulSet, **N replicas**, packs and refs on S3 (`[repo] refs = "backend"`), small per-pod volume for staging and its own audit log | high availability, large stores |
 
 ```sh
-kubectl create namespace pico2peta
-# Tokens: entries from `pico2peta-server gen-token <principal>` (sha256 only; keep the tokens elsewhere).
-kubectl -n pico2peta create secret generic pico2peta-tokens --from-file=tokens.toml=../tokens.example.toml
-kubectl -n pico2peta apply -f local.yaml        # or s3.yaml (edit bucket, region, role ARN first)
+kubectl create namespace o5s
+# Tokens: entries from `o5s-server gen-token <principal>` (sha256 only; keep the tokens elsewhere).
+kubectl -n o5s create secret generic o5s-tokens --from-file=tokens.toml=../tokens.example.toml
+kubectl -n o5s apply -f local.yaml        # or s3.yaml (edit bucket, region, role ARN first)
 ```
 
 Notes:
@@ -27,5 +27,5 @@ Notes:
 - **Metrics:** `/metrics` on the service port (or `server.metrics_listen`). The dashboard is
   `../grafana-dashboard.json`, the alerts `../prometheus-alerts.yml`.
 - **GC:** in `s3.yaml`, replicas run no background GC (`interval_secs = 0`). A CronJob triggers
-  `POST /v1/admin/gc` hourly, with an admin token from the `pico2peta-admin` secret. The GC protocol is
+  `POST /v1/admin/gc` hourly, with an admin token from the `o5s-admin` secret. The GC protocol is
   safe with concurrent writers, and one runner is enough.

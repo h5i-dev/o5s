@@ -1,4 +1,4 @@
-import Pico2petaNetKernel
+import O5sNetKernel
 import H5iAppLib
 /-!
 # Git push acceptance: the extracted decision computes this spec
@@ -7,9 +7,9 @@ import H5iAppLib
 `cmdSpec` of each command, and with `--atomic` and any refusal, every accepted one becomes
 `AtomicFailed`. The corollaries state what an accepted command guarantees.
 -/
-open Aeneas Aeneas.Std Result H5iAppLib pico2peta_net_kernel pico2peta_net_kernel.gitpush
+open Aeneas Aeneas.Std Result H5iAppLib o5s_net_kernel o5s_net_kernel.gitpush
 
-namespace pico2peta_net_kernel.Spec.GitPush
+namespace o5s_net_kernel.Spec.GitPush
 
 /-- One command's decision. -/
 def cmdSpec (c : PushCmd) : core.result.Result Accept Ng :=
@@ -126,4 +126,4 @@ theorem atomic_all_or_nothing (cs : List PushCmd) :
     simp only [List.any_eq_true, not_exists, not_and, Bool.not_eq_true] at h
     exact h d hd
 
-end pico2peta_net_kernel.Spec.GitPush
+end o5s_net_kernel.Spec.GitPush

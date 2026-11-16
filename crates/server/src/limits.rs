@@ -15,7 +15,7 @@
 //!   writes in one scan interval.
 
 use crate::config::{LimitRule, RateLimit};
-use pico2peta_core::{Hash, ObjectStore, Repository, Result};
+use o5s_core::{Hash, ObjectStore, Repository, Result};
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -43,7 +43,7 @@ impl NamespaceLimits {
 
     /// The rule governing `name`: the longest prefix it is under.
     pub fn rule_for(&self, name: &str) -> Option<&LimitRule> {
-        self.rules.iter().filter(|r| pico2peta_core::is_under(name, &r.prefix)).max_by_key(|r| r.prefix.len())
+        self.rules.iter().filter(|r| o5s_core::is_under(name, &r.prefix)).max_by_key(|r| r.prefix.len())
     }
 
     /// Admits one request against `name`. `write`: it may add data (quota applies);
@@ -91,7 +91,7 @@ impl NamespaceLimits {
     }
 
     /// Measures every quota prefix (blocking; see the module docs).
-    pub fn scan(&self, repo: &dyn Repository, tracer: &dyn pico2peta_repo::Tracer) -> Result<()> {
+    pub fn scan(&self, repo: &dyn Repository, tracer: &dyn o5s_repo::Tracer) -> Result<()> {
         for r in self.rules.iter().filter(|r| r.max_stored_bytes.is_some()) {
             let used = usage_under(repo, tracer, &r.prefix)?;
             if let Ok(mut u) = self.usage.lock() {
@@ -109,7 +109,7 @@ impl NamespaceLimits {
 }
 
 /// Logical bytes of the distinct objects reachable from the names under `prefix`.
-pub fn usage_under(repo: &dyn Repository, tracer: &dyn pico2peta_repo::Tracer, prefix: &str) -> Result<u64> {
+pub fn usage_under(repo: &dyn Repository, tracer: &dyn o5s_repo::Tracer, prefix: &str) -> Result<u64> {
     let mut seen: HashSet<Hash> = HashSet::new();
     let mut stack: Vec<Hash> = repo.list_refs(prefix)?.into_iter().map(|(_, v)| v.hash).collect();
     let mut total = 0u64;
@@ -119,7 +119,7 @@ pub fn usage_under(repo: &dyn Repository, tracer: &dyn pico2peta_repo::Tracer, p
         }
         let size = match repo.size(&h) {
             Ok(s) => s,
-            Err(pico2peta_core::Error::NotFound(_)) => continue, // collected meanwhile
+            Err(o5s_core::Error::NotFound(_)) => continue, // collected meanwhile
             Err(e) => return Err(e),
         };
         total += size;

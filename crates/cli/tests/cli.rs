@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_pico2peta"))
+    Command::new(env!("CARGO_BIN_EXE_o5s"))
 }
 
 fn run(repo: &Path, args: &[&str]) -> Output {

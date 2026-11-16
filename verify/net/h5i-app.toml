@@ -1,5 +1,5 @@
 # Read by `h5i app`: extract, check, prove, mutate, doctor.
-# The extracted crate is pico2peta's net kernel (front decisions and wire parsers).
+# The extracted crate is o5s's net kernel (front decisions and wire parsers).
 
 [extract]
 crate = "../../crates/net-kernel"
@@ -21,39 +21,39 @@ include = ["h5i_app_std"]
 std-specs = true
 
 [obligations]
-# `check` requires exactly `H5iAppLib.Obligation.PanicFree pico2peta_net_kernel.transition` and
-# `ReadOnlySound pico2peta_net_kernel.read_only pico2peta_net_kernel.transition (·.val)`.
-panic-free = "pico2peta_net_kernel.Spec.Obligations.panic_free"
-read-only = "pico2peta_net_kernel.Spec.Obligations.read_only_sound"
+# `check` requires exactly `H5iAppLib.Obligation.PanicFree o5s_net_kernel.transition` and
+# `ReadOnlySound o5s_net_kernel.read_only o5s_net_kernel.transition (·.val)`.
+panic-free = "o5s_net_kernel.Spec.Obligations.panic_free"
+read-only = "o5s_net_kernel.Spec.Obligations.read_only_sound"
 
 [check]
 theorems = [
-  "pico2peta_net_kernel.Spec.decode_hex_spec",
-  "pico2peta_net_kernel.Spec.pkt_len_spec",
-  "pico2peta_net_kernel.Spec.parse_dec_u64_spec",
-  "pico2peta_net_kernel.Spec.xet_chunk_header_spec",
-  "pico2peta_net_kernel.Spec.GitPush.decide_push_spec",
-  "pico2peta_net_kernel.Spec.GitPush.accepted_update",
-  "pico2peta_net_kernel.Spec.GitPush.accepted_delete",
-  "pico2peta_net_kernel.Spec.GitPush.atomic_all_or_nothing",
-  "pico2peta_net_kernel.Spec.Policy.is_under_spec",
-  "pico2peta_net_kernel.Spec.Policy.allows_spec",
-  "pico2peta_net_kernel.Spec.Policy.reads_some_spec",
-  "pico2peta_net_kernel.Spec.Policy.cells_of_spec",
-  "pico2peta_net_kernel.Spec.Policy.visible_object_spec",
-  "pico2peta_net_kernel.Spec.Policy.permits_spec",
-  "pico2peta_net_kernel.Spec.Publish.decide_create_once_spec",
-  "pico2peta_net_kernel.Spec.Publish.release_files_never_change",
-  "pico2peta_net_kernel.Spec.Publish.decide_manifest_spec",
-  "pico2peta_net_kernel.Spec.Publish.manifest_accepted",
-  "pico2peta_net_kernel.Spec.Publish.decide_commit_spec",
-  "pico2peta_net_kernel.Spec.Publish.commit_accepted",
-  "pico2peta_net_kernel.Spec.Publish.decide_rev_spec",
-  "pico2peta_net_kernel.Spec.Lfs.parse_lfs_pointer_spec",
-  "pico2peta_net_kernel.Spec.Lfs.ptr_accepted",
-  "pico2peta_net_kernel.Spec.Obligations.ref_of_spec",
-  "pico2peta_net_kernel.guarded_transition.authorized",
-  "pico2peta_net_kernel.guarded_transition.read_only_sound",
+  "o5s_net_kernel.Spec.decode_hex_spec",
+  "o5s_net_kernel.Spec.pkt_len_spec",
+  "o5s_net_kernel.Spec.parse_dec_u64_spec",
+  "o5s_net_kernel.Spec.xet_chunk_header_spec",
+  "o5s_net_kernel.Spec.GitPush.decide_push_spec",
+  "o5s_net_kernel.Spec.GitPush.accepted_update",
+  "o5s_net_kernel.Spec.GitPush.accepted_delete",
+  "o5s_net_kernel.Spec.GitPush.atomic_all_or_nothing",
+  "o5s_net_kernel.Spec.Policy.is_under_spec",
+  "o5s_net_kernel.Spec.Policy.allows_spec",
+  "o5s_net_kernel.Spec.Policy.reads_some_spec",
+  "o5s_net_kernel.Spec.Policy.cells_of_spec",
+  "o5s_net_kernel.Spec.Policy.visible_object_spec",
+  "o5s_net_kernel.Spec.Policy.permits_spec",
+  "o5s_net_kernel.Spec.Publish.decide_create_once_spec",
+  "o5s_net_kernel.Spec.Publish.release_files_never_change",
+  "o5s_net_kernel.Spec.Publish.decide_manifest_spec",
+  "o5s_net_kernel.Spec.Publish.manifest_accepted",
+  "o5s_net_kernel.Spec.Publish.decide_commit_spec",
+  "o5s_net_kernel.Spec.Publish.commit_accepted",
+  "o5s_net_kernel.Spec.Publish.decide_rev_spec",
+  "o5s_net_kernel.Spec.Lfs.parse_lfs_pointer_spec",
+  "o5s_net_kernel.Spec.Lfs.ptr_accepted",
+  "o5s_net_kernel.Spec.Obligations.ref_of_spec",
+  "o5s_net_kernel.guarded_transition.authorized",
+  "o5s_net_kernel.guarded_transition.read_only_sound",
 ]
 
 # Bugs the proofs must reject (`h5i app mutate`). Each `old` occurs once in `file`.

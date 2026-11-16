@@ -19,12 +19,12 @@ kernel and policy:
 
 Not covered here: that the shell builds the snapshot truthfully (the refs it names and each
 object's cells, from core's reachability index; the index's invariant is core's obligation),
-and that the store commits the writes the core's name-layer kernel accepts. pico2peta's store
+and that the store commits the writes the core's name-layer kernel accepts. o5s's store
 is not PostgreSQL, so h5i's `Storage` obligation does not apply; it is a trusted assumption of
 this deployment (docs/NET_PROGRESS.md, "h5i rebuild").
 -/
-open Aeneas Aeneas.Std Result H5iAppLib pico2peta_net_kernel
+open Aeneas Aeneas.Std Result H5iAppLib o5s_net_kernel
 
 h5i_derive_all
 
-h5i_authz pico2peta_net_kernel.guarded_transition
+h5i_authz o5s_net_kernel.guarded_transition

@@ -1,5 +1,5 @@
 [package]
-name = "pico2peta-fuzz"
+name = "o5s-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2024"
@@ -12,14 +12,14 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-pico2peta-core = { path = "../crates/core" }
-pico2peta-pack = { path = "../crates/pack" }
-pico2peta-refs = { path = "../crates/refs" }
-pico2peta-server = { path = "../crates/server" }
-pico2peta-backend-s3 = { path = "../crates/backend-s3" }
-pico2peta-attest = { path = "../crates/attest" }
-pico2peta-prov = { path = "../crates/prov" }
-pico2peta-repo = { path = "../crates/repo" }
+o5s-core = { path = "../crates/core" }
+o5s-pack = { path = "../crates/pack" }
+o5s-refs = { path = "../crates/refs" }
+o5s-server = { path = "../crates/server" }
+o5s-backend-s3 = { path = "../crates/backend-s3" }
+o5s-attest = { path = "../crates/attest" }
+o5s-prov = { path = "../crates/prov" }
+o5s-repo = { path = "../crates/repo" }
 tempfile = "3"
 
 [[bin]]

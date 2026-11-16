@@ -1,7 +1,7 @@
-//! The access kernel on `h5i-app-http` (docs/H5I_PLAN.md, H2): an [`H5iApp`] over pico2peta's
+//! The access kernel on `h5i-app-http` (docs/H5I_PLAN.md, H2): an [`H5iApp`] over o5s's
 //! own store instead of PostgreSQL.
 //!
-//! - The kernel is `pico2peta_net_kernel::App`, i.e. `h5i_app_core::Authz<Access>`: its
+//! - The kernel is `o5s_net_kernel::App`, i.e. `h5i_app_core::Authz<Access>`: its
 //!   `transition` is `guard_viewed` over the access kernel, proven in `verify/net`
 //!   (`guarded_transition.authorized`, noninterference, `read_only_sound`, `panic_free`).
 //! - [`NetExecutor`] is the `h5i_app_core::Executor`: it builds the command's snapshot from
@@ -22,11 +22,11 @@ use h5i_app_core::{Executed, Executor, Kernel, ReplyCodec, TenantId};
 use h5i_app_http::{AuthError, Authenticator};
 use h5i_app_json::Value;
 use h5i_app_std::authz::Guarded;
-use pico2peta_net_kernel::access::{self, Command, READ, Snapshot};
+use o5s_net_kernel::access::{self, Command, READ, Snapshot};
 use std::sync::{Arc, RwLock};
 
 /// The access kernel, guarded (`Authz<Access>`).
-pub type NetKernel = pico2peta_net_kernel::App;
+pub type NetKernel = o5s_net_kernel::App;
 
 /// The kernel on h5i-app-http.
 pub type NetApp = h5i_app_http::H5iApp<NetKernel, NetStore, NetExecutor>;
@@ -43,9 +43,9 @@ impl std::fmt::Display for ExecError {
 
 impl std::error::Error for ExecError {}
 
-/// Runs the access kernel on snapshots read from pico2peta's store.
+/// Runs the access kernel on snapshots read from o5s's store.
 pub struct NetExecutor {
-    pub reach: Option<pico2peta_repo::reach::ReachIndex>,
+    pub reach: Option<o5s_repo::reach::ReachIndex>,
     /// Shared with `AppState::cells` (policy reloads change them).
     pub cells: Arc<RwLock<Vec<String>>>,
 }
@@ -67,10 +67,8 @@ impl NetExecutor {
         if candidates.is_empty() {
             return Ok(empty());
         }
-        let hs: Vec<pico2peta_core::Hash> = hashes
-            .iter()
-            .map(|h| pico2peta_core::Hash(<[u8; 32]>::try_from(h.as_slice()).unwrap_or([0; 32])))
-            .collect();
+        let hs: Vec<o5s_core::Hash> =
+            hashes.iter().map(|h| o5s_core::Hash(<[u8; 32]>::try_from(h.as_slice()).unwrap_or([0; 32]))).collect();
         let reaching = tokio::task::spawn_blocking(move || reach.cells_reaching_many(&hs, &candidates))
             .await
             .map_err(|e| ExecError(format!("reach lookup: {e}")))?
@@ -177,7 +175,7 @@ impl ReplyCodec<NetKernel> for NetStore {
 }
 
 fn unused() -> h5i_app_pg::DbError {
-    h5i_app_pg::DbError::Pool("pico2peta does not use PostgreSQL: NetExecutor runs the kernel".into())
+    h5i_app_pg::DbError::Pool("o5s does not use PostgreSQL: NetExecutor runs the kernel".into())
 }
 
 impl h5i_app_pg::Store<NetKernel> for NetStore {

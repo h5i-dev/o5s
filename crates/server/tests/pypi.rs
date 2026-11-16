@@ -1,36 +1,36 @@
 //! The PyPI front against real, unmodified clients: twine (upload), pip and uv (install),
 //! plus the upstream proxy-cache (a second server proxying the first).
 //!
-//! Needs `PICO2PETA_PKG_PYTHON` (a Python with pip and twine; default: the shared tools venv)
-//! and optionally `PICO2PETA_UV`. Skipped when absent.
+//! Needs `O5S_PKG_PYTHON` (a Python with pip and twine; default: the shared tools venv)
+//! and optionally `O5S_UV`. Skipped when absent.
 
 mod common;
 
 use common::*;
-use pico2peta_server::config::{Access, Upstream};
+use o5s_server::config::{Access, Upstream};
 use std::path::Path;
 use std::process::{Command, Output};
 
 fn python() -> Option<String> {
-    let p = std::env::var("PICO2PETA_PKG_PYTHON")
-        .unwrap_or_else(|_| "/mnt/scratch/pico2peta/tools/pkgvenv/bin/python".into());
+    let p =
+        std::env::var("O5S_PKG_PYTHON").unwrap_or_else(|_| "/mnt/scratch/pico2peta/tools/pkgvenv/bin/python".into());
     let ok = Command::new(&p).args(["-c", "import pip, twine"]).output().is_ok_and(|o| o.status.success());
     if ok {
         Some(p)
     } else {
-        eprintln!("skipping: no python with pip and twine at {p} (set PICO2PETA_PKG_PYTHON)");
+        eprintln!("skipping: no python with pip and twine at {p} (set O5S_PKG_PYTHON)");
         None
     }
 }
 
 fn uv() -> Option<String> {
-    let p = std::env::var("PICO2PETA_UV").unwrap_or_else(|_| "/mnt/scratch/pico2peta/tools/uv/uv".into());
+    let p = std::env::var("O5S_UV").unwrap_or_else(|_| "/mnt/scratch/pico2peta/tools/uv/uv".into());
     Command::new(&p).arg("--version").output().is_ok_and(|o| o.status.success()).then_some(p)
 }
 
 fn run(c: &mut Command) -> Output {
     // pip/twine/uv temp files stay inside this test's own directory.
-    let tmp = std::env::temp_dir().join(format!("p2p-pypi-test-{}", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("o5s-pypi-test-{}", std::process::id()));
     std::fs::create_dir_all(&tmp).unwrap();
     let o = c.env("TMPDIR", &tmp).output().unwrap();
     if !o.status.success() {
@@ -102,7 +102,7 @@ fn twine_upload_pip_and_uv_install_and_proxy_cache() {
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(std::env::temp_dir().join(format!("p2p-pypi-test-{}", std::process::id())));
+            let _ = std::fs::remove_dir_all(std::env::temp_dir().join(format!("o5s-pypi-test-{}", std::process::id())));
         }
     }
     let _cleanup = Cleanup;
@@ -247,9 +247,9 @@ fn twine_upload_pip_and_uv_install_and_proxy_cache() {
     up.stop.take().map(|s| s.send(()));
     drop(up);
     // Zero-grace GC on the proxy first: cached files are reachable through their records.
-    let repo = pico2peta_repo::LocalRepo::open(proxy.dir.path().join("repo")).unwrap();
-    let fronts = pico2peta_server::fronts::Fronts::open(repo).unwrap();
-    let opts = pico2peta_repo::GcOptions {
+    let repo = o5s_repo::LocalRepo::open(proxy.dir.path().join("repo")).unwrap();
+    let fronts = o5s_server::fronts::Fronts::open(repo).unwrap();
+    let opts = o5s_repo::GcOptions {
         grace: std::time::Duration::ZERO,
         allow_short_grace: true,
         repack_all: true,
@@ -257,7 +257,7 @@ fn twine_upload_pip_and_uv_install_and_proxy_cache() {
     };
     for _ in 0..3 {
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        let prov = pico2peta_prov::ProvTracer { inner: pico2peta_server::fronts::Leaves };
+        let prov = o5s_prov::ProvTracer { inner: o5s_server::fronts::Leaves };
         fronts.repo.gc_with_fronts(&opts, Some(&prov), false).unwrap();
     }
     let t = w.path().join("t7");

@@ -1,5 +1,5 @@
 -- Copied from h5i-app-std's proofs/StdSpecs.lean by `h5i app extract`. Do not edit.
-import Pico2petaNetKernel
+import O5sNetKernel
 import H5iAppLib
 /-!
 # Specs of h5i-app-std
@@ -15,7 +15,7 @@ extracted functions have the same names and bodies there, so the same proofs
 go through. Aeneas extracts only the functions the kernel calls, so each
 spec is guarded by its function (`h5i_when`).
 -/
-open Aeneas Aeneas.Std Result H5iAppLib pico2peta_net_kernel
+open Aeneas Aeneas.Std Result H5iAppLib o5s_net_kernel
 
 -- In a kernel's copy, the specs of functions the kernel does not call are
 -- skipped, and their tactics would be reported as never run.

@@ -16,7 +16,7 @@ EXP1=$CARGO_TARGET_DIR/release/exp1
 EXP3=$CARGO_TARGET_DIR/release/exp3
 mkdir -p "$W"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-(cd "$ROOT" && nice cargo build -q --release -j1 -p pico2peta-exp1 -p pico2peta-exp3)
+(cd "$ROOT" && nice cargo build -q --release -j1 -p o5s-exp1 -p o5s-exp3)
 COMMIT=$(git -C "$ROOT" rev-parse --short HEAD)
 DIRTY=$(git -C "$ROOT" status --porcelain -- crates bench | wc -l)
 run() { # run <work-dir> <name> <variant>

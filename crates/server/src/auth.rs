@@ -189,9 +189,9 @@ impl Authenticator for TokenAuthenticator {
 /// The access kernel's level for `a` (1 read, 2 write, 3 admin).
 pub fn level(a: Access) -> u8 {
     match a {
-        Access::Read => pico2peta_net_kernel::access::READ,
-        Access::Write => pico2peta_net_kernel::access::WRITE,
-        Access::Admin => pico2peta_net_kernel::access::ADMIN,
+        Access::Read => o5s_net_kernel::access::READ,
+        Access::Write => o5s_net_kernel::access::WRITE,
+        Access::Admin => o5s_net_kernel::access::ADMIN,
     }
 }
 
@@ -225,23 +225,20 @@ impl Authorizer {
     /// The grants that apply to `p`, as the access kernel takes them (`net-kernel/src/access.rs`).
     /// Which policy entries apply to a principal (its name, `*`, or anonymous) is this shell's
     /// part; what they allow is the kernel's.
-    pub fn grants(&self, p: &Principal) -> pico2peta_net_kernel::access::Principal {
+    pub fn grants(&self, p: &Principal) -> o5s_net_kernel::access::Principal {
         let grants = self
             .snapshot()
             .iter()
             .filter(|e| Self::applies(e, p))
-            .map(|e| pico2peta_net_kernel::access::Grant {
-                prefix: e.namespace.as_bytes().to_vec(),
-                access: level(e.access),
-            })
+            .map(|e| o5s_net_kernel::access::Grant { prefix: e.namespace.as_bytes().to_vec(), access: level(e.access) })
             .collect();
-        pico2peta_net_kernel::access::Principal { grants }
+        o5s_net_kernel::access::Principal { grants }
     }
 
     /// May `p` perform `access` on name (or namespace prefix) `path`? Decided by the extracted
     /// access kernel (`access::allows`).
     pub fn allows(&self, p: &Principal, path: &str, access: Access) -> bool {
-        pico2peta_net_kernel::access::allows(&self.grants(p), path.as_bytes(), level(access))
+        o5s_net_kernel::access::allows(&self.grants(p), path.as_bytes(), level(access))
     }
 
     /// Does `p` hold `access` on at least one namespace?

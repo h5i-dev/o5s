@@ -2,7 +2,7 @@
 //!
 //! Record (little endian):
 //! ```text
-//! magic  u32  = "P2PR"
+//! magic  u32  = "O5SR"
 //! kind   u8   0 = blob, 1 = manifest
 //! codec  u8   0 = raw,  1 = zstd
 //! rsvd   u16  = 0
@@ -13,16 +13,16 @@
 //! crc32  u32  over all preceding bytes of the record
 //! ```
 
-use pico2peta_core::{Error, Hash, Result};
+use o5s_core::{Error, Hash, Result};
 use std::io::Read as _;
 
 /// Pack format v1: magic, then records.
-pub const PACK_MAGIC_V1: &[u8; 8] = b"P2PPACK1";
+pub const PACK_MAGIC_V1: &[u8; 8] = b"O5SPACK1";
 /// Pack format v2 (current): magic, a 16-byte random nonce, then records.
 /// The nonce makes every pack's content (and so its content-derived name)
 /// unique, even when two packs hold the same records in the same order. GC
 /// relies on this: a rewritten copy must never alias a condemned pack.
-pub const PACK_MAGIC: &[u8; 8] = b"P2PPACK2";
+pub const PACK_MAGIC: &[u8; 8] = b"O5SPACK2";
 /// Length of the v2 pack header (magic + nonce).
 pub const PACK_HEADER_V2: usize = 24;
 
@@ -37,9 +37,9 @@ pub fn pack_header_len(magic: &[u8]) -> Option<u64> {
     }
 }
 /// Index format v1 magic (read-only; v2 is written).
-pub const IDX_MAGIC: &[u8; 8] = b"P2PIDX01";
+pub const IDX_MAGIC: &[u8; 8] = b"O5SIDX01";
 /// Magic at the start of every pack record.
-pub const REC_MAGIC: u32 = u32::from_le_bytes(*b"P2PR");
+pub const REC_MAGIC: u32 = u32::from_le_bytes(*b"O5SR");
 /// Record header length in bytes.
 pub const REC_HEADER: usize = 4 + 1 + 1 + 2 + 32 + 8 + 4;
 /// Record trailer (CRC-32) length in bytes.
@@ -49,14 +49,14 @@ pub const IDX_ENTRY: usize = 32 + 8 + 4 + 8 + 1 + 1;
 /// v2 entries add `frame_inner: u32` and `frame_len: u32` (0 = not framed).
 pub const IDX_ENTRY_V2: usize = IDX_ENTRY + 8;
 /// Index format v2 magic (read-only).
-pub const IDX_MAGIC_V2: &[u8; 8] = b"P2PIDX02";
+pub const IDX_MAGIC_V2: &[u8; 8] = b"O5SIDX02";
 /// Index format v3 magic (current). Layout after the magic:
 /// `n_records u64 | n_entries u64 | records | entries | blake3[32]`, where a
 /// record is `offset u64 | stored_len u32 | raw_len u64 | kind u8 | codec u8`
 /// (22 B) and an entry is `hash[32] | record u32 | inner u32 | len u32` (44 B).
 /// Frame members share their frame's record. For non-frame records,
 /// `inner = len = 0` and the length is the record's `raw_len`.
-pub const IDX_MAGIC_V3: &[u8; 8] = b"P2PIDX03";
+pub const IDX_MAGIC_V3: &[u8; 8] = b"O5SIDX03";
 const IDX3_REC: usize = 22;
 const IDX3_ENT: usize = 44;
 /// Upper bound on a blob record's logical length (blobs are below the
@@ -204,8 +204,8 @@ pub fn encode_record(kind: Kind, codec: Codec, hash: &Hash, raw_len: u64, payloa
 /// Parses a header from at least `REC_HEADER` bytes.
 pub fn parse_header(b: &[u8]) -> Result<RecHeader> {
     // The decoding is the extracted kernel's (`codec::parse_header`, proved equal to its spec).
-    use pico2peta_kernel::codec::HeaderError;
-    let h = match pico2peta_kernel::codec::parse_header(b) {
+    use o5s_kernel::codec::HeaderError;
+    let h = match o5s_kernel::codec::parse_header(b) {
         Ok(h) => h,
         Err(HeaderError::Short) => return Err(Error::Corrupt("short record header".into())),
         Err(HeaderError::BadMagic) => return Err(Error::Corrupt("bad record magic".into())),
@@ -809,12 +809,12 @@ impl<T: AsRef<[u8]>> IdxV3View<T> {
 
 // ---------------------------------------------------------------------------
 // Multi-pack index (derived, local): one sorted table across many packs.
-//   "P2PMIDX1" | n_packs u32 | n_packs * name[64 hex] | n u64 |
+//   "O5SMIDX1" | n_packs u32 | n_packs * name[64 hex] | n u64 |
 //   n * (hash[32] | pack u32 | entry u32) | blake3[32]
 // ---------------------------------------------------------------------------
 
 /// Multi-pack index magic.
-pub const MIDX_MAGIC: &[u8; 8] = b"P2PMIDX1";
+pub const MIDX_MAGIC: &[u8; 8] = b"O5SMIDX1";
 const MIDX_ENT: usize = 40;
 
 /// Writes a multi-pack index over `packs` (name, v3 view) to `w` by k-way
