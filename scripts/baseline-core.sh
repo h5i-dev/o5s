@@ -17,6 +17,8 @@ OUT=${OUT:-$SCRATCH/baseline/$COMMIT}
 WORK=$SCRATCH/bench-micro/baseline
 LOCK=$SCRATCH/bench.lock
 mkdir -p "$OUT" "$WORK"
+# Build the binary this commit measures (a missing or stale one would measure something else).
+(cd "$ROOT" && nice cargo build -q --release -j2 -p o5s-micro)
 
 load() { cut -d' ' -f1 /proc/loadavg; }
 # run NAME REPS ARGS...: one raw file per rep.

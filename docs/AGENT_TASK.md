@@ -1,6 +1,6 @@
 # Task for the autonomous worker session
 
-You are working autonomously in a tmux session on `/home/ec2-user/Dev/pico2peta` (branch `demo`).
+You are working autonomously in a tmux session on `/home/ec2-user/Dev/pico2peta`, on a task branch cut from `origin/main` (see Git workflow below).
 The human may be disconnected for long periods — keep making progress without waiting for input.
 
 ## Read first
@@ -30,14 +30,19 @@ The goal is a production-grade storage system that teams can run for real data, 
 - **Engineering hygiene:** `cargo clippy -- -D warnings`, `cargo fmt`, no `unwrap()`/`expect()` on non-invariant paths, no panics on bad input, fuzz targets for every parser/decoder, documented public APIs, `CHANGELOG`, CI config (GitHub Actions), reproducible benchmarks.
 - **Performance is a requirement:** streaming I/O (never load whole large objects into memory), bounded memory, parallelism where it pays, benchmarks with recorded numbers vs Git/OCI/Xet baselines.
 - No shortcuts that would need a rewrite to productionize. If you must defer something, record it in `docs/PROGRESS.md` under "Production gaps" with what is missing.
-- Branch name `demo` is historical; treat the code as the real product.
 
 ## Team (two Claude sessions, both implementers)
 This is the build-out phase: both sessions write product code. Formal verification (Lean, differential testing) is deferred until the core APIs settle.
-- **You (session `o5s`, worktree `/home/ec2-user/Dev/pico2peta`, branch `demo`) = core lead.** You own `crates/core`, `crates/pack`, `crates/refs`, `crates/repo`, `crates/cli`, `bench/`, and the core traits (`Backend`, `ObjectStore`, ref store). Priorities: M1–M4 at production quality (durability, crash recovery, multi-process safety, streaming), then Experiment 1, then GC/repack.
-- **Session `o5s-net` (worktree `/home/ec2-user/Dev/pico2peta-net`, branch `net`) = backends & server.** Owns `crates/backend-s3`, `crates/server`, `crates/client`, `deploy/`, `.github/workflows/`. Builds a real S3 backend and the network service on top of your traits.
+- **You (session `o5s`, worktree `/home/ec2-user/Dev/pico2peta`) = core lead.** You own `crates/core`, `crates/pack`, `crates/refs`, `crates/repo`, `crates/cli`, `bench/`, and the core traits (`Backend`, `ObjectStore`, ref store). Priorities: M1–M4 at production quality (durability, crash recovery, multi-process safety, streaming), then Experiment 1, then GC/repack.
+- **Session `o5s-net` (worktree `/home/ec2-user/Dev/pico2peta-net`) = backends & server.** Owns `crates/backend-s3`, `crates/server`, `crates/client`, `deploy/`, `.github/workflows/`. Builds a real S3 backend and the network service on top of your traits.
 - **Interfaces:** you own the trait definitions. Stabilize `Backend` and the repo-level API (`put/get/resolve/replace`) early and note every breaking change under "API changes" in `docs/PROGRESS.md`. The net session requests trait changes under "Requests for core" in its `docs/NET_PROGRESS.md`, not by editing your crates.
-- **Integration:** `git merge net` into `demo` at each milestone (at least every ~2 hours); keep the workspace building. Add the net crates to the workspace `members` when merging.
+- **Integration:** **Git workflow (from the human, 2026-11-16).** There are no long-lived `demo` or `net` branches any more.
+  - Each task gets its own branch cut from the current `origin/main` (`git fetch; git switch -c <topic> origin/main`).
+  - Agents push only their task branches, gate green (check `scripts/check.sh`'s exit code, never off a pipe). Never
+    force-push, never push `main`, no Claude attribution.
+  - The human opens the PR and merges it. The next task branches from the new `main`.
+  - When one session needs the other's unmerged work, it merges that session's pushed task branch and says so in
+    its message.
 - Lean proofs and the model/difftest (M5, M7) are deferred. Keep a lightweight in-crate reference model + proptests where they find bugs cheaply.
 
 ## Goals (in order)
@@ -53,7 +58,7 @@ This is the build-out phase: both sessions write product code. Formal verificati
 5. Later layers (provenance, Git/OCI adapters, GC) only after the above are solid.
 
 ## Working rules
-- Commit early and often on branch `demo` with clear messages. **Do not add any Claude / Claude Code attribution** (no `Co-Authored-By: Claude…` trailer, no "Generated with Claude Code"). A commit-msg hook strips them anyway. **Push `demo` to `origin` yourself** after each milestone or meaningful batch, once `scripts/check.sh` passes (`git push origin demo`; never force-push, never push `main`). Don't open PRs unless asked.
+- Commit early and often on your task branch with clear messages. **Do not add any Claude / Claude Code attribution** (no `Co-Authored-By: Claude…` trailer, no "Generated with Claude Code"). A commit-msg hook strips them anyway. **Push your task branch to `origin` yourself** once `scripts/check.sh` passes (`git push origin <branch>`; never force-push, never push `main`). The human opens the PR.
 - Keep `docs/PROGRESS.md` updated after each milestone (what's done, what's next, blockers) — this is how the human catches up after reconnecting.
 - Run `cargo test` before each commit. Keep `cargo build` warnings at zero where practical.
 - If you hit a genuine decision only the human can make, write it under "Questions for human" in `docs/PROGRESS.md` and continue with the most reasonable default.
