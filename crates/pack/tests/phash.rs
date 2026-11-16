@@ -49,6 +49,19 @@ proptest! {
         prop_assert_eq!(phash::hash_stream(split(&data, &cuts), len as u64, threads), Some(want));
     }
 
+    /// Any mix of segments hashed inline and on the workers gives the same hash.
+    #[test]
+    fn any_offload_pattern_equals_serial(len in length(), seed in any::<u64>(), threads in 2usize..5, pattern in any::<u64>(), cuts in prop::collection::vec(any::<usize>(), 0..24)) {
+        let data = bytes(seed, len);
+        let want = Hash(*blake3::hash(&data).as_bytes());
+        let mut i = 0u32;
+        let got = phash::hash_stream_with(split(&data, &cuts), len as u64, threads, || {
+            i = (i + 1) % 64;
+            pattern >> i & 1 == 1
+        });
+        prop_assert_eq!(got, Some(want));
+    }
+
     #[test]
     fn wrong_length_is_refused(len in (2 * SEGMENT + 1)..(5 * SEGMENT), seed in any::<u64>(), short in 1usize..4096) {
         let data = bytes(seed, len);

@@ -77,6 +77,26 @@ its offset) and combined in input order by BLAKE3's own stack rule.
 | verified read, strict, vs warm `cat` | 0.173×, 0.170× | 0.225×, 0.220× |
 | verified read, eof, vs warm `cat` | 0.185×, 0.183× | 0.319×, 0.314× |
 
+**Correction (same day): the first version slowed compressible reads, and the fix.** Net's A/B found `/v1`
+GET of a 270 MB model +25 % slower on `d6bfd5f`. My A/B had used only incompressible data. On compressible
+64 MiB reads, strict `open` fell from about 1,115 to 890 MB/s and `get` by 17 %. Two causes, each confirmed by a
+build that removes it:
+- `read_blob` called `hash_threads()` per chunk, and `std::thread::available_parallelism()` reads cgroup files on
+  every call (`statx`, `open`, `read` in the profile). That added several syscalls to every 64 KiB chunk. It is
+  now computed once (`OnceLock`), and only for objects large enough to split.
+- Extra hash threads only pay when hashing is the bottleneck. When decompression is, they take cores from the
+  read-ahead workers. The verify thread now offloads a segment only after the reader found its channel full; it
+  hashes inline otherwise, as the bytes arrive, so nothing is held.
+
+After the fix (3 interleaved rounds each, before vs after, load 1.8–2.1):
+
+| 64 MiB read | before | after |
+|---|---|---|
+| text (compressible) `get` / strict `open` / eof `open`, MB/s | 882–911 / 1106–1124 / 1271–1286 | 897–915 / 1111–1123 / 1233–1277 |
+| random `get` / strict `open` / eof `open`, MB/s | 1326–1333 / 1991–2003 / 2120–2132 | 1339–1347 / 2453–2562 / 3039–3265 |
+
+A proptest also covers every mix of inline and offloaded segments (`any_offload_pattern_equals_serial`).
+
 **The ≥ 0.50× target is not reached.** Warm `cat` here is a page-cache copy at about 11.7 GB/s, so 0.50× needs
 about 5.8 GB/s of verified bytes. Strict hashes every byte twice (per chunk and whole object), which needs
 11.6 GB/s of BLAKE3 on top of the reads and copies; the 4 cores give about half of that. Eof hashes once and

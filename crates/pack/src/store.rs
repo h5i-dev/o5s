@@ -1456,7 +1456,8 @@ impl PackStore {
         // bytes. Frames keep it (one CRC covers all members, and decompression
         // dominates their cost).
         let (_, data) = self.read_record(hash, loc, loc.frame.is_some())?;
-        if !digest_ok(hash, &crate::phash::hash(&data, hash_threads())) {
+        let threads = if crate::phash::parallel_pays(data.len() as u64) { hash_threads() } else { 1 };
+        if !digest_ok(hash, &crate::phash::hash(&data, threads)) {
             return Err(Error::Corrupt(format!("content hash mismatch for {hash}")));
         }
         Ok(data)
@@ -2915,13 +2916,24 @@ struct ChunkReader {
 
 /// A whole-object hash running on its own thread: chunk sender, the thread
 /// (its result is the hash of exactly `span` bytes, or `None`), and the expected hash.
-type VerifyThread = (std::sync::mpsc::SyncSender<Arc<Vec<u8>>>, std::thread::JoinHandle<Option<Hash>>, Hash);
+type VerifyThread = (
+    std::sync::mpsc::SyncSender<Arc<Vec<u8>>>,
+    std::thread::JoinHandle<Option<Hash>>,
+    Hash,
+    Arc<std::sync::atomic::AtomicBool>,
+);
+// The verify thread hands a segment to extra hash threads only after the reader found its
+// channel full ("behind"): hashing is then the bottleneck. When decompression is (compressible
+// data), the extra threads would only take cores from the read-ahead workers (BENCH.md, H4).
 
 /// Threads for one whole-object hash ([`crate::phash`]): half the cores, at most 4. The
 /// read-ahead workers (which also hash, per chunk, in strict mode) and the reader itself need
 /// the rest: on 4 cores, 2 hash threads beat 4 (BENCH.md, H4).
+/// Computed once: `available_parallelism` reads cgroup files on every call, which per
+/// chunk cost about 20 % of a compressible read (BENCH.md, H4).
 fn hash_threads() -> usize {
-    (std::thread::available_parallelism().map_or(1, |n| n.get()) / 2).clamp(1, 4)
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(|| (std::thread::available_parallelism().map_or(1, |n| n.get()) / 2).clamp(1, 4))
 }
 
 /// One read-ahead job: fetch and verify chunk `hash`, return bytes `[a, b)`.
@@ -2965,11 +2977,16 @@ impl ChunkReader {
         // hash; `span` is the object's length here (whole reads only).
         let hasher = verify.filter(|_| span >= READAHEAD_MIN).and_then(|want| {
             let (tx, rx) = std::sync::mpsc::sync_channel::<Arc<Vec<u8>>>(READAHEAD_PER_WORKER * 4);
+            let behind = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let b = behind.clone();
             std::thread::Builder::new()
                 .name("p2p-verify".into())
-                .spawn(move || crate::phash::hash_stream(rx, span, hash_threads()))
+                .spawn(move || {
+                    let offload = || b.swap(false, std::sync::atomic::Ordering::Relaxed);
+                    crate::phash::hash_stream_with(rx, span, hash_threads(), offload)
+                })
                 .ok()
-                .map(|j| (tx, j, want))
+                .map(|j| (tx, j, want, behind))
         });
         ChunkReader {
             store,
@@ -3104,7 +3121,7 @@ impl Read for ChunkReader {
                     {
                         return Err(io_err(Error::Corrupt(format!("reassembled hash mismatch for {want}"))));
                     }
-                    if let Some((tx, join, want)) = self.hasher.take() {
+                    if let Some((tx, join, want, _)) = self.hasher.take() {
                         drop(tx);
                         let hs = join.join().map_err(|_| io_err(Error::Corrupt("verify thread panicked".into())))?;
                         // `None`: the bytes returned were not the object's length.
@@ -3119,8 +3136,15 @@ impl Read for ChunkReader {
                     if let Some((hs, _)) = self.verify.as_mut() {
                         hs.update(&d);
                     }
-                    if let Some((tx, _, _)) = &self.hasher
-                        && tx.send(d.clone()).is_err()
+                    if let Some((tx, _, _, behind)) = &self.hasher
+                        && match tx.try_send(d.clone()) {
+                            Ok(()) => false,
+                            Err(std::sync::mpsc::TrySendError::Full(d)) => {
+                                behind.store(true, std::sync::atomic::Ordering::Relaxed);
+                                tx.send(d).is_err()
+                            }
+                            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => true,
+                        }
                     {
                         return Err(io_err(Error::Corrupt("verify thread died".into())));
                     }
