@@ -49,11 +49,6 @@ o5s-server serve --config deploy/server.toml  # local disk or any S3-compatible 
 export O5S_REMOTE=https://o5s.example.com O5S_TOKEN=o5s_...
 o5s put --for-name models/acme/main model.safetensors
 ```
-
-Exit codes: 0 ok, 1 error, 2 not found, 3 conflict, 4 forbidden, 5 unauthorized.
-
-### Supported fronts
-
 Each front speaks its domain's protocol, so the real client works unmodified
 (`S=o5s.example.com`, `TOKEN=o5s_...`).
 
@@ -89,6 +84,3 @@ mvn deploy -DaltDeploymentRepository=o5s::https://$S/maven/releases
 curl -T big.bin -H "Authorization: Bearer $TOKEN" https://$S/v1/objects   # {"hash","size"}
 curl -H "Authorization: Bearer $TOKEN" -r 0-1023 https://$S/v1/objects/<hash>
 ```
-
-PyPI, npm and Maven can also proxy-cache their public upstreams. Every front shares one store, so the same bytes
-pushed through Git, PyPI and OCI are stored once, under one provenance log, audit log and policy.
