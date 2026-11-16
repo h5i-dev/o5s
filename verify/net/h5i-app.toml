@@ -1,0 +1,15 @@
+# Read by `h5i app`: extract, check, prove, mutate, doctor.
+# The extracted crate is pico2peta's net kernel (front decisions and wire parsers).
+
+[extract]
+crate = "../../crates/net-kernel"
+start-from = [
+  "parse::decode_hex",
+  "parse::pkt_len",
+  "parse::parse_dec_u64",
+  "parse::parse_lfs_pointer",
+  "parse::xet_chunk_header",
+]
+
+[check]
+theorems = ["pico2peta_net_kernel.Spec.decode_hex_spec", "pico2peta_net_kernel.Spec.pkt_len_spec"]

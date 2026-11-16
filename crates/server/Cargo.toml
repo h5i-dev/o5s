@@ -17,6 +17,7 @@ pico2peta-prov.workspace = true
 pico2peta-weights.workspace = true
 pico2peta-attest = { path = "../attest" }
 pico2peta-client = { path = "../client" }
+pico2peta-net-kernel = { path = "../net-kernel" }
 pico2peta-backend-s3 = { path = "../backend-s3" }
 serde.workspace = true
 toml.workspace = true

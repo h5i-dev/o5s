@@ -1336,6 +1336,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "pico2peta-net-kernel"
+version = "0.1.0"
+
+[[package]]
 name = "pico2peta-order"
 version = "0.1.0"
 dependencies = [
@@ -1419,6 +1423,7 @@ dependencies = [
  "pico2peta-chunk",
  "pico2peta-client",
  "pico2peta-core",
+ "pico2peta-net-kernel",
  "pico2peta-pack",
  "pico2peta-prov",
  "pico2peta-repo",

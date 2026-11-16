@@ -1,0 +1,27 @@
+[package]
+name = "pico2peta-net-kernel"
+description = "pico2peta's front decisions and wire parsers, extracted to Lean by Charon/Aeneas and proven (verify/net)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# No dependencies yet: extracted to Lean by Charon + Aeneas (h5i-app). The shared types
+# will come from pico2peta-kernel (core).
+[dependencies]
+
+# Written in the Rust subset Aeneas translates: no `?`, no iterator adapters or closures,
+# explicit loops and arithmetic. Clippy's idiomatic rewrites leave that subset.
+[lints.clippy]
+assign_op_pattern = "allow"
+len_zero = "allow"
+manual_range_contains = "allow"
+manual_map = "allow"
+match_like_matches_macro = "allow"
+needless_range_loop = "allow"
+question_mark = "allow"
+ptr_arg = "allow"
+collapsible_if = "allow"
+collapsible_else_if = "allow"
+implicit_saturating_sub = "allow"
+manual_is_multiple_of = "allow"
+single_match = "allow"
