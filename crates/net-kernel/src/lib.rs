@@ -3,6 +3,7 @@
 //! code as extracted. The server calls these functions; it does not reimplement them.
 
 pub mod access;
+pub mod gitpush;
 pub mod parse;
 
 use access::{Access, Command, Error, Hash, Principal, Reply, Row, Snapshot, Write, cells_of, ref_of};

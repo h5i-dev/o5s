@@ -865,7 +865,7 @@ def access.Access.Insts.H5i_app_stdAuthzPolicyPrincipalSnapshotWriteRow :
 }
 
 /-- [pico2peta_net_kernel::drop_ref]: loop body 0:
-    Source: 'crates/net-kernel/src/lib.rs', lines 54:4-58:5
+    Source: 'crates/net-kernel/src/lib.rs', lines 55:4-59:5
     Visibility: public -/
 @[rust_loop_body]
 def drop_ref_loop.body
@@ -894,7 +894,7 @@ def drop_ref_loop.body
     else ok (cont (iter1, out))
 
 /-- [pico2peta_net_kernel::drop_ref]: loop 0:
-    Source: 'crates/net-kernel/src/lib.rs', lines 54:4-58:5
+    Source: 'crates/net-kernel/src/lib.rs', lines 55:4-59:5
     Visibility: public -/
 @[rust_loop]
 def drop_ref_loop
@@ -908,7 +908,7 @@ def drop_ref_loop
     (iter, out)
 
 /-- [pico2peta_net_kernel::drop_ref]:
-    Source: 'crates/net-kernel/src/lib.rs', lines 52:0-60:1
+    Source: 'crates/net-kernel/src/lib.rs', lines 53:0-61:1
     Visibility: public -/
 def drop_ref
   (refs : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize)))
@@ -921,7 +921,7 @@ def drop_ref
     Std.U8 32#usize)))
 
 /-- [pico2peta_net_kernel::apply]: loop body 0:
-    Source: 'crates/net-kernel/src/lib.rs', lines 42:4-48:5
+    Source: 'crates/net-kernel/src/lib.rs', lines 43:4-49:5
     Visibility: public -/
 @[rust_loop_body]
 def apply_loop.body
@@ -940,7 +940,7 @@ def apply_loop.body
     ok (cont (iter1, refs1))
 
 /-- [pico2peta_net_kernel::apply]: loop 0:
-    Source: 'crates/net-kernel/src/lib.rs', lines 42:4-48:5
+    Source: 'crates/net-kernel/src/lib.rs', lines 43:4-49:5
     Visibility: public -/
 @[rust_loop]
 def apply_loop
@@ -953,7 +953,7 @@ def apply_loop
     (iter, refs)
 
 /-- [pico2peta_net_kernel::apply]:
-    Source: 'crates/net-kernel/src/lib.rs', lines 40:0-50:1
+    Source: 'crates/net-kernel/src/lib.rs', lines 41:0-51:1
     Visibility: public -/
 def apply
   (s : access.Snapshot) (ws : alloc.vec.Vec access.Write) :
@@ -981,7 +981,7 @@ def
   apply s ws
 
 /-- [pico2peta_net_kernel::one_row]:
-    Source: 'crates/net-kernel/src/lib.rs', lines 12:0-16:1
+    Source: 'crates/net-kernel/src/lib.rs', lines 13:0-17:1
     Visibility: public -/
 def one_row (r : access.Row) : Result access.Reply := do
   let rows ← alloc.vec.Vec.push (alloc.vec.Vec.new access.Row) r
@@ -995,7 +995,7 @@ inductive access.Error where
 | NotFound : access.Error
 
 /-- [pico2peta_net_kernel::transition]:
-    Source: 'crates/net-kernel/src/lib.rs', lines 20:0-36:1
+    Source: 'crates/net-kernel/src/lib.rs', lines 21:0-37:1
     Visibility: public -/
 def transition
   (_p : access.Principal) (s : access.Snapshot) (cmd : access.Command) :
@@ -1085,6 +1085,221 @@ def guarded_transition
 def read_only (cmd : access.Command) : Result Bool := do
   access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.read_only
     cmd
+
+/-- [pico2peta_net_kernel::gitpush::Ng]
+    Source: 'crates/net-kernel/src/gitpush.rs', lines 15:0-21:1
+    Visibility: public -/
+@[discriminant isize]
+inductive gitpush.Ng where
+| UnsupportedRef : gitpush.Ng
+| StaleOld : gitpush.Ng
+| MissingNew : gitpush.Ng
+| BranchNotCommit : gitpush.Ng
+| AtomicFailed : gitpush.Ng
+
+/-- [pico2peta_net_kernel::gitpush::PushCmd]
+    Source: 'crates/net-kernel/src/gitpush.rs', lines 25:0-40:1
+    Visibility: public -/
+structure gitpush.PushCmd where
+  ref_ok : Bool
+  is_branch : Bool
+  delete : Bool
+  old : Option (alloc.vec.Vec Std.U8)
+  cur : Option (alloc.vec.Vec Std.U8)
+  new_present : Bool
+  new_is_commit : Bool
+
+/-- [pico2peta_net_kernel::gitpush::Accept]
+    Source: 'crates/net-kernel/src/gitpush.rs', lines 44:0-47:1
+    Visibility: public -/
+@[discriminant isize]
+inductive gitpush.Accept where
+| Delete : gitpush.Accept
+| Update : gitpush.Accept
+
+/-- [pico2peta_net_kernel::gitpush::same]:
+    Source: 'crates/net-kernel/src/gitpush.rs', lines 49:0-60:1 -/
+def gitpush.same
+  (a : Option (alloc.vec.Vec Std.U8)) (b : Option (alloc.vec.Vec Std.U8)) :
+  Result Bool
+  := do
+  match a with
+  | none => match b with
+            | none => ok true
+            | some _ => ok false
+  | some x =>
+    match b with
+    | none => ok false
+    | some y => alloc.vec.partial_eq.PartialEqVec.eq core.cmp.PartialEqU8 x y
+
+/-- [pico2peta_net_kernel::gitpush::decide_cmd]:
+    Source: 'crates/net-kernel/src/gitpush.rs', lines 63:0-88:1
+    Visibility: public -/
+def gitpush.decide_cmd
+  (c : gitpush.PushCmd) :
+  Result (core.result.Result gitpush.Accept gitpush.Ng)
+  := do
+  if c.ref_ok
+  then
+    if c.delete
+    then
+      match c.old with
+      | none => ok (core.result.Result.Ok gitpush.Accept.Delete)
+      | some _ =>
+        let b ← gitpush.same c.cur c.old
+        if b
+        then ok (core.result.Result.Ok gitpush.Accept.Delete)
+        else ok (core.result.Result.Err gitpush.Ng.StaleOld)
+    else
+      if c.new_present
+      then
+        if c.is_branch
+        then
+          if c.new_is_commit
+          then
+            let b ← gitpush.same c.cur c.old
+            if b
+            then ok (core.result.Result.Ok gitpush.Accept.Update)
+            else ok (core.result.Result.Err gitpush.Ng.StaleOld)
+          else ok (core.result.Result.Err gitpush.Ng.BranchNotCommit)
+        else
+          let b ← gitpush.same c.cur c.old
+          if b
+          then ok (core.result.Result.Ok gitpush.Accept.Update)
+          else ok (core.result.Result.Err gitpush.Ng.StaleOld)
+      else ok (core.result.Result.Err gitpush.Ng.MissingNew)
+  else ok (core.result.Result.Err gitpush.Ng.UnsupportedRef)
+
+/-- [pico2peta_net_kernel::gitpush::is_err]:
+    Source: 'crates/net-kernel/src/gitpush.rs', lines 102:0-107:1 -/
+def gitpush.is_err
+  (d : core.result.Result gitpush.Accept gitpush.Ng) : Result Bool := do
+  match d with
+  | core.result.Result.Ok _ => ok false
+  | core.result.Result.Err _ => ok true
+
+/-- [pico2peta_net_kernel::gitpush::decide_all]: loop body 0:
+    Source: 'crates/net-kernel/src/gitpush.rs', lines 94:4-98:5
+    Visibility: public -/
+@[rust_loop_body]
+def gitpush.decide_all_loop.body
+  (iter : core.slice.iter.Iter gitpush.PushCmd)
+  (out : alloc.vec.Vec (core.result.Result gitpush.Accept gitpush.Ng))
+  (any_err : Bool) :
+  Result (ControlFlow ((core.slice.iter.Iter gitpush.PushCmd) × (alloc.vec.Vec
+    (core.result.Result gitpush.Accept gitpush.Ng)) × Bool) ((alloc.vec.Vec
+    (core.result.Result gitpush.Accept gitpush.Ng)) × Bool))
+  := do
+  let (o, iter1) ← core.slice.iter.IteratorSliceIter.next iter
+  match o with
+  | none => ok (done (out, any_err))
+  | some c =>
+    let d ← gitpush.decide_cmd c
+    let any_err1 ← if any_err
+                     then ok true
+                     else gitpush.is_err d
+    let out1 ← alloc.vec.Vec.push out d
+    ok (cont (iter1, out1, any_err1))
+
+/-- [pico2peta_net_kernel::gitpush::decide_all]: loop 0:
+    Source: 'crates/net-kernel/src/gitpush.rs', lines 94:4-98:5
+    Visibility: public -/
+@[rust_loop]
+def gitpush.decide_all_loop
+  (iter : core.slice.iter.Iter gitpush.PushCmd)
+  (out : alloc.vec.Vec (core.result.Result gitpush.Accept gitpush.Ng))
+  (any_err : Bool) :
+  Result ((alloc.vec.Vec (core.result.Result gitpush.Accept gitpush.Ng)) ×
+    Bool)
+  := do
+  loop
+    (fun (iter1, out1, any_err1) => gitpush.decide_all_loop.body iter1 out1
+      any_err1)
+    (iter, out, any_err)
+
+/-- [pico2peta_net_kernel::gitpush::decide_all]:
+    Source: 'crates/net-kernel/src/gitpush.rs', lines 91:0-100:1
+    Visibility: public -/
+def gitpush.decide_all
+  (cmds : alloc.vec.Vec gitpush.PushCmd) :
+  Result ((alloc.vec.Vec (core.result.Result gitpush.Accept gitpush.Ng)) ×
+    Bool)
+  := do
+  let s := alloc.vec.Vec.deref cmds
+  let iter ← core.slice.Slice.iter s
+  gitpush.decide_all_loop iter (alloc.vec.Vec.new (core.result.Result
+    gitpush.Accept gitpush.Ng)) false
+
+/-- [pico2peta_net_kernel::gitpush::refuse]:
+    Source: 'crates/net-kernel/src/gitpush.rs', lines 110:0-115:1
+    Visibility: public -/
+def gitpush.refuse
+  (d : core.result.Result gitpush.Accept gitpush.Ng) :
+  Result (core.result.Result gitpush.Accept gitpush.Ng)
+  := do
+  match d with
+  | core.result.Result.Ok _ =>
+    ok (core.result.Result.Err gitpush.Ng.AtomicFailed)
+  | core.result.Result.Err _ => ok d
+
+/-- [pico2peta_net_kernel::gitpush::refuse_all]: loop body 0:
+    Source: 'crates/net-kernel/src/gitpush.rs', lines 120:4-122:5
+    Visibility: public -/
+@[rust_loop_body]
+def gitpush.refuse_all_loop.body
+  (iter : core.slice.iter.Iter (core.result.Result gitpush.Accept gitpush.Ng))
+  (all : alloc.vec.Vec (core.result.Result gitpush.Accept gitpush.Ng)) :
+  Result (ControlFlow ((core.slice.iter.Iter (core.result.Result gitpush.Accept
+    gitpush.Ng)) × (alloc.vec.Vec (core.result.Result gitpush.Accept
+    gitpush.Ng))) (alloc.vec.Vec (core.result.Result gitpush.Accept
+    gitpush.Ng)))
+  := do
+  let (o, iter1) ← core.slice.iter.IteratorSliceIter.next iter
+  match o with
+  | none => ok (done all)
+  | some d =>
+    let r ← gitpush.refuse d
+    let all1 ← alloc.vec.Vec.push all r
+    ok (cont (iter1, all1))
+
+/-- [pico2peta_net_kernel::gitpush::refuse_all]: loop 0:
+    Source: 'crates/net-kernel/src/gitpush.rs', lines 120:4-122:5
+    Visibility: public -/
+@[rust_loop]
+def gitpush.refuse_all_loop
+  (iter : core.slice.iter.Iter (core.result.Result gitpush.Accept gitpush.Ng))
+  (all : alloc.vec.Vec (core.result.Result gitpush.Accept gitpush.Ng)) :
+  Result (alloc.vec.Vec (core.result.Result gitpush.Accept gitpush.Ng))
+  := do
+  loop
+    (fun (iter1, all1) => gitpush.refuse_all_loop.body iter1 all1)
+    (iter, all)
+
+/-- [pico2peta_net_kernel::gitpush::refuse_all]:
+    Source: 'crates/net-kernel/src/gitpush.rs', lines 118:0-124:1
+    Visibility: public -/
+def gitpush.refuse_all
+  (ds : alloc.vec.Vec (core.result.Result gitpush.Accept gitpush.Ng)) :
+  Result (alloc.vec.Vec (core.result.Result gitpush.Accept gitpush.Ng))
+  := do
+  let s := alloc.vec.Vec.deref ds
+  let iter ← core.slice.Slice.iter s
+  gitpush.refuse_all_loop iter (alloc.vec.Vec.new (core.result.Result
+    gitpush.Accept gitpush.Ng))
+
+/-- [pico2peta_net_kernel::gitpush::decide_push]:
+    Source: 'crates/net-kernel/src/gitpush.rs', lines 127:0-130:1
+    Visibility: public -/
+def gitpush.decide_push
+  (cmds : alloc.vec.Vec gitpush.PushCmd) (atomic : Bool) :
+  Result (alloc.vec.Vec (core.result.Result gitpush.Accept gitpush.Ng))
+  := do
+  let (out, any_err) ← gitpush.decide_all cmds
+  if atomic
+  then if any_err
+       then gitpush.refuse_all out
+       else ok out
+  else ok out
 
 /-- [pico2peta_net_kernel::parse::hex_nibble]:
     Source: 'crates/net-kernel/src/parse.rs', lines 5:0-15:1
