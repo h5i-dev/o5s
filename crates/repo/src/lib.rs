@@ -608,31 +608,48 @@ impl LocalRepo {
         Ok(FrontHandle { repo: self.clone(), id: id.to_string() })
     }
 
-    /// Refuses a write to `name` unless `who` owns it (or nobody does).
-    fn guard(&self, name: &str, who: Option<&str>) -> Result<()> {
-        match self.fronts.owner(name) {
-            Some(owner) if Some(owner) != who => Err(Error::Unauthorized(format!(
-                "{name:?} belongs to the {owner:?} front; write it through that front"
-            ))),
-            _ => Ok(()),
+    /// The fronts' claims for the ownership kernel: `(prefix, front index)`,
+    /// and the index of `who` (`None` for core callers or an unknown id).
+    fn claims(&self, who: Option<&str>) -> (pico2peta_kernel::fronts::Claims, Option<u32>) {
+        let mut claims = Vec::new();
+        let mut me = None;
+        for (i, f) in self.fronts.fronts().iter().enumerate() {
+            if Some(f.id()) == who {
+                me = Some(i as u32);
+            }
+            for p in f.prefixes() {
+                claims.push((p.into_bytes(), i as u32));
+            }
         }
+        (claims, me)
+    }
+
+    /// Refuses a write to `name` unless `who` owns it (or nobody does). The
+    /// decision is the extracted kernel's (`fronts::may_write`, P6).
+    fn guard(&self, name: &str, who: Option<&str>) -> Result<()> {
+        if self.fronts.fronts().is_empty() {
+            return Ok(());
+        }
+        let (claims, me) = self.claims(who);
+        if pico2peta_kernel::fronts::may_write(&claims, &name.as_bytes().to_vec(), me) {
+            return Ok(());
+        }
+        let owner = self.fronts.owner(name).unwrap_or("?");
+        Err(Error::Unauthorized(format!("{name:?} belongs to the {owner:?} front; write it through that front")))
     }
 
     /// Like [`LocalRepo::guard`] for a rule prefix: also refuses rules that
-    /// would cover another front's claimed prefix.
+    /// would cover another front's claimed prefix (`fronts::may_set_rule`).
     fn guard_prefix(&self, prefix: &str, who: Option<&str>) -> Result<()> {
-        self.guard(prefix, who)?;
-        for f in self.fronts.fronts() {
-            for p in f.prefixes() {
-                if p.starts_with(prefix) && Some(f.id()) != who && self.fronts.owner(&p) == Some(f.id()) {
-                    return Err(Error::Unauthorized(format!(
-                        "rule prefix {prefix:?} covers the {:?} front's {p:?}",
-                        f.id()
-                    )));
-                }
-            }
+        if self.fronts.fronts().is_empty() {
+            return Ok(());
         }
-        Ok(())
+        let (claims, me) = self.claims(who);
+        if pico2peta_kernel::fronts::may_set_rule(&claims, &prefix.as_bytes().to_vec(), me) {
+            return Ok(());
+        }
+        self.guard(prefix, who)?;
+        Err(Error::Unauthorized(format!("rule prefix {prefix:?} covers another front's claimed prefix")))
     }
 
     fn replace_as(

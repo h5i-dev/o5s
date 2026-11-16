@@ -131,24 +131,22 @@ jobs:
           path: ${{ runner.temp }}/oci-conformance/server/report.html
           if-no-files-found: ignore
 
-  lean:
-    name: Lean proofs + Rust/Lean difftest
+  proofs:
+    name: Extracted-kernel proofs (h5i app, verify/core)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install elan (toolchain from lean/lean-toolchain)
+      - name: Install elan (toolchain from verify/core/proofs/lean-toolchain)
         run: |
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-      - name: No sorry in proofs
-        run: "! grep -rn --include='*.lean' -w sorry lean/Pico2peta"
-      - name: Build proofs and the executable model
-        working-directory: lean
-        run: lake build && lake build p2p-model
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Differential test (Lean model is required)
-        run: P2P_REQUIRE_LEAN=1 cargo test --locked -p pico2peta-refs --test lean_diff
+      - name: No sorry in hand-written proofs
+        run: "! grep -n -w sorry verify/core/proofs/Proofs.lean"
+      - name: Build the proofs about the checked-in extraction
+        working-directory: verify/core/proofs
+        run: lake build
+      # Re-extracting (`h5i app extract --check`) needs Charon/Aeneas at the pins in
+      # h5i's pins.rs; the dev host runs it (verify/core/README.md).
 
   fuzz-smoke:
     name: Fuzz smoke (30 s per target)

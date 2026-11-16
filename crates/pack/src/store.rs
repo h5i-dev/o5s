@@ -1051,7 +1051,7 @@ impl PackStore {
             }
             None => unpack_payload(&h, payload)?,
         };
-        if Hash::of(&data) != *hash {
+        if !digest_ok(hash, &Hash::of(&data)) {
             return Err(Error::Corrupt(format!("content hash mismatch for {hash} during recovery")));
         }
         Ok(data)
@@ -1456,7 +1456,7 @@ impl PackStore {
         // bytes. Frames keep it (one CRC covers all members, and decompression
         // dominates their cost).
         let (_, data) = self.read_record(hash, loc, loc.frame.is_some())?;
-        if Hash::of(&data) != *hash {
+        if !digest_ok(hash, &Hash::of(&data)) {
             return Err(Error::Corrupt(format!("content hash mismatch for {hash}")));
         }
         Ok(data)
@@ -2722,6 +2722,13 @@ fn zstd_compress(raw: &[u8], level: i32) -> Option<Vec<u8>> {
     })
 }
 
+/// Whether bytes with `digest` may be returned for `key`: the extracted
+/// kernel's decision (`objects::accept_read`, P1).
+#[inline]
+fn digest_ok(key: &Hash, digest: &Hash) -> bool {
+    pico2peta_kernel::objects::accept_read(key.as_bytes(), digest.as_bytes())
+}
+
 /// Below this many bytes a `put_many` batch is hashed and compressed on the
 /// calling thread (thread start-up would cost more than it saves).
 const PUT_MANY_PARALLEL_BYTES: usize = 256 << 10;
@@ -2826,7 +2833,7 @@ impl Read for XorReader {
         let n = self.xor.read(buf)?;
         if n == 0 {
             if let Some((h, want)) = self.verify.take()
-                && Hash(*h.finalize().as_bytes()) != want
+                && !digest_ok(&want, &Hash(*h.finalize().as_bytes()))
             {
                 return Err(io_err(Error::Corrupt(format!("delta reassembly hash mismatch for {want}"))));
             }
@@ -3090,14 +3097,14 @@ impl Read for ChunkReader {
             match self.next_chunk().map_err(io_err)? {
                 None => {
                     if let Some((hs, want)) = self.verify.take()
-                        && Hash(*hs.finalize().as_bytes()) != want
+                        && !digest_ok(&want, &Hash(*hs.finalize().as_bytes()))
                     {
                         return Err(io_err(Error::Corrupt(format!("reassembled hash mismatch for {want}"))));
                     }
                     if let Some((tx, join, want)) = self.hasher.take() {
                         drop(tx);
                         let hs = join.join().map_err(|_| io_err(Error::Corrupt("verify thread panicked".into())))?;
-                        if Hash(*hs.finalize().as_bytes()) != want {
+                        if !digest_ok(&want, &Hash(*hs.finalize().as_bytes())) {
                             return Err(io_err(Error::Corrupt(format!("reassembled hash mismatch for {want}"))));
                         }
                     }

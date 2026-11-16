@@ -19,8 +19,652 @@ set_option maxRecDepth 2048
 
 namespace pico2peta_kernel
 
+/-- [pico2peta_kernel::codec::REC_HEADER]
+    Source: 'crates/kernel/src/codec.rs', lines 9:0-9:33
+    Visibility: public -/
+@[global_simps, irreducible] def codec.REC_HEADER : Std.Usize := 52#usize
+
+/-- [pico2peta_kernel::codec::REC_MAGIC]
+    Source: 'crates/kernel/src/codec.rs', lines 11:0-11:39
+    Visibility: public -/
+@[global_simps, irreducible] def codec.REC_MAGIC : Std.U32 := 1380987472#u32
+
+/-- [pico2peta_kernel::codec::MAX_BLOB]
+    Source: 'crates/kernel/src/codec.rs', lines 13:0-13:34
+    Visibility: public -/
+@[global_simps, irreducible]
+def codec.MAX_BLOB : Result Std.U64 := 1#u64 <<< 31#i32
+
+/-- [pico2peta_kernel::codec::MAX_STORED]
+    Source: 'crates/kernel/src/codec.rs', lines 15:0-15:50
+    Visibility: public -/
+@[global_simps, irreducible]
+def codec.MAX_STORED : Result Std.U32 := do
+  let i ← 1#u32 <<< 31#i32
+  let i1 ← 1#u32 <<< 20#i32
+  i + i1
+
+/-- [pico2peta_kernel::codec::MAX_FRAME]
+    Source: 'crates/kernel/src/codec.rs', lines 17:0-17:36
+    Visibility: public -/
+@[global_simps, irreducible]
+def codec.MAX_FRAME : Result Std.U64 := 64#u64 <<< 20#i32
+
+/-- [pico2peta_kernel::codec::Header]
+    Source: 'crates/kernel/src/codec.rs', lines 21:0-27:1
+    Visibility: public -/
+structure codec.Header where
+  kind : Std.U8
+  codec : Std.U8
+  hash : Array Std.U8 32#usize
+  raw_len : Std.U64
+  stored_len : Std.U32
+
+/-- [pico2peta_kernel::codec::HeaderError]
+    Source: 'crates/kernel/src/codec.rs', lines 31:0-42:1
+    Visibility: public -/
+@[discriminant isize]
+inductive codec.HeaderError where
+| Short : codec.HeaderError
+| BadMagic : codec.HeaderError
+| BadKind : codec.HeaderError
+| BadCodec : codec.HeaderError
+| TooLong : codec.HeaderError
+
+/-- [pico2peta_kernel::codec::le32]:
+    Source: 'crates/kernel/src/codec.rs', lines 45:0-48:1
+    Visibility: public -/
+def codec.le32 (b : Slice Std.U8) («at» : Std.Usize) : Result Std.U32 := do
+  let i ← Slice.index_usize b «at»
+  let i1 ← lift (UScalar.cast .U32 i)
+  let i2 ← «at» + 1#usize
+  let i3 ← Slice.index_usize b i2
+  let i4 ← lift (UScalar.cast .U32 i3)
+  let i5 ← i4 * 256#u32
+  let i6 ← i1 + i5
+  let i7 ← «at» + 2#usize
+  let i8 ← Slice.index_usize b i7
+  let i9 ← lift (UScalar.cast .U32 i8)
+  let i10 ← i9 * 65536#u32
+  let i11 ← i6 + i10
+  let i12 ← «at» + 3#usize
+  let i13 ← Slice.index_usize b i12
+  let i14 ← lift (UScalar.cast .U32 i13)
+  let i15 ← i14 * 16777216#u32
+  i11 + i15
+
+/-- [pico2peta_kernel::codec::le64]:
+    Source: 'crates/kernel/src/codec.rs', lines 51:0-53:1
+    Visibility: public -/
+def codec.le64 (b : Slice Std.U8) («at» : Std.Usize) : Result Std.U64 := do
+  let i ← codec.le32 b «at»
+  let i1 ← lift (UScalar.cast .U64 i)
+  let i2 ← «at» + 4#usize
+  let i3 ← codec.le32 b i2
+  let i4 ← lift (UScalar.cast .U64 i3)
+  let i5 ← i4 * 4294967296#u64
+  i1 + i5
+
+/-- [pico2peta_kernel::codec::is_frame]:
+    Source: 'crates/kernel/src/codec.rs', lines 56:0-58:1
+    Visibility: public -/
+def codec.is_frame (kind : Std.U8) : Result Bool := do
+  if kind = 2#u8
+  then ok true
+  else if kind = 3#u8
+       then ok true
+       else ok (kind = 5#u8)
+
+/-- [pico2peta_kernel::codec::hash_at]: loop body 0:
+    Source: 'crates/kernel/src/codec.rs', lines 64:4-67:5
+    Visibility: public -/
+@[rust_loop_body]
+def codec.hash_at_loop.body
+  (b : Slice Std.U8) (h : Array Std.U8 32#usize) (i : Std.Usize) :
+  Result (ControlFlow ((Array Std.U8 32#usize) × Std.Usize) (Array Std.U8
+    32#usize))
+  := do
+  if i < 32#usize
+  then
+    let i1 ← 8#usize + i
+    let i2 ← Slice.index_usize b i1
+    let a ← Array.update h i i2
+    let i3 ← i + 1#usize
+    ok (cont (a, i3))
+  else ok (done h)
+
+/-- [pico2peta_kernel::codec::hash_at]: loop 0:
+    Source: 'crates/kernel/src/codec.rs', lines 64:4-67:5
+    Visibility: public -/
+@[rust_loop]
+def codec.hash_at_loop
+  (b : Slice Std.U8) (h : Array Std.U8 32#usize) (i : Std.Usize) :
+  Result (Array Std.U8 32#usize)
+  := do
+  loop
+    (fun (h1, i1) => codec.hash_at_loop.body b h1 i1)
+    (h, i)
+
+/-- [pico2peta_kernel::codec::hash_at]:
+    Source: 'crates/kernel/src/codec.rs', lines 61:0-69:1
+    Visibility: public -/
+def codec.hash_at (b : Slice Std.U8) : Result (Array Std.U8 32#usize) := do
+  let h := Array.repeat 32#usize 0#u8
+  codec.hash_at_loop b h 0#usize
+
+/-- [pico2peta_kernel::codec::too_long]:
+    Source: 'crates/kernel/src/codec.rs', lines 72:0-83:1
+    Visibility: public -/
+def codec.too_long
+  (kind : Std.U8) (raw_len : Std.U64) (stored_len : Std.U32) :
+  Result Bool
+  := do
+  let i ← codec.MAX_STORED
+  if stored_len > i
+  then ok true
+  else
+    if kind = 0#u8
+    then let i1 ← codec.MAX_BLOB
+         ok (raw_len > i1)
+    else
+      let b ← codec.is_frame kind
+      if b
+      then let i1 ← codec.MAX_FRAME
+           ok (raw_len > i1)
+      else ok false
+
+/-- [pico2peta_kernel::codec::parse_header]:
+    Source: 'crates/kernel/src/codec.rs', lines 86:0-107:1
+    Visibility: public -/
+def codec.parse_header
+  (b : Slice Std.U8) :
+  Result (core.result.Result codec.Header codec.HeaderError)
+  := do
+  let i := Slice.len b
+  if i < codec.REC_HEADER
+  then ok (core.result.Result.Err codec.HeaderError.Short)
+  else
+    let i1 ← codec.le32 b 0#usize
+    if i1 != codec.REC_MAGIC
+    then ok (core.result.Result.Err codec.HeaderError.BadMagic)
+    else
+      let kind ← Slice.index_usize b 4#usize
+      let codec_code ← Slice.index_usize b 5#usize
+      if kind > 5#u8
+      then ok (core.result.Result.Err codec.HeaderError.BadKind)
+      else
+        if codec_code > 2#u8
+        then ok (core.result.Result.Err codec.HeaderError.BadCodec)
+        else
+          let raw_len ← codec.le64 b 40#usize
+          let stored_len ← codec.le32 b 48#usize
+          let b1 ← codec.too_long kind raw_len stored_len
+          if b1
+          then ok (core.result.Result.Err codec.HeaderError.TooLong)
+          else
+            let a ← codec.hash_at b
+            ok (core.result.Result.Ok
+              { kind, codec := codec_code, hash := a, raw_len, stored_len })
+
+/-- [pico2peta_kernel::codec::JournalStep]
+    Source: 'crates/kernel/src/codec.rs', lines 111:0-120:1
+    Visibility: public -/
+@[discriminant isize]
+inductive codec.JournalStep where
+| Torn : codec.JournalStep
+| TooLong : codec.JournalStep
+| Checksum : codec.JournalStep
+| Record : Std.Usize → codec.JournalStep
+
+/-- [pico2peta_kernel::codec::journal_step]:
+    Source: 'crates/kernel/src/codec.rs', lines 126:0-145:1
+    Visibility: public -/
+def codec.journal_step
+  (rest_len : Std.Usize) (all_zero : Bool) (len : Std.U32)
+  (max_record : Std.U32) (crc_ok : Bool) :
+  Result codec.JournalStep
+  := do
+  if rest_len < 8#usize
+  then ok codec.JournalStep.Torn
+  else
+    if all_zero
+    then ok codec.JournalStep.Torn
+    else
+      if len > max_record
+      then ok codec.JournalStep.TooLong
+      else
+        let need ← lift (UScalar.cast .Usize len)
+        let i ← rest_len - 8#usize
+        if need > i
+        then ok codec.JournalStep.Torn
+        else
+          let «end» ← 8#usize + need
+          if crc_ok
+          then ok (codec.JournalStep.Record «end»)
+          else
+            if «end» = rest_len
+            then ok codec.JournalStep.Torn
+            else ok codec.JournalStep.Checksum
+
+/-- [pico2peta_kernel::names::starts_with]: loop body 0:
+    Source: 'crates/kernel/src/names.rs', lines 75:4-82:1
+    Visibility: public -/
+@[rust_loop_body]
+def names.starts_with_loop.body
+  (s : alloc.vec.Vec Std.U8) («prefix» : alloc.vec.Vec Std.U8)
+  (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let i1 := alloc.vec.Vec.len «prefix»
+  if i < i1
+  then
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) s i
+    let i3 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8)
+        «prefix» i
+    if i2 != i3
+    then ok (done false)
+    else let i4 ← i + 1#usize
+         ok (cont i4)
+  else ok (done true)
+
+/-- [pico2peta_kernel::names::starts_with]: loop 0:
+    Source: 'crates/kernel/src/names.rs', lines 75:4-82:1
+    Visibility: public -/
+@[rust_loop]
+def names.starts_with_loop
+  (s : alloc.vec.Vec Std.U8) («prefix» : alloc.vec.Vec Std.U8)
+  (i : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun i1 => names.starts_with_loop.body s «prefix» i1)
+    i
+
+/-- [pico2peta_kernel::names::starts_with]:
+    Source: 'crates/kernel/src/names.rs', lines 70:0-82:1
+    Visibility: public -/
+def names.starts_with
+  (s : alloc.vec.Vec Std.U8) («prefix» : alloc.vec.Vec Std.U8) :
+  Result Bool
+  := do
+  let i := alloc.vec.Vec.len «prefix»
+  let i1 := alloc.vec.Vec.len s
+  if i > i1
+  then ok false
+  else names.starts_with_loop s «prefix» 0#usize
+
+/-- [pico2peta_kernel::fronts::pick_owner]:
+    Source: 'crates/kernel/src/fronts.rs', lines 33:0-47:1
+    Visibility: public -/
+def fronts.pick_owner
+  (best : Option Std.Usize) (best_len : Std.Usize) (i : Std.Usize)
+  (plen : Std.Usize) (covers : Bool) :
+  Result ((Option Std.Usize) × Std.Usize)
+  := do
+  if covers
+  then
+    match best with
+    | none => ok (some i, plen)
+    | some _ =>
+      if plen > best_len
+      then ok (some i, plen)
+      else ok (best, best_len)
+  else ok (best, best_len)
+
+/-- [pico2peta_kernel::fronts::owner]: loop body 0:
+    Source: 'crates/kernel/src/fronts.rs', lines 19:4-25:5
+    Visibility: public -/
+@[rust_loop_body]
+def fronts.owner_loop.body
+  (claims : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × Std.U32))
+  («name» : alloc.vec.Vec Std.U8) (best : Option Std.Usize)
+  (best_len : Std.Usize) (i : Std.Usize) :
+  Result (ControlFlow ((Option Std.Usize) × Std.Usize × Std.Usize) (Option
+    Std.Usize))
+  := do
+  let i1 := alloc.vec.Vec.len claims
+  if i < i1
+  then
+    let (v, _) ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+        ((alloc.vec.Vec Std.U8) × Std.U32)) claims i
+    let covers ← names.starts_with «name» v
+    let i2 := alloc.vec.Vec.len v
+    let (best1, best_len1) ← fronts.pick_owner best best_len i i2 covers
+    let i3 ← i + 1#usize
+    ok (cont (best1, best_len1, i3))
+  else ok (done best)
+
+/-- [pico2peta_kernel::fronts::owner]: loop 0:
+    Source: 'crates/kernel/src/fronts.rs', lines 19:4-25:5
+    Visibility: public -/
+@[rust_loop]
+def fronts.owner_loop
+  (claims : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × Std.U32))
+  («name» : alloc.vec.Vec Std.U8) (best : Option Std.Usize)
+  (best_len : Std.Usize) (i : Std.Usize) :
+  Result (Option Std.Usize)
+  := do
+  loop
+    (fun (best1, best_len1, i1) => fronts.owner_loop.body claims «name» best1
+      best_len1 i1)
+    (best, best_len, i)
+
+/-- [pico2peta_kernel::fronts::owner]:
+    Source: 'crates/kernel/src/fronts.rs', lines 15:0-30:1
+    Visibility: public -/
+def fronts.owner
+  (claims : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × Std.U32))
+  («name» : alloc.vec.Vec Std.U8) :
+  Result (Option Std.U32)
+  := do
+  let best ← fronts.owner_loop claims «name» none 0#usize 0#usize
+  match best with
+  | none => ok none
+  | some j =>
+    let (_, i) ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+        ((alloc.vec.Vec Std.U8) × Std.U32)) claims j
+    ok (some i)
+
+/-- [pico2peta_kernel::fronts::may_write]:
+    Source: 'crates/kernel/src/fronts.rs', lines 50:0-58:1
+    Visibility: public -/
+def fronts.may_write
+  (claims : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × Std.U32))
+  («name» : alloc.vec.Vec Std.U8) (who : Option Std.U32) :
+  Result Bool
+  := do
+  let o ← fronts.owner claims «name»
+  match o with
+  | none => ok true
+  | some o1 => match who with
+               | none => ok false
+               | some w => ok (o1 = w)
+
+/-- [pico2peta_kernel::fronts::is_mine]:
+    Source: 'crates/kernel/src/fronts.rs', lines 95:0-100:1
+    Visibility: public -/
+def fronts.is_mine (who : Option Std.U32) (f : Std.U32) : Result Bool := do
+  match who with
+  | none => ok false
+  | some w => ok (w = f)
+
+/-- [pico2peta_kernel::fronts::rule_spares]:
+    Source: 'crates/kernel/src/fronts.rs', lines 79:0-92:1 -/
+def fronts.rule_spares
+  (claims : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × Std.U32))
+  («prefix» : alloc.vec.Vec Std.U8) (who : Option Std.U32) (i : Std.Usize) :
+  Result Bool
+  := do
+  let (p, i1) ←
+    alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice ((alloc.vec.Vec
+      Std.U8) × Std.U32)) claims i
+  let b ← names.starts_with p «prefix»
+  if b
+  then
+    let b1 ← fronts.is_mine who i1
+    if b1
+    then ok true
+    else
+      let o ← fronts.owner claims p
+      match o with
+      | none => ok true
+      | some o1 => ok (o1 != i1)
+  else ok true
+
+/-- [pico2peta_kernel::fronts::may_set_rule]: loop body 0:
+    Source: 'crates/kernel/src/fronts.rs', lines 69:4-76:1
+    Visibility: public -/
+@[rust_loop_body]
+def fronts.may_set_rule_loop.body
+  (claims : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × Std.U32))
+  («prefix» : alloc.vec.Vec Std.U8) (who : Option Std.U32) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let i1 := alloc.vec.Vec.len claims
+  if i < i1
+  then
+    let b ← fronts.rule_spares claims «prefix» who i
+    if b
+    then let i2 ← i + 1#usize
+         ok (cont i2)
+    else ok (done false)
+  else ok (done true)
+
+/-- [pico2peta_kernel::fronts::may_set_rule]: loop 0:
+    Source: 'crates/kernel/src/fronts.rs', lines 69:4-76:1
+    Visibility: public -/
+@[rust_loop]
+def fronts.may_set_rule_loop
+  (claims : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × Std.U32))
+  («prefix» : alloc.vec.Vec Std.U8) (who : Option Std.U32) (i : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun i1 => fronts.may_set_rule_loop.body claims «prefix» who i1)
+    i
+
+/-- [pico2peta_kernel::fronts::may_set_rule]:
+    Source: 'crates/kernel/src/fronts.rs', lines 64:0-76:1
+    Visibility: public -/
+def fronts.may_set_rule
+  (claims : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × Std.U32))
+  («prefix» : alloc.vec.Vec Std.U8) (who : Option Std.U32) :
+  Result Bool
+  := do
+  let b ← fronts.may_write claims «prefix» who
+  if b
+  then fronts.may_set_rule_loop claims «prefix» who 0#usize
+  else ok false
+
+/-- [pico2peta_kernel::gc::Thresholds]
+    Source: 'crates/kernel/src/gc.rs', lines 16:0-23:1
+    Visibility: public -/
+structure gc.Thresholds where
+  min_garbage_permille : Std.U64
+  small_pack_bytes : Std.U64
+  repack_all : Bool
+
+/-- [pico2peta_kernel::gc::is_victim]:
+    Source: 'crates/kernel/src/gc.rs', lines 27:0-40:1
+    Visibility: public -/
+def gc.is_victim
+  (t : gc.Thresholds) (total : Std.U64) (live : Std.U64) (size : Std.U64) :
+  Result Bool
+  := do
+  if t.repack_all
+  then ok true
+  else
+    if size < t.small_pack_bytes
+    then ok true
+    else
+      if total = 0#u64
+      then ok true
+      else
+        if live > total
+        then ok true
+        else
+          let i ← total - live
+          let garbage ← lift (UScalar.cast .U128 i)
+          let i1 ← garbage * 1000#u128
+          let i2 ← lift (UScalar.cast .U128 t.min_garbage_permille)
+          let i3 ← lift (UScalar.cast .U128 total)
+          let i4 ← i2 * i3
+          ok (i1 >= i4)
+
+/-- [pico2peta_kernel::names::cmp]: loop body 0:
+    Source: 'crates/kernel/src/names.rs', lines 195:4-211:1
+    Visibility: public -/
+@[rust_loop_body]
+def names.cmp_loop.body
+  (a : alloc.vec.Vec Std.U8) (b : alloc.vec.Vec Std.U8) (n : Std.Usize)
+  (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Std.I8)
+  := do
+  if i < n
+  then
+    let i1 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) a i
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) b i
+    if i1 < i2
+    then ok (done (-1)#i8)
+    else
+      if i1 > i2
+      then ok (done 1#i8)
+      else let i3 ← i + 1#usize
+           ok (cont i3)
+  else
+    let i1 := alloc.vec.Vec.len a
+    let i2 := alloc.vec.Vec.len b
+    if i1 < i2
+    then ok (done (-1)#i8)
+    else
+      let i3 := alloc.vec.Vec.len a
+      let i4 := alloc.vec.Vec.len b
+      if i3 > i4
+      then ok (done 1#i8)
+      else ok (done 0#i8)
+
+/-- [pico2peta_kernel::names::cmp]: loop 0:
+    Source: 'crates/kernel/src/names.rs', lines 195:4-211:1
+    Visibility: public -/
+@[rust_loop]
+def names.cmp_loop
+  (a : alloc.vec.Vec Std.U8) (b : alloc.vec.Vec Std.U8) (n : Std.Usize)
+  (i : Std.Usize) :
+  Result Std.I8
+  := do
+  loop
+    (fun i1 => names.cmp_loop.body a b n i1)
+    i
+
+/-- [pico2peta_kernel::names::cmp]:
+    Source: 'crates/kernel/src/names.rs', lines 192:0-211:1
+    Visibility: public -/
+def names.cmp
+  (a : alloc.vec.Vec Std.U8) (b : alloc.vec.Vec Std.U8) : Result Std.I8 := do
+  let i := alloc.vec.Vec.len a
+  let i1 := alloc.vec.Vec.len b
+  let n ←
+    if i < i1
+    then ok (alloc.vec.Vec.len a)
+    else ok (alloc.vec.Vec.len b)
+  names.cmp_loop a b n 0#usize
+
+/-- [pico2peta_kernel::gc::is_doomed]: loop body 0:
+    Source: 'crates/kernel/src/gc.rs', lines 45:4-52:1
+    Visibility: public -/
+@[rust_loop_body]
+def gc.is_doomed_loop.body
+  (doomed : alloc.vec.Vec (alloc.vec.Vec Std.U8)) (p : alloc.vec.Vec Std.U8)
+  (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let i1 := alloc.vec.Vec.len doomed
+  if i < i1
+  then
+    let v ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
+        Std.U8)) doomed i
+    let i2 ← names.cmp v p
+    if i2 = 0#i8
+    then ok (done true)
+    else let i3 ← i + 1#usize
+         ok (cont i3)
+  else ok (done false)
+
+/-- [pico2peta_kernel::gc::is_doomed]: loop 0:
+    Source: 'crates/kernel/src/gc.rs', lines 45:4-52:1
+    Visibility: public -/
+@[rust_loop]
+def gc.is_doomed_loop
+  (doomed : alloc.vec.Vec (alloc.vec.Vec Std.U8)) (p : alloc.vec.Vec Std.U8)
+  (i : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun i1 => gc.is_doomed_loop.body doomed p i1)
+    i
+
+/-- [pico2peta_kernel::gc::is_doomed]:
+    Source: 'crates/kernel/src/gc.rs', lines 43:0-52:1
+    Visibility: public -/
+@[reducible]
+def gc.is_doomed
+  (doomed : alloc.vec.Vec (alloc.vec.Vec Std.U8)) (p : alloc.vec.Vec Std.U8) :
+  Result Bool
+  := do
+  gc.is_doomed_loop doomed p 0#usize
+
+/-- [pico2peta_kernel::gc::delete_ok]: loop body 0:
+    Source: 'crates/kernel/src/gc.rs', lines 59:4-71:1
+    Visibility: public -/
+@[rust_loop_body]
+def gc.delete_ok_loop.body
+  (doomed : alloc.vec.Vec (alloc.vec.Vec Std.U8))
+  (serving : alloc.vec.Vec (Option (alloc.vec.Vec Std.U8))) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let i1 := alloc.vec.Vec.len serving
+  if i < i1
+  then
+    let o ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Option
+        (alloc.vec.Vec Std.U8))) serving i
+    match o with
+    | none => let i2 ← i + 1#usize
+              ok (cont i2)
+    | some p =>
+      let b ← gc.is_doomed doomed p
+      if b
+      then ok (done false)
+      else let i2 ← i + 1#usize
+           ok (cont i2)
+  else ok (done true)
+
+/-- [pico2peta_kernel::gc::delete_ok]: loop 0:
+    Source: 'crates/kernel/src/gc.rs', lines 59:4-71:1
+    Visibility: public -/
+@[rust_loop]
+def gc.delete_ok_loop
+  (doomed : alloc.vec.Vec (alloc.vec.Vec Std.U8))
+  (serving : alloc.vec.Vec (Option (alloc.vec.Vec Std.U8))) (i : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun i1 => gc.delete_ok_loop.body doomed serving i1)
+    i
+
+/-- [pico2peta_kernel::gc::delete_ok]:
+    Source: 'crates/kernel/src/gc.rs', lines 57:0-71:1
+    Visibility: public -/
+@[reducible]
+def gc.delete_ok
+  (doomed : alloc.vec.Vec (alloc.vec.Vec Std.U8))
+  (serving : alloc.vec.Vec (Option (alloc.vec.Vec Std.U8))) :
+  Result Bool
+  := do
+  gc.delete_ok_loop doomed serving 0#usize
+
+/-- [pico2peta_kernel::gc::skip_lone_live]:
+    Source: 'crates/kernel/src/gc.rs', lines 75:0-77:1
+    Visibility: public -/
+def gc.skip_lone_live
+  (victims : Std.Usize) (lone_fully_live : Bool) (repack_all : Bool) :
+  Result Bool
+  := do
+  if repack_all
+  then ok false
+  else if victims = 1#usize
+       then ok lone_fully_live
+       else ok false
+
 /-- [pico2peta_kernel::Rule]
-    Source: 'crates/kernel/src/lib.rs', lines 22:0-30:1
+    Source: 'crates/kernel/src/lib.rs', lines 28:0-36:1
     Visibility: public -/
 @[discriminant isize]
 inductive Rule where
@@ -29,7 +673,7 @@ inductive Rule where
 | HeadRelease : Rule
 
 /-- [pico2peta_kernel::{impl core::cmp::PartialEq<pico2peta_kernel::Rule> for pico2peta_kernel::Rule}::eq]:
-    Source: 'crates/kernel/src/lib.rs', lines 21:29-21:38
+    Source: 'crates/kernel/src/lib.rs', lines 27:29-27:38
     Visibility: public -/
 def Rule.Insts.CoreCmpPartialEqRule.eq
   (self : Rule) (other : Rule) : Result Bool := do
@@ -38,7 +682,7 @@ def Rule.Insts.CoreCmpPartialEqRule.eq
   ok (self1 = other1)
 
 /-- [pico2peta_kernel::Why]
-    Source: 'crates/kernel/src/lib.rs', lines 34:0-41:1
+    Source: 'crates/kernel/src/lib.rs', lines 40:0-47:1
     Visibility: public -/
 @[discriminant isize]
 inductive Why where
@@ -47,7 +691,7 @@ inductive Why where
 | HeadReleaseOnly : Why
 
 /-- [pico2peta_kernel::Mobility]
-    Source: 'crates/kernel/src/lib.rs', lines 45:0-52:1
+    Source: 'crates/kernel/src/lib.rs', lines 51:0-58:1
     Visibility: public -/
 @[discriminant isize]
 inductive Mobility where
@@ -56,7 +700,7 @@ inductive Mobility where
 | Forbidden : Mobility
 
 /-- [pico2peta_kernel::Observed]
-    Source: 'crates/kernel/src/lib.rs', lines 56:0-61:1
+    Source: 'crates/kernel/src/lib.rs', lines 62:0-67:1
     Visibility: public -/
 @[discriminant isize]
 inductive Observed where
@@ -64,7 +708,7 @@ inductive Observed where
 | Version : Std.U64 → Observed
 
 /-- [pico2peta_kernel::{impl core::cmp::PartialEq<pico2peta_kernel::Observed> for pico2peta_kernel::Observed}::eq]:
-    Source: 'crates/kernel/src/lib.rs', lines 55:29-55:38
+    Source: 'crates/kernel/src/lib.rs', lines 61:29-61:38
     Visibility: public -/
 def Observed.Insts.CoreCmpPartialEqObserved.eq
   (self : Observed) (other : Observed) : Result Bool := do
@@ -82,7 +726,7 @@ def Observed.Insts.CoreCmpPartialEqObserved.eq
   else ok false
 
 /-- Trait implementation: [pico2peta_kernel::{impl core::cmp::PartialEq<pico2peta_kernel::Observed> for pico2peta_kernel::Observed}]
-    Source: 'crates/kernel/src/lib.rs', lines 55:29-55:38 -/
+    Source: 'crates/kernel/src/lib.rs', lines 61:29-61:38 -/
 @[reducible]
 impl_def Observed.Insts.CoreCmpPartialEqObserved : core.cmp.PartialEq Observed
   Observed := {
@@ -92,7 +736,7 @@ impl_def Observed.Insts.CoreCmpPartialEqObserved : core.cmp.PartialEq Observed
 }
 
 /-- [pico2peta_kernel::RefVal]
-    Source: 'crates/kernel/src/lib.rs', lines 65:0-70:1
+    Source: 'crates/kernel/src/lib.rs', lines 71:0-76:1
     Visibility: public -/
 structure RefVal where
   hash : Array Std.U8 32#usize
@@ -380,55 +1024,6 @@ def names.validate
     then ok (core.result.Result.Err names.Invalid.TooLong)
     else names.validate_loop s 0#usize 0#usize
 
-/-- [pico2peta_kernel::names::starts_with]: loop body 0:
-    Source: 'crates/kernel/src/names.rs', lines 75:4-82:1
-    Visibility: public -/
-@[rust_loop_body]
-def names.starts_with_loop.body
-  (s : alloc.vec.Vec Std.U8) («prefix» : alloc.vec.Vec Std.U8)
-  (i : Std.Usize) :
-  Result (ControlFlow Std.Usize Bool)
-  := do
-  let i1 := alloc.vec.Vec.len «prefix»
-  if i < i1
-  then
-    let i2 ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) s i
-    let i3 ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8)
-        «prefix» i
-    if i2 != i3
-    then ok (done false)
-    else let i4 ← i + 1#usize
-         ok (cont i4)
-  else ok (done true)
-
-/-- [pico2peta_kernel::names::starts_with]: loop 0:
-    Source: 'crates/kernel/src/names.rs', lines 75:4-82:1
-    Visibility: public -/
-@[rust_loop]
-def names.starts_with_loop
-  (s : alloc.vec.Vec Std.U8) («prefix» : alloc.vec.Vec Std.U8)
-  (i : Std.Usize) :
-  Result Bool
-  := do
-  loop
-    (fun i1 => names.starts_with_loop.body s «prefix» i1)
-    i
-
-/-- [pico2peta_kernel::names::starts_with]:
-    Source: 'crates/kernel/src/names.rs', lines 70:0-82:1
-    Visibility: public -/
-def names.starts_with
-  (s : alloc.vec.Vec Std.U8) («prefix» : alloc.vec.Vec Std.U8) :
-  Result Bool
-  := do
-  let i := alloc.vec.Vec.len «prefix»
-  let i1 := alloc.vec.Vec.len s
-  if i > i1
-  then ok false
-  else names.starts_with_loop s «prefix» 0#usize
-
 /-- [pico2peta_kernel::names::is_under]:
     Source: 'crates/kernel/src/names.rs', lines 86:0-94:1
     Visibility: public -/
@@ -668,65 +1263,328 @@ def names.mobility_of
     let m ← names.mobility rule v «name»
     ok (rule, m)
 
-/-- [pico2peta_kernel::names::cmp]: loop body 0:
-    Source: 'crates/kernel/src/names.rs', lines 195:4-211:1
+/-- [pico2peta_kernel::objects::PutAction]
+    Source: 'crates/kernel/src/objects.rs', lines 12:0-17:1
+    Visibility: public -/
+@[discriminant isize]
+inductive objects.PutAction where
+| Append : objects.PutAction
+| Skip : objects.PutAction
+
+/-- [pico2peta_kernel::objects::put_action]:
+    Source: 'crates/kernel/src/objects.rs', lines 20:0-22:1
+    Visibility: public -/
+def objects.put_action (present : Bool) : Result objects.PutAction := do
+  if present
+  then ok objects.PutAction.Skip
+  else ok objects.PutAction.Append
+
+/-- [pico2peta_kernel::objects::accept_read]: loop body 0:
+    Source: 'crates/kernel/src/objects.rs', lines 27:4-34:1
     Visibility: public -/
 @[rust_loop_body]
-def names.cmp_loop.body
-  (a : alloc.vec.Vec Std.U8) (b : alloc.vec.Vec Std.U8) (n : Std.Usize)
+def objects.accept_read_loop.body
+  (key : Array Std.U8 32#usize) (digest : Array Std.U8 32#usize)
   (i : Std.Usize) :
-  Result (ControlFlow Std.Usize Std.I8)
+  Result (ControlFlow Std.Usize Bool)
   := do
-  if i < n
+  if i < 32#usize
   then
-    let i1 ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) a i
-    let i2 ←
-      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) b i
-    if i1 < i2
-    then ok (done (-1)#i8)
-    else
-      if i1 > i2
-      then ok (done 1#i8)
-      else let i3 ← i + 1#usize
-           ok (cont i3)
-  else
-    let i1 := alloc.vec.Vec.len a
-    let i2 := alloc.vec.Vec.len b
-    if i1 < i2
-    then ok (done (-1)#i8)
-    else
-      let i3 := alloc.vec.Vec.len a
-      let i4 := alloc.vec.Vec.len b
-      if i3 > i4
-      then ok (done 1#i8)
-      else ok (done 0#i8)
+    let i1 ← Array.index_usize key i
+    let i2 ← Array.index_usize digest i
+    if i1 != i2
+    then ok (done false)
+    else let i3 ← i + 1#usize
+         ok (cont i3)
+  else ok (done true)
 
-/-- [pico2peta_kernel::names::cmp]: loop 0:
-    Source: 'crates/kernel/src/names.rs', lines 195:4-211:1
+/-- [pico2peta_kernel::objects::accept_read]: loop 0:
+    Source: 'crates/kernel/src/objects.rs', lines 27:4-34:1
     Visibility: public -/
 @[rust_loop]
-def names.cmp_loop
-  (a : alloc.vec.Vec Std.U8) (b : alloc.vec.Vec Std.U8) (n : Std.Usize)
+def objects.accept_read_loop
+  (key : Array Std.U8 32#usize) (digest : Array Std.U8 32#usize)
   (i : Std.Usize) :
-  Result Std.I8
+  Result Bool
   := do
   loop
-    (fun i1 => names.cmp_loop.body a b n i1)
+    (fun i1 => objects.accept_read_loop.body key digest i1)
     i
 
-/-- [pico2peta_kernel::names::cmp]:
-    Source: 'crates/kernel/src/names.rs', lines 192:0-211:1
+/-- [pico2peta_kernel::objects::accept_read]:
+    Source: 'crates/kernel/src/objects.rs', lines 25:0-34:1
     Visibility: public -/
-def names.cmp
-  (a : alloc.vec.Vec Std.U8) (b : alloc.vec.Vec Std.U8) : Result Std.I8 := do
-  let i := alloc.vec.Vec.len a
-  let i1 := alloc.vec.Vec.len b
-  let n ←
-    if i < i1
-    then ok (alloc.vec.Vec.len a)
-    else ok (alloc.vec.Vec.len b)
-  names.cmp_loop a b n 0#usize
+@[reducible]
+def objects.accept_read
+  (key : Array Std.U8 32#usize) (digest : Array Std.U8 32#usize) :
+  Result Bool
+  := do
+  objects.accept_read_loop key digest 0#usize
+
+/-- [pico2peta_kernel::promote::Attestation]
+    Source: 'crates/kernel/src/promote.rs', lines 16:0-23:1
+    Visibility: public -/
+structure promote.Attestation where
+  about_object : Bool
+  predicate_type : alloc.vec.Vec Std.U8
+  verified_keys : alloc.vec.Vec (alloc.vec.Vec Std.U8)
+
+/-- [pico2peta_kernel::promote::Policy]
+    Source: 'crates/kernel/src/promote.rs', lines 27:0-34:1
+    Visibility: public -/
+structure promote.Policy where
+  required_keys : alloc.vec.Vec (alloc.vec.Vec Std.U8)
+  predicate_type : Option (alloc.vec.Vec Std.U8)
+  require_provenance : Bool
+
+/-- [pico2peta_kernel::promote::Refused]
+    Source: 'crates/kernel/src/promote.rs', lines 38:0-45:1
+    Visibility: public -/
+structure promote.Refused where
+  no_source : Bool
+  no_provenance : Bool
+  keys : alloc.vec.Vec (alloc.vec.Vec Std.U8)
+
+/-- [pico2peta_kernel::promote::Plan]
+    Source: 'crates/kernel/src/promote.rs', lines 50:0-54:1
+    Visibility: public -/
+structure promote.Plan where
+  object : Array Std.U8 32#usize
+  src_observed : Observed
+  dst_observed : Observed
+
+/-- [pico2peta_kernel::promote::counts]:
+    Source: 'crates/kernel/src/promote.rs', lines 57:0-65:1
+    Visibility: public -/
+def promote.counts
+  (policy : promote.Policy) (a : promote.Attestation) : Result Bool := do
+  if a.about_object
+  then
+    match policy.predicate_type with
+    | none => ok true
+    | some t => let i ← names.cmp t a.predicate_type
+                ok (i = 0#i8)
+  else ok false
+
+/-- [pico2peta_kernel::promote::has_key]: loop body 0:
+    Source: 'crates/kernel/src/promote.rs', lines 82:4-89:1
+    Visibility: public -/
+@[rust_loop_body]
+def promote.has_key_loop.body
+  (keys : alloc.vec.Vec (alloc.vec.Vec Std.U8)) (k : alloc.vec.Vec Std.U8)
+  (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let i1 := alloc.vec.Vec.len keys
+  if i < i1
+  then
+    let v ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
+        Std.U8)) keys i
+    let i2 ← names.cmp v k
+    if i2 = 0#i8
+    then ok (done true)
+    else let i3 ← i + 1#usize
+         ok (cont i3)
+  else ok (done false)
+
+/-- [pico2peta_kernel::promote::has_key]: loop 0:
+    Source: 'crates/kernel/src/promote.rs', lines 82:4-89:1
+    Visibility: public -/
+@[rust_loop]
+def promote.has_key_loop
+  (keys : alloc.vec.Vec (alloc.vec.Vec Std.U8)) (k : alloc.vec.Vec Std.U8)
+  (i : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun i1 => promote.has_key_loop.body keys k i1)
+    i
+
+/-- [pico2peta_kernel::promote::has_key]:
+    Source: 'crates/kernel/src/promote.rs', lines 80:0-89:1
+    Visibility: public -/
+@[reducible]
+def promote.has_key
+  (keys : alloc.vec.Vec (alloc.vec.Vec Std.U8)) (k : alloc.vec.Vec Std.U8) :
+  Result Bool
+  := do
+  promote.has_key_loop keys k 0#usize
+
+/-- [pico2peta_kernel::promote::signed_by]: loop body 0:
+    Source: 'crates/kernel/src/promote.rs', lines 70:4-77:1
+    Visibility: public -/
+@[rust_loop_body]
+def promote.signed_by_loop.body
+  (policy : promote.Policy) (atts : alloc.vec.Vec promote.Attestation)
+  (k : alloc.vec.Vec Std.U8) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let i1 := alloc.vec.Vec.len atts
+  if i < i1
+  then
+    let a ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+        promote.Attestation) atts i
+    let b ← promote.counts policy a
+    if b
+    then
+      let b1 ← promote.has_key a.verified_keys k
+      if b1
+      then ok (done true)
+      else let i2 ← i + 1#usize
+           ok (cont i2)
+    else let i2 ← i + 1#usize
+         ok (cont i2)
+  else ok (done false)
+
+/-- [pico2peta_kernel::promote::signed_by]: loop 0:
+    Source: 'crates/kernel/src/promote.rs', lines 70:4-77:1
+    Visibility: public -/
+@[rust_loop]
+def promote.signed_by_loop
+  (policy : promote.Policy) (atts : alloc.vec.Vec promote.Attestation)
+  (k : alloc.vec.Vec Std.U8) (i : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun i1 => promote.signed_by_loop.body policy atts k i1)
+    i
+
+/-- [pico2peta_kernel::promote::signed_by]:
+    Source: 'crates/kernel/src/promote.rs', lines 68:0-77:1
+    Visibility: public -/
+@[reducible]
+def promote.signed_by
+  (policy : promote.Policy) (atts : alloc.vec.Vec promote.Attestation)
+  (k : alloc.vec.Vec Std.U8) :
+  Result Bool
+  := do
+  promote.signed_by_loop policy atts k 0#usize
+
+/-- [pico2peta_kernel::promote::key_missing]:
+    Source: 'crates/kernel/src/promote.rs', lines 106:0-115:1
+    Visibility: public -/
+def promote.key_missing
+  (policy : promote.Policy) (atts : alloc.vec.Vec promote.Attestation)
+  (i : Std.Usize) :
+  Result (Option (alloc.vec.Vec Std.U8))
+  := do
+  let i1 := alloc.vec.Vec.len policy.required_keys
+  if i >= i1
+  then ok none
+  else
+    let v ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (alloc.vec.Vec
+        Std.U8)) policy.required_keys i
+    let b ← promote.signed_by policy atts v
+    if b
+    then ok none
+    else let v1 ← alloc.vec.CloneVec.clone core.clone.CloneU8 v
+         ok (some v1)
+
+/-- [pico2peta_kernel::promote::keys_missing]: loop body 0:
+    Source: 'crates/kernel/src/promote.rs', lines 95:4-101:5
+    Visibility: public -/
+@[rust_loop_body]
+def promote.keys_missing_loop.body
+  (policy : promote.Policy) (atts : alloc.vec.Vec promote.Attestation)
+  (missing : alloc.vec.Vec (alloc.vec.Vec Std.U8)) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec (alloc.vec.Vec Std.U8)) × Std.Usize)
+    (alloc.vec.Vec (alloc.vec.Vec Std.U8)))
+  := do
+  let i1 := alloc.vec.Vec.len policy.required_keys
+  if i < i1
+  then
+    let o ← promote.key_missing policy atts i
+    let missing1 ←
+      match o with
+      | none => ok missing
+      | some m => alloc.vec.Vec.push missing m
+    let i2 ← i + 1#usize
+    ok (cont (missing1, i2))
+  else ok (done missing)
+
+/-- [pico2peta_kernel::promote::keys_missing]: loop 0:
+    Source: 'crates/kernel/src/promote.rs', lines 95:4-101:5
+    Visibility: public -/
+@[rust_loop]
+def promote.keys_missing_loop
+  (policy : promote.Policy) (atts : alloc.vec.Vec promote.Attestation)
+  (missing : alloc.vec.Vec (alloc.vec.Vec Std.U8)) (i : Std.Usize) :
+  Result (alloc.vec.Vec (alloc.vec.Vec Std.U8))
+  := do
+  loop
+    (fun (missing1, i1) => promote.keys_missing_loop.body policy atts missing1
+      i1)
+    (missing, i)
+
+/-- [pico2peta_kernel::promote::keys_missing]:
+    Source: 'crates/kernel/src/promote.rs', lines 92:0-103:1
+    Visibility: public -/
+@[reducible]
+def promote.keys_missing
+  (policy : promote.Policy) (atts : alloc.vec.Vec promote.Attestation) :
+  Result (alloc.vec.Vec (alloc.vec.Vec Std.U8))
+  := do
+  promote.keys_missing_loop policy atts (alloc.vec.Vec.new (alloc.vec.Vec
+    Std.U8)) 0#usize
+
+/-- [pico2peta_kernel::promote::prov_missing]:
+    Source: 'crates/kernel/src/promote.rs', lines 118:0-120:1
+    Visibility: public -/
+def promote.prov_missing
+  (required : Bool) (has_producer : Bool) : Result Bool := do
+  if required
+  then ok (¬ has_producer)
+  else ok false
+
+/-- [pico2peta_kernel::promote::observed]:
+    Source: 'crates/kernel/src/promote.rs', lines 123:0-128:1
+    Visibility: public -/
+def promote.observed (v : Option RefVal) : Result Observed := do
+  match v with
+  | none => ok Observed.Absent
+  | some d => ok (Observed.Version d.version)
+
+/-- [pico2peta_kernel::promote::decide_promote]:
+    Source: 'crates/kernel/src/promote.rs', lines 132:0-150:1
+    Visibility: public -/
+def promote.decide_promote
+  (policy : promote.Policy) (src : Option RefVal) (dst : Option RefVal)
+  (has_producer : Bool) (atts : alloc.vec.Vec promote.Attestation) :
+  Result (core.result.Result promote.Plan promote.Refused)
+  := do
+  match src with
+  | none =>
+    ok (core.result.Result.Err
+      {
+        no_source := true,
+        no_provenance := false,
+        keys := (alloc.vec.Vec.new (alloc.vec.Vec Std.U8))
+      })
+  | some s =>
+    let no_provenance ←
+      promote.prov_missing policy.require_provenance has_producer
+    let keys ← promote.keys_missing policy atts
+    if no_provenance
+    then
+      ok (core.result.Result.Err
+        { no_source := false, no_provenance := true, keys })
+    else
+      let i := alloc.vec.Vec.len keys
+      if i > 0#usize
+      then
+        ok (core.result.Result.Err
+          { no_source := false, no_provenance := false, keys })
+      else
+        let o ← promote.observed dst
+        ok (core.result.Result.Ok
+          {
+            object := s.hash,
+            src_observed := (Observed.Version s.version),
+            dst_observed := o
+          })
 
 /-- [pico2peta_kernel::refs::MAX_BATCH]
     Source: 'crates/kernel/src/refs.rs', lines 28:0-28:36
@@ -1201,5 +2059,422 @@ def refs.decide_set_rule
       if any_under
       then ok (core.result.Result.Err refs.SetRuleRefusal.NonEmpty)
       else ok (core.result.Result.Ok true)
+
+/-- [pico2peta_kernel::retention::cmp_from]: loop body 0:
+    Source: 'crates/kernel/src/retention.rs', lines 110:4-120:1 -/
+@[rust_loop_body]
+def retention.cmp_from_loop.body
+  (a : alloc.vec.Vec Std.U8) (ai : Std.Usize) (b : alloc.vec.Vec Std.U8)
+  (bi : Std.Usize) (n : Std.Usize) (k : Std.Usize) :
+  Result (ControlFlow Std.Usize Std.I8)
+  := do
+  if k < n
+  then
+    let i ← ai + k
+    let i1 := alloc.vec.Vec.len a
+    if i < i1
+    then
+      let i2 ← bi + k
+      let i3 := alloc.vec.Vec.len b
+      if i2 < i3
+      then
+        let i4 ←
+          alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) a
+            i
+        let i5 ←
+          alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) b
+            i2
+        if i4 < i5
+        then ok (done (-1)#i8)
+        else
+          let i6 ←
+            alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8)
+              a i
+          let i7 ←
+            alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8)
+              b i2
+          if i6 > i7
+          then ok (done 1#i8)
+          else let k1 ← k + 1#usize
+               ok (cont k1)
+      else ok (done 0#i8)
+    else ok (done 0#i8)
+  else ok (done 0#i8)
+
+/-- [pico2peta_kernel::retention::cmp_from]: loop 0:
+    Source: 'crates/kernel/src/retention.rs', lines 110:4-120:1 -/
+@[rust_loop]
+def retention.cmp_from_loop
+  (a : alloc.vec.Vec Std.U8) (ai : Std.Usize) (b : alloc.vec.Vec Std.U8)
+  (bi : Std.Usize) (n : Std.Usize) (k : Std.Usize) :
+  Result Std.I8
+  := do
+  loop
+    (fun k1 => retention.cmp_from_loop.body a ai b bi n k1)
+    k
+
+/-- [pico2peta_kernel::retention::cmp_from]:
+    Source: 'crates/kernel/src/retention.rs', lines 108:0-120:1 -/
+@[reducible]
+def retention.cmp_from
+  (a : alloc.vec.Vec Std.U8) (ai : Std.Usize) (b : alloc.vec.Vec Std.U8)
+  (bi : Std.Usize) (n : Std.Usize) :
+  Result Std.I8
+  := do
+  retention.cmp_from_loop a ai b bi n 0#usize
+
+/-- [pico2peta_kernel::retention::skip_zeros]: loop body 0:
+    Source: 'crates/kernel/src/retention.rs', lines 101:4-103:5 -/
+@[rust_loop_body]
+def retention.skip_zeros_loop.body
+  (s : alloc.vec.Vec Std.U8) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Std.Usize)
+  := do
+  let i1 := alloc.vec.Vec.len s
+  if i < i1
+  then
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) s i
+    if i2 = 48#u8
+    then let i3 ← i + 1#usize
+         ok (cont i3)
+    else ok (done i)
+  else ok (done i)
+
+/-- [pico2peta_kernel::retention::skip_zeros]: loop 0:
+    Source: 'crates/kernel/src/retention.rs', lines 101:4-103:5 -/
+@[rust_loop]
+def retention.skip_zeros_loop
+  (s : alloc.vec.Vec Std.U8) (i : Std.Usize) : Result Std.Usize := do
+  loop
+    (fun i1 => retention.skip_zeros_loop.body s i1)
+    i
+
+/-- [pico2peta_kernel::retention::skip_zeros]:
+    Source: 'crates/kernel/src/retention.rs', lines 99:0-105:1 -/
+@[reducible]
+def retention.skip_zeros (s : alloc.vec.Vec Std.U8) : Result Std.Usize := do
+  retention.skip_zeros_loop s 0#usize
+
+/-- [pico2peta_kernel::retention::run_cmp]:
+    Source: 'crates/kernel/src/retention.rs', lines 81:0-96:1 -/
+def retention.run_cmp
+  (p : (Bool × (alloc.vec.Vec Std.U8))) (q : (Bool × (alloc.vec.Vec Std.U8)))
+  :
+  Result Std.I8
+  := do
+  let (b, v) := p
+  if b
+  then
+    let (b1, v1) := q
+    if b1
+    then
+      let a ← retention.skip_zeros v
+      let b2 ← retention.skip_zeros v1
+      let i := alloc.vec.Vec.len v
+      let la ← i - a
+      let i1 := alloc.vec.Vec.len v1
+      let lb ← i1 - b2
+      if la < lb
+      then ok (-1)#i8
+      else if la > lb
+           then ok 1#i8
+           else retention.cmp_from v a v1 b2 la
+    else names.cmp v v1
+  else let (_, v1) := q
+       names.cmp v v1
+
+/-- [pico2peta_kernel::retention::flush_run]:
+    Source: 'crates/kernel/src/retention.rs', lines 65:0-78:1
+    Visibility: public -/
+def retention.flush_run
+  (out : alloc.vec.Vec (Bool × (alloc.vec.Vec Std.U8)))
+  (cur : alloc.vec.Vec Std.U8) (cur_digit : Bool) (d : Bool) :
+  Result ((alloc.vec.Vec (Bool × (alloc.vec.Vec Std.U8))) × (alloc.vec.Vec
+    Std.U8))
+  := do
+  let i := alloc.vec.Vec.len cur
+  if i > 0#usize
+  then
+    if d != cur_digit
+    then
+      let out1 ← alloc.vec.Vec.push out (cur_digit, cur)
+      ok (out1, alloc.vec.Vec.new Std.U8)
+    else ok (out, cur)
+  else ok (out, cur)
+
+/-- [pico2peta_kernel::retention::is_digit]:
+    Source: 'crates/kernel/src/retention.rs', lines 39:0-41:1
+    Visibility: public -/
+def retention.is_digit (c : Std.U8) : Result Bool := do
+  if c >= 48#u8
+  then ok (c <= 57#u8)
+  else ok false
+
+/-- [pico2peta_kernel::retention::runs]: loop body 0:
+    Source: 'crates/kernel/src/retention.rs', lines 49:4-57:5
+    Visibility: public -/
+@[rust_loop_body]
+def retention.runs_loop.body
+  (s : alloc.vec.Vec Std.U8)
+  (out : alloc.vec.Vec (Bool × (alloc.vec.Vec Std.U8)))
+  (cur : alloc.vec.Vec Std.U8) (cur_digit : Bool) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec (Bool × (alloc.vec.Vec Std.U8))) ×
+    (alloc.vec.Vec Std.U8) × Bool × Std.Usize) ((alloc.vec.Vec (Bool ×
+    (alloc.vec.Vec Std.U8))) × (alloc.vec.Vec Std.U8) × Bool))
+  := do
+  let i1 := alloc.vec.Vec.len s
+  if i < i1
+  then
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) s i
+    let d ← retention.is_digit i2
+    let (out1, cur1) ← retention.flush_run out cur cur_digit d
+    let cur2 ← alloc.vec.Vec.push cur1 i2
+    let i3 ← i + 1#usize
+    ok (cont (out1, cur2, d, i3))
+  else ok (done (out, cur, cur_digit))
+
+/-- [pico2peta_kernel::retention::runs]: loop 0:
+    Source: 'crates/kernel/src/retention.rs', lines 49:4-57:5
+    Visibility: public -/
+@[rust_loop]
+def retention.runs_loop
+  (s : alloc.vec.Vec Std.U8)
+  (out : alloc.vec.Vec (Bool × (alloc.vec.Vec Std.U8)))
+  (cur : alloc.vec.Vec Std.U8) (cur_digit : Bool) (i : Std.Usize) :
+  Result ((alloc.vec.Vec (Bool × (alloc.vec.Vec Std.U8))) × (alloc.vec.Vec
+    Std.U8) × Bool)
+  := do
+  loop
+    (fun (out1, cur1, cur_digit1, i1) => retention.runs_loop.body s out1 cur1
+      cur_digit1 i1)
+    (out, cur, cur_digit, i)
+
+/-- [pico2peta_kernel::retention::runs]:
+    Source: 'crates/kernel/src/retention.rs', lines 44:0-62:1
+    Visibility: public -/
+def retention.runs
+  (s : alloc.vec.Vec Std.U8) :
+  Result (alloc.vec.Vec (Bool × (alloc.vec.Vec Std.U8)))
+  := do
+  let (out, cur, cur_digit) ←
+    retention.runs_loop s (alloc.vec.Vec.new (Bool × (alloc.vec.Vec Std.U8)))
+      (alloc.vec.Vec.new Std.U8) false 0#usize
+  let i := alloc.vec.Vec.len cur
+  if i > 0#usize
+  then alloc.vec.Vec.push out (cur_digit, cur)
+  else ok out
+
+/-- [pico2peta_kernel::retention::version_cmp]: loop body 0:
+    Source: 'crates/kernel/src/retention.rs', lines 22:4-36:1
+    Visibility: public -/
+@[rust_loop_body]
+def retention.version_cmp_loop.body
+  (a : alloc.vec.Vec Std.U8) (b : alloc.vec.Vec Std.U8)
+  (ra : alloc.vec.Vec (Bool × (alloc.vec.Vec Std.U8)))
+  (rb : alloc.vec.Vec (Bool × (alloc.vec.Vec Std.U8))) (n : Std.Usize)
+  (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Std.I8)
+  := do
+  if i < n
+  then
+    let p ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Bool ×
+        (alloc.vec.Vec Std.U8))) ra i
+    let p1 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice (Bool ×
+        (alloc.vec.Vec Std.U8))) rb i
+    let c ← retention.run_cmp p p1
+    if c != 0#i8
+    then ok (done c)
+    else let i1 ← i + 1#usize
+         ok (cont i1)
+  else
+    let i1 := alloc.vec.Vec.len ra
+    let i2 := alloc.vec.Vec.len rb
+    if i1 < i2
+    then ok (done (-1)#i8)
+    else
+      let i3 := alloc.vec.Vec.len ra
+      let i4 := alloc.vec.Vec.len rb
+      if i3 > i4
+      then ok (done 1#i8)
+      else let c ← names.cmp a b
+           ok (done c)
+
+/-- [pico2peta_kernel::retention::version_cmp]: loop 0:
+    Source: 'crates/kernel/src/retention.rs', lines 22:4-36:1
+    Visibility: public -/
+@[rust_loop]
+def retention.version_cmp_loop
+  (a : alloc.vec.Vec Std.U8) (b : alloc.vec.Vec Std.U8)
+  (ra : alloc.vec.Vec (Bool × (alloc.vec.Vec Std.U8)))
+  (rb : alloc.vec.Vec (Bool × (alloc.vec.Vec Std.U8))) (n : Std.Usize)
+  (i : Std.Usize) :
+  Result Std.I8
+  := do
+  loop
+    (fun i1 => retention.version_cmp_loop.body a b ra rb n i1)
+    i
+
+/-- [pico2peta_kernel::retention::version_cmp]:
+    Source: 'crates/kernel/src/retention.rs', lines 17:0-36:1
+    Visibility: public -/
+def retention.version_cmp
+  (a : alloc.vec.Vec Std.U8) (b : alloc.vec.Vec Std.U8) : Result Std.I8 := do
+  let ra ← retention.runs a
+  let rb ← retention.runs b
+  let i := alloc.vec.Vec.len ra
+  let i1 := alloc.vec.Vec.len rb
+  let n ←
+    if i < i1
+    then ok (alloc.vec.Vec.len ra)
+    else ok (alloc.vec.Vec.len rb)
+  retention.version_cmp_loop a b ra rb n 0#usize
+
+/-- [pico2peta_kernel::retention::Entry]
+    Source: 'crates/kernel/src/retention.rs', lines 124:0-133:1
+    Visibility: public -/
+structure retention.Entry where
+  «name» : alloc.vec.Vec Std.U8
+  version : alloc.vec.Vec Std.U8
+  regenerable : Bool
+  rules : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × Rule)
+
+/-- [pico2peta_kernel::retention::Action]
+    Source: 'crates/kernel/src/retention.rs', lines 137:0-146:1
+    Visibility: public -/
+@[discriminant isize]
+inductive retention.Action where
+| Keep : retention.Action
+| KeepNotRegenerable : retention.Action
+| KeepByRule : retention.Action
+| Delete : retention.Action
+
+/-- [pico2peta_kernel::retention::action]:
+    Source: 'crates/kernel/src/retention.rs', lines 169:0-181:1
+    Visibility: public -/
+def retention.action
+  (k : Std.Usize) (old : Std.Usize) (only_if_regenerable : Bool)
+  (e : retention.Entry) :
+  Result retention.Action
+  := do
+  if k >= old
+  then ok retention.Action.Keep
+  else
+    if only_if_regenerable
+    then
+      if e.regenerable
+      then
+        let (_, m) ← names.mobility_of e.rules e.name
+        match m with
+        | Mobility.Mutable => ok retention.Action.Delete
+        | Mobility.CreateOnce => ok retention.Action.KeepByRule
+        | Mobility.Forbidden => ok retention.Action.KeepByRule
+      else ok retention.Action.KeepNotRegenerable
+    else
+      let (_, m) ← names.mobility_of e.rules e.name
+      match m with
+      | Mobility.Mutable => ok retention.Action.Delete
+      | Mobility.CreateOnce => ok retention.Action.KeepByRule
+      | Mobility.Forbidden => ok retention.Action.KeepByRule
+
+/-- [pico2peta_kernel::retention::plan]: loop body 1:
+    Source: 'crates/kernel/src/retention.rs', lines 161:4-164:5
+    Visibility: public -/
+@[rust_loop_body]
+def retention.plan_loop0_loop0.body
+  (only_if_regenerable : Bool) (entries : alloc.vec.Vec retention.Entry)
+  (old : Std.Usize) (out : alloc.vec.Vec retention.Action) (k : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec retention.Action) × Std.Usize)
+    (alloc.vec.Vec retention.Action))
+  := do
+  let i := alloc.vec.Vec.len entries
+  if k < i
+  then
+    let e ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+        retention.Entry) entries k
+    let a ← retention.action k old only_if_regenerable e
+    let out1 ← alloc.vec.Vec.push out a
+    let k1 ← k + 1#usize
+    ok (cont (out1, k1))
+  else ok (done out)
+
+/-- [pico2peta_kernel::retention::plan]: loop 1:
+    Source: 'crates/kernel/src/retention.rs', lines 161:4-164:5
+    Visibility: public -/
+@[rust_loop]
+def retention.plan_loop0_loop0
+  (only_if_regenerable : Bool) (entries : alloc.vec.Vec retention.Entry)
+  (old : Std.Usize) (out : alloc.vec.Vec retention.Action) (k : Std.Usize) :
+  Result (alloc.vec.Vec retention.Action)
+  := do
+  loop
+    (fun (out1, k1) => retention.plan_loop0_loop0.body only_if_regenerable
+      entries old out1 k1)
+    (out, k)
+
+/-- [pico2peta_kernel::retention::plan]: loop body 0:
+    Source: 'crates/kernel/src/retention.rs', lines 152:4-166:1
+    Visibility: public -/
+@[rust_loop_body]
+def retention.plan_loop0.body
+  (keep : Std.Usize) (only_if_regenerable : Bool)
+  (entries : alloc.vec.Vec retention.Entry) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize (core.result.Result (alloc.vec.Vec
+    retention.Action) Unit))
+  := do
+  let i1 := alloc.vec.Vec.len entries
+  if i < i1
+  then
+    let i2 ← i - 1#usize
+    let e ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+        retention.Entry) entries i2
+    let e1 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+        retention.Entry) entries i
+    let i3 ← retention.version_cmp e.version e1.version
+    if i3 > 0#i8
+    then ok (done (core.result.Result.Err ()))
+    else let i4 ← i + 1#usize
+         ok (cont i4)
+  else
+    let i2 := alloc.vec.Vec.len entries
+    let old ←
+      if i2 > keep
+      then let i3 := alloc.vec.Vec.len entries
+           i3 - keep
+      else ok 0#usize
+    let out ←
+      retention.plan_loop0_loop0 only_if_regenerable entries old
+        (alloc.vec.Vec.new retention.Action) 0#usize
+    ok (done (core.result.Result.Ok out))
+
+/-- [pico2peta_kernel::retention::plan]: loop 0:
+    Source: 'crates/kernel/src/retention.rs', lines 152:4-166:1
+    Visibility: public -/
+@[rust_loop]
+def retention.plan_loop0
+  (keep : Std.Usize) (only_if_regenerable : Bool)
+  (entries : alloc.vec.Vec retention.Entry) (i : Std.Usize) :
+  Result (core.result.Result (alloc.vec.Vec retention.Action) Unit)
+  := do
+  loop
+    (fun i1 => retention.plan_loop0.body keep only_if_regenerable entries i1)
+    i
+
+/-- [pico2peta_kernel::retention::plan]:
+    Source: 'crates/kernel/src/retention.rs', lines 150:0-166:1
+    Visibility: public -/
+@[reducible]
+def retention.plan
+  (keep : Std.Usize) (only_if_regenerable : Bool)
+  (entries : alloc.vec.Vec retention.Entry) :
+  Result (core.result.Result (alloc.vec.Vec retention.Action) Unit)
+  := do
+  retention.plan_loop0 keep only_if_regenerable entries 1#usize
 
 end pico2peta_kernel

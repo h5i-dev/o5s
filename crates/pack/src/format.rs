@@ -203,22 +203,28 @@ pub fn encode_record(kind: Kind, codec: Codec, hash: &Hash, raw_len: u64, payloa
 
 /// Parses a header from at least `REC_HEADER` bytes.
 pub fn parse_header(b: &[u8]) -> Result<RecHeader> {
-    if b.len() < REC_HEADER {
-        return Err(Error::Corrupt("short record header".into()));
-    }
-    if rd_u32(&b[0..4]) != REC_MAGIC {
-        return Err(Error::Corrupt("bad record magic".into()));
-    }
-    let kind = Kind::from_u8(b[4])?;
-    let codec = Codec::from_u8(b[5])?;
-    let hash = rd_hash(&b[8..40]);
-    let raw_len = rd_u64(&b[40..48]);
-    let stored_len = rd_u32(&b[48..52]);
-    if stored_len > MAX_STORED || (kind == Kind::Blob && raw_len > MAX_BLOB) || (kind.is_frame() && raw_len > MAX_FRAME)
-    {
-        return Err(Error::Corrupt("record length out of bounds".into()));
-    }
-    Ok(RecHeader { kind, codec, hash, raw_len, stored_len })
+    // The decoding is the extracted kernel's (`codec::parse_header`, proved equal to its spec).
+    use pico2peta_kernel::codec::HeaderError;
+    let h = match pico2peta_kernel::codec::parse_header(b) {
+        Ok(h) => h,
+        Err(HeaderError::Short) => return Err(Error::Corrupt("short record header".into())),
+        Err(HeaderError::BadMagic) => return Err(Error::Corrupt("bad record magic".into())),
+        // Same messages as before (the unknown code).
+        Err(HeaderError::BadKind) => {
+            return Err(Kind::from_u8(b[4]).err().unwrap_or_else(|| Error::Corrupt("bad record kind".into())));
+        }
+        Err(HeaderError::BadCodec) => {
+            return Err(Codec::from_u8(b[5]).err().unwrap_or_else(|| Error::Corrupt("bad record codec".into())));
+        }
+        Err(HeaderError::TooLong) => return Err(Error::Corrupt("record length out of bounds".into())),
+    };
+    Ok(RecHeader {
+        kind: Kind::from_u8(h.kind)?,
+        codec: Codec::from_u8(h.codec)?,
+        hash: Hash(h.hash),
+        raw_len: h.raw_len,
+        stored_len: h.stored_len,
+    })
 }
 
 /// Verifies the CRC of a complete record and returns (header, payload).

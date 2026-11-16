@@ -63,7 +63,7 @@ candidate to `main`; agents never push `main`.
    - SECURITY.md;
    - BENCH.md numbers with their dates and loads.
 5. Fuzz smoke: every target in fuzz/ runs ≥ 60 s clean under ASan.
-6. Lean: `lake build` with no `sorry` (lean/README.md).
+6. Proofs: `h5i app prove` in `verify/core` (and net's `verify/net`) passes, with no `sorry` (verify/core/README.md).
 7. Tag: `git tag -a v0.1.0-rc.N -m "pico2peta 0.1.0 release candidate N"` on `demo`, then push the tag. Never
    move or delete a pushed tag; fix forward with rc.N+1.
 8. Record the candidate, its commit and its gate run in PROGRESS.md.
