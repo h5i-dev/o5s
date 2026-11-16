@@ -366,14 +366,7 @@ pub fn parse_lfs_pointer(body: &[u8]) -> Option<(String, u64)> {
 }
 
 pub(crate) fn sha_key(hex64: &str) -> Option<Key> {
-    let mut k = [0u8; 32];
-    if hex64.len() != 64 {
-        return None;
-    }
-    for (i, b) in k.iter_mut().enumerate() {
-        *b = u8::from_str_radix(hex64.get(2 * i..2 * i + 2)?, 16).ok()?;
-    }
-    Some(k)
+    crate::hexs::decode32(hex64)
 }
 
 fn now_secs() -> u64 {
@@ -1291,7 +1284,10 @@ fn urlencoding_decode(s: &str) -> String {
     while i < b.len() {
         if b[i] == b'%'
             && i + 2 < b.len()
-            && let Ok(v) = u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 3]).unwrap_or("zz"), 16)
+            && let Some(v) = {
+                let mut o = [0u8; 1];
+                crate::hexs::decode_into(&b[i + 1..i + 3], &mut o).map(|_| o[0])
+            }
         {
             out.push(v);
             i += 3;

@@ -148,13 +148,8 @@ impl OciState {
 /// 64 hex chars → 32-byte key.
 fn hex_key(hex: &str) -> OciResult<Key> {
     let mut k = [0u8; 32];
-    if hex.len() != 64 {
-        return Err(oe(StatusCode::BAD_REQUEST, "DIGEST_INVALID", "bad digest"));
-    }
-    for (i, b) in k.iter_mut().enumerate() {
-        *b = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16)
-            .map_err(|_| oe(StatusCode::BAD_REQUEST, "DIGEST_INVALID", "bad digest"))?;
-    }
+    crate::hexs::decode_lower_into(hex.as_bytes(), &mut k)
+        .ok_or_else(|| oe(StatusCode::BAD_REQUEST, "DIGEST_INVALID", "bad digest"))?;
     Ok(k)
 }
 

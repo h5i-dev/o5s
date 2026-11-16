@@ -374,6 +374,11 @@ The contended run checks that no update is lost: the final version equals the nu
 - **read_verify, server side: DONE** (as agreed with the core: one policy source, the repo's `[read]` config, and no server setting).
   - `GET /v1/objects/<h>?verify=strict|eof` calls `open_verified`. `eof` gets 403 unless the repo allows it, and a bad value gets 400. With no parameter, the plain `open` follows `[read] verify`, so strict is the default by construction.
   - `RemoteRepo::open_verified` sends the parameter. Test `read_verify_parameter_follows_repo_policy`.
+- **Security fix (fuzz finding from the core's smoke run, oci_parsers): strict hex decoding everywhere** (`crates/server/src/hexs.rs`).
+  - `oci::hex_key` sliced a 64-*byte* `&str` at byte offsets, so a digest containing a multi-byte character panicked (500, and possibly a poisoned lock). It is reachable from a URL (`/v2/<repo>/blobs/sha256:<64 bytes>`).
+  - `u8::from_str_radix` also accepts a leading `+`, so non-canonical digest spellings mapped to the same key.
+  - One decoder now accepts only ASCII hex digits, and only lowercase for canonical ids (OCI digests, git oids). Every site goes through it: OCI digests, git oids, pkt-line lengths, LFS sha256 keys, HF percent-decoding, token hashes and promotion keys.
+  - Unit test `hexs::tests::strict` covers the multi-byte case, `+`, uppercase and wrong lengths. The remaining byte-offset `&str` slices in the fronts were checked and are at ASCII boundaries.
 - **HF transfers vs /v1 (human's priority 2): front overhead removed; the rest is core work or client-side.** SmolLM2-135M (270 MB); dev checks under the bench lock in a quiet window (load 1.5–2.7).
   - Front fixes:
     - LFS uploads compute SHA-256 on their own task, fed the same refcounted buffers, instead of inline in the store's read loop;

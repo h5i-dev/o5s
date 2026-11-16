@@ -244,9 +244,7 @@ pub fn parse_oid(s: &[u8]) -> Option<Oid> {
         return None;
     }
     let mut o = [0u8; 32];
-    for (i, b) in o.iter_mut().take(s.len() / 2).enumerate() {
-        *b = u8::from_str_radix(std::str::from_utf8(&s[2 * i..2 * i + 2]).ok()?, 16).ok()?;
-    }
+    crate::hexs::decode_lower_into(s, &mut o[..s.len() / 2])?;
     Oid::from_slice(&o[..s.len() / 2])
 }
 
@@ -330,9 +328,7 @@ pub const FLUSH: &[u8] = b"0000";
 fn read_pkt(r: &mut dyn Read) -> Result<Option<Vec<u8>>> {
     let mut len = [0u8; 4];
     r.read_exact(&mut len).map_err(|e| Error::Parse(format!("pkt-line: {e}")))?;
-    let n =
-        usize::from_str_radix(std::str::from_utf8(&len).map_err(|_| Error::Parse("bad pkt-line length".into()))?, 16)
-            .map_err(|_| Error::Parse("bad pkt-line length".into()))?;
+    let n = crate::hexs::pkt_len(&len).ok_or_else(|| Error::Parse("bad pkt-line length".into()))?;
     match n {
         0 => Ok(None),
         1..=3 => Ok(Some(Vec::new())), // delim/response-end (v2); treated as empty
@@ -2864,8 +2860,7 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
             let mut len = [0u8; 4];
             r.read_exact(&mut len).map_err(|e| Error::Parse(format!("push commands: {e}")))?;
             consumed += 4;
-            let n = usize::from_str_radix(std::str::from_utf8(&len).map_err(|_| Error::Parse("bad pkt".into()))?, 16)
-                .map_err(|_| Error::Parse("bad pkt".into()))?;
+            let n = crate::hexs::pkt_len(&len).ok_or_else(|| Error::Parse("bad pkt".into()))?;
             if n == 0 {
                 break;
             }

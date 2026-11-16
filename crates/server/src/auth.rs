@@ -72,14 +72,7 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
 }
 
 fn parse_hex32(s: &str) -> Option<[u8; 32]> {
-    if s.len() != 64 {
-        return None;
-    }
-    let mut out = [0u8; 32];
-    for (i, o) in out.iter_mut().enumerate() {
-        *o = u8::from_str_radix(s.get(2 * i..2 * i + 2)?, 16).ok()?;
-    }
-    Some(out)
+    crate::hexs::decode32(s)
 }
 
 impl TokenAuthenticator {

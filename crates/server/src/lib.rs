@@ -13,6 +13,7 @@ pub mod error;
 pub mod fronts;
 pub mod git;
 pub(crate) mod gitgraph;
+pub(crate) mod hexs;
 pub mod hf;
 pub mod limits;
 pub mod maven;

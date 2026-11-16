@@ -396,9 +396,7 @@ fn verifiers(st: &AppState) -> Vec<pico2peta_attest::Ed25519Verifier> {
 }
 
 fn parse_key(hex: &str) -> Option<pico2peta_attest::Ed25519Verifier> {
-    let b: Vec<u8> =
-        (0..hex.len() / 2).map(|i| u8::from_str_radix(hex.get(2 * i..2 * i + 2)?, 16).ok()).collect::<Option<_>>()?;
-    pico2peta_attest::Ed25519Verifier::from_public(&<[u8; 32]>::try_from(b.as_slice()).ok()?).ok()
+    pico2peta_attest::Ed25519Verifier::from_public(&crate::hexs::decode32(hex)?).ok()
 }
 
 /// `POST /v1/attestations`: stores a DSSE envelope (in-toto Statement) and links it to its
