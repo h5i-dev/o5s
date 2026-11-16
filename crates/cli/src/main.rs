@@ -947,7 +947,8 @@ fn hex(b: &[u8]) -> String {
 
 fn unhex32(s: &str) -> Option<[u8; 32]> {
     let s = s.trim();
-    if s.len() != 64 {
+    // Exactly 64 hex digits (`from_str_radix` alone would accept a '+' sign).
+    if s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
     let mut out = [0u8; 32];

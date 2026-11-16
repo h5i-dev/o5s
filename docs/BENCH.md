@@ -48,6 +48,30 @@ pre-registered metric was plain RSS, so it is reported as **missed**; the split 
   292 B/object projection was stopped early, as soon as the 10⁷ disk number showed it could not fit.
 - The bench's disk number now counts each inode once.
 
+## 2026-11-16: generic front (PLAN §6.4), pre-registered run
+
+`p2p-bench generic bench-micro 1024`: 1 GiB incompressible input from tmpfs, local NVMe, under the bench lock, three
+runs (load 2.6–4.9). The verdicts use the medians.
+
+| metric | runs | median | threshold | verdict |
+|---|---|---|---|---|
+| durable write vs `dd conv=fsync` | 0.945, 1.233, 1.002 (put 177–189 MB/s vs dd 153–187) | **1.002×** | ≥ 0.90× | **PASS** |
+| verified read (warm) vs `cat` | strict 0.184, 0.192, 0.175; eof 0.198, 0.272, 0.185 | **0.184× strict, 0.198× eof** | ≥ 0.50× | **FAIL** |
+| 4 KiB range read p99 (warm) | 0.112, 0.155, 0.110 ms | **0.112 ms** | ≤ 1 ms | **PASS** |
+| 10 versions, scattered 0.1 % edits | 1,135,462,813 B each run | **1.057 GiB** | ≤ 1.15 GiB | **PASS** (chunk-anchored XOR deltas) |
+| 10 versions, 1 MiB inserted each | 1,091,744,331 B each run | **1.017 GiB** | ≤ 1.15 GiB | **PASS** |
+
+**The read miss.**
+- The baseline is warm `cat`, a page-cache memcpy at 7.4–11.7 GB/s. A verified read is one stream at 1.4–2.2 GB/s:
+  - read-ahead threads decompress or copy and hash each chunk;
+  - strict mode also hashes the whole object again at EOF;
+  - eof mode hashes once, but on one thread.
+- Reaching 0.5× would need about 5 GB/s of verified throughput per stream. That means hashing in parallel
+  across cores (BLAKE3's tree allows it over large contiguous buffers), not just a cheaper read path.
+- Recorded as a FAIL against the frozen threshold. §6.4 has no pre-registered consequence beyond reporting.
+  Parallel whole-object hashing is noted as a follow-up in PROGRESS.md. It is not attempted before the
+  release candidate.
+
 ## 2026-11-16: put/get pass, part 3: verified reads of incompressible blobs (net's OCI profile)
 
 Net's server profile of OCI pulls (gzip layers, stored raw), self time: BLAKE3 36.8 %, CRC32 11.6 %, memset

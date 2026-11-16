@@ -578,3 +578,34 @@ of an identical file stored through two fronts (stored once).
 **Consequences:**
 - FAIL on a metric: reported honestly, and the next attempt is pre-registered separately, as in §6.1.
 - Functional FAIL: the front is not done.
+
+### 6.8 No-regression rule for the h5i-app rebuild (docs/H5I_PLAN.md), pre-registered 2026-11-16, before any h5i code
+
+**Baseline.** `docs/BASELINE.md` on the commit tagged `baseline-pre-h5i`. It covers:
+- the Exp3 official results (§6.6);
+- the core suite `scripts/baseline-core.sh micro|scale` (3 reps for micro, 1 for scale);
+- the §6.4 generic-front run;
+- net's §6.5 final batch.
+
+Every number carries its commit, host load and raw-data file.
+
+**Rerun (H3).** After the rebuild, the same benchmarks run on the rebuilt commit:
+- the same scripts, commands, corpora, inputs and repetition counts;
+- in announced bench windows, under the bench lock;
+- the load is reported per result, as for the baseline;
+- a result whose load makes it unusable is rerun once later, as in the batch protocol.
+
+**Rule.**
+1. **Metrics.** Every baseline metric must be no worse than its baseline value by more than the larger of 3 %
+   or that metric's baseline run-to-run range (max − min over the baseline reps, relative to the baseline
+   median).
+   - Metrics with one baseline rep use 3 %.
+   - "Worse" means lower for throughputs and higher for times, latencies, sizes and memory.
+   - The compared values are medians where there are reps.
+2. **Tiers.** No pass/fail tier may get worse: STRONG PASS → PASS, PASS → FAIL, or a met threshold becoming missed.
+3. **Exp3 sizes** must be byte-identical. The one allowed exception is an intentionally unchanged encoding
+   whose layout differs only by deterministic reordering; that is reported with the reason.
+4. **Functional checks** (net's real-client checks, the gate) must all still pass.
+
+**Consequence.** A regression is a FAIL. It is fixed before the release candidate, not rationalized. The RC
+(`v0.1.0-rc.1`) is tagged only after the rerun passes this rule.
