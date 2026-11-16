@@ -91,6 +91,11 @@ Remaining by design:
 3. The fd cache trusted packs that had been deleted. Fixed with the nlink
    check (found by net's HF test).
 4. Group-commit self-deadlock on the failure path (see Races).
+5. The CLI's hex parser for keys and public keys accepted a `+` sign per byte pair (`u8::from_str_radix`),
+   so the same key had several spellings. It is now limited to exactly 64 hex digits.
+6. Found by the fuzz smoke in a front (reported to net 2026-11-16, fixed in c8f9942 with a strict hex decoder for every untrusted id in the fronts): the OCI digest parser sliced an untrusted
+   `&str` at byte offsets. A non-ASCII digest panicked (a 500 via `CatchPanicLayer`; any lock held at the time
+   would be poisoned). It had the same `+` acceptance.
 
 ## Fuzz targets
 
