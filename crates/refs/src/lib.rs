@@ -1,0 +1,1240 @@
+//! Name layer: refs, OCC `replace`, per-namespace rules.
+//!
+//! # Storage
+//! A single append-only journal `<dir>/journal`:
+//! ```text
+//! "O5SREFJ1"                                   8-byte versioned magic
+//! { len: u32 | crc32(payload): u32 | payload } records
+//! payload = 1 | name_len u16 | name | hash[32] | version u64      (ref set)
+//!         | 2 | prefix_len u16 | prefix | rule u8                  (namespace rule)
+//! ```
+//! # Concurrency and the commit point
+//! Every handle (in-process or in another process) keeps an in-memory copy
+//! and the journal offset it has applied. Mutations take an **exclusive
+//! `flock`** on the journal. Under that lock the handle catches up on
+//! records other handles appended (truncating a torn tail left by a crash),
+//! validates, appends one checksummed record, fsyncs, and unlocks. So
+//! validation and commit are atomic across processes, and an `Ok` is durable.
+//! Reads take a shared lock, which means they never observe a half-written
+//! record from a live writer.
+#![warn(missing_docs)]
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
+
+use o5s_core::fault::{FaultHandle, Faults};
+use o5s_core::{
+    Error, Hash, Name, Observed, RefValue, ReplaceManyOutcome, ReplaceOutcome, Result, Rule, is_under, validate_path,
+};
+use o5s_kernel as kernel;
+use std::collections::BTreeMap;
+use std::fs::{File, OpenOptions};
+use std::os::unix::fs::FileExt;
+use std::path::{Path, PathBuf};
+use std::sync::{Condvar, Mutex};
+
+const MAGIC: &[u8; 8] = b"O5SREFJ1";
+const MAX_RECORD: u32 = 16 << 20;
+/// Maximum number of names in one atomic `replace_many`.
+pub const MAX_BATCH: usize = 10_000;
+
+/// Pure in-memory ref state, plus the decision logic shared by every handle.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RefState {
+    /// Current refs.
+    pub refs: BTreeMap<Name, RefValue>,
+    /// Namespace rules by prefix.
+    pub rules: BTreeMap<String, Rule>,
+    /// Last version of deleted names, so a re-created name continues its
+    /// version sequence instead of restarting at 1.
+    pub tombstones: BTreeMap<Name, u64>,
+}
+
+/// The effect of a mutation that passed every check.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Mutation {
+    /// Point `name` at `value`.
+    Set(Name, RefValue),
+    /// Set the rule for a prefix.
+    Rule(String, Rule),
+    /// Journal tombstone: this journal is closed, and state continues in
+    /// generation `n` (snapshot + journal). Written only by compaction.
+    Rotated(u64),
+    /// Several `Set`s committed atomically (one record, one commit point).
+    Batch(Vec<(Name, RefValue)>),
+    /// Remove a name, remembering its last version (tombstone).
+    Delete(Name, u64),
+    /// Several `Set`/`Delete`s committed atomically (API v1.6 `update_many`).
+    Txn(Vec<Mutation>),
+}
+
+impl RefState {
+    /// Observed state of `name`.
+    pub fn observe(&self, name: &Name) -> Observed {
+        RefValue::observed(self.refs.get(name).copied())
+    }
+
+    /// Decides a `replace` against this state (pure). Order: input
+    /// validation → read-set validation (`Conflict`) → rule (`Forbidden`).
+    /// Object existence is checked by the caller beforehand. The decision is
+    /// the extracted kernel's (`o5s_kernel::refs::decide`).
+    pub fn decide_replace(
+        &self,
+        name: &Name,
+        read_set: &[(Name, Observed)],
+        new: Hash,
+    ) -> Result<std::result::Result<Mutation, ReplaceOutcome>> {
+        let k = self.decide_kernel(&[(name, Some(new))], read_set, "replace")?;
+        Ok(match k {
+            KernelDecision::Commit(es) => match es.first() {
+                Some(kernel::refs::Effect::Set(v)) => Ok(Mutation::Set(name.clone(), ref_value(*v))),
+                _ => return Err(Error::Corrupt("kernel: unexpected effect for replace".into())),
+            },
+            KernelDecision::Conflict(stale) => Err(ReplaceOutcome::Conflict { stale }),
+        })
+    }
+
+    /// Decides an atomic multi-name update (pure), where `None` deletes.
+    /// Each entry follows the single-name rules against the pre-state.
+    /// Returns the mutation and the per-entry versions (deletes: the deleted
+    /// version, 0 if absent), in the caller's order.
+    pub fn decide_update_many(
+        &self,
+        updates: &[(Name, Option<Hash>)],
+        read_set: &[(Name, Observed)],
+    ) -> Result<std::result::Result<(Mutation, Vec<u64>), ReplaceManyOutcome>> {
+        Ok(match self.decide_kernel(updates, read_set, "update_many")? {
+            KernelDecision::Commit(es) => {
+                let mut ms = Vec::with_capacity(es.len());
+                let mut versions = Vec::with_capacity(es.len());
+                for ((n, _), e) in updates.iter().zip(es) {
+                    match e {
+                        kernel::refs::Effect::Set(v) => {
+                            versions.push(v.version);
+                            ms.push(Mutation::Set(n.clone(), ref_value(v)));
+                        }
+                        kernel::refs::Effect::Delete(v) => {
+                            versions.push(v);
+                            ms.push(Mutation::Delete(n.clone(), v));
+                        }
+                        kernel::refs::Effect::Noop => versions.push(0),
+                    }
+                }
+                Ok((Mutation::Txn(ms), versions))
+            }
+            KernelDecision::Conflict(stale) => Err(ReplaceManyOutcome::Conflict { stale }),
+        })
+    }
+
+    /// Whether name rules allow deleting `name` at all (ignoring OCC), using
+    /// the same decision as [`RefState::decide_delete`]. For tools that plan
+    /// deletions (retention dry runs).
+    pub fn rules_allow_delete(rules: &[(String, Rule)], name: &Name) -> bool {
+        let covering: Vec<(Vec<u8>, kernel::Rule)> = rules
+            .iter()
+            .filter(|(p, _)| name.is_under(p))
+            .map(|(p, r)| (p.as_bytes().to_vec(), kernel_rule(*r)))
+            .collect();
+        let (_, m) = kernel::names::mobility_of(&covering, &name.as_str().as_bytes().to_vec());
+        m == kernel::Mobility::Mutable
+    }
+
+    /// Decides an OCC delete (pure). Deleting an absent name is a no-op
+    /// (`Ok(None)`). Create-once and forbidden names can't be deleted.
+    pub fn decide_delete(
+        &self,
+        name: &Name,
+        read_set: &[(Name, Observed)],
+    ) -> Result<std::result::Result<Option<Mutation>, ReplaceOutcome>> {
+        Ok(match self.decide_kernel(&[(name, None)], read_set, "delete")? {
+            KernelDecision::Commit(es) => match es.first() {
+                Some(kernel::refs::Effect::Delete(v)) => Ok(Some(Mutation::Delete(name.clone(), *v))),
+                Some(kernel::refs::Effect::Noop) => Ok(None),
+                _ => return Err(Error::Corrupt("kernel: unexpected effect for delete".into())),
+            },
+            KernelDecision::Conflict(stale) => Err(ReplaceOutcome::Conflict { stale }),
+        })
+    }
+
+    /// Decides a `set_rule` (pure). Returns `None` when it's a no-op.
+    pub fn decide_set_rule(&self, prefix: &str, rule: Rule) -> Result<Option<Mutation>> {
+        validate_path(prefix)?;
+        let any_under = self.refs.keys().any(|n| is_under(n.as_str(), prefix));
+        match kernel::refs::decide_set_rule(
+            self.rules.get(prefix).map(|r| kernel_rule(*r)),
+            kernel_rule(rule),
+            any_under,
+        ) {
+            Ok(false) => Ok(None),
+            Ok(true) => Ok(Some(Mutation::Rule(prefix.to_string(), rule))),
+            Err(kernel::refs::SetRuleRefusal::NonEmpty) => Err(Error::RuleChangeOnNonEmpty(prefix.to_string())),
+        }
+    }
+
+    /// The rules whose prefixes cover `name`: the empty prefix and every
+    /// segment-aligned prefix of it (a lookup per segment, not a scan).
+    fn covering_rules(&self, name: &Name) -> Vec<(Vec<u8>, kernel::Rule)> {
+        let s = name.as_str();
+        let mut out = Vec::new();
+        if self.rules.is_empty() {
+            return out;
+        }
+        if let Some(r) = self.rules.get("") {
+            out.push((Vec::new(), kernel_rule(*r)));
+        }
+        for (i, c) in s.char_indices() {
+            if c == '/'
+                && let Some(r) = self.rules.get(&s[..i])
+            {
+                out.push((s.as_bytes()[..i].to_vec(), kernel_rule(*r)));
+            }
+        }
+        if let Some(r) = self.rules.get(s) {
+            out.push((s.as_bytes().to_vec(), kernel_rule(*r)));
+        }
+        out
+    }
+
+    /// Builds the kernel's view of a batch, runs the kernel, and maps the
+    /// result back: effects in the caller's order, refusals to errors.
+    fn decide_kernel<N: std::borrow::Borrow<Name>>(
+        &self,
+        updates: &[(N, Option<Hash>)],
+        read_set: &[(Name, Observed)],
+        what: &str,
+    ) -> Result<KernelDecision> {
+        let mut reads: Vec<kernel::refs::Read> = read_set
+            .iter()
+            .map(|(n, o)| kernel::refs::Read {
+                name: n.as_str().as_bytes().to_vec(),
+                observed: kernel_observed(*o),
+                current: kernel_observed(self.observe(n)),
+            })
+            .collect();
+        reads.sort_by(|a, b| a.name.cmp(&b.name));
+        // Targets sorted by name; perm[k] is the caller's index of sorted target k.
+        let mut perm: Vec<usize> = (0..updates.len()).collect();
+        if updates.len() > 1 {
+            perm.sort_by(|&a, &b| updates[a].0.borrow().cmp(updates[b].0.borrow()));
+        }
+        let targets: Vec<kernel::refs::Target> = perm
+            .iter()
+            .map(|&i| {
+                let (n, new) = &updates[i];
+                let n: &Name = n.borrow();
+                kernel::refs::Target {
+                    name: n.as_str().as_bytes().to_vec(),
+                    new: new.map(|h| *h.as_bytes()),
+                    current: self.refs.get(n).map(|v| kernel::RefVal { hash: *v.hash.as_bytes(), version: v.version }),
+                    tombstone: self.tombstones.get(n).copied(),
+                    rules: self.covering_rules(n),
+                }
+            })
+            .collect();
+        let view = kernel::refs::View { reads, targets };
+        let target_name = |k: usize| updates[perm[k]].0.borrow().clone();
+        match kernel::refs::decide(&view) {
+            Ok(kernel::refs::Decision::Commit(effects)) => {
+                if effects.len() != updates.len() {
+                    return Err(Error::Corrupt("kernel: effect count differs from target count".into()));
+                }
+                if updates.len() == 1 {
+                    return Ok(KernelDecision::Commit(effects));
+                }
+                let mut out = vec![kernel::refs::Effect::Noop; updates.len()];
+                for (k, e) in effects.into_iter().enumerate() {
+                    out[perm[k]] = e;
+                }
+                Ok(KernelDecision::Commit(out))
+            }
+            Ok(kernel::refs::Decision::Conflict(stale)) => {
+                let mut v = Vec::with_capacity(stale.len());
+                for (n, o) in stale {
+                    let n = String::from_utf8(n).map_err(|_| Error::Corrupt("kernel: non-UTF-8 name".into()))?;
+                    v.push((Name::new(n)?, core_observed(o)));
+                }
+                Ok(KernelDecision::Conflict(v))
+            }
+            Err(kernel::refs::Refusal::BatchSize) => {
+                Err(Error::Parse(format!("{what} takes 1..={} updates", kernel::refs::MAX_BATCH)))
+            }
+            Err(kernel::refs::Refusal::Duplicate(k)) => {
+                Err(Error::Parse(format!("duplicate target {} in {what}", target_name(k))))
+            }
+            Err(kernel::refs::Refusal::NotInReadSet(k)) => Err(Error::TargetNotInReadSet(target_name(k))),
+            Err(kernel::refs::Refusal::Forbidden(k, rule, why)) => Err(Error::Forbidden {
+                name: target_name(k),
+                rule: core_rule(rule),
+                why: match why {
+                    kernel::Why::Published => "name is immutable once published",
+                    kernel::Why::ImmutableDelete => "immutable names can't be deleted",
+                    kernel::Why::HeadReleaseOnly => {
+                        "only heads/* and releases/* may be written in a head-release namespace"
+                    }
+                },
+            }),
+            Err(kernel::refs::Refusal::Unsorted) => Err(Error::Corrupt("kernel: unsorted view".into())),
+            Err(kernel::refs::Refusal::VersionExhausted(k)) => {
+                Err(Error::Parse(format!("{} has reached the last version", target_name(k))))
+            }
+        }
+    }
+
+    /// Applies a mutation.
+    pub fn apply(&mut self, m: Mutation) {
+        match m {
+            Mutation::Set(n, v) => {
+                self.tombstones.remove(&n);
+                self.refs.insert(n, v);
+            }
+            Mutation::Delete(n, v) => {
+                self.refs.remove(&n);
+                self.tombstones.insert(n, v);
+            }
+            Mutation::Txn(ms) => {
+                for m in ms {
+                    self.apply(m);
+                }
+            }
+            Mutation::Rule(p, r) => {
+                self.rules.insert(p, r);
+            }
+            Mutation::Rotated(_) => {}
+            Mutation::Batch(v) => {
+                for (n, val) in v {
+                    self.tombstones.remove(&n);
+                    self.refs.insert(n, val);
+                }
+            }
+        }
+    }
+
+    /// Decides an atomic multi-name replace (pure). Same order as
+    /// [`RefState::decide_replace`]: input, then read set, then rules (each name).
+    pub fn decide_replace_many(
+        &self,
+        updates: &[(Name, Hash)],
+        read_set: &[(Name, Observed)],
+    ) -> Result<std::result::Result<Mutation, ReplaceManyOutcome>> {
+        let ups: Vec<(&Name, Option<Hash>)> = updates.iter().map(|(n, h)| (n, Some(*h))).collect();
+        Ok(match self.decide_kernel(&ups, read_set, "replace_many")? {
+            KernelDecision::Commit(es) => {
+                let mut sets = Vec::with_capacity(es.len());
+                for ((n, _), e) in updates.iter().zip(es) {
+                    match e {
+                        kernel::refs::Effect::Set(v) => sets.push((n.clone(), ref_value(v))),
+                        _ => return Err(Error::Corrupt("kernel: unexpected effect for replace_many".into())),
+                    }
+                }
+                Ok(Mutation::Batch(sets))
+            }
+            KernelDecision::Conflict(stale) => Err(ReplaceManyOutcome::Conflict { stale }),
+        })
+    }
+
+    /// Refs under `prefix` ("" = all), sorted.
+    pub fn list(&self, prefix: &str) -> Vec<(Name, RefValue)> {
+        self.refs.iter().filter(|(n, _)| is_under(n.as_str(), prefix)).map(|(n, v)| (n.clone(), *v)).collect()
+    }
+}
+
+/// A kernel decision mapped back to core types (effects in the caller's order).
+enum KernelDecision {
+    /// One effect per target, in the caller's order.
+    Commit(Vec<kernel::refs::Effect>),
+    Conflict(Vec<(Name, Observed)>),
+}
+
+fn kernel_rule(r: Rule) -> kernel::Rule {
+    match r {
+        Rule::Mutable => kernel::Rule::Mutable,
+        Rule::ImmutableAfterPublish => kernel::Rule::Immutable,
+        Rule::HeadMutableReleaseImmutable => kernel::Rule::HeadRelease,
+    }
+}
+
+fn core_rule(r: kernel::Rule) -> Rule {
+    match r {
+        kernel::Rule::Mutable => Rule::Mutable,
+        kernel::Rule::Immutable => Rule::ImmutableAfterPublish,
+        kernel::Rule::HeadRelease => Rule::HeadMutableReleaseImmutable,
+    }
+}
+
+fn kernel_observed(o: Observed) -> kernel::Observed {
+    match o {
+        Observed::Absent => kernel::Observed::Absent,
+        Observed::Version(v) => kernel::Observed::Version(v),
+    }
+}
+
+fn core_observed(o: kernel::Observed) -> Observed {
+    match o {
+        kernel::Observed::Absent => Observed::Absent,
+        kernel::Observed::Version(v) => Observed::Version(v),
+    }
+}
+
+fn ref_value(v: kernel::RefVal) -> RefValue {
+    RefValue { hash: Hash(v.hash), version: v.version }
+}
+
+fn encode(m: &Mutation) -> Vec<u8> {
+    let mut p = Vec::new();
+    match m {
+        Mutation::Set(n, v) => {
+            p.push(1);
+            p.extend_from_slice(&(n.as_str().len() as u16).to_le_bytes());
+            p.extend_from_slice(n.as_str().as_bytes());
+            p.extend_from_slice(v.hash.as_bytes());
+            p.extend_from_slice(&v.version.to_le_bytes());
+        }
+        Mutation::Rule(prefix, r) => {
+            p.push(2);
+            p.extend_from_slice(&(prefix.len() as u16).to_le_bytes());
+            p.extend_from_slice(prefix.as_bytes());
+            p.push(r.code());
+        }
+        Mutation::Rotated(g) => {
+            p.push(3);
+            p.extend_from_slice(&g.to_le_bytes());
+        }
+        Mutation::Delete(n, ver) => {
+            p.push(5);
+            p.extend_from_slice(&(n.as_str().len() as u16).to_le_bytes());
+            p.extend_from_slice(n.as_str().as_bytes());
+            p.extend_from_slice(&ver.to_le_bytes());
+        }
+        Mutation::Txn(ms) => {
+            p.push(6);
+            p.extend_from_slice(&(ms.len() as u32).to_le_bytes());
+            for m in ms {
+                let inner = encode(m);
+                // Reuse the record framing: len u32 | crc u32 | payload.
+                p.extend_from_slice(&inner);
+            }
+        }
+        Mutation::Batch(v) => {
+            p.push(4);
+            p.extend_from_slice(&(v.len() as u32).to_le_bytes());
+            for (n, val) in v {
+                p.extend_from_slice(&(n.as_str().len() as u16).to_le_bytes());
+                p.extend_from_slice(n.as_str().as_bytes());
+                p.extend_from_slice(val.hash.as_bytes());
+                p.extend_from_slice(&val.version.to_le_bytes());
+            }
+        }
+    }
+    let mut rec = Vec::with_capacity(8 + p.len());
+    rec.extend_from_slice(&(p.len() as u32).to_le_bytes());
+    rec.extend_from_slice(&crc32fast::hash(&p).to_le_bytes());
+    rec.extend_from_slice(&p);
+    rec
+}
+
+/// Decodes a payload (already CRC-checked).
+pub fn decode_payload(p: &[u8]) -> Result<Mutation> {
+    let bad = |w: &str| Error::Corrupt(format!("ref journal: {w}"));
+    let (&tag, rest) = p.split_first().ok_or_else(|| bad("empty record"))?;
+    if tag == 6 {
+        let cnt: [u8; 4] = rest.get(..4).and_then(|b| b.try_into().ok()).ok_or_else(|| bad("short txn"))?;
+        let cnt = u32::from_le_bytes(cnt) as usize;
+        if cnt > MAX_BATCH {
+            return Err(bad("bad txn size"));
+        }
+        let (inner, used, err) = parse_records(&rest[4..]);
+        if err.is_some() || used != rest.len() - 4 || inner.len() != cnt {
+            return Err(bad("bad txn body"));
+        }
+        if inner.iter().any(|m| !matches!(m, Mutation::Set(..) | Mutation::Delete(..))) {
+            return Err(bad("txn may only contain set/delete"));
+        }
+        return Ok(Mutation::Txn(inner));
+    }
+    if tag == 4 {
+        let cnt: [u8; 4] = rest.get(..4).and_then(|b| b.try_into().ok()).ok_or_else(|| bad("short batch"))?;
+        let cnt = u32::from_le_bytes(cnt) as usize;
+        if cnt == 0 || cnt > MAX_BATCH {
+            return Err(bad("bad batch size"));
+        }
+        let mut rest = &rest[4..];
+        let mut v = Vec::with_capacity(cnt);
+        for _ in 0..cnt {
+            let l = rest.get(..2).ok_or_else(|| bad("short batch entry"))?;
+            let l = u16::from_le_bytes([l[0], l[1]]) as usize;
+            let e = rest.get(2..2 + l + 40).ok_or_else(|| bad("short batch entry"))?;
+            let name = Name::new(std::str::from_utf8(&e[..l]).map_err(|_| bad("non-utf8 name"))?)?;
+            let mut h = [0u8; 32];
+            h.copy_from_slice(&e[l..l + 32]);
+            let mut ver = [0u8; 8];
+            ver.copy_from_slice(&e[l + 32..l + 40]);
+            v.push((name, RefValue { hash: Hash(h), version: u64::from_le_bytes(ver) }));
+            rest = &rest[2 + l + 40..];
+        }
+        if !rest.is_empty() {
+            return Err(bad("trailing bytes in batch"));
+        }
+        return Ok(Mutation::Batch(v));
+    }
+    if tag == 3 {
+        let g: [u8; 8] = rest.try_into().map_err(|_| bad("bad rotation record"))?;
+        return Ok(Mutation::Rotated(u64::from_le_bytes(g)));
+    }
+    if rest.len() < 2 {
+        return Err(bad("short record"));
+    }
+    let n = u16::from_le_bytes([rest[0], rest[1]]) as usize;
+    let rest = &rest[2..];
+    let s = rest.get(..n).ok_or_else(|| bad("short name"))?;
+    let s = std::str::from_utf8(s).map_err(|_| bad("non-utf8 name"))?;
+    let rest = &rest[n..];
+    match tag {
+        1 => {
+            if rest.len() != 40 {
+                return Err(bad("bad set record length"));
+            }
+            let name = Name::new(s)?;
+            let mut h = [0u8; 32];
+            h.copy_from_slice(&rest[..32]);
+            let mut v = [0u8; 8];
+            v.copy_from_slice(&rest[32..40]);
+            Ok(Mutation::Set(name, RefValue { hash: Hash(h), version: u64::from_le_bytes(v) }))
+        }
+        2 => {
+            if rest.len() != 1 {
+                return Err(bad("bad rule record length"));
+            }
+            validate_path(s)?;
+            let r = Rule::from_code(rest[0]).ok_or_else(|| bad("unknown rule"))?;
+            Ok(Mutation::Rule(s.to_string(), r))
+        }
+        5 => {
+            let v: [u8; 8] = rest.try_into().map_err(|_| bad("bad delete record length"))?;
+            Ok(Mutation::Delete(Name::new(s)?, u64::from_le_bytes(v)))
+        }
+        _ => Err(bad("unknown record tag")),
+    }
+}
+
+/// Parses as many complete, valid records as possible from `buf`.
+/// Returns the mutations and the number of bytes consumed.
+pub fn parse_records(buf: &[u8]) -> (Vec<Mutation>, usize, Option<Error>) {
+    let mut out = Vec::new();
+    let mut off = 0;
+    let corrupt = |off: usize, why: &str| Some(Error::Corrupt(format!("ref journal: {why} at offset {off}")));
+    while off < buf.len() {
+        let rest = &buf[off..];
+        // A crash can leave a partially written *last* record, or a zero-filled
+        // tail (size persisted, data not). Both are torn tails, not corruption.
+        // The framing decision is the extracted kernel's (`codec::journal_step`): a bad record
+        // followed by more data is corruption, never a torn tail (valid history is never truncated).
+        let all_zero = rest.iter().all(|b| *b == 0);
+        let (len, crc) = if rest.len() >= 8 {
+            (
+                u32::from_le_bytes([rest[0], rest[1], rest[2], rest[3]]),
+                u32::from_le_bytes([rest[4], rest[5], rest[6], rest[7]]),
+            )
+        } else {
+            (0, 0)
+        };
+        let complete = rest.len() >= 8 && (len as usize) <= rest.len() - 8;
+        let crc_ok = complete && crc32fast::hash(&rest[8..8 + len as usize]) == crc;
+        use o5s_kernel::codec::JournalStep;
+        let end = match o5s_kernel::codec::journal_step(rest.len(), all_zero, len, MAX_RECORD, crc_ok) {
+            JournalStep::Torn => break,
+            JournalStep::TooLong => return (out, off, corrupt(off, "record length out of range")),
+            JournalStep::Checksum => return (out, off, corrupt(off, "checksum mismatch")),
+            JournalStep::Record(end) => end,
+        };
+        let p = &rest[8..end];
+        match decode_payload(p) {
+            Ok(m) => out.push(m),
+            // A CRC-valid but undecodable record is real corruption (or a newer format).
+            Err(e) => return (out, off, Some(e)),
+        }
+        off += end;
+    }
+    (out, off, None)
+}
+
+/// Encodes a mutation, refusing records the decoder would reject.
+fn encode_checked(m: &Mutation) -> Result<Vec<u8>> {
+    let rec = encode(m);
+    if rec.len() - 8 > MAX_RECORD as usize {
+        return Err(Error::Parse(format!(
+            "ref transaction too large ({} bytes encoded, limit {MAX_RECORD}); split it",
+            rec.len()
+        )));
+    }
+    Ok(rec)
+}
+
+struct Inner {
+    file: File,
+    /// Journal generation of `file` (0 = `journal`, n = `journal.<n>`).
+    generation: u64,
+    state: RefState,
+    /// Journal offset up to which `state` is applied.
+    applied: u64,
+    /// Group commit: while a batch is open, this process holds the exclusive
+    /// flock (here), and `state` may include records not yet fsynced.
+    batch: Option<FlockGuard>,
+    /// Journal offset known to be fsynced in the current batch.
+    durable: u64,
+    /// Batch counter (bumped when a batch opens).
+    epoch: u64,
+    /// Recent batches whose fsync failed: `(epoch, message)`. Their waiters get
+    /// an error (bounded; a waiter checks right after its batch ends).
+    failed: Vec<(u64, String)>,
+}
+
+/// A handle on a ref store directory. Thread-safe. Any number of handles,
+/// in any number of processes, may share a directory.
+///
+/// # Compaction
+/// When the journal exceeds the compaction threshold, the committer (holding
+/// the exclusive lock) writes `snapshot.<n+1>` (the full state) and an empty
+/// `journal.<n+1>`, then appends a `Rotated(n+1)` tombstone to the old journal.
+/// The tombstone is the commit point. Last, it updates `CURRENT`. A handle
+/// that catches up on an old journal and reaches the tombstone switches to the
+/// new generation, so no write is ever made to a rotated journal.
+struct Journal {
+    dir: PathBuf,
+    faults: FaultHandle,
+    compact_threshold: std::sync::atomic::AtomicU64,
+    inner: Mutex<Inner>,
+    /// Signals the end of a group-commit fsync or batch.
+    synced: Condvar,
+}
+
+fn poisoned<T>(_: T) -> Error {
+    Error::Corrupt("internal lock poisoned".into())
+}
+
+/// Releases a flock on drop. Holds a `dup` of the locked file, which shares
+/// the open file description and therefore the lock.
+struct FlockGuard(File);
+impl FlockGuard {
+    fn exclusive(f: &File) -> Result<Self> {
+        let d = f.try_clone()?;
+        d.lock()?;
+        Ok(FlockGuard(d))
+    }
+    fn shared(f: &File) -> Result<Self> {
+        let d = f.try_clone()?;
+        d.lock_shared()?;
+        Ok(FlockGuard(d))
+    }
+}
+impl Drop for FlockGuard {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
+const SNAP_MAGIC: &[u8; 8] = b"O5SREFS1";
+/// Default journal size that triggers compaction.
+pub const DEFAULT_COMPACT_THRESHOLD: u64 = 64 << 20;
+
+fn journal_name(g: u64) -> String {
+    if g == 0 { "journal".into() } else { format!("journal.{g}") }
+}
+
+/// Writes `bytes` to `dir/name` atomically (temp file, fsync, rename, dir fsync).
+fn write_atomic(dir: &Path, name: &str, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    let tmp = dir.join(format!(".{name}.tmp-{}", std::process::id()));
+    {
+        let mut f = OpenOptions::new().write(true).create(true).truncate(true).open(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, dir.join(name))?;
+    o5s_core::backend::fsync_dir(dir)
+}
+
+fn encode_snapshot(st: &RefState) -> Vec<u8> {
+    let mut v = SNAP_MAGIC.to_vec();
+    for (p, r) in &st.rules {
+        v.extend_from_slice(&encode(&Mutation::Rule(p.clone(), *r)));
+    }
+    for (n, val) in &st.refs {
+        v.extend_from_slice(&encode(&Mutation::Set(n.clone(), *val)));
+    }
+    for (n, ver) in &st.tombstones {
+        v.extend_from_slice(&encode(&Mutation::Delete(n.clone(), *ver)));
+    }
+    let crc = crc32fast::hash(&v);
+    v.extend_from_slice(&crc.to_le_bytes());
+    v
+}
+
+fn decode_snapshot(b: &[u8]) -> Result<RefState> {
+    let bad = || Error::Corrupt("ref snapshot is corrupt".into());
+    if b.len() < 12 || &b[..8] != SNAP_MAGIC {
+        return Err(bad());
+    }
+    let (body, crc) = b.split_at(b.len() - 4);
+    if crc32fast::hash(body).to_le_bytes() != crc {
+        return Err(bad());
+    }
+    let (muts, used, err) = parse_records(&body[8..]);
+    if err.is_some() || used != body.len() - 8 {
+        return Err(bad());
+    }
+    let mut st = RefState::default();
+    for m in muts {
+        st.apply(m);
+    }
+    Ok(st)
+}
+
+fn read_current(dir: &Path) -> Result<u64> {
+    match std::fs::read_to_string(dir.join("CURRENT")) {
+        Ok(s) => s.trim().parse().map_err(|_| Error::Corrupt("bad refs/CURRENT".into())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(e) => Err(e.into()),
+    }
+}
+
+impl Journal {
+    /// Opens or creates the ref store in `dir`.
+    fn open_with_faults(dir: impl AsRef<Path>, faults: FaultHandle) -> Result<Self> {
+        let dir = dir.as_ref().to_path_buf();
+        std::fs::create_dir_all(&dir)?;
+        let mut last_err = None;
+        // Retry: a concurrent compaction may delete the generation we just read from CURRENT.
+        for _ in 0..8 {
+            match Self::load_generation(&dir, read_current(&dir)?) {
+                Ok(inner) => {
+                    let s = Journal {
+                        dir,
+                        faults,
+                        compact_threshold: std::sync::atomic::AtomicU64::new(DEFAULT_COMPACT_THRESHOLD),
+                        inner: Mutex::new(inner),
+                        synced: Condvar::new(),
+                    };
+                    s.with_shared(|_| ())?;
+                    return Ok(s);
+                }
+                Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => last_err = Some(Error::Io(e)),
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_err.unwrap_or(Error::Corrupt("could not open ref store".into())))
+    }
+
+    /// Opens generation `g`: its snapshot (none for 0) and its journal.
+    fn load_generation(dir: &Path, g: u64) -> Result<Inner> {
+        let path = dir.join(journal_name(g));
+        let state = if g == 0 {
+            RefState::default()
+        } else {
+            decode_snapshot(&std::fs::read(dir.join(format!("snapshot.{g}")))?)?
+        };
+        let file = if g == 0 {
+            OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path)?
+        } else {
+            OpenOptions::new().read(true).write(true).open(&path)?
+        };
+        {
+            let _g = FlockGuard::exclusive(&file)?;
+            let len = file.metadata()?.len();
+            if len < MAGIC.len() as u64 {
+                // New (or torn during creation). Initialize under the exclusive lock.
+                file.set_len(0)?;
+                file.write_all_at(MAGIC, 0)?;
+                file.sync_all()?;
+                o5s_core::backend::fsync_dir(dir)?;
+            } else {
+                let mut m = [0u8; 8];
+                file.read_exact_at(&mut m, 0)?;
+                if &m != MAGIC {
+                    return Err(Error::Corrupt(format!("{} is not a o5s ref journal (v1)", path.display())));
+                }
+            }
+            // Generation 0 is opened with `create`. If a compaction moved past it and
+            // deleted it after we read CURRENT, we may just have recreated an empty
+            // orphan. CURRENT is written before old generations are deleted, so
+            // re-checking it under the lock detects that. Retry with the new generation.
+            if g == 0 && read_current(dir)? > 0 {
+                return Err(Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "generation 0 superseded")));
+            }
+        }
+        Ok(Inner {
+            file,
+            generation: g,
+            state,
+            applied: MAGIC.len() as u64,
+            batch: None,
+            durable: 0,
+            epoch: 0,
+            failed: Vec::new(),
+        })
+    }
+
+    /// Switches `g` to generation `next` after reading a tombstone. Falls back
+    /// to `CURRENT` if `next` was itself compacted away already.
+    fn switch(&self, g: &mut Inner, next: u64) -> Result<()> {
+        let fresh = match Self::load_generation(&self.dir, next) {
+            Ok(i) => i,
+            Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
+                Self::load_generation(&self.dir, read_current(&self.dir)?)?
+            }
+            Err(e) => return Err(e),
+        };
+        if fresh.generation <= g.generation {
+            return Err(Error::Corrupt("ref journal rotation went backwards".into()));
+        }
+        *g = fresh;
+        Ok(())
+    }
+
+    /// Applies records appended since `applied`. With `exclusive`, a torn tail
+    /// is truncated. Returns `true` if it switched generation; the caller
+    /// must then re-lock the new journal and call again.
+    fn catch_up(&self, g: &mut Inner, exclusive: bool) -> Result<bool> {
+        let len = g.file.metadata()?.len();
+        if len < g.applied {
+            return Err(Error::Corrupt("ref journal shrank below applied offset".into()));
+        }
+        if len == g.applied {
+            return Ok(false);
+        }
+        let mut buf = vec![0u8; (len - g.applied) as usize];
+        g.file.read_exact_at(&mut buf, g.applied)?;
+        let (muts, used, err) = parse_records(&buf);
+        for m in muts {
+            if let Mutation::Rotated(next) = m {
+                self.switch(g, next)?;
+                return Ok(true);
+            }
+            g.state.apply(m);
+        }
+        g.applied += used as u64;
+        if let Some(e) = err {
+            return Err(e);
+        }
+        if exclusive && g.applied < len {
+            // Torn tail from a crashed writer: no live writer exists (we hold the lock).
+            g.file.set_len(g.applied)?;
+            g.file.sync_all()?;
+        }
+        Ok(false)
+    }
+
+    /// Waits until no group-commit batch is open (its records may not be
+    /// durable yet, and its exclusive flock must not be downgraded by a shared
+    /// lock on the same open file).
+    fn idle<'a>(&self, mut g: std::sync::MutexGuard<'a, Inner>) -> Result<std::sync::MutexGuard<'a, Inner>> {
+        while g.batch.is_some() {
+            g = self.synced.wait(g).map_err(poisoned)?;
+        }
+        Ok(g)
+    }
+
+    fn with_shared<T>(&self, f: impl FnOnce(&RefState) -> T) -> Result<T> {
+        let mut g = self.idle(self.inner.lock().map_err(poisoned)?)?;
+        loop {
+            let _l = FlockGuard::shared(&g.file)?;
+            if !self.catch_up(&mut g, false)? {
+                return Ok(f(&g.state));
+            }
+        }
+    }
+
+    /// Runs `decide` under the exclusive lock and commits its mutation durably.
+    ///
+    /// **Group commit.** The first committer opens a batch: it takes the
+    /// exclusive flock, catches up, decides, appends, and fsyncs, with the
+    /// in-process mutex released during the fsync. Committers of this process
+    /// that arrive meanwhile join the batch: they decide against the state that
+    /// includes the batch's earlier records, append, and wait. The leader
+    /// repeats the fsync until it covers every appended record, and only then
+    /// releases the flock. Nobody returns before an fsync covers its record, and
+    /// no other process (and no reader here) sees a record before it is durable:
+    /// the flock is held, and readers wait for the batch to close. On an fsync
+    /// error, every member of the batch gets the error (the outcome is
+    /// ambiguous, as for a single commit), and the state is reloaded from disk.
+    fn commit<T>(&self, decide: impl FnOnce(&RefState) -> Result<(Option<Mutation>, T)>) -> Result<T> {
+        let mut g = self.inner.lock().map_err(poisoned)?;
+        let leader = g.batch.is_none();
+        if leader {
+            let l = loop {
+                let l = FlockGuard::exclusive(&g.file)?;
+                if !self.catch_up(&mut g, true)? {
+                    break l;
+                }
+            };
+            g.batch = Some(l);
+            g.epoch += 1;
+            g.durable = g.applied;
+        }
+        let epoch = g.epoch;
+        // Decide and append (no fsync yet).
+        let mine: Result<(u64, T)> = (|| {
+            let (m, out) = decide(&g.state)?;
+            if let Some(m) = m {
+                let rec = encode_checked(&m)?;
+                if let Err(e) = self.faults.hit("refs.append") {
+                    // Simulated torn write.
+                    let _ = g.file.write_all_at(&rec[..rec.len() / 2], g.applied);
+                    return Err(e.into());
+                }
+                g.file.write_all_at(&rec, g.applied)?;
+                g.applied += rec.len() as u64;
+                g.state.apply(m);
+            }
+            Ok((g.applied, out))
+        })();
+        if !leader {
+            let (end, out) = mine?;
+            // Wait for an fsync covering `end` (or this batch's failure).
+            loop {
+                if let Some((_, msg)) = g.failed.iter().find(|(e, _)| *e == epoch) {
+                    return Err(Error::Io(std::io::Error::other(format!("group commit fsync failed: {msg}"))));
+                }
+                if g.epoch != epoch || g.durable >= end {
+                    return Ok(out);
+                }
+                g = self.synced.wait(g).map_err(poisoned)?;
+            }
+        }
+        // Leader: fsync until everything appended to this batch is covered.
+        let synced: Result<()> = loop {
+            let target = g.applied;
+            if g.durable >= target {
+                break Ok(());
+            }
+            let file = match g.file.try_clone() {
+                Ok(f) => f,
+                Err(e) => break Err(e.into()),
+            };
+            drop(g);
+            let r = self.faults.hit("refs.fsync").map_err(Error::from).and_then(|_| Ok(file.sync_data()?));
+            g = self.inner.lock().map_err(poisoned)?;
+            if let Err(e) = r {
+                break Err(e);
+            }
+            g.durable = target;
+            self.synced.notify_all();
+        };
+        match synced {
+            Ok(()) => {
+                if mine.is_ok() && g.applied > self.compact_threshold.load(std::sync::atomic::Ordering::Relaxed) {
+                    // The commits are done. A failed compaction is retried on a later commit.
+                    let _ = self.rotate_locked(&mut g);
+                }
+            }
+            Err(e) => {
+                if g.failed.len() >= 64 {
+                    g.failed.remove(0);
+                }
+                g.failed.push((epoch, e.to_string()));
+                // Release the batch's flock first: `load_generation` takes its own
+                // exclusive flock on a new open file description, which would wait
+                // forever on ours (flock locks belong to open file descriptions).
+                g.batch = None;
+                // `state` may be ahead of the disk: reload what is actually there.
+                if let Ok(fresh) = Self::load_generation(&self.dir, g.generation) {
+                    let ep = g.epoch;
+                    let failed = std::mem::take(&mut g.failed);
+                    *g = Inner { epoch: ep, failed, ..fresh };
+                }
+                g.batch = None;
+                self.synced.notify_all();
+                return Err(e);
+            }
+        }
+        g.batch = None;
+        self.synced.notify_all();
+        mine.map(|(_, out)| out)
+    }
+
+    /// Compacts while holding the exclusive lock on `g.file`.
+    fn rotate_locked(&self, g: &mut Inner) -> Result<()> {
+        let next = g.generation + 1;
+        self.faults.hit("refs.rotate.snapshot")?;
+        write_atomic(&self.dir, &format!("snapshot.{next}"), &encode_snapshot(&g.state))?;
+        self.faults.hit("refs.rotate.journal")?;
+        write_atomic(&self.dir, &journal_name(next), MAGIC)?;
+        let rec = encode(&Mutation::Rotated(next));
+        if let Err(e) = self.faults.hit("refs.rotate.tombstone") {
+            let _ = g.file.write_all_at(&rec[..rec.len() / 2], g.applied);
+            return Err(e.into());
+        }
+        g.file.write_all_at(&rec, g.applied)?;
+        g.file.sync_data()?;
+        // Committed. From here on, every handle (including this one) moves to `next`.
+        let old = g.generation;
+        let fresh = Self::load_generation(&self.dir, next)?;
+        // The batch (and its flock on the old journal) ends with this rotation.
+        let failed = std::mem::take(&mut g.failed);
+        *g = Inner { state: std::mem::take(&mut g.state), epoch: g.epoch, failed, ..fresh };
+        self.faults.hit("refs.rotate.current")?;
+        write_atomic(&self.dir, "CURRENT", format!("{next}\n").as_bytes())?;
+        // Old generations are only needed by handles that haven't caught up.
+        // Those hold open descriptors, and a missing snapshot makes them fall
+        // back to CURRENT.
+        for gen_ in old.saturating_sub(1)..=old {
+            let _ = std::fs::remove_file(self.dir.join(journal_name(gen_)));
+            if gen_ > 0 {
+                let _ = std::fs::remove_file(self.dir.join(format!("snapshot.{gen_}")));
+            }
+        }
+        Ok(())
+    }
+
+    /// Sets the journal size (bytes) that triggers compaction.
+    pub fn set_compact_threshold(&self, bytes: u64) {
+        self.compact_threshold.store(bytes.max(64), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Forces a compaction now.
+    pub fn compact(&self) -> Result<()> {
+        let mut g = self.idle(self.inner.lock().map_err(poisoned)?)?;
+        let _l = loop {
+            let l = FlockGuard::exclusive(&g.file)?;
+            if !self.catch_up(&mut g, true)? {
+                break l;
+            }
+        };
+        self.rotate_locked(&mut g)
+    }
+
+    /// Current journal generation (diagnostics).
+    pub fn generation(&self) -> Result<u64> {
+        Ok(self.inner.lock().map_err(poisoned)?.generation)
+    }
+}
+
+/// The storage engine behind a [`RefStore`]: a consistent read, and a
+/// linearizable commit of a decision. A decision may be evaluated more than
+/// once (engines with optimistic commit retry it against a newer state).
+trait Engine: Send + Sync {
+    fn read(&self, f: &mut dyn FnMut(&RefState)) -> Result<()>;
+    fn commit(&self, decide: &mut dyn FnMut(&RefState) -> Result<Option<Mutation>>) -> Result<()>;
+    fn compact(&self) -> Result<()>;
+    fn generation(&self) -> Result<u64>;
+    fn set_compact_threshold(&self, bytes: u64);
+    fn set_trim_grace(&self, _d: std::time::Duration) {}
+}
+
+impl Engine for Journal {
+    fn read(&self, f: &mut dyn FnMut(&RefState)) -> Result<()> {
+        self.with_shared(|s| f(s))
+    }
+    fn commit(&self, decide: &mut dyn FnMut(&RefState) -> Result<Option<Mutation>>) -> Result<()> {
+        Journal::commit(self, |s| Ok((decide(s)?, ())))
+    }
+    fn compact(&self) -> Result<()> {
+        Journal::compact(self)
+    }
+    fn generation(&self) -> Result<u64> {
+        Journal::generation(self)
+    }
+    fn set_compact_threshold(&self, bytes: u64) {
+        Journal::set_compact_threshold(self, bytes)
+    }
+}
+
+/// A handle on a ref store. Thread-safe, and any number of handles may share
+/// one store:
+/// * [`RefStore::open`]: a local journal directory. Commits are serialized by an exclusive
+///   `flock`, so all writers must be on one host.
+/// * [`RefStore::open_backend`]: a create-only log on any [`Backend`], e.g. S3. Commits are
+///   linearized by atomic conditional create, so writers may be on many hosts.
+pub struct RefStore {
+    engine: Box<dyn Engine>,
+}
+
+impl RefStore {
+    /// Opens or creates a journal-backed ref store in `dir`.
+    pub fn open(dir: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_faults(dir, Faults::disarmed())
+    }
+
+    /// Like [`RefStore::open`], with fault injection.
+    pub fn open_with_faults(dir: impl AsRef<Path>, faults: FaultHandle) -> Result<Self> {
+        Ok(RefStore { engine: Box::new(Journal::open_with_faults(dir, faults)?) })
+    }
+
+    /// Opens (creating if needed) a ref store stored as a create-only log under
+    /// `prefix` on `backend` (see [`log`]).
+    pub fn open_backend(backend: std::sync::Arc<dyn o5s_core::backend::Backend>, prefix: &str) -> Result<Self> {
+        Self::open_backend_with_faults(backend, prefix, Faults::disarmed())
+    }
+
+    /// Like [`RefStore::open_backend`], with fault injection.
+    pub fn open_backend_with_faults(
+        backend: std::sync::Arc<dyn o5s_core::backend::Backend>,
+        prefix: &str,
+        faults: FaultHandle,
+    ) -> Result<Self> {
+        Ok(RefStore { engine: Box::new(log::LogEngine::open(backend, prefix, faults)?) })
+    }
+
+    fn read<T>(&self, f: impl FnOnce(&RefState) -> T) -> Result<T> {
+        let mut f = Some(f);
+        let mut out = None;
+        self.engine.read(&mut |s| {
+            if let Some(f) = f.take() {
+                out = Some(f(s));
+            }
+        })?;
+        out.ok_or_else(|| Error::Corrupt("ref engine did not read".into()))
+    }
+
+    fn commit<T>(&self, mut decide: impl FnMut(&RefState) -> Result<(Option<Mutation>, T)>) -> Result<T> {
+        let mut out = None;
+        self.engine.commit(&mut |s| {
+            let (m, t) = decide(s)?;
+            out = Some(t);
+            Ok(m)
+        })?;
+        out.ok_or_else(|| Error::Corrupt("ref engine did not decide".into()))
+    }
+
+    /// Sets the size that triggers compaction (journal engine: bytes; log engine: entries).
+    pub fn set_compact_threshold(&self, n: u64) {
+        self.engine.set_compact_threshold(n)
+    }
+
+    /// Forces a compaction now.
+    pub fn compact(&self) -> Result<()> {
+        self.engine.compact()
+    }
+
+    /// Log engine only: how old a snapshot must be before log entries behind it
+    /// are trimmed (default `log::TRIM_GRACE`, 1 h). For tests.
+    pub fn set_trim_grace(&self, d: std::time::Duration) {
+        self.engine.set_trim_grace(d)
+    }
+
+    /// Current journal generation, or log snapshot sequence (diagnostics).
+    pub fn generation(&self) -> Result<u64> {
+        self.engine.generation()
+    }
+
+    /// Current value of `name`.
+    pub fn resolve(&self, name: &Name) -> Result<Option<RefValue>> {
+        self.read(|s| s.refs.get(name).copied())
+    }
+
+    /// OCC replace. `exists` reports whether `new` is a stored object.
+    pub fn replace(
+        &self,
+        name: &Name,
+        read_set: &[(Name, Observed)],
+        new: Hash,
+        exists: &dyn Fn(&Hash) -> Result<bool>,
+    ) -> Result<ReplaceOutcome> {
+        if !read_set.iter().any(|(n, _)| n == name) {
+            return Err(Error::TargetNotInReadSet(name.clone()));
+        }
+        if !exists(&new)? {
+            return Err(Error::MissingObject(new));
+        }
+        self.commit(|s| match s.decide_replace(name, read_set, new)? {
+            Ok(m) => {
+                let version = match &m {
+                    Mutation::Set(_, v) => v.version,
+                    Mutation::Rule(..)
+                    | Mutation::Rotated(_)
+                    | Mutation::Batch(_)
+                    | Mutation::Delete(..)
+                    | Mutation::Txn(_) => 0,
+                };
+                Ok((Some(m), ReplaceOutcome::Ok { version }))
+            }
+            Err(conflict) => Ok((None, conflict)),
+        })
+    }
+
+    /// Atomic multi-name OCC replace: either every update commits (in one
+    /// journal record) or none does.
+    pub fn replace_many(
+        &self,
+        updates: &[(Name, Hash)],
+        read_set: &[(Name, Observed)],
+        exists: &dyn Fn(&Hash) -> Result<bool>,
+    ) -> Result<ReplaceManyOutcome> {
+        for (n, h) in updates {
+            if !read_set.iter().any(|(r, _)| r == n) {
+                return Err(Error::TargetNotInReadSet(n.clone()));
+            }
+            if !exists(h)? {
+                return Err(Error::MissingObject(*h));
+            }
+        }
+        self.commit(|s| match s.decide_replace_many(updates, read_set)? {
+            Ok(m) => {
+                let versions = match &m {
+                    Mutation::Batch(v) => v.iter().map(|(_, val)| val.version).collect(),
+                    _ => Vec::new(),
+                };
+                Ok((Some(m), ReplaceManyOutcome::Ok { versions }))
+            }
+            Err(c) => Ok((None, c)),
+        })
+    }
+
+    /// Atomic multi-name update where `None` deletes (API v1.6).
+    pub fn update_many(
+        &self,
+        updates: &[(Name, Option<Hash>)],
+        read_set: &[(Name, Observed)],
+        exists: &dyn Fn(&Hash) -> Result<bool>,
+    ) -> Result<ReplaceManyOutcome> {
+        for (n, h) in updates {
+            if !read_set.iter().any(|(r, _)| r == n) {
+                return Err(Error::TargetNotInReadSet(n.clone()));
+            }
+            if let Some(h) = h
+                && !exists(h)?
+            {
+                return Err(Error::MissingObject(*h));
+            }
+        }
+        self.commit(|s| match s.decide_update_many(updates, read_set)? {
+            Ok((m, versions)) => Ok((Some(m), ReplaceManyOutcome::Ok { versions })),
+            Err(c) => Ok((None, c)),
+        })
+    }
+
+    /// OCC delete (see [`RefState::decide_delete`]). `Ok { version }` carries
+    /// the deleted version (0 if the name was already absent).
+    pub fn delete(&self, name: &Name, read_set: &[(Name, Observed)]) -> Result<ReplaceOutcome> {
+        self.commit(|s| match s.decide_delete(name, read_set)? {
+            Ok(Some(m)) => {
+                let version = match &m {
+                    Mutation::Delete(_, v) => *v,
+                    _ => 0,
+                };
+                Ok((Some(m), ReplaceOutcome::Ok { version }))
+            }
+            Ok(None) => Ok((None, ReplaceOutcome::Ok { version: 0 })),
+            Err(c) => Ok((None, c)),
+        })
+    }
+
+    /// Sets a namespace rule (see [`RefState::decide_set_rule`]).
+    pub fn set_rule(&self, prefix: &str, rule: Rule) -> Result<()> {
+        self.commit(|s| Ok((s.decide_set_rule(prefix, rule)?, ())))
+    }
+
+    /// Refs under `prefix`.
+    pub fn list(&self, prefix: &str) -> Result<Vec<(Name, RefValue)>> {
+        self.read(|s| s.list(prefix))
+    }
+
+    /// Configured rules.
+    pub fn rules(&self) -> Result<Vec<(String, Rule)>> {
+        self.read(|s| s.rules.iter().map(|(p, r)| (p.clone(), *r)).collect())
+    }
+
+    /// A snapshot of the whole state (after catching up).
+    pub fn snapshot(&self) -> Result<RefState> {
+        self.read(|s| s.clone())
+    }
+}
+
+pub mod log;

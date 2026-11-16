@@ -1,0 +1,15 @@
+[package]
+name = "o5s-exp1c"
+description = "Experiment 1c: resemblance-selected base + zstd patch-from delta (see docs/PLAN.md §4.9)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "exp1c"
+path = "src/main.rs"
+
+[dependencies]
+zstd.workspace = true
+sha1_smol = "1"

@@ -1,0 +1,7 @@
+# commits rep 3 commit cbbbb8a dirty 0 load_start 1.58 2026-11-16T06:30:48+00:00
+| threads (one handle, distinct names) | commits/s |
+|---|---|
+| 1 | 7189 |
+| 4 | 10858 |
+| 8 | 13261 |
+# load_end 1.62

@@ -1,0 +1,33 @@
+[package]
+name = "o5s-kernel"
+description = "o5s's decision kernels: pure Rust in the Charon/Aeneas subset, extracted to Lean and proved (docs/H5I_PLAN.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# No dependencies: Charon + Aeneas extract this crate (verify/core). It is
+# written in their subset: no `?`, no closures or iterator adapters, `&Vec`
+# rather than slices, explicit loops. Clippy's idiomatic rewrites leave that
+# subset, so they are allowed here rather than applied.
+[dependencies]
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints.clippy]
+len_zero = "allow"
+needless_range_loop = "allow"
+manual_strip = "allow"
+ptr_arg = "allow"
+collapsible_if = "allow"
+collapsible_else_if = "allow"
+needless_return = "allow"
+manual_range_contains = "allow"
+byte_char_slices = "allow"
+collapsible_match = "allow"
+manual_unwrap_or_default = "allow"
+manual_unwrap_or = "allow"
+question_mark = "allow"
+manual_map = "allow"
+result_unit_err = "allow"
+single_match = "allow"

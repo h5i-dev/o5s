@@ -1,0 +1,20 @@
+[package]
+name = "o5s-repo"
+description = "Local o5s repository: pack store + ref store behind the Repository trait"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+o5s-kernel.workspace = true
+o5s-core.workspace = true
+o5s-pack.workspace = true
+o5s-refs.workspace = true
+o5s-order.workspace = true
+serde.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+proptest.workspace = true
+o5s-chunk.workspace = true

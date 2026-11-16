@@ -1,0 +1,159 @@
+# Deploying o5s-server
+
+## Files
+| File | Purpose |
+|---|---|
+| `Dockerfile` | Multi-stage build to distroless `nonroot`. Build from the repo root: `docker build -f deploy/Dockerfile -t o5s-server .` |
+| `server.toml` | Sample config for a systemd install (`/etc/o5s/server.toml`) |
+| `server.docker.toml` | The same config, baked into the image (listens on `0.0.0.0:8080`, state in `/var/lib/o5s`) |
+| `tokens.example.toml` | Token file format (`/etc/o5s/tokens.toml`, mode 0600) |
+| `o5s-server.service` | Hardened systemd unit |
+
+## systemd install
+```sh
+useradd --system --home /var/lib/o5s --shell /usr/sbin/nologin o5s
+install -m 0755 target/release/o5s-server target/release/o5s /usr/local/bin/
+install -d -m 0750 -o root -g o5s /etc/o5s
+install -m 0640 -g o5s deploy/server.toml /etc/o5s/server.toml
+o5s-server gen-token admin   # prints the token once, plus a [[tokens]] entry
+$EDITOR /etc/o5s/tokens.toml # paste the entry (as [[tokens]]); chmod 0640, group o5s
+install -m 0644 deploy/o5s-server.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now o5s-server
+```
+The unit runs `check-config` before every start. `systemctl stop` sends SIGTERM, and then:
+1. `/readyz` turns to 503 and new API requests get 503 `shutting_down`.
+2. In-flight requests get `shutdown_grace_secs` to finish.
+3. The repository is flushed and the audit log is synced.
+
+`TimeoutStopSec` (60 s) must stay above the grace period.
+
+## Docker
+```sh
+docker run -d --name o5s -p 8080:8080 \
+  -v o5s-data:/var/lib/o5s \
+  -v /secure/tokens.toml:/etc/o5s/tokens.toml:ro \
+  -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY \
+  o5s-server
+```
+`docker stop` sends SIGTERM. Give it `--stop-timeout 45` or more if you raise the grace period.
+
+## TLS
+Two options:
+- **Native:** set `server.tls = { cert = "...", key = "..." }` (PEM; ECDSA or RSA; TLS 1.2+, ALPN h2 and http/1.1). Handshakes run concurrently with a 10 s timeout, so slow clients cannot block accepts. After renewing the certificate in place, `systemctl reload o5s-server` (SIGHUP) swaps it for new connections without dropping existing ones.
+- **Proxy:** terminate TLS in a reverse proxy (nginx, envoy, an ALB) and keep the server on loopback or a private network. Bearer tokens must never cross an untrusted network in clear text. Behind a proxy, set `server.trust_forwarded_for = true` so audit records show the real client address. Never enable it when clients can reach the server directly, because they could then forge their address.
+
+For large uploads, disable request buffering in the proxy (`proxy_request_buffering off; client_max_body_size 0;` in nginx). Otherwise the proxy spools whole uploads to disk.
+
+## S3 backend
+- Create the bucket first. The server never creates buckets.
+- Credentials are resolved in this order: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (in `/etc/o5s/env`), then web identity (`AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN`, e.g. EKS IRSA), then the EC2 instance profile (IMDSv2). Temporary credentials refresh automatically. Prefer the instance profile or IRSA over static keys.
+- **Add a lifecycle rule that aborts incomplete multipart uploads** (for example after 1 day). If the process is killed in the middle of an upload, the parts stay billable until that rule removes them:
+  ```json
+  {"Rules":[{"ID":"abort-mpu","Status":"Enabled","Filter":{"Prefix":""},
+    "AbortIncompleteMultipartUpload":{"DaysAfterInitiation":1}}]}
+  ```
+- Don't enable bucket versioning just to protect packs. They are create-only (`If-None-Match: *`) and never overwritten.
+- Minimal IAM permissions on `arn:aws:s3:::bucket/prefix/*`: `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` (used only by GC), `s3:AbortMultipartUpload`. Add `s3:ListBucket` on the bucket with a prefix condition.
+- Staging (the open pack) and refs stay on the local disk at `repo.path`. Put that path on durable storage (EBS, not instance store) and back it up. Without it, refs are lost.
+
+### S3 deployment guide (production checklist)
+1. **Bucket:** in the same region as the servers. Block all public access. Use default encryption (SSE-S3, or SSE-KMS with a bucket key so KMS isn't called on every request). The server sends no SSE headers, so bucket defaults apply. Leave versioning off (see above) and add the abort-multipart lifecycle rule.
+2. **Network:** reach S3 through a **gateway VPC endpoint**. It is free, and keeps pack traffic off the NAT gateway, which bills per GB. The bucket policy can then require `aws:SourceVpce`.
+3. **Identity:** an instance profile (EC2) or IRSA (EKS; see `k8s/s3.yaml`), scoped to the IAM actions above on `bucket/prefix/*`. With several deployments in one bucket, give each its own `prefix` and its own role.
+4. **Refs:**
+   - Single server: `refs = "local"`. Refs live on `repo.path` (EBS), so snapshot that volume.
+   - Several servers or failover: `refs = "backend"`. Refs live in S3 under the prefix, and each server's `repo.path` holds only staging. This needs `backend.conditional_writes = true` (the default). AWS S3 supports `If-None-Match: *` since 2024. For other S3-compatible stores, check that a second conditional create of the same key gets 412; MinIO does, and is what CI runs against.
+5. **Storage class:** keep packs in S3 Standard (or Intelligent-Tiering without the archive tiers). GC deletes and rewrites packs, which incurs minimum-duration fees in Standard-IA, One Zone-IA and the Glacier classes, and archive tiers make reads fail until restored.
+6. **Throughput:** each server keeps at most `backend.max_in_flight` S3 requests in flight (default 32). Raise it for many concurrent large transfers; S3 serves ≥3,500 PUT and 5,500 GET requests per second per prefix. Throttling shows up as `o5s_s3_throttled_total` and is retried with backoff.
+7. **Cost model:** objects are packed, so S3 request counts scale with packs and ranged chunk reads, not with user objects. GC lists the prefix and rewrites the packs it repacks (PUT and DELETE requests, plus the bytes rewritten).
+8. **Monitoring:** alert on `o5s_s3_failures_total` (requests that failed after retries) and on throttling. Both are in `prometheus-alerts.yml` and the Grafana dashboard.
+9. **Backup and DR:**
+   - Same-region protection: S3 durability, plus snapshots of `repo.path` with `refs = "local"`.
+   - Cross-region: S3 replication of the prefix, and with `refs = "local"` a copy of the refs.
+   - Restore: point a new server at the bucket and prefix (and the restored `repo.path`), then run `o5s fsck`.
+   - Packs are immutable, so a replica never holds a torn pack. S3 replication is asynchronous and unordered, though: right after a failover, a replicated ref may point at a pack that hasn't arrived yet. Run `fsck` before serving writes from a replica, and expect a replication lag window (S3 RTC bounds it at 15 minutes).
+10. **Verify before going live:** `o5s-server check-config`, a put/get round trip, `POST /v1/admin/gc?dry_run=true`, and a restart (the server must come back with every ref).
+
+## Reloading configuration
+SIGHUP (`systemctl reload`) re-reads the config file and applies **tokens, policies and the TLS certificate** atomically. Revoked tokens stop working on the next request. If the new file fails validation, nothing changes and an error is logged. Every reload is audited (`action = "config_reload"`). All other settings need a restart.
+
+## Several servers per repository
+Create the repository with `[repo] refs = "backend"` (and an S3 `[backend]`). Then run any number of servers, each with its **own** `repo.path` (local staging), pointing at the same bucket and prefix. Refs are committed through S3's conditional create (`If-None-Match`), so OCC holds across hosts. Put a load balancer in front.
+
+Notes:
+- `[gc]` should run on one server only. GC is safe with concurrent writers, but parallel GC runs only duplicate work.
+- An object put on one server becomes visible to the others once it is flushed (any `replace` does that).
+
+## Fronts and proxy-caches
+
+All fronts are on by default and share one store, one token set, one policy and one audit log. Each is authorized on its own namespace: `git/<repo>`, `git/hf/<type>s/<ns>/<name>` (HF), `oci/<repo>`, `pypi/<index>`, `npm/<registry>` and `maven/<repo>`. Any `[git]`, `[oci]`, `[hf]`, `[pypi]`, `[npm]` or `[maven]` front can be turned off with `enabled = false`.
+
+To make an index a cache of a public registry, give it an upstream:
+
+```toml
+[pypi.upstream.pypi]            # https://host/pypi/pypi/simple/
+url = "https://pypi.org/simple"
+
+[npm.upstream.npmjs]            # registry=https://host/npm/npmjs/
+url = "https://registry.npmjs.org"
+
+[maven.upstream.central]        # mirror URL https://host/maven/central
+url = "https://repo.maven.apache.org/maven2"
+# token = "..."                 # bearer token for a private upstream
+# file_hosts = ["cdn.example.com"]  # other hosts its listings may point downloads at
+# ttl_secs = 600                # how long fetched listings or metadata are reused
+```
+
+- Proxied files are verified against the upstream's checksums (sha256, npm integrity, Maven `.sha1`) and stored once. After that they are served from the store, including when the upstream is down. `o5s_upstream_fetches_total{front}` counts upstream file fetches.
+- Downloads are fetched only from the upstream's own host and its `file_hosts` (`pypi.org` implies `files.pythonhosted.org`), and redirects are followed only to such hosts. A compromised upstream therefore can't steer the server at internal addresses (SSRF).
+- Uploads to a proxied index are allowed and take precedence over the upstream's files.
+- For HF repos, configure the Xet chunker on their content in the repo's `config.toml`, so that Xet uploads and the rebuilt files dedup chunk for chunk:
+
+```toml
+[profiles.hf]
+chunker = "xet"
+[namespaces]
+"hf/" = "hf"
+```
+
+## Kubernetes
+`deploy/k8s/` has two shapes:
+- `local.yaml`: one replica on a PersistentVolume.
+- `s3.yaml`: several replicas on S3 with `refs = "backend"`, IRSA, and a GC CronJob.
+
+Both use non-root, read-only-root pods with readiness and liveness probes. See `deploy/k8s/README.md` (ingress body limits, tokens secret).
+
+## Observability
+- `GET /healthz` is liveness (the process is up). `GET /readyz` is readiness: it is 503 while draining, after an audit-log failure, or when the repository is unreachable. Neither needs credentials.
+- `GET /metrics` serves OpenMetrics text with no credentials. Set `server.metrics_listen` to a private address so it is served only there (the API port then returns 404 for it), or restrict it at the proxy or firewall. Key series:
+  - `o5s_http_requests_total{method,route,status}` and `o5s_http_request_duration_seconds`
+  - `o5s_http_in_flight`
+  - `o5s_replace_total{outcome=ok|conflict|rejected}`
+  - `o5s_auth_failures_total`, `o5s_authz_denied_total`, `o5s_audit_write_failures_total`
+  - `o5s_s3_{requests,retries,throttled,failures}_total`
+- Logs are JSON lines on stderr (journald). Each request logs one INFO line with status and latency, and its span carries `request_id`. The same id is returned in `x-request-id` and stored in audit records.
+
+- Dashboard: `deploy/grafana-dashboard.json` (Grafana 10+; pick the Prometheus data source and the job). It has request and error rates, p50/p99 latency by route, bytes in and out, OCC outcomes, auth failures, authz denials and rate limiting, audit write failures, GC, proxy-cache upstream fetches, and S3 requests/retries/throttling.
+- Alerts: `deploy/prometheus-alerts.yml` covers down, audit write failures (mutations are refused), 5xx rate, slow metadata requests, GC failures, S3 failures and throttling, auth-failure spikes, and saturation.
+
+## Audit log
+The log is append-only JSON lines at `audit.path`, fsync'd before each mutating call returns. Each record's `prev` field is the BLAKE3 hash of the previous line, so you can check the chain with:
+```sh
+o5s-server verify-audit /var/log/o5s/audit.jsonl
+```
+If an audit write fails (for example, the disk is full), the server refuses all further mutations, returns 503 from `/readyz`, and increments `o5s_audit_write_failures_total`.
+
+Rotation: set `audit.rotate_bytes`. A full file is renamed to `audit.jsonl.<last seq>` (fsync'd), and the next file continues the same chain. You may archive or move the oldest rotated files away, and `verify-audit` then reports the sequence number the remaining chain starts at. Deleting a file from the middle is detected.
+
+## Garbage collection
+With `gc.interval_secs > 0`, the server advances the GC protocol on that schedule: plan, then sweep and repack, then delete, with each phase at least `gc.grace_secs` after the previous one. Admins can also trigger it with `POST /v1/admin/gc` (`?dry_run=true` for a report only). GC is safe with concurrent writers, but it relies on the **put→replace lease**: a client must make a ref point at a newly put object within `grace_secs`. Results show up in `o5s_gc_runs_total`, `o5s_gc_deleted_bytes_total`, the logs, and the audit log (`action = "gc"`). Any `dangling_refs` in a report means the repository is corrupt, so investigate it before the next run.
+
+## Capacity notes
+- Each transfer buffers at most about 2 MiB, whatever the object size. Measured: 19 MiB peak RSS growth while streaming 512 MiB up and back down (`crates/server/tests/memory.rs`).
+- `server.rate_limit = { per_sec, burst }` gives each principal (anonymous callers: each client IP) a token bucket. Excess requests get 429 with `Retry-After`.
+- `[[limits]]` rules set limits per namespace (the longest `prefix` applies). Every front honours them (git, OCI, HF, PyPI, npm, Maven), and so do the `/v1` name operations.
+  - `rate = { per_sec, burst }` is one token bucket shared by all callers of the namespace. Excess requests get 429 with `Retry-After`.
+  - `max_stored_bytes` is a quota on the logical bytes reachable from the namespace's names, following the fronts' references (commits → trees → blobs, manifests → layers). Content shared with other namespaces counts in full in each one. A background scan measures usage every `server.limits_scan_secs` (default 3600; the scan reads every reachable object's size, so size the interval to the data). Writes into a namespace measured at or over its quota get 507 `quota_exceeded`. Not blocked: reads, `/v1` ref deletes, OCI manifest deletes, and global admins (for cleanup through any front). Other front-level deletes count as writes (e.g. a git push that only deletes refs). A namespace can overshoot by what it writes within one scan interval.
+  - Refusals are counted in `o5s_namespace_limited_total{outcome="rate"|"quota"}`, and each scan logs the usage it measured.
+- `max_concurrent_requests` bounds concurrent requests, including those still streaming bodies. Beyond it, the server answers 503 with `Retry-After: 1`.
+- A client that stalls for 60 s in the middle of a transfer is disconnected.

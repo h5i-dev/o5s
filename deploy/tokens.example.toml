@@ -1,0 +1,6 @@
+# /etc/o5s/tokens.toml (mode 0600, owner o5s).
+# Only SHA-256 hashes of tokens are stored. Generate with:
+#   o5s-server gen-token <principal>
+[[tokens]]
+principal = "admin"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"  # replace

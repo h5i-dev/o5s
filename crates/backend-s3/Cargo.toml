@@ -1,0 +1,27 @@
+[package]
+name = "o5s-backend-s3"
+description = "S3 / S3-compatible storage backend for o5s (SigV4, conditional writes, multipart, retries)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+o5s-core.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "fs", "io-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2"] }
+bytes = "1"
+hmac = "0.12"
+sha2 = "0.10"
+md-5 = "0.10"
+quick-xml = "0.38"
+fastrand = "2"
+tracing = "0.1"
+serde_json = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+o5s-refs.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macros", "time"] }

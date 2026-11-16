@@ -1,0 +1,56 @@
+[Unit]
+Description=o5s server
+Documentation=file:///usr/share/doc/o5s/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=o5s
+Group=o5s
+ExecStartPre=/usr/local/bin/o5s-server check-config --config /etc/o5s/server.toml
+ExecStart=/usr/local/bin/o5s-server serve --config /etc/o5s/server.toml
+# SIGHUP reloads tokens, policies and the TLS certificate.
+ExecReload=/bin/kill -HUP $MAINPID
+# Optional: AWS_ACCESS_KEY_ID=..., AWS_SECRET_ACCESS_KEY=..., RUST_LOG=...
+EnvironmentFile=-/etc/o5s/env
+# Graceful drain: must exceed server.shutdown_grace_secs.
+KillSignal=SIGTERM
+TimeoutStopSec=60
+Restart=on-failure
+RestartSec=2s
+LimitNOFILE=65536
+
+StateDirectory=o5s
+StateDirectoryMode=0750
+LogsDirectory=o5s
+LogsDirectoryMode=0750
+ConfigurationDirectory=o5s
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

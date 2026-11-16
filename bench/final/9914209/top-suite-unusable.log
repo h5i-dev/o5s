@@ -1,0 +1,553 @@
+## 2026-11-16T17:15:41+00:00 load 7.39 7.09 6.55
+%CPU USER     COMMAND
+ 108 ec2-user blender
+ 104 ec2-user python
+67.1 ec2-user blender
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:15:51+00:00 load 6.95 7.00 6.53
+%CPU USER     COMMAND
+ 108 ec2-user blender
+70.7 ec2-user blender
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:16:01+00:00 load 7.14 7.04 6.54
+%CPU USER     COMMAND
+ 108 ec2-user blender
+73.6 ec2-user blender
+37.5 ec2-user p2p-bench
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:16:11+00:00 load 7.73 7.17 6.59
+%CPU USER     COMMAND
+ 135 ec2-user p2p-bench
+ 108 ec2-user blender
+76.3 ec2-user blender
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:16:21+00:00 load 7.95 7.23 6.62
+%CPU USER     COMMAND
+ 107 ec2-user blender
+77.9 ec2-user blender
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:16:32+00:00 load 7.43 7.14 6.60
+%CPU USER     COMMAND
+ 128 ec2-user p2p-bench
+ 107 ec2-user blender
+79.9 ec2-user blender
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:16:42+00:00 load 6.89 7.03 6.57
+%CPU USER     COMMAND
+ 148 ec2-user p2p-bench
+82.2 ec2-user blender
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:16:52+00:00 load 6.44 6.93 6.54
+%CPU USER     COMMAND
+ 100 ec2-user blender
+88.7 ec2-user p2p-bench
+83.6 ec2-user blender
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:17:02+00:00 load 6.15 6.85 6.52
+%CPU USER     COMMAND
+ 104 ec2-user blender
+94.4 ec2-user p2p-bench
+85.1 ec2-user blender
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:17:12+00:00 load 5.99 6.79 6.50
+%CPU USER     COMMAND
+ 107 ec2-user blender
+96.4 ec2-user p2p-bench
+86.5 ec2-user blender
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:17:22+00:00 load 5.75 6.72 6.48
+%CPU USER     COMMAND
+ 108 ec2-user blender
+97.4 ec2-user p2p-bench
+87.6 ec2-user blender
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:17:32+00:00 load 5.57 6.64 6.46
+%CPU USER     COMMAND
+ 108 ec2-user blender
+98.0 ec2-user p2p-bench
+88.6 ec2-user blender
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:17:42+00:00 load 5.32 6.56 6.43
+%CPU USER     COMMAND
+ 108 ec2-user blender
+98.3 ec2-user p2p-bench
+89.5 ec2-user blender
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:17:52+00:00 load 5.36 6.52 6.42
+%CPU USER     COMMAND
+ 108 ec2-user blender
+98.2 ec2-user p2p-bench
+90.3 ec2-user blender
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:18:02+00:00 load 5.32 6.47 6.41
+%CPU USER     COMMAND
+ 108 ec2-user blender
+98.2 ec2-user p2p-bench
+91.1 ec2-user blender
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:18:12+00:00 load 5.33 6.44 6.40
+%CPU USER     COMMAND
+ 108 ec2-user blender
+99.8 ec2-user p2p-bench
+91.7 ec2-user blender
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:18:22+00:00 load 6.43 6.64 6.46
+%CPU USER     COMMAND
+ 106 ec2-user blender
+ 101 ec2-user p2p-bench
+91.8 ec2-user blender
+90.7 ec2-user blender
+ 5.1 ec2-user claude
+## 2026-11-16T17:18:32+00:00 load 6.89 6.73 6.49
+%CPU USER     COMMAND
+ 129 ec2-user blender
+ 102 ec2-user blender
+ 102 ec2-user p2p-bench
+90.5 ec2-user blender
+ 5.1 ec2-user claude
+## 2026-11-16T17:18:42+00:00 load 6.90 6.74 6.50
+%CPU USER     COMMAND
+ 133 ec2-user blender
+ 100 ec2-user p2p-bench
+99.7 ec2-user blender
+89.8 ec2-user blender
+ 5.1 ec2-user claude
+## 2026-11-16T17:18:52+00:00 load 7.62 6.90 6.55
+%CPU USER     COMMAND
+ 147 ec2-user blender
+99.9 ec2-user p2p-bench
+95.8 ec2-user blender
+88.3 ec2-user blender
+ 5.1 ec2-user claude
+## 2026-11-16T17:19:02+00:00 load 7.51 6.90 6.56
+%CPU USER     COMMAND
+ 148 ec2-user blender
+99.5 ec2-user p2p-bench
+94.2 ec2-user blender
+87.6 ec2-user blender
+ 5.1 ec2-user claude
+## 2026-11-16T17:19:12+00:00 load 7.44 6.91 6.56
+%CPU USER     COMMAND
+ 141 ec2-user blender
+98.8 ec2-user p2p-bench
+93.9 ec2-user blender
+87.6 ec2-user blender
+ 5.1 ec2-user claude
+## 2026-11-16T17:19:22+00:00 load 7.83 7.01 6.60
+%CPU USER     COMMAND
+ 135 ec2-user blender
+98.8 ec2-user p2p-bench
+94.1 ec2-user blender
+87.9 ec2-user blender
+ 5.1 ec2-user claude
+## 2026-11-16T17:19:32+00:00 load 8.00 7.08 6.63
+%CPU USER     COMMAND
+ 129 ec2-user blender
+98.7 ec2-user p2p-bench
+94.3 ec2-user blender
+88.3 ec2-user blender
+ 5.1 ec2-user claude
+## 2026-11-16T17:19:42+00:00 load 8.31 7.17 6.66
+%CPU USER     COMMAND
+ 126 ec2-user blender
+98.7 ec2-user p2p-bench
+94.7 ec2-user blender
+88.5 ec2-user blender
+ 5.1 ec2-user claude
+## 2026-11-16T17:19:52+00:00 load 7.87 7.12 6.65
+%CPU USER     COMMAND
+ 123 ec2-user blender
+98.8 ec2-user p2p-bench
+94.8 ec2-user blender
+88.7 ec2-user blender
+ 5.0 ec2-user claude
+## 2026-11-16T17:20:02+00:00 load 7.96 7.16 6.67
+%CPU USER     COMMAND
+ 121 ec2-user blender
+ 100 ec2-user p2p-bench
+94.7 ec2-user blender
+88.8 ec2-user blender
+ 5.0 ec2-user claude
+## 2026-11-16T17:20:12+00:00 load 8.43 7.29 6.72
+%CPU USER     COMMAND
+ 119 ec2-user blender
+94.9 ec2-user blender
+89.0 ec2-user blender
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:20:23+00:00 load 8.49 7.34 6.74
+%CPU USER     COMMAND
+ 117 ec2-user blender
+ 104 ec2-user p2p-bench
+95.0 ec2-user blender
+89.2 ec2-user blender
+ 5.0 ec2-user claude
+## 2026-11-16T17:20:33+00:00 load 8.44 7.37 6.76
+%CPU USER     COMMAND
+ 116 ec2-user blender
+ 101 ec2-user p2p-bench
+95.2 ec2-user blender
+89.4 ec2-user blender
+ 5.0 ec2-user claude
+## 2026-11-16T17:20:43+00:00 load 8.46 7.40 6.77
+%CPU USER     COMMAND
+ 114 ec2-user blender
+97.9 ec2-user p2p-bench
+95.0 ec2-user blender
+89.3 ec2-user blender
+ 5.0 ec2-user claude
+## 2026-11-16T17:20:53+00:00 load 7.85 7.31 6.75
+%CPU USER     COMMAND
+ 112 ec2-user blender
+98.4 ec2-user p2p-bench
+95.1 ec2-user blender
+89.6 ec2-user blender
+ 5.0 ec2-user claude
+## 2026-11-16T17:21:03+00:00 load 7.88 7.33 6.76
+%CPU USER     COMMAND
+ 111 ec2-user blender
+98.5 ec2-user p2p-bench
+95.2 ec2-user blender
+89.8 ec2-user blender
+ 4.9 ec2-user claude
+## 2026-11-16T17:21:13+00:00 load 7.96 7.37 6.78
+%CPU USER     COMMAND
+ 111 ec2-user blender
+98.6 ec2-user p2p-bench
+95.3 ec2-user blender
+90.0 ec2-user blender
+ 4.9 ec2-user claude
+## 2026-11-16T17:21:23+00:00 load 7.43 7.27 6.76
+%CPU USER     COMMAND
+ 110 ec2-user blender
+98.5 ec2-user p2p-bench
+95.3 ec2-user blender
+90.2 ec2-user blender
+ 4.9 ec2-user claude
+## 2026-11-16T17:21:33+00:00 load 7.20 7.23 6.75
+%CPU USER     COMMAND
+ 109 ec2-user blender
+98.6 ec2-user p2p-bench
+95.4 ec2-user blender
+90.3 ec2-user blender
+ 4.9 ec2-user claude
+## 2026-11-16T17:21:43+00:00 load 7.17 7.22 6.75
+%CPU USER     COMMAND
+ 109 ec2-user blender
+99.2 ec2-user p2p-bench
+95.4 ec2-user blender
+90.5 ec2-user blender
+ 4.9 ec2-user claude
+## 2026-11-16T17:21:53+00:00 load 7.76 7.35 6.80
+%CPU USER     COMMAND
+ 108 ec2-user blender
+ 100 ec2-user p2p-bench
+95.2 ec2-user blender
+90.5 ec2-user blender
+ 4.9 ec2-user claude
+## 2026-11-16T17:22:03+00:00 load 7.33 7.27 6.78
+%CPU USER     COMMAND
+95.4 ec2-user blender
+94.2 ec2-user blender
+90.7 ec2-user blender
+63.8 ec2-user git
+22.0 ec2-user head
+## 2026-11-16T17:22:13+00:00 load 6.82 7.16 6.75
+%CPU USER     COMMAND
+95.8 ec2-user p2p-bench
+95.6 ec2-user blender
+95.4 ec2-user blender
+90.8 ec2-user blender
+ 4.9 ec2-user claude
+## 2026-11-16T17:22:23+00:00 load 7.08 7.21 6.77
+%CPU USER     COMMAND
+97.0 ec2-user p2p-bench
+96.1 ec2-user blender
+95.4 ec2-user blender
+90.9 ec2-user blender
+ 4.9 ec2-user claude
+## 2026-11-16T17:22:33+00:00 load 7.45 7.28 6.80
+%CPU USER     COMMAND
+98.0 ec2-user p2p-bench
+95.8 ec2-user blender
+95.5 ec2-user blender
+91.0 ec2-user blender
+ 4.9 ec2-user claude
+## 2026-11-16T17:22:43+00:00 load 8.15 7.44 6.85
+%CPU USER     COMMAND
+95.1 ec2-user blender
+93.0 ec2-user blender
+90.8 ec2-user blender
+83.0 ec2-user p2p-bench
+ 4.9 ec2-user claude
+## 2026-11-16T17:22:53+00:00 load 7.97 7.42 6.85
+%CPU USER     COMMAND
+95.2 ec2-user blender
+94.7 ec2-user p2p-bench
+93.9 ec2-user blender
+90.9 ec2-user blender
+ 4.9 ec2-user claude
+## 2026-11-16T17:23:03+00:00 load 7.36 7.31 6.82
+%CPU USER     COMMAND
+97.0 ec2-user p2p-bench
+95.3 ec2-user blender
+94.6 ec2-user blender
+91.0 ec2-user blender
+ 4.9 ec2-user claude
+## 2026-11-16T17:23:13+00:00 load 7.06 7.25 6.81
+%CPU USER     COMMAND
+99.1 ec2-user p2p-bench
+95.3 ec2-user blender
+95.1 ec2-user blender
+91.1 ec2-user blender
+ 4.8 ec2-user claude
+## 2026-11-16T17:23:23+00:00 load 6.81 7.19 6.80
+%CPU USER     COMMAND
+ 106 ec2-user p2p-bench
+95.1 ec2-user blender
+94.0 ec2-user blender
+91.0 ec2-user blender
+ 4.8 ec2-user claude
+## 2026-11-16T17:23:33+00:00 load 6.60 7.13 6.78
+%CPU USER     COMMAND
+ 101 ec2-user p2p-bench
+95.2 ec2-user blender
+94.7 ec2-user blender
+91.1 ec2-user blender
+ 4.8 ec2-user claude
+## 2026-11-16T17:23:44+00:00 load 6.90 7.18 6.80
+%CPU USER     COMMAND
+ 100 ec2-user p2p-bench
+95.3 ec2-user blender
+95.0 ec2-user blender
+91.1 ec2-user blender
+ 4.8 ec2-user claude
+## 2026-11-16T17:23:54+00:00 load 6.53 7.09 6.78
+%CPU USER     COMMAND
+ 105 ec2-user p2p-bench
+95.0 ec2-user blender
+93.6 ec2-user blender
+90.9 ec2-user blender
+ 4.8 ec2-user claude
+## 2026-11-16T17:24:04+00:00 load 6.44 7.05 6.77
+%CPU USER     COMMAND
+95.1 ec2-user blender
+93.8 ec2-user blender
+91.0 ec2-user blender
+82.5 ec2-user p2p-bench
+ 4.8 ec2-user claude
+## 2026-11-16T17:24:14+00:00 load 6.37 7.02 6.76
+%CPU USER     COMMAND
+95.1 ec2-user blender
+94.0 ec2-user blender
+91.1 ec2-user blender
+90.6 ec2-user p2p-bench
+ 4.8 ec2-user claude
+## 2026-11-16T17:24:24+00:00 load 6.30 6.98 6.75
+%CPU USER     COMMAND
+95.1 ec2-user blender
+94.0 ec2-user blender
+92.3 ec2-user p2p-bench
+91.1 ec2-user blender
+ 4.8 ec2-user claude
+## 2026-11-16T17:24:34+00:00 load 6.17 6.94 6.74
+%CPU USER     COMMAND
+95.1 ec2-user blender
+94.0 ec2-user blender
+92.7 ec2-user p2p-bench
+91.2 ec2-user blender
+ 4.7 ec2-user claude
+## 2026-11-16T17:24:44+00:00 load 6.15 6.91 6.73
+%CPU USER     COMMAND
+95.1 ec2-user blender
+94.1 ec2-user blender
+93.0 ec2-user p2p-bench
+91.3 ec2-user blender
+ 4.7 ec2-user claude
+## 2026-11-16T17:24:54+00:00 load 5.97 6.84 6.71
+%CPU USER     COMMAND
+95.1 ec2-user blender
+94.1 ec2-user blender
+93.3 ec2-user p2p-bench
+91.4 ec2-user blender
+ 4.7 ec2-user claude
+## 2026-11-16T17:25:04+00:00 load 6.57 6.95 6.75
+%CPU USER     COMMAND
+95.2 ec2-user blender
+94.4 ec2-user blender
+93.5 ec2-user p2p-bench
+91.4 ec2-user blender
+ 4.7 ec2-user claude
+## 2026-11-16T17:25:14+00:00 load 6.86 7.00 6.76
+%CPU USER     COMMAND
+95.2 ec2-user blender
+94.6 ec2-user blender
+92.1 ec2-user p2p-bench
+91.5 ec2-user blender
+ 4.7 ec2-user claude
+## 2026-11-16T17:25:24+00:00 load 7.20 7.06 6.79
+%CPU USER     COMMAND
+ 103 ec2-user p2p-bench
+95.2 ec2-user blender
+94.9 ec2-user blender
+91.7 ec2-user blender
+ 4.7 ec2-user claude
+## 2026-11-16T17:25:34+00:00 load 6.95 7.01 6.78
+%CPU USER     COMMAND
+ 101 ec2-user p2p-bench
+95.3 ec2-user blender
+95.0 ec2-user blender
+91.7 ec2-user blender
+ 4.7 ec2-user claude
+## 2026-11-16T17:25:44+00:00 load 6.50 6.91 6.75
+%CPU USER     COMMAND
+ 100 ec2-user p2p-bench
+95.4 ec2-user blender
+95.2 ec2-user blender
+91.8 ec2-user blender
+ 4.7 ec2-user claude
+## 2026-11-16T17:25:54+00:00 load 6.11 6.82 6.72
+%CPU USER     COMMAND
+ 100 ec2-user p2p-bench
+95.4 ec2-user blender
+95.2 ec2-user blender
+91.9 ec2-user blender
+ 4.7 ec2-user claude
+## 2026-11-16T17:26:04+00:00 load 6.71 6.92 6.75
+%CPU USER     COMMAND
+99.7 ec2-user p2p-bench
+95.5 ec2-user blender
+95.1 ec2-user blender
+92.0 ec2-user blender
+ 4.7 ec2-user claude
+## 2026-11-16T17:26:14+00:00 load 6.29 6.82 6.72
+%CPU USER     COMMAND
+99.6 ec2-user p2p-bench
+95.6 ec2-user blender
+95.3 ec2-user blender
+92.0 ec2-user blender
+ 4.7 ec2-user claude
+## 2026-11-16T17:26:24+00:00 load 6.60 6.88 6.74
+%CPU USER     COMMAND
+99.6 ec2-user p2p-bench
+95.6 ec2-user blender
+95.4 ec2-user blender
+92.1 ec2-user blender
+ 4.6 ec2-user claude
+## 2026-11-16T17:26:34+00:00 load 6.50 6.85 6.73
+%CPU USER     COMMAND
+99.3 ec2-user p2p-bench
+95.6 ec2-user blender
+95.4 ec2-user blender
+92.2 ec2-user blender
+ 4.6 ec2-user claude
+## 2026-11-16T17:26:44+00:00 load 6.35 6.80 6.72
+%CPU USER     COMMAND
+99.3 ec2-user p2p-bench
+95.7 ec2-user blender
+95.5 ec2-user blender
+92.2 ec2-user blender
+ 4.6 ec2-user claude
+## 2026-11-16T17:26:55+00:00 load 6.31 6.78 6.71
+%CPU USER     COMMAND
+99.3 ec2-user p2p-bench
+95.7 ec2-user blender
+95.5 ec2-user blender
+92.3 ec2-user blender
+ 4.6 ec2-user claude
+## 2026-11-16T17:27:05+00:00 load 6.18 6.74 6.70
+%CPU USER     COMMAND
+99.3 ec2-user p2p-bench
+95.8 ec2-user blender
+95.5 ec2-user blender
+92.4 ec2-user blender
+ 4.6 ec2-user claude
+## 2026-11-16T17:27:15+00:00 load 7.15 6.93 6.76
+%CPU USER     COMMAND
+98.4 ec2-user p2p-bench
+95.6 ec2-user blender
+95.4 ec2-user blender
+92.3 ec2-user blender
+ 4.6 ec2-user claude
+## 2026-11-16T17:27:25+00:00 load 7.04 6.91 6.76
+%CPU USER     COMMAND
+98.4 ec2-user p2p-bench
+95.6 ec2-user blender
+95.5 ec2-user blender
+92.4 ec2-user blender
+ 4.6 ec2-user claude
+## 2026-11-16T17:27:35+00:00 load 6.80 6.86 6.74
+%CPU USER     COMMAND
+98.5 ec2-user p2p-bench
+95.7 ec2-user blender
+95.6 ec2-user blender
+92.5 ec2-user blender
+ 4.6 ec2-user claude
+## 2026-11-16T17:27:45+00:00 load 7.53 7.02 6.80
+%CPU USER     COMMAND
+96.4 ec2-user p2p-bench
+95.7 ec2-user blender
+95.7 ec2-user blender
+92.5 ec2-user blender
+ 4.5 ec2-user claude
+## 2026-11-16T17:27:55+00:00 load 7.98 7.13 6.84
+%CPU USER     COMMAND
+96.9 ec2-user p2p-bench
+95.8 ec2-user blender
+95.8 ec2-user blender
+92.6 ec2-user blender
+ 4.5 ec2-user claude
+## 2026-11-16T17:28:05+00:00 load 7.37 7.03 6.80
+%CPU USER     COMMAND
+95.8 ec2-user blender
+95.8 ec2-user blender
+92.7 ec2-user blender
+67.0 ec2-user p2p-bench
+ 4.5 ec2-user claude
+## 2026-11-16T17:28:15+00:00 load 7.07 6.98 6.79
+%CPU USER     COMMAND
+95.9 ec2-user blender
+95.8 ec2-user blender
+94.6 ec2-user p2p-bench
+92.8 ec2-user blender
+ 4.5 ec2-user claude
+## 2026-11-16T17:28:25+00:00 load 7.04 6.98 6.79
+%CPU USER     COMMAND
+96.0 ec2-user blender
+95.9 ec2-user blender
+95.1 ec2-user p2p-bench
+92.8 ec2-user blender
+ 4.5 ec2-user claude
+## 2026-11-16T17:28:35+00:00 load 6.72 6.91 6.77
+%CPU USER     COMMAND
+96.0 ec2-user blender
+95.9 ec2-user blender
+95.2 ec2-user p2p-bench
+92.9 ec2-user blender
+ 4.5 ec2-user claude
+## 2026-11-16T17:28:45+00:00 load 6.75 6.91 6.78
+%CPU USER     COMMAND
+96.0 ec2-user blender
+95.9 ec2-user blender
+95.4 ec2-user p2p-bench
+93.0 ec2-user blender
+ 4.5 ec2-user claude

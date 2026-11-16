@@ -1,0 +1,17 @@
+[package]
+name = "o5s-exp3"
+description = "Experiment 3: generic similarity ordering and framing (docs/PLAN.md §6.6, docs/ORDERING.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "exp3"
+path = "src/main.rs"
+
+[dependencies]
+o5s-order.workspace = true
+o5s-weights.workspace = true
+zstd.workspace = true
+sha1_smol = "1"

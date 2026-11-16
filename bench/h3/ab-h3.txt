@@ -1,0 +1,18 @@
+== base r1 load 2.22
+| threads (one handle, distinct names) | commits/s | 
+{"part":"names","m":1000000,"bulk_s":17.1,"replace_rate":8258,"resolve_p99_ms":0.0042,"open_s":0.55,"rss_mb":148,"disk_bytes":53841518,"load":"1.80"} 
+== h3 r1 load 1.80
+| threads (one handle, distinct names) | commits/s | 
+{"part":"names","m":1000000,"bulk_s":16.9,"replace_rate":7995,"resolve_p99_ms":0.0043,"open_s":0.57,"rss_mb":149,"disk_bytes":53841518,"load":"1.65"} 
+== base r2 load 1.65
+| threads (one handle, distinct names) | commits/s | 
+{"part":"names","m":1000000,"bulk_s":17.2,"replace_rate":8245,"resolve_p99_ms":0.0045,"open_s":0.56,"rss_mb":148,"disk_bytes":53841518,"load":"1.56"} 
+== h3 r2 load 1.56
+| threads (one handle, distinct names) | commits/s | 
+{"part":"names","m":1000000,"bulk_s":16.8,"replace_rate":8156,"resolve_p99_ms":0.0043,"open_s":0.59,"rss_mb":149,"disk_bytes":53841518,"load":"1.41"} 
+== base r3 load 1.41
+| threads (one handle, distinct names) | commits/s | 
+{"part":"names","m":1000000,"bulk_s":17.2,"replace_rate":8102,"resolve_p99_ms":0.0043,"open_s":0.55,"rss_mb":148,"disk_bytes":53841518,"load":"1.27"} 
+== h3 r3 load 1.27
+| threads (one handle, distinct names) | commits/s | 
+{"part":"names","m":1000000,"bulk_s":17.0,"replace_rate":8018,"resolve_p99_ms":0.0043,"open_s":0.59,"rss_mb":149,"disk_bytes":53841518,"load":"1.18"} 

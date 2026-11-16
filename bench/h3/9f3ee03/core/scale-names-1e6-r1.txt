@@ -1,0 +1,3 @@
+# scale-names-1e6 rep 1 commit 9f3ee03 dirty 0 load_start 1.02 2026-11-16T06:11:38+00:00
+{"part":"names","m":1000000,"bulk_s":16.9,"replace_rate":8008,"resolve_p99_ms":0.0044,"open_s":0.59,"rss_mb":149,"disk_bytes":53841518,"load":"1.10"}
+# load_end 1.10

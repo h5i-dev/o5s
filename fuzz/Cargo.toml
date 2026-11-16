@@ -1,0 +1,164 @@
+[package]
+name = "o5s-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Separate workspace: built only with `cargo +nightly fuzz` (see fuzz/README.md).
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+o5s-core = { path = "../crates/core" }
+o5s-pack = { path = "../crates/pack" }
+o5s-refs = { path = "../crates/refs" }
+o5s-server = { path = "../crates/server" }
+o5s-backend-s3 = { path = "../crates/backend-s3" }
+o5s-attest = { path = "../crates/attest" }
+o5s-prov = { path = "../crates/prov" }
+o5s-repo = { path = "../crates/repo" }
+tempfile = "3"
+
+[[bin]]
+name = "pack_record"
+path = "fuzz_targets/pack_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pack_index"
+path = "fuzz_targets/pack_index.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "manifest"
+path = "fuzz_targets/manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ref_journal"
+path = "fuzz_targets/ref_journal.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "staging_recovery"
+path = "fuzz_targets/staging_recovery.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "names"
+path = "fuzz_targets/names.rs"
+test = false
+doc = false
+bench = false
+
+# --- net session targets (server and S3 backend decoders) ---
+[[bin]]
+name = "git_push"
+path = "fuzz_targets/git_push.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "git_parsers"
+path = "fuzz_targets/git_parsers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "oci_parsers"
+path = "fuzz_targets/oci_parsers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "segmap"
+path = "fuzz_targets/segmap.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "audit_log"
+path = "fuzz_targets/audit_log.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "s3_xml"
+path = "fuzz_targets/s3_xml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http_range"
+path = "fuzz_targets/http_range.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "midx"
+path = "fuzz_targets/midx.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pkg_parsers"
+path = "fuzz_targets/pkg_parsers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frames"
+path = "fuzz_targets/frames.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "attestations"
+path = "fuzz_targets/attestations.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "provenance"
+path = "fuzz_targets/provenance.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "delta_config"
+path = "fuzz_targets/delta_config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "search_index"
+path = "fuzz_targets/search_index.rs"
+test = false
+doc = false
+bench = false

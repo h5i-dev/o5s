@@ -1,0 +1,74 @@
+[package]
+name = "o5s-server"
+description = "o5s HTTP server: put/get/resolve/replace, authn/authz, audit log, metrics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "o5s-server"
+path = "src/main.rs"
+
+[dependencies]
+o5s-core.workspace = true
+o5s-repo.workspace = true
+o5s-pack.workspace = true
+o5s-prov.workspace = true
+o5s-weights.workspace = true
+o5s-attest = { path = "../attest" }
+o5s-client = { path = "../client" }
+o5s-net-kernel = { path = "../net-kernel" }
+# Issued bearer tokens: h5i-app's token encoding and strict parser (extracted, proven), signed
+# with HMAC-SHA256 from libcrux (HACL*-verified), as h5i-app-http's `HmacAuth` does.
+h5i-app-token = "=0.5.5"
+# The access kernel runs on h5i-app-http's `H5iApp` with our own executor (src/h5iapp.rs).
+h5i-app-http = "=0.5.5"
+h5i-app-core = { workspace = true }
+h5i-app-std = { workspace = true }
+h5i-app-json = "=0.5.5"
+h5i-app-pg = "=0.5.5"
+# Not used directly: pinned so a fresh resolve keeps h5i-app-pg's own h5i dependencies at the
+# released 0.5.5 too (they drifted to 0.5.6 once).
+h5i-app-pgsql = "=0.5.5"
+h5i-app-sql = "=0.5.5"
+libcrux-hmac = "0.0.8"
+o5s-backend-s3 = { path = "../backend-s3" }
+serde.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+blake3.workspace = true
+serde_json = "1"
+axum = { version = "0.8", default-features = false, features = ["http1", "http2", "tokio", "json", "query", "matched-path", "multipart"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "fs", "io-util"] }
+tower = { version = "0.5", features = ["limit", "util"] }
+tower-http = { version = "0.6", features = ["trace", "request-id", "catch-panic", "sensitive-headers", "timeout"] }
+http-body-util = "0.1"
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+prometheus-client = "0.24"
+sha2 = "0.10"
+fastrand = "2"
+clap.workspace = true
+getrandom = "0.3"
+tempfile.workspace = true
+base64 = "0.22"
+jsonwebtoken = { version = "9", default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+flate2 = "1"
+sha1 = "0.10"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-pki-types = { version = "1", features = ["std"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+lz4_flex = { version = "0.11", default-features = false, features = ["frame", "std"] }
+md-5 = "0.10"
+http-body = "1"
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1.21", features = ["server", "server-auto", "server-graceful", "service", "tokio", "http1", "http2"] }
+
+[dev-dependencies]
+o5s-chunk = { path = "../chunk" }
+jsonwebtoken = "9"
+proptest.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "blocking"] }

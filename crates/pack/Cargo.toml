@@ -1,0 +1,25 @@
+[package]
+name = "o5s-pack"
+description = "Physical layer: append-only packs, index, bundling, FastCDC chunking, storage backends"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+o5s-kernel.workspace = true
+o5s-core.workspace = true
+o5s-chunk.workspace = true
+blake3.workspace = true
+fastcdc.workspace = true
+zstd.workspace = true
+crc32fast.workspace = true
+memmap2.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+crc32fast.workspace = true
+tempfile.workspace = true
+proptest.workspace = true
+blake3.workspace = true

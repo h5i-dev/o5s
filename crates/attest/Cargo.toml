@@ -1,0 +1,20 @@
+[package]
+name = "o5s-attest"
+description = "Signed attestations (in-toto Statement v1 in DSSE envelopes) and policy-gated promotion between namespaces"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+o5s-kernel.workspace = true
+o5s-core.workspace = true
+o5s-prov.workspace = true
+serde_json = "1"
+base64 = "0.22"
+sha2 = "0.10"
+ed25519-dalek = "2"
+
+[dev-dependencies]
+o5s-repo.workspace = true
+tempfile.workspace = true
+proptest.workspace = true

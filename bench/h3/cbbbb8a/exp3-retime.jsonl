@@ -1,0 +1,2 @@
+{"repo":"ripgrep","variant":"retime-a3","git_secs":6.1,"ours_secs":5.37,"ratio":0.88,"load_start":4.07,"load_end":3.91}
+{"repo":"jq","variant":"retime-a3","git_secs":10.45,"ours_secs":11.09,"ratio":1.061,"load_start":3.91,"load_end":3.78}

@@ -1,0 +1,20 @@
+[package]
+name = "o5s-micro"
+description = "Reproducible throughput/latency benchmarks for the local repository"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "o5s-bench"
+path = "src/main.rs"
+
+[dependencies]
+o5s-core.workspace = true
+o5s-repo.workspace = true
+o5s-weights.workspace = true
+o5s-chunk.workspace = true
+o5s-prov.workspace = true
+blake3.workspace = true
+zstd.workspace = true

@@ -1,0 +1,358 @@
+{"front": "git", "metric": "push_s", "system": "git-daemon", "value": 0.5360895459889434, "unit": "s", "ts": 1794791575.24249, "load1": 6.22, "corpus": "ripgrep", "run": 0}
+{"front": "git", "metric": "first_push_s", "system": "git-daemon", "value": 0.5360895459889434, "unit": "s", "ts": 1794791575.2427256, "load1": 6.22, "corpus": "ripgrep", "run": 0}
+{"front": "git", "metric": "push_s", "system": "git-daemon", "value": 0.5340043199830689, "unit": "s", "ts": 1794791575.7769084, "load1": 6.22, "corpus": "ripgrep", "run": 1}
+{"front": "git", "metric": "first_push_s", "system": "git-daemon", "value": 0.5340043199830689, "unit": "s", "ts": 1794791575.777067, "load1": 6.22, "corpus": "ripgrep", "run": 1}
+{"front": "git", "metric": "push_s", "system": "git-daemon", "value": 0.5399036179878749, "unit": "s", "ts": 1794791576.3171377, "load1": 6.22, "corpus": "ripgrep", "run": 2}
+{"front": "git", "metric": "first_push_s", "system": "git-daemon", "value": 0.5399036179878749, "unit": "s", "ts": 1794791576.3173144, "load1": 6.22, "corpus": "ripgrep", "run": 2}
+{"front": "git", "metric": "clone_v2_s", "system": "git-daemon", "value": 0.5783508669701405, "unit": "s", "ts": 1794791576.8958697, "load1": 6.22, "corpus": "ripgrep", "run": 0}
+{"front": "git", "metric": "functional:fsck_git-daemon_ripgrep_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791577.4954371, "load1": 6.22, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_ripgrep_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791577.5056524, "load1": 6.22, "detail": ""}
+{"front": "git", "metric": "clone_v2_s", "system": "git-daemon", "value": 0.5744893550290726, "unit": "s", "ts": 1794791578.0861976, "load1": 6.22, "corpus": "ripgrep", "run": 1}
+{"front": "git", "metric": "functional:fsck_git-daemon_ripgrep_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791578.6844523, "load1": 5.96, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_ripgrep_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791578.694598, "load1": 5.96, "detail": ""}
+{"front": "git", "metric": "clone_v2_s", "system": "git-daemon", "value": 0.5944897980079986, "unit": "s", "ts": 1794791579.2948751, "load1": 5.96, "corpus": "ripgrep", "run": 2}
+{"front": "git", "metric": "functional:fsck_git-daemon_ripgrep_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791579.8897583, "load1": 5.96, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_ripgrep_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791579.9009018, "load1": 5.96, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "git-daemon", "value": 0.48295815294841304, "unit": "s", "ts": 1794791580.389739, "load1": 5.96, "corpus": "ripgrep", "run": 0}
+{"front": "git", "metric": "functional:fsck_git-daemon_ripgrep_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791580.9864845, "load1": 5.96, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_ripgrep_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791580.9966877, "load1": 5.96, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "git-daemon", "value": 0.4836582739953883, "unit": "s", "ts": 1794791581.4864342, "load1": 5.96, "corpus": "ripgrep", "run": 1}
+{"front": "git", "metric": "functional:fsck_git-daemon_ripgrep_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791582.0835412, "load1": 5.96, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_ripgrep_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791582.0935805, "load1": 5.96, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "git-daemon", "value": 0.48922695801593363, "unit": "s", "ts": 1794791582.588897, "load1": 5.96, "corpus": "ripgrep", "run": 2}
+{"front": "git", "metric": "functional:fsck_git-daemon_ripgrep_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791583.193729, "load1": 5.56, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_ripgrep_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791583.2038627, "load1": 5.56, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "git-daemon", "value": 0.18700598599389195, "unit": "s", "ts": 1794791583.4088273, "load1": 5.56, "corpus": "ripgrep", "run": 0}
+{"front": "git", "metric": "functional:fetch_git-daemon_ripgrep", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791583.415912, "load1": 5.56, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "git-daemon", "value": 0.17875627998728305, "unit": "s", "ts": 1794791583.6090596, "load1": 5.56, "corpus": "ripgrep", "run": 1}
+{"front": "git", "metric": "functional:fetch_git-daemon_ripgrep", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791583.6162522, "load1": 5.56, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "git-daemon", "value": 0.1802772149676457, "unit": "s", "ts": 1794791583.8089452, "load1": 5.56, "corpus": "ripgrep", "run": 2}
+{"front": "git", "metric": "functional:fetch_git-daemon_ripgrep", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791583.8160803, "load1": 5.56, "detail": ""}
+{"front": "git", "metric": "clone_wire_bytes", "system": "git-daemon", "value": 6074358, "unit": "B", "ts": 1794791584.427871, "load1": 5.56, "corpus": "ripgrep"}
+{"front": "git", "metric": "push_s", "system": "pico2peta", "value": 0.7524378589587286, "unit": "s", "ts": 1794791585.3242857, "load1": 5.56, "corpus": "ripgrep", "run": 0}
+{"front": "git", "metric": "push_s", "system": "pico2peta", "value": 0.56276845902903, "unit": "s", "ts": 1794791585.887432, "load1": 5.56, "corpus": "ripgrep", "run": 1}
+{"front": "git", "metric": "push_s", "system": "pico2peta", "value": 0.5397329370025545, "unit": "s", "ts": 1794791586.427497, "load1": 5.56, "corpus": "ripgrep", "run": 2}
+{"front": "git", "metric": "clone_v2_s", "system": "pico2peta", "value": 0.6228098659776151, "unit": "s", "ts": 1794791587.0506256, "load1": 5.56, "corpus": "ripgrep", "run": 0}
+{"front": "git", "metric": "functional:fsck_pico2peta_ripgrep_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791587.704952, "load1": 5.56, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_ripgrep_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791587.7152994, "load1": 5.56, "detail": ""}
+{"front": "git", "metric": "clone_v2_s", "system": "pico2peta", "value": 0.46117667004000396, "unit": "s", "ts": 1794791588.1825163, "load1": 5.36, "corpus": "ripgrep", "run": 1}
+{"front": "git", "metric": "functional:fsck_pico2peta_ripgrep_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791588.8354363, "load1": 5.36, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_ripgrep_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791588.8459525, "load1": 5.36, "detail": ""}
+{"front": "git", "metric": "clone_v2_s", "system": "pico2peta", "value": 0.45834681298583746, "unit": "s", "ts": 1794791589.31039, "load1": 5.36, "corpus": "ripgrep", "run": 2}
+{"front": "git", "metric": "functional:fsck_pico2peta_ripgrep_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791589.9663932, "load1": 5.36, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_ripgrep_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791589.9768205, "load1": 5.36, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "pico2peta", "value": 0.458493507001549, "unit": "s", "ts": 1794791590.4422987, "load1": 5.36, "corpus": "ripgrep", "run": 0}
+{"front": "git", "metric": "functional:fsck_pico2peta_ripgrep_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791591.0951831, "load1": 5.36, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_ripgrep_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791591.1055255, "load1": 5.36, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "pico2peta", "value": 0.4620776469819248, "unit": "s", "ts": 1794791591.5738227, "load1": 5.36, "corpus": "ripgrep", "run": 1}
+{"front": "git", "metric": "functional:fsck_pico2peta_ripgrep_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791592.2332847, "load1": 5.36, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_ripgrep_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791592.2436357, "load1": 5.36, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "pico2peta", "value": 0.4598998210276477, "unit": "s", "ts": 1794791592.7095053, "load1": 5.36, "corpus": "ripgrep", "run": 2}
+{"front": "git", "metric": "functional:fsck_pico2peta_ripgrep_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791593.3627841, "load1": 5.01, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_ripgrep_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791593.3732398, "load1": 5.01, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "pico2peta", "value": 0.12259353697299957, "unit": "s", "ts": 1794791593.5087826, "load1": 5.01, "corpus": "ripgrep", "run": 0}
+{"front": "git", "metric": "functional:fetch_pico2peta_ripgrep", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791593.51605, "load1": 5.01, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "pico2peta", "value": 0.1398249120102264, "unit": "s", "ts": 1794791593.6687758, "load1": 5.01, "corpus": "ripgrep", "run": 1}
+{"front": "git", "metric": "functional:fetch_pico2peta_ripgrep", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791593.676001, "load1": 5.01, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "pico2peta", "value": 0.1403100499883294, "unit": "s", "ts": 1794791593.8288164, "load1": 5.01, "corpus": "ripgrep", "run": 2}
+{"front": "git", "metric": "functional:fetch_pico2peta_ripgrep", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791593.836815, "load1": 5.01, "detail": ""}
+{"front": "git", "metric": "clone_wire_bytes", "system": "pico2peta", "value": 6830723, "unit": "B", "ts": 1794791594.3075356, "load1": 5.01, "corpus": "ripgrep"}
+{"front": "git", "metric": "first_push_s", "system": "pico2peta", "value": 0.7333891540183686, "unit": "s", "ts": 1794791595.1650069, "load1": 5.01, "corpus": "ripgrep", "run": 0}
+{"front": "git", "metric": "first_push_s", "system": "pico2peta", "value": 0.739264320989605, "unit": "s", "ts": 1794791596.03293, "load1": 5.01, "corpus": "ripgrep", "run": 1}
+{"front": "git", "metric": "first_push_s", "system": "pico2peta", "value": 0.759558346006088, "unit": "s", "ts": 1794791596.9203353, "load1": 5.01, "corpus": "ripgrep", "run": 2}
+{"front": "git", "metric": "push_s", "system": "git-daemon", "value": 0.5532353909802623, "unit": "s", "ts": 1794791598.9126406, "load1": 4.85, "corpus": "jq", "run": 0}
+{"front": "git", "metric": "first_push_s", "system": "git-daemon", "value": 0.5532353909802623, "unit": "s", "ts": 1794791598.912809, "load1": 4.85, "corpus": "jq", "run": 0}
+{"front": "git", "metric": "push_s", "system": "git-daemon", "value": 0.5454482689965516, "unit": "s", "ts": 1794791599.4584284, "load1": 4.85, "corpus": "jq", "run": 1}
+{"front": "git", "metric": "first_push_s", "system": "git-daemon", "value": 0.5454482689965516, "unit": "s", "ts": 1794791599.4585836, "load1": 4.85, "corpus": "jq", "run": 1}
+{"front": "git", "metric": "push_s", "system": "git-daemon", "value": 0.5468255039886571, "unit": "s", "ts": 1794791600.0055795, "load1": 4.85, "corpus": "jq", "run": 2}
+{"front": "git", "metric": "first_push_s", "system": "git-daemon", "value": 0.5468255039886571, "unit": "s", "ts": 1794791600.0057316, "load1": 4.85, "corpus": "jq", "run": 2}
+{"front": "git", "metric": "clone_v2_s", "system": "git-daemon", "value": 0.5708290110342205, "unit": "s", "ts": 1794791600.5767543, "load1": 4.85, "corpus": "jq", "run": 0}
+{"front": "git", "metric": "functional:fsck_git-daemon_jq_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791601.257598, "load1": 4.85, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_jq_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791601.2655678, "load1": 4.85, "detail": ""}
+{"front": "git", "metric": "clone_v2_s", "system": "git-daemon", "value": 0.5903949270141311, "unit": "s", "ts": 1794791601.8619692, "load1": 4.85, "corpus": "jq", "run": 1}
+{"front": "git", "metric": "functional:fsck_git-daemon_jq_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791602.546641, "load1": 4.85, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_jq_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791602.554819, "load1": 4.85, "detail": ""}
+{"front": "git", "metric": "clone_v2_s", "system": "git-daemon", "value": 0.5787410840275697, "unit": "s", "ts": 1794791603.1396365, "load1": 4.85, "corpus": "jq", "run": 2}
+{"front": "git", "metric": "functional:fsck_git-daemon_jq_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791603.819898, "load1": 4.7, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_jq_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791603.8277013, "load1": 4.7, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "git-daemon", "value": 0.5785003690398298, "unit": "s", "ts": 1794791604.412264, "load1": 4.7, "corpus": "jq", "run": 0}
+{"front": "git", "metric": "functional:fsck_git-daemon_jq_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791605.0961063, "load1": 4.7, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_jq_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791605.1040654, "load1": 4.7, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "git-daemon", "value": 0.5731968820327893, "unit": "s", "ts": 1794791605.6837804, "load1": 4.7, "corpus": "jq", "run": 1}
+{"front": "git", "metric": "functional:fsck_git-daemon_jq_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791606.3726685, "load1": 4.7, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_jq_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791606.3807335, "load1": 4.7, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "git-daemon", "value": 0.578030222968664, "unit": "s", "ts": 1794791606.9647942, "load1": 4.7, "corpus": "jq", "run": 2}
+{"front": "git", "metric": "functional:fsck_git-daemon_jq_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791607.6478114, "load1": 4.7, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_jq_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791607.6557755, "load1": 4.7, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "git-daemon", "value": 0.1391431519878097, "unit": "s", "ts": 1794791607.809925, "load1": 4.7, "corpus": "jq", "run": 0}
+{"front": "git", "metric": "functional:fetch_git-daemon_jq", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791607.8175073, "load1": 4.7, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "git-daemon", "value": 0.15697131800698116, "unit": "s", "ts": 1794791607.9901428, "load1": 4.7, "corpus": "jq", "run": 1}
+{"front": "git", "metric": "functional:fetch_git-daemon_jq", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791607.9976914, "load1": 4.7, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "git-daemon", "value": 0.1481335610151291, "unit": "s", "ts": 1794791608.1599915, "load1": 4.7, "corpus": "jq", "run": 2}
+{"front": "git", "metric": "functional:fetch_git-daemon_jq", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791608.1673112, "load1": 4.7, "detail": ""}
+{"front": "git", "metric": "clone_wire_bytes", "system": "git-daemon", "value": 8360866, "unit": "B", "ts": 1794791608.7498171, "load1": 4.4, "corpus": "jq"}
+{"front": "git", "metric": "push_s", "system": "pico2peta", "value": 0.7344752419739962, "unit": "s", "ts": 1794791609.6078615, "load1": 4.4, "corpus": "jq", "run": 0}
+{"front": "git", "metric": "push_s", "system": "pico2peta", "value": 0.43177969101816416, "unit": "s", "ts": 1794791610.0399702, "load1": 4.4, "corpus": "jq", "run": 1}
+{"front": "git", "metric": "push_s", "system": "pico2peta", "value": 0.47581532498588786, "unit": "s", "ts": 1794791610.5161095, "load1": 4.4, "corpus": "jq", "run": 2}
+{"front": "git", "metric": "clone_v2_s", "system": "pico2peta", "value": 0.8250392450136133, "unit": "s", "ts": 1794791611.3414574, "load1": 4.4, "corpus": "jq", "run": 0}
+{"front": "git", "metric": "functional:fsck_pico2peta_jq_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791612.0921483, "load1": 4.4, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_jq_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791612.1002176, "load1": 4.4, "detail": ""}
+{"front": "git", "metric": "clone_v2_s", "system": "pico2peta", "value": 0.5826155280228704, "unit": "s", "ts": 1794791612.6892583, "load1": 4.4, "corpus": "jq", "run": 1}
+{"front": "git", "metric": "functional:fsck_pico2peta_jq_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791613.439786, "load1": 4.13, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_jq_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791613.4480677, "load1": 4.13, "detail": ""}
+{"front": "git", "metric": "clone_v2_s", "system": "pico2peta", "value": 0.5808459989493713, "unit": "s", "ts": 1794791614.0351985, "load1": 4.13, "corpus": "jq", "run": 2}
+{"front": "git", "metric": "functional:fsck_pico2peta_jq_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791614.7865443, "load1": 4.13, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_jq_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791614.794578, "load1": 4.13, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "pico2peta", "value": 0.5359766650362872, "unit": "s", "ts": 1794791615.3367972, "load1": 4.13, "corpus": "jq", "run": 0}
+{"front": "git", "metric": "functional:fsck_pico2peta_jq_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791616.088988, "load1": 4.13, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_jq_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791616.097, "load1": 4.13, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "pico2peta", "value": 0.5330549060017802, "unit": "s", "ts": 1794791616.6367204, "load1": 4.13, "corpus": "jq", "run": 1}
+{"front": "git", "metric": "functional:fsck_pico2peta_jq_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791617.3936307, "load1": 4.13, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_jq_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791617.4035156, "load1": 4.13, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "pico2peta", "value": 0.5661931249778718, "unit": "s", "ts": 1794791617.9760025, "load1": 4.13, "corpus": "jq", "run": 2}
+{"front": "git", "metric": "functional:fsck_pico2peta_jq_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791618.7257586, "load1": 3.96, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_jq_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791618.7339342, "load1": 3.96, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "pico2peta", "value": 0.11292894504731521, "unit": "s", "ts": 1794791618.860194, "load1": 3.96, "corpus": "jq", "run": 0}
+{"front": "git", "metric": "functional:fetch_pico2peta_jq", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791618.8676443, "load1": 3.96, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "pico2peta", "value": 0.10528942995006219, "unit": "s", "ts": 1794791618.988967, "load1": 3.96, "corpus": "jq", "run": 1}
+{"front": "git", "metric": "functional:fetch_pico2peta_jq", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791618.9963863, "load1": 3.96, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "pico2peta", "value": 0.10974133398849517, "unit": "s", "ts": 1794791619.1201813, "load1": 3.96, "corpus": "jq", "run": 2}
+{"front": "git", "metric": "functional:fetch_pico2peta_jq", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791619.1276014, "load1": 3.96, "detail": ""}
+{"front": "git", "metric": "clone_wire_bytes", "system": "pico2peta", "value": 9588307, "unit": "B", "ts": 1794791619.7090306, "load1": 3.96, "corpus": "jq"}
+{"front": "git", "metric": "first_push_s", "system": "pico2peta", "value": 0.7196168749942444, "unit": "s", "ts": 1794791620.5691664, "load1": 3.96, "corpus": "jq", "run": 0}
+{"front": "git", "metric": "first_push_s", "system": "pico2peta", "value": 0.7225252219941467, "unit": "s", "ts": 1794791621.420816, "load1": 3.96, "corpus": "jq", "run": 1}
+{"front": "git", "metric": "first_push_s", "system": "pico2peta", "value": 0.7316014739917591, "unit": "s", "ts": 1794791622.2816596, "load1": 3.96, "corpus": "jq", "run": 2}
+{"front": "git", "metric": "push_s", "system": "git-daemon", "value": 10.813151387032121, "unit": "s", "ts": 1794791657.4593203, "load1": 3.05, "corpus": "redis", "run": 0}
+{"front": "git", "metric": "first_push_s", "system": "git-daemon", "value": 10.813151387032121, "unit": "s", "ts": 1794791657.4594867, "load1": 3.05, "corpus": "redis", "run": 0}
+{"front": "git", "metric": "push_s", "system": "git-daemon", "value": 10.606656098971143, "unit": "s", "ts": 1794791668.0663185, "load1": 2.73, "corpus": "redis", "run": 1}
+{"front": "git", "metric": "first_push_s", "system": "git-daemon", "value": 10.606656098971143, "unit": "s", "ts": 1794791668.0664794, "load1": 2.73, "corpus": "redis", "run": 1}
+{"front": "git", "metric": "push_s", "system": "git-daemon", "value": 11.020803639024962, "unit": "s", "ts": 1794791679.0874598, "load1": 2.58, "corpus": "redis", "run": 2}
+{"front": "git", "metric": "first_push_s", "system": "git-daemon", "value": 11.020803639024962, "unit": "s", "ts": 1794791679.0876188, "load1": 2.58, "corpus": "redis", "run": 2}
+{"front": "git", "metric": "clone_v2_s", "system": "git-daemon", "value": 10.750654948002193, "unit": "s", "ts": 1794791689.838469, "load1": 2.64, "corpus": "redis", "run": 0}
+{"front": "git", "metric": "functional:fsck_git-daemon_redis_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791703.5627992, "load1": 2.28, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_redis_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791703.5761983, "load1": 2.28, "detail": ""}
+{"front": "git", "metric": "clone_v2_s", "system": "git-daemon", "value": 10.724815235997085, "unit": "s", "ts": 1794791714.338515, "load1": 2.24, "corpus": "redis", "run": 1}
+{"front": "git", "metric": "functional:fsck_git-daemon_redis_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791728.0549226, "load1": 2.05, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_redis_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791728.0689156, "load1": 2.05, "detail": ""}
+{"front": "git", "metric": "clone_v2_s", "system": "git-daemon", "value": 10.976780593045987, "unit": "s", "ts": 1794791739.0830433, "load1": 2.21, "corpus": "redis", "run": 2}
+{"front": "git", "metric": "functional:fsck_git-daemon_redis_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791752.8074052, "load1": 2.1, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_redis_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791752.8205245, "load1": 2.1, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "git-daemon", "value": 11.031034832005389, "unit": "s", "ts": 1794791763.8885577, "load1": 2.24, "corpus": "redis", "run": 0}
+{"front": "git", "metric": "functional:fsck_git-daemon_redis_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791777.7951598, "load1": 2.19, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_redis_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791777.8085287, "load1": 2.19, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "git-daemon", "value": 10.759855246986263, "unit": "s", "ts": 1794791788.6056685, "load1": 2.08, "corpus": "redis", "run": 1}
+{"front": "git", "metric": "functional:fsck_git-daemon_redis_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791802.3327892, "load1": 1.91, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_redis_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791802.3461223, "load1": 1.91, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "git-daemon", "value": 10.656133721000515, "unit": "s", "ts": 1794791813.0401378, "load1": 1.93, "corpus": "redis", "run": 2}
+{"front": "git", "metric": "functional:fsck_git-daemon_redis_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791826.744782, "load1": 1.72, "detail": ""}
+{"front": "git", "metric": "functional:refs_git-daemon_redis_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791826.7581239, "load1": 1.72, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "git-daemon", "value": 0.219258641009219, "unit": "s", "ts": 1794791827.0227773, "load1": 1.72, "corpus": "redis", "run": 0}
+{"front": "git", "metric": "functional:fetch_git-daemon_redis", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791827.030655, "load1": 1.72, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "git-daemon", "value": 0.21464239404303953, "unit": "s", "ts": 1794791827.2623267, "load1": 1.72, "corpus": "redis", "run": 1}
+{"front": "git", "metric": "functional:fetch_git-daemon_redis", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791827.2699044, "load1": 1.72, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "git-daemon", "value": 0.22675841604359448, "unit": "s", "ts": 1794791827.513505, "load1": 1.72, "corpus": "redis", "run": 2}
+{"front": "git", "metric": "functional:fetch_git-daemon_redis", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791827.521326, "load1": 1.72, "detail": ""}
+{"front": "git", "metric": "clone_wire_bytes", "system": "git-daemon", "value": 226930438, "unit": "B", "ts": 1794791838.596964, "load1": 1.77, "corpus": "redis"}
+{"front": "git", "metric": "push_s", "system": "pico2peta", "value": 13.956287821987644, "unit": "s", "ts": 1794791852.8683574, "load1": 1.9, "corpus": "redis", "run": 0}
+{"front": "git", "metric": "push_s", "system": "pico2peta", "value": 6.996181791997515, "unit": "s", "ts": 1794791859.8648877, "load1": 2.39, "corpus": "redis", "run": 1}
+{"front": "git", "metric": "push_s", "system": "pico2peta", "value": 9.039517477969639, "unit": "s", "ts": 1794791868.9047577, "load1": 3.12, "corpus": "redis", "run": 2}
+{"front": "git", "metric": "clone_v2_s", "system": "pico2peta", "value": 22.23408553097397, "unit": "s", "ts": 1794791891.1391623, "load1": 3.9, "corpus": "redis", "run": 0}
+{"front": "git", "metric": "functional:fsck_pico2peta_redis_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791903.3074763, "load1": 3.45, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_redis_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791903.3211894, "load1": 3.45, "detail": ""}
+{"front": "git", "metric": "clone_v2_s", "system": "pico2peta", "value": 7.9071102580055594, "unit": "s", "ts": 1794791911.253446, "load1": 3.32, "corpus": "redis", "run": 1}
+{"front": "git", "metric": "functional:fsck_pico2peta_redis_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791923.4162276, "load1": 3.03, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_redis_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791923.429716, "load1": 3.03, "detail": ""}
+{"front": "git", "metric": "clone_v2_s", "system": "pico2peta", "value": 7.933252772025298, "unit": "s", "ts": 1794791931.3879333, "load1": 3.04, "corpus": "redis", "run": 2}
+{"front": "git", "metric": "functional:fsck_pico2peta_redis_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791943.5454605, "load1": 2.73, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_redis_v2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791943.5587878, "load1": 2.73, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "pico2peta", "value": 7.986548000015318, "unit": "s", "ts": 1794791951.5699065, "load1": 2.62, "corpus": "redis", "run": 0}
+{"front": "git", "metric": "functional:fsck_pico2peta_redis_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791963.7110345, "load1": 2.37, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_redis_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791963.7243028, "load1": 2.37, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "pico2peta", "value": 7.973941559030209, "unit": "s", "ts": 1794791971.722771, "load1": 2.32, "corpus": "redis", "run": 1}
+{"front": "git", "metric": "functional:fsck_pico2peta_redis_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791983.9191597, "load1": 2.12, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_redis_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794791983.933556, "load1": 2.03, "detail": ""}
+{"front": "git", "metric": "clone_v0_s", "system": "pico2peta", "value": 7.944334621017333, "unit": "s", "ts": 1794791991.9023032, "load1": 2.11, "corpus": "redis", "run": 2}
+{"front": "git", "metric": "functional:fsck_pico2peta_redis_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792004.076792, "load1": 1.86, "detail": ""}
+{"front": "git", "metric": "functional:refs_pico2peta_redis_v0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792004.090282, "load1": 1.86, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "pico2peta", "value": 0.19891029095742851, "unit": "s", "ts": 1794792004.3213565, "load1": 1.86, "corpus": "redis", "run": 0}
+{"front": "git", "metric": "functional:fetch_pico2peta_redis", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792004.329354, "load1": 1.86, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "pico2peta", "value": 0.2051938459626399, "unit": "s", "ts": 1794792004.549883, "load1": 1.86, "corpus": "redis", "run": 1}
+{"front": "git", "metric": "functional:fetch_pico2peta_redis", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792004.5575826, "load1": 1.86, "detail": ""}
+{"front": "git", "metric": "fetch10_s", "system": "pico2peta", "value": 0.19831339095253497, "unit": "s", "ts": 1794792004.7726233, "load1": 1.86, "corpus": "redis", "run": 2}
+{"front": "git", "metric": "functional:fetch_pico2peta_redis", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792004.7803247, "load1": 1.86, "detail": ""}
+{"front": "git", "metric": "clone_wire_bytes", "system": "pico2peta", "value": 131548990, "unit": "B", "ts": 1794792012.7040913, "load1": 1.95, "corpus": "redis"}
+{"front": "git", "metric": "first_push_s", "system": "pico2peta", "value": 13.118644289963413, "unit": "s", "ts": 1794792026.1133087, "load1": 3.72, "corpus": "redis", "run": 0}
+{"front": "git", "metric": "first_push_s", "system": "pico2peta", "value": 13.177036026027054, "unit": "s", "ts": 1794792039.5415447, "load1": 4.35, "corpus": "redis", "run": 1}
+{"front": "git", "metric": "first_push_s", "system": "pico2peta", "value": 13.606228613003623, "unit": "s", "ts": 1794792053.3925157, "load1": 4.16, "corpus": "redis", "run": 2}
+{"front": "oci", "metric": "image_set_bytes", "system": "source", "value": 135684096, "unit": "B", "ts": 1794792218.495977, "load1": 3.5}
+{"front": "oci", "metric": "push_s", "system": "distribution", "value": 0.17380147200310603, "unit": "s", "ts": 1794792218.7739463, "load1": 3.5, "run": 0, "images": 4}
+{"front": "oci", "metric": "stored_bytes", "system": "distribution", "value": 76042240, "unit": "B", "ts": 1794792218.777119, "load1": 3.5}
+{"front": "oci", "metric": "pull_s", "system": "distribution", "value": 0.2069163869600743, "unit": "s", "ts": 1794792219.0151958, "load1": 3.5, "run": 0, "images": 4}
+{"front": "oci", "metric": "functional:digest_distribution_python_3.11-slim_run0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792219.0221174, "load1": 3.5, "detail": "sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd vs sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd"}
+{"front": "oci", "metric": "functional:digest_distribution_python_3.12-slim_run0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792219.0289462, "load1": 3.5, "detail": "sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177 vs sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177"}
+{"front": "oci", "metric": "functional:digest_distribution_python_3.13-slim_run0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792219.0360863, "load1": 3.5, "detail": "sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20 vs sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20"}
+{"front": "oci", "metric": "functional:digest_distribution_alpine_3.20_run0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792219.04301, "load1": 3.5, "detail": "sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e vs sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e"}
+{"front": "oci", "metric": "push_s", "system": "distribution", "value": 0.16949183092219755, "unit": "s", "ts": 1794792219.2127757, "load1": 3.5, "run": 1, "images": 4}
+{"front": "oci", "metric": "pull_s", "system": "distribution", "value": 0.18946473288815469, "unit": "s", "ts": 1794792219.4360309, "load1": 3.38, "run": 1, "images": 4}
+{"front": "oci", "metric": "functional:digest_distribution_python_3.11-slim_run1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792219.443191, "load1": 3.38, "detail": "sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd vs sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd"}
+{"front": "oci", "metric": "functional:digest_distribution_python_3.12-slim_run1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792219.449976, "load1": 3.38, "detail": "sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177 vs sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177"}
+{"front": "oci", "metric": "functional:digest_distribution_python_3.13-slim_run1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792219.4568756, "load1": 3.38, "detail": "sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20 vs sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20"}
+{"front": "oci", "metric": "functional:digest_distribution_alpine_3.20_run1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792219.4633152, "load1": 3.38, "detail": "sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e vs sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e"}
+{"front": "oci", "metric": "push_s", "system": "distribution", "value": 0.17704943800345063, "unit": "s", "ts": 1794792219.6406431, "load1": 3.38, "run": 2, "images": 4}
+{"front": "oci", "metric": "pull_s", "system": "distribution", "value": 0.17841597105143592, "unit": "s", "ts": 1794792219.8504236, "load1": 3.38, "run": 2, "images": 4}
+{"front": "oci", "metric": "functional:digest_distribution_python_3.11-slim_run2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792219.8592513, "load1": 3.38, "detail": "sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd vs sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd"}
+{"front": "oci", "metric": "functional:digest_distribution_python_3.12-slim_run2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792219.8673923, "load1": 3.38, "detail": "sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177 vs sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177"}
+{"front": "oci", "metric": "functional:digest_distribution_python_3.13-slim_run2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792219.8752565, "load1": 3.38, "detail": "sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20 vs sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20"}
+{"front": "oci", "metric": "functional:digest_distribution_alpine_3.20_run2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792219.8838422, "load1": 3.38, "detail": "sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e vs sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e"}
+{"front": "oci", "metric": "push_s", "system": "pico2peta", "value": 0.22441670100670308, "unit": "s", "ts": 1794792220.2471762, "load1": 3.38, "run": 0, "images": 4}
+{"front": "oci", "metric": "stored_bytes", "system": "pico2peta", "value": 76238848, "unit": "B", "ts": 1794792220.2479558, "load1": 3.38}
+{"front": "oci", "metric": "pull_s", "system": "pico2peta", "value": 0.37688788608647883, "unit": "s", "ts": 1794792220.6552312, "load1": 3.38, "run": 0, "images": 4}
+{"front": "oci", "metric": "functional:digest_pico2peta_python_3.11-slim_run0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792220.662206, "load1": 3.38, "detail": "sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd vs sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd"}
+{"front": "oci", "metric": "functional:digest_pico2peta_python_3.12-slim_run0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792220.6690269, "load1": 3.38, "detail": "sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177 vs sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177"}
+{"front": "oci", "metric": "functional:digest_pico2peta_python_3.13-slim_run0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792220.6755497, "load1": 3.38, "detail": "sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20 vs sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20"}
+{"front": "oci", "metric": "functional:digest_pico2peta_alpine_3.20_run0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792220.6820505, "load1": 3.38, "detail": "sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e vs sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e"}
+{"front": "oci", "metric": "push_s", "system": "pico2peta", "value": 0.10728127701440826, "unit": "s", "ts": 1794792220.7896383, "load1": 3.38, "run": 1, "images": 4}
+{"front": "oci", "metric": "pull_s", "system": "pico2peta", "value": 0.3782364809885621, "unit": "s", "ts": 1794792221.1952975, "load1": 3.38, "run": 1, "images": 4}
+{"front": "oci", "metric": "functional:digest_pico2peta_python_3.11-slim_run1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792221.2019277, "load1": 3.38, "detail": "sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd vs sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd"}
+{"front": "oci", "metric": "functional:digest_pico2peta_python_3.12-slim_run1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792221.208714, "load1": 3.38, "detail": "sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177 vs sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177"}
+{"front": "oci", "metric": "functional:digest_pico2peta_python_3.13-slim_run1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792221.2154362, "load1": 3.38, "detail": "sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20 vs sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20"}
+{"front": "oci", "metric": "functional:digest_pico2peta_alpine_3.20_run1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792221.221831, "load1": 3.38, "detail": "sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e vs sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e"}
+{"front": "oci", "metric": "push_s", "system": "pico2peta", "value": 0.10546684701694176, "unit": "s", "ts": 1794792221.327579, "load1": 3.38, "run": 2, "images": 4}
+{"front": "oci", "metric": "pull_s", "system": "pico2peta", "value": 0.36807634797878563, "unit": "s", "ts": 1794792221.7253764, "load1": 3.38, "run": 2, "images": 4}
+{"front": "oci", "metric": "functional:digest_pico2peta_python_3.11-slim_run2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792221.7322977, "load1": 3.38, "detail": "sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd vs sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd"}
+{"front": "oci", "metric": "functional:digest_pico2peta_python_3.12-slim_run2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792221.7389665, "load1": 3.38, "detail": "sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177 vs sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177"}
+{"front": "oci", "metric": "functional:digest_pico2peta_python_3.13-slim_run2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792221.7455552, "load1": 3.38, "detail": "sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20 vs sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20"}
+{"front": "oci", "metric": "functional:digest_pico2peta_alpine_3.20_run2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792221.7519836, "load1": 3.38, "detail": "sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e vs sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e"}
+{"front": "hf", "metric": "upload_s", "system": "v1-reference", "value": 0.4344893969828263, "unit": "s", "ts": 1794792237.8778658, "load1": 2.63, "run": 0}
+{"front": "hf", "metric": "download_s", "system": "v1-reference", "value": 0.29184483899734914, "unit": "s", "ts": 1794792238.169969, "load1": 2.63, "run": 0}
+{"front": "hf", "metric": "upload_s", "system": "v1-reference", "value": 0.25670649902895093, "unit": "s", "ts": 1794792238.4681113, "load1": 2.63, "run": 1}
+{"front": "hf", "metric": "download_s", "system": "v1-reference", "value": 0.29407490498851985, "unit": "s", "ts": 1794792238.7624307, "load1": 2.63, "run": 1}
+{"front": "hf", "metric": "upload_s", "system": "v1-reference", "value": 0.25487768900347874, "unit": "s", "ts": 1794792239.0585198, "load1": 2.63, "run": 2}
+{"front": "hf", "metric": "download_s", "system": "v1-reference", "value": 0.2935721669928171, "unit": "s", "ts": 1794792239.3523371, "load1": 2.63, "run": 2}
+{"front": "hf", "metric": "upload_s", "system": "pico2peta-xet", "value": 2.313730766007211, "unit": "s", "ts": 1794792242.483855, "load1": 2.9, "run": 0}
+{"front": "hf", "metric": "download_s", "system": "pico2peta-xet", "value": 0.45672092598397285, "unit": "s", "ts": 1794792243.536016, "load1": 2.9, "run": 0}
+{"front": "hf", "metric": "functional:download_sha256_xet_0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792243.536173, "load1": 2.9, "detail": ""}
+{"front": "hf", "metric": "upload_s", "system": "pico2peta-xet", "value": 1.9308181480155326, "unit": "s", "ts": 1794792245.7361884, "load1": 2.75, "run": 1}
+{"front": "hf", "metric": "download_s", "system": "pico2peta-xet", "value": 0.48072396899806336, "unit": "s", "ts": 1794792246.8129492, "load1": 2.75, "run": 1}
+{"front": "hf", "metric": "functional:download_sha256_xet_1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792246.813108, "load1": 2.75, "detail": ""}
+{"front": "hf", "metric": "upload_s", "system": "pico2peta-xet", "value": 1.966839529981371, "unit": "s", "ts": 1794792249.0521212, "load1": 2.75, "run": 2}
+{"front": "hf", "metric": "download_s", "system": "pico2peta-xet", "value": 0.4405389159801416, "unit": "s", "ts": 1794792250.0897398, "load1": 3.97, "run": 2}
+{"front": "hf", "metric": "functional:download_sha256_xet_2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792250.0899115, "load1": 3.97, "detail": ""}
+{"front": "hf", "metric": "family_added_bytes", "system": "pico2peta-xet", "value": 212512768, "unit": "B", "ts": 1794792255.1172197, "load1": 3.73, "note": "growth of the repo for base+instruct; base content was already stored by the timing runs"}
+{"front": "hf", "metric": "upload_s", "system": "pico2peta-lfs", "value": 1.0934652489959262, "unit": "s", "ts": 1794792256.7928188, "load1": 3.73, "run": 0}
+{"front": "hf", "metric": "download_s", "system": "pico2peta-lfs", "value": 0.6890108449733816, "unit": "s", "ts": 1794792258.0743744, "load1": 3.73, "run": 0}
+{"front": "hf", "metric": "functional:download_sha256_lfs_0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792258.074544, "load1": 3.73, "detail": ""}
+{"front": "hf", "metric": "upload_s", "system": "pico2peta-lfs", "value": 0.5271663970197551, "unit": "s", "ts": 1794792258.8690767, "load1": 3.73, "run": 1}
+{"front": "hf", "metric": "download_s", "system": "pico2peta-lfs", "value": 0.6459181749960408, "unit": "s", "ts": 1794792260.1169786, "load1": 3.51, "run": 1}
+{"front": "hf", "metric": "functional:download_sha256_lfs_1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792260.1171453, "load1": 3.51, "detail": ""}
+{"front": "hf", "metric": "upload_s", "system": "pico2peta-lfs", "value": 0.5327137899585068, "unit": "s", "ts": 1794792260.9178998, "load1": 3.51, "run": 2}
+{"front": "hf", "metric": "download_s", "system": "pico2peta-lfs", "value": 0.6902021290152334, "unit": "s", "ts": 1794792262.2055194, "load1": 3.51, "run": 2}
+{"front": "hf", "metric": "functional:download_sha256_lfs_2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792262.2057035, "load1": 3.51, "detail": ""}
+{"front": "hf", "metric": "family_stored_bytes", "system": "pico2peta-xet", "value": 424796160, "unit": "B", "ts": 1794792267.732169, "load1": 3.63}
+{"front": "hf", "metric": "family_stored_bytes", "system": "xet-dedup", "value": 465944177, "unit": "B", "ts": 1794792270.8714976, "load1": 3.5, "files": 2, "bytes": 538121104, "chunks": 8395, "distinct_chunks": 8395, "unique_bytes": 538121104}
+{"front": "hf", "metric": "family_raw_bytes", "system": "source", "value": 538121104, "unit": "B", "ts": 1794792270.8716857, "load1": 3.5}
+{"front": "pypi", "metric": "cold_p50_s", "system": "devpi", "value": 0.4876281979959458, "unit": "s", "ts": 1794792302.5588963, "load1": 2.92, "run": 0, "files": 50}
+{"front": "pypi", "metric": "cold_total_s", "system": "devpi", "value": 27.958679054805543, "unit": "s", "ts": 1794792302.5591002, "load1": 2.92, "run": 0, "files": 50}
+{"front": "pypi", "metric": "hot_p50_s", "system": "devpi", "value": 0.33800654200604185, "unit": "s", "ts": 1794792319.7595255, "load1": 2.37, "run": 0, "files": 50}
+{"front": "pypi", "metric": "hot_total_s", "system": "devpi", "value": 17.18925686815055, "unit": "s", "ts": 1794792319.7596948, "load1": 2.37, "run": 0, "files": 50}
+{"front": "pypi", "metric": "stored_bytes", "system": "devpi", "value": 14577664, "unit": "B", "ts": 1794792319.7680213, "load1": 2.37, "run": 0}
+{"front": "pypi", "metric": "cold_p50_s", "system": "pico2peta", "value": 0.4682561460067518, "unit": "s", "ts": 1794792343.4384758, "load1": 1.97, "run": 0, "files": 50}
+{"front": "pypi", "metric": "cold_total_s", "system": "pico2peta", "value": 23.49949526396813, "unit": "s", "ts": 1794792343.4386501, "load1": 1.97, "run": 0, "files": 50}
+{"front": "pypi", "metric": "hot_p50_s", "system": "pico2peta", "value": 0.4004737070063129, "unit": "s", "ts": 1794792363.6853104, "load1": 1.68, "run": 0, "files": 50}
+{"front": "pypi", "metric": "hot_total_s", "system": "pico2peta", "value": 20.23560023709433, "unit": "s", "ts": 1794792363.6854796, "load1": 1.68, "run": 0, "files": 50}
+{"front": "pypi", "metric": "stored_bytes", "system": "pico2peta", "value": 6791168, "unit": "B", "ts": 1794792363.693412, "load1": 1.68, "run": 0}
+{"front": "pypi", "metric": "functional:one_fetch_per_file_run0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792363.695307, "load1": 1.68, "detail": "50.0 upstream fetches for 50 files"}
+{"front": "pypi", "metric": "functional:all_files_run0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792363.6954038, "load1": 1.68, "detail": "50 files"}
+{"front": "pypi", "metric": "cold_p50_s", "system": "devpi", "value": 0.4479136490263045, "unit": "s", "ts": 1794792393.0059657, "load1": 1.75, "run": 1, "files": 50}
+{"front": "pypi", "metric": "cold_total_s", "system": "devpi", "value": 25.85831377527211, "unit": "s", "ts": 1794792393.0061412, "load1": 1.75, "run": 1, "files": 50}
+{"front": "pypi", "metric": "hot_p50_s", "system": "devpi", "value": 0.33822895103367046, "unit": "s", "ts": 1794792410.2554893, "load1": 1.54, "run": 1, "files": 50}
+{"front": "pypi", "metric": "hot_total_s", "system": "devpi", "value": 17.238607627688907, "unit": "s", "ts": 1794792410.255664, "load1": 1.54, "run": 1, "files": 50}
+{"front": "pypi", "metric": "stored_bytes", "system": "devpi", "value": 14512128, "unit": "B", "ts": 1794792410.2632477, "load1": 1.54, "run": 1}
+{"front": "pypi", "metric": "cold_p50_s", "system": "pico2peta", "value": 0.49897831602720544, "unit": "s", "ts": 1794792435.3456805, "load1": 1.28, "run": 1, "files": 50}
+{"front": "pypi", "metric": "cold_total_s", "system": "pico2peta", "value": 24.91036170197185, "unit": "s", "ts": 1794792435.345851, "load1": 1.28, "run": 1, "files": 50}
+{"front": "pypi", "metric": "hot_p50_s", "system": "pico2peta", "value": 0.4031276300083846, "unit": "s", "ts": 1794792455.688283, "load1": 1.4, "run": 1, "files": 50}
+{"front": "pypi", "metric": "hot_total_s", "system": "pico2peta", "value": 20.332440932863392, "unit": "s", "ts": 1794792455.6884565, "load1": 1.4, "run": 1, "files": 50}
+{"front": "pypi", "metric": "stored_bytes", "system": "pico2peta", "value": 6791168, "unit": "B", "ts": 1794792455.696266, "load1": 1.4, "run": 1}
+{"front": "pypi", "metric": "functional:one_fetch_per_file_run1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792455.6972692, "load1": 1.4, "detail": "50.0 upstream fetches for 50 files"}
+{"front": "pypi", "metric": "functional:all_files_run1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792455.697362, "load1": 1.4, "detail": "50 files"}
+{"front": "pypi", "metric": "cold_p50_s", "system": "devpi", "value": 0.46516493801027536, "unit": "s", "ts": 1794792485.6852756, "load1": 1.24, "run": 2, "files": 50}
+{"front": "pypi", "metric": "cold_total_s", "system": "devpi", "value": 26.51669811300235, "unit": "s", "ts": 1794792485.6854513, "load1": 1.24, "run": 2, "files": 50}
+{"front": "pypi", "metric": "hot_p50_s", "system": "devpi", "value": 0.3378167860209942, "unit": "s", "ts": 1794792502.8254976, "load1": 1.25, "run": 2, "files": 50}
+{"front": "pypi", "metric": "hot_total_s", "system": "devpi", "value": 17.129592160170432, "unit": "s", "ts": 1794792502.8256762, "load1": 1.25, "run": 2, "files": 50}
+{"front": "pypi", "metric": "stored_bytes", "system": "devpi", "value": 14512128, "unit": "B", "ts": 1794792502.8338804, "load1": 1.25, "run": 2}
+{"front": "pypi", "metric": "cold_p50_s", "system": "pico2peta", "value": 0.4724770980537869, "unit": "s", "ts": 1794792526.6339774, "load1": 1.15, "run": 2, "files": 50}
+{"front": "pypi", "metric": "cold_total_s", "system": "pico2peta", "value": 23.629033312085085, "unit": "s", "ts": 1794792526.6341755, "load1": 1.15, "run": 2, "files": 50}
+{"front": "pypi", "metric": "hot_p50_s", "system": "pico2peta", "value": 0.4025805729907006, "unit": "s", "ts": 1794792546.7862146, "load1": 1.12, "run": 2, "files": 50}
+{"front": "pypi", "metric": "hot_total_s", "system": "pico2peta", "value": 20.141063357063103, "unit": "s", "ts": 1794792546.786388, "load1": 1.12, "run": 2, "files": 50}
+{"front": "pypi", "metric": "stored_bytes", "system": "pico2peta", "value": 6791168, "unit": "B", "ts": 1794792546.7938075, "load1": 1.12, "run": 2}
+{"front": "pypi", "metric": "functional:one_fetch_per_file_run2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792546.79484, "load1": 1.12, "detail": "50.0 upstream fetches for 50 files"}
+{"front": "pypi", "metric": "functional:all_files_run2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792546.7949438, "load1": 1.12, "detail": "50 files"}
+{"front": "npm", "metric": "cold_p50_s", "system": "verdaccio", "value": 0.5679839760414325, "unit": "s", "ts": 1794792577.8456511, "load1": 1.14, "run": 0, "files": 50}
+{"front": "npm", "metric": "cold_total_s", "system": "verdaccio", "value": 29.822655391180888, "unit": "s", "ts": 1794792577.845839, "load1": 1.14, "run": 0, "files": 50}
+{"front": "npm", "metric": "hot_p50_s", "system": "verdaccio", "value": 0.5358658250188455, "unit": "s", "ts": 1794792605.5057137, "load1": 1.14, "run": 0, "files": 50}
+{"front": "npm", "metric": "hot_total_s", "system": "verdaccio", "value": 27.623301511164755, "unit": "s", "ts": 1794792605.5058749, "load1": 1.14, "run": 0, "files": 50}
+{"front": "npm", "metric": "stored_bytes", "system": "verdaccio", "value": 14708736, "unit": "B", "ts": 1794792605.5130577, "load1": 1.14, "run": 0}
+{"front": "npm", "metric": "cold_p50_s", "system": "pico2peta", "value": 0.5992470500059426, "unit": "s", "ts": 1794792635.8605247, "load1": 1.14, "run": 0, "files": 50}
+{"front": "npm", "metric": "cold_total_s", "system": "pico2peta", "value": 30.180664849001914, "unit": "s", "ts": 1794792635.8606913, "load1": 1.14, "run": 0, "files": 50}
+{"front": "npm", "metric": "hot_p50_s", "system": "pico2peta", "value": 0.5659425759804435, "unit": "s", "ts": 1794792664.0808775, "load1": 1.16, "run": 0, "files": 50}
+{"front": "npm", "metric": "hot_total_s", "system": "pico2peta", "value": 28.180992935143877, "unit": "s", "ts": 1794792664.0810392, "load1": 1.16, "run": 0, "files": 50}
+{"front": "npm", "metric": "stored_bytes", "system": "pico2peta", "value": 1658880, "unit": "B", "ts": 1794792664.086992, "load1": 1.16, "run": 0}
+{"front": "npm", "metric": "functional:one_fetch_per_file_run0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792664.088894, "load1": 1.16, "detail": "50.0 upstream fetches for 50 packages"}
+{"front": "npm", "metric": "functional:all_files_run0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792664.088989, "load1": 1.16, "detail": "50 tarballs"}
+{"front": "npm", "metric": "cold_p50_s", "system": "verdaccio", "value": 0.5715098579530604, "unit": "s", "ts": 1794792695.0043879, "load1": 1.17, "run": 1, "files": 50}
+{"front": "npm", "metric": "cold_total_s", "system": "verdaccio", "value": 29.882405551092234, "unit": "s", "ts": 1794792695.0045547, "load1": 1.17, "run": 1, "files": 50}
+{"front": "npm", "metric": "hot_p50_s", "system": "verdaccio", "value": 0.534323890984524, "unit": "s", "ts": 1794792722.7307904, "load1": 1.18, "run": 1, "files": 50}
+{"front": "npm", "metric": "hot_total_s", "system": "verdaccio", "value": 27.689750809047837, "unit": "s", "ts": 1794792722.7309513, "load1": 1.18, "run": 1, "files": 50}
+{"front": "npm", "metric": "stored_bytes", "system": "verdaccio", "value": 14708736, "unit": "B", "ts": 1794792722.737781, "load1": 1.18, "run": 1}
+{"front": "npm", "metric": "cold_p50_s", "system": "pico2peta", "value": 0.599417761026416, "unit": "s", "ts": 1794792753.2516997, "load1": 1.18, "run": 1, "files": 50}
+{"front": "npm", "metric": "cold_total_s", "system": "pico2peta", "value": 30.34553341800347, "unit": "s", "ts": 1794792753.2519069, "load1": 1.18, "run": 1, "files": 50}
+{"front": "npm", "metric": "hot_p50_s", "system": "pico2peta", "value": 0.5696651830221526, "unit": "s", "ts": 1794792781.8411624, "load1": 1.24, "run": 1, "files": 50}
+{"front": "npm", "metric": "hot_total_s", "system": "pico2peta", "value": 28.54943651193753, "unit": "s", "ts": 1794792781.8413239, "load1": 1.24, "run": 1, "files": 50}
+{"front": "npm", "metric": "stored_bytes", "system": "pico2peta", "value": 1658880, "unit": "B", "ts": 1794792781.8474023, "load1": 1.24, "run": 1}
+{"front": "npm", "metric": "functional:one_fetch_per_file_run1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792781.848366, "load1": 1.24, "detail": "50.0 upstream fetches for 50 packages"}
+{"front": "npm", "metric": "functional:all_files_run1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792781.8484576, "load1": 1.24, "detail": "50 tarballs"}
+{"front": "npm", "metric": "cold_p50_s", "system": "verdaccio", "value": 0.5746701399912126, "unit": "s", "ts": 1794792812.9205763, "load1": 1.03, "run": 2, "files": 50}
+{"front": "npm", "metric": "cold_total_s", "system": "verdaccio", "value": 30.13959152501775, "unit": "s", "ts": 1794792812.9207406, "load1": 1.03, "run": 2, "files": 50}
+{"front": "npm", "metric": "hot_p50_s", "system": "verdaccio", "value": 0.5338467510300688, "unit": "s", "ts": 1794792840.5162537, "load1": 1.09, "run": 2, "files": 50}
+{"front": "npm", "metric": "hot_total_s", "system": "verdaccio", "value": 27.560107894300018, "unit": "s", "ts": 1794792840.5164182, "load1": 1.09, "run": 2, "files": 50}
+{"front": "npm", "metric": "stored_bytes", "system": "verdaccio", "value": 14708736, "unit": "B", "ts": 1794792840.5236094, "load1": 1.09, "run": 2}
+{"front": "npm", "metric": "cold_p50_s", "system": "pico2peta", "value": 0.5913904460030608, "unit": "s", "ts": 1794792870.7312682, "load1": 0.98, "run": 2, "files": 50}
+{"front": "npm", "metric": "cold_total_s", "system": "pico2peta", "value": 30.03853387903655, "unit": "s", "ts": 1794792870.7314394, "load1": 0.98, "run": 2, "files": 50}
+{"front": "npm", "metric": "hot_p50_s", "system": "pico2peta", "value": 0.568898512981832, "unit": "s", "ts": 1794792899.2301812, "load1": 1.13, "run": 2, "files": 50}
+{"front": "npm", "metric": "hot_total_s", "system": "pico2peta", "value": 28.459652003191877, "unit": "s", "ts": 1794792899.230347, "load1": 1.13, "run": 2, "files": 50}
+{"front": "npm", "metric": "stored_bytes", "system": "pico2peta", "value": 1658880, "unit": "B", "ts": 1794792899.237024, "load1": 1.13, "run": 2}
+{"front": "npm", "metric": "functional:one_fetch_per_file_run2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792899.2380326, "load1": 1.13, "detail": "50.0 upstream fetches for 50 packages"}
+{"front": "npm", "metric": "functional:all_files_run2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794792899.2381258, "load1": 1.13, "detail": "50 tarballs"}
+{"front": "maven", "metric": "cold_p50_s", "system": "reposilite", "value": 2.655304260959383, "unit": "s", "ts": 1794793050.2803352, "load1": 2.81, "run": 0, "files": 50}
+{"front": "maven", "metric": "cold_total_s", "system": "reposilite", "value": 133.92566382390214, "unit": "s", "ts": 1794793050.2805321, "load1": 2.81, "run": 0, "files": 50}
+{"front": "maven", "metric": "hot_p50_s", "system": "reposilite", "value": 2.4075860480079427, "unit": "s", "ts": 1794793180.0130315, "load1": 3.2, "run": 0, "files": 50}
+{"front": "maven", "metric": "hot_total_s", "system": "reposilite", "value": 122.78772178594954, "unit": "s", "ts": 1794793180.0131986, "load1": 3.2, "run": 0, "files": 50}
+{"front": "maven", "metric": "stored_bytes", "system": "reposilite", "value": 48869376, "unit": "B", "ts": 1794793180.0189028, "load1": 3.2, "run": 0}
+{"front": "maven", "metric": "cold_p50_s", "system": "pico2peta", "value": 2.516860616975464, "unit": "s", "ts": 1794793314.015126, "load1": 2.56, "run": 0, "files": 50}
+{"front": "maven", "metric": "cold_total_s", "system": "pico2peta", "value": 127.09028621704783, "unit": "s", "ts": 1794793314.0152962, "load1": 2.56, "run": 0, "files": 50}
+{"front": "maven", "metric": "hot_p50_s", "system": "pico2peta", "value": 2.4583812469500117, "unit": "s", "ts": 1794793444.396349, "load1": 3.09, "run": 0, "files": 50}
+{"front": "maven", "metric": "hot_total_s", "system": "pico2peta", "value": 123.63543050410226, "unit": "s", "ts": 1794793444.396524, "load1": 3.09, "run": 0, "files": 50}
+{"front": "maven", "metric": "stored_bytes", "system": "pico2peta", "value": 45588480, "unit": "B", "ts": 1794793444.3993914, "load1": 3.09, "run": 0}
+{"front": "maven", "metric": "functional:no_refetch_on_hit_run0", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794793444.399478, "load1": 3.09, "detail": "129.0 upstream fetches cold, 129.0 after hot"}
+{"front": "maven", "metric": "cold_p50_s", "system": "reposilite", "value": 2.5635944090317935, "unit": "s", "ts": 1794793583.79479, "load1": 3.22, "run": 1, "files": 50}
+{"front": "maven", "metric": "cold_total_s", "system": "reposilite", "value": 129.12057450675638, "unit": "s", "ts": 1794793583.7949593, "load1": 3.22, "run": 1, "files": 50}
+{"front": "maven", "metric": "hot_p50_s", "system": "reposilite", "value": 2.4537729839794338, "unit": "s", "ts": 1794793716.5923076, "load1": 4.09, "run": 1, "files": 50}
+{"front": "maven", "metric": "hot_total_s", "system": "reposilite", "value": 125.84150181879522, "unit": "s", "ts": 1794793716.5924797, "load1": 4.09, "run": 1, "files": 50}
+{"front": "maven", "metric": "stored_bytes", "system": "reposilite", "value": 48869376, "unit": "B", "ts": 1794793716.5983388, "load1": 4.09, "run": 1}
+{"front": "maven", "metric": "cold_p50_s", "system": "pico2peta", "value": 2.552827598992735, "unit": "s", "ts": 1794793853.073371, "load1": 2.79, "run": 1, "files": 50}
+{"front": "maven", "metric": "cold_total_s", "system": "pico2peta", "value": 129.52692284918157, "unit": "s", "ts": 1794793853.073542, "load1": 2.79, "run": 1, "files": 50}
+{"front": "maven", "metric": "hot_p50_s", "system": "pico2peta", "value": 2.4618438880424947, "unit": "s", "ts": 1794793983.4348469, "load1": 3.02, "run": 1, "files": 50}
+{"front": "maven", "metric": "hot_total_s", "system": "pico2peta", "value": 123.5540531501174, "unit": "s", "ts": 1794793983.4350162, "load1": 3.02, "run": 1, "files": 50}
+{"front": "maven", "metric": "stored_bytes", "system": "pico2peta", "value": 45588480, "unit": "B", "ts": 1794793983.4378228, "load1": 3.02, "run": 1}
+{"front": "maven", "metric": "functional:no_refetch_on_hit_run1", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794793983.4379067, "load1": 3.02, "detail": "129.0 upstream fetches cold, 129.0 after hot"}
+{"front": "maven", "metric": "cold_p50_s", "system": "reposilite", "value": 2.5817960309796035, "unit": "s", "ts": 1794794123.6027572, "load1": 2.65, "run": 2, "files": 50}
+{"front": "maven", "metric": "cold_total_s", "system": "reposilite", "value": 129.9045884050429, "unit": "s", "ts": 1794794123.6029298, "load1": 2.65, "run": 2, "files": 50}
+{"front": "maven", "metric": "hot_p50_s", "system": "reposilite", "value": 2.4233250240213238, "unit": "s", "ts": 1794794251.282273, "load1": 3.42, "run": 2, "files": 50}
+{"front": "maven", "metric": "hot_total_s", "system": "reposilite", "value": 120.8548538388568, "unit": "s", "ts": 1794794251.2824478, "load1": 3.42, "run": 2, "files": 50}
+{"front": "maven", "metric": "stored_bytes", "system": "reposilite", "value": 48869376, "unit": "B", "ts": 1794794251.288186, "load1": 3.42, "run": 2}
+{"front": "maven", "metric": "cold_p50_s", "system": "pico2peta", "value": 2.6660374740022235, "unit": "s", "ts": 1794794391.9696379, "load1": 3.53, "run": 2, "files": 50}
+{"front": "maven", "metric": "cold_total_s", "system": "pico2peta", "value": 133.59030159009853, "unit": "s", "ts": 1794794391.9698145, "load1": 3.53, "run": 2, "files": 50}
+{"front": "maven", "metric": "hot_p50_s", "system": "pico2peta", "value": 2.4513211530284025, "unit": "s", "ts": 1794794522.164305, "load1": 3.31, "run": 2, "files": 50}
+{"front": "maven", "metric": "hot_total_s", "system": "pico2peta", "value": 123.41498149192194, "unit": "s", "ts": 1794794522.1644838, "load1": 3.31, "run": 2, "files": 50}
+{"front": "maven", "metric": "stored_bytes", "system": "pico2peta", "value": 45588480, "unit": "B", "ts": 1794794522.1673286, "load1": 3.31, "run": 2}
+{"front": "maven", "metric": "functional:no_refetch_on_hit_run2", "system": "pico2peta", "value": true, "unit": "bool", "ts": 1794794522.1674144, "load1": 3.31, "detail": "129.0 upstream fetches cold, 129.0 after hot"}

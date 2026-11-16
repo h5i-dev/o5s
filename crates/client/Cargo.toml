@@ -1,0 +1,19 @@
+[package]
+name = "o5s-client"
+description = "Rust client for the o5s server; implements the Repository trait over HTTP"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+o5s-core.workspace = true
+o5s-attest = { path = "../attest" }
+serde.workspace = true
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "stream", "json"] }
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+fastrand = "2"
+tracing = "0.1"
+blake3.workspace = true

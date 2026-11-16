@@ -1,0 +1,7 @@
+# commits rep 1 commit 40b6ed6 dirty 0 load_start 1.41 2026-11-16T02:08:46+00:00
+| threads (one handle, distinct names) | commits/s |
+|---|---|
+| 1 | 7998 |
+| 4 | 12729 |
+| 8 | 14355 |
+# load_end 1.38

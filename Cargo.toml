@@ -1,0 +1,38 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/pack", "crates/refs", "crates/repo", "crates/cli", "crates/prov", "crates/weights", "crates/chunk", "crates/order", "crates/kernel", "crates/attest", "crates/backend-s3", "crates/server", "crates/client", "crates/net-kernel", "bench/exp1", "bench/exp1c", "bench/exp3", "bench/micro"]
+exclude = ["fuzz"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+# h5i-app (H5I_PLAN): kernel helpers and the guard, extracted with our kernels.
+h5i-app-std = "=0.5.5"
+h5i-app-core = "=0.5.5"
+o5s-core = { path = "crates/core" }
+o5s-pack = { path = "crates/pack" }
+o5s-refs = { path = "crates/refs" }
+o5s-repo = { path = "crates/repo" }
+o5s-prov = { path = "crates/prov" }
+o5s-weights = { path = "crates/weights" }
+o5s-chunk = { path = "crates/chunk" }
+o5s-order = { path = "crates/order" }
+o5s-kernel = { path = "crates/kernel" }
+o5s-attest = { path = "crates/attest" }
+blake3 = "1"
+memmap2 = "0.9"
+fastcdc = "3"
+zstd = "0.13"
+thiserror = "2"
+crc32fast = "1"
+clap = { version = "4", features = ["derive", "env"] }
+proptest = "1"
+tempfile = "3"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+[profile.release]
+debug = 1

@@ -1,0 +1,8 @@
+# ingest rep 3 commit 9f3ee03 dirty 0 load_start 1.48 2026-11-16T06:08:31+00:00
+{"mode":"ingest-level","level":-1,"objects":30911,"raw_mb":1073.8,"ratio":0.3869,"mb_s":326}
+{"mode":"ingest-level","level":1,"objects":30911,"raw_mb":1073.8,"ratio":0.3391,"mb_s":305}
+{"mode":"ingest-level","level":2,"objects":30911,"raw_mb":1073.8,"ratio":0.3308,"mb_s":274}
+{"mode":"ingest-level","level":3,"objects":30911,"raw_mb":1073.8,"ratio":0.3220,"mb_s":228}
+{"mode":"ingest","api":"put","objects":30911,"raw_mb":1073.8,"secs":5.81,"mb_s":185,"obj_s":5321,"load":"1.37"}
+{"mode":"ingest","api":"put_many","objects":30911,"raw_mb":1073.8,"secs":2.61,"mb_s":412,"obj_s":11859,"load":"1.37"}
+# load_end 1.37

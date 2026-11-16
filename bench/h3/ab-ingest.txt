@@ -1,0 +1,6 @@
+base r1 load 0.84 "api":"put", mb_s:191 "api":"put_many", mb_s:418 
+fix r1 load 1.28 "api":"put", mb_s:191 "api":"put_many", mb_s:422 
+base r2 load 1.18 "api":"put", mb_s:185 "api":"put_many", mb_s:394 
+fix r2 load 1.58 "api":"put", mb_s:180 "api":"put_many", mb_s:407 
+base r3 load 1.38 "api":"put", mb_s:178 "api":"put_many", mb_s:413 
+fix r3 load 1.65 "api":"put", mb_s:178 "api":"put_many", mb_s:412 

@@ -1,0 +1,6 @@
+load average: 2.56, 2.66, 2.89
+{"mib":1024,"dd_fsync_mb_s":187,"put_mb_s":177,"write_ratio":0.945,"cat_mb_s":10414,"get_strict_mb_s":1916,"read_ratio_strict":0.184,"get_eof_mb_s":2062,"read_ratio_eof":0.198,"range4k_p99_ms":0.112,"scattered_10v_bytes":1135462813,"inserted_10v_bytes":1091744331,"one_copy_bytes":1073741824}
+load average: 4.86, 3.37, 3.10
+{"mib":1024,"dd_fsync_mb_s":153,"put_mb_s":189,"write_ratio":1.233,"cat_mb_s":7439,"get_strict_mb_s":1429,"read_ratio_strict":0.192,"get_eof_mb_s":2023,"read_ratio_eof":0.272,"range4k_p99_ms":0.155,"scattered_10v_bytes":1135462813,"inserted_10v_bytes":1091744331,"one_copy_bytes":1073741824}
+load average: 4.16, 3.23, 3.20
+{"mib":1024,"dd_fsync_mb_s":184,"put_mb_s":184,"write_ratio":1.002,"cat_mb_s":11729,"get_strict_mb_s":2051,"read_ratio_strict":0.175,"get_eof_mb_s":2175,"read_ratio_eof":0.185,"range4k_p99_ms":0.110,"scattered_10v_bytes":1135462813,"inserted_10v_bytes":1091744331,"one_copy_bytes":1073741824}
