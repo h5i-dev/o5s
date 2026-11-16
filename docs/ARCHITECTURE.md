@@ -156,15 +156,20 @@ dangling ref.
 
 ## Verification map
 
-| property | proof (lean/) | tests (Rust) |
+Every decision below is an h5i-app kernel in `crates/kernel`, extracted with Charon/Aeneas; the theorems
+are about the extracted code (`verify/core`, docs/H5I_PLAN.md). Authorization (P4) is net's kernel
+(`verify/net`).
+
+| property | theorem (verify/core/proofs) | tests (Rust) |
 |---|---|---|
-| content never changes; data hashes to key | `objects_stable_run`, `wf_run` | read-path verification, fuzz, `fsck` |
-| no undetected overwrite | `no_lost_update`, `replace_ok_validated` | contention tests (threads, processes), Lean↔Rust difftest |
-| immutable names never move (incl. deletes, transactions) | `frozen_run`, `updateMany_frozen` | rule tests, model proptest, difftest |
-| unauthorized principals can't move/read | `unauthorized_cannot_move_run`, `resolve_denied` | server authz tests (net) |
-| GC never loses live objects (incl. Frame3 references as children) | `gc_preserves_live` | GC crash sweep, concurrent-writer GC, SIGKILL test, Frame3 reference GC test |
-| a front's names move only through its handle | `non_owner_cannot_move_run` | nested-claims and every-write-path tests (`crates/repo/tests/front.rs`) |
-| promotion moves only `dst`, never from a stale `src` | `promote_only_moves_dst`, `updateMany_stale_noop` | difftest `M` op, `crates/attest` promotion test |
+| P1 a read returns only what was stored under its key; puts never overwrite | `read_accepts_only_key`, `put_never_overwrites` | read-path verification, fuzz, `fsck` |
+| P2 no undetected overwrite; versions | `commit_validated`, `commit_versions`, `decide_spec` (total) | contention tests (threads, processes), kernel-vs-model proptest |
+| P3 published names never move (incl. deletes, transactions) | `commit_respects_rules`, `mobility_of_spec`, `governing_spec` | rule tests, model proptest |
+| P4 unauthorized principals can't move/read | net: `guarded_transition.authorized` (`verify/net`) | server authz tests |
+| P5 GC never deletes a live object's only copy | `delete_keeps_live` (+ `is_victim_spec`) | GC crash sweep, concurrent-writer GC, SIGKILL test, Frame3 reference GC test |
+| P6 a front's names (and rule prefixes) are written only through its handle | `guard_owner`, `may_set_rule_spec` | nested-claims and every-write-path tests (`crates/repo/tests/front.rs`) |
+| P7 promotion moves only `dst`, never from a stale `src` | `promote_plan`, `promote_src_fresh` | `crates/attest` promotion test |
+| retention keeps the newest N and deletes only what rules and provenance allow | `plan_spec` | `crates/prov/tests/retention.rs` |
 
 Crash consistency (fsync honesty, atomic rename, create-only puts) is assumed by the proofs and tested
 by fault injection at every write/fsync point plus real SIGKILLs.
@@ -192,7 +197,7 @@ by fault injection at every write/fsync point plus real SIGKILLs.
   content-named, so they're safe even if several hosts write the same bucket. But only one host may own
   the refs (see above), and staging stays local to each writer.
 - Both ref engines share the pure decision logic (`RefState::decide_*`). Both are checked against the
-  model proptest and the Lean↔Rust difftest.
+  model proptest; their decision logic is the extracted kernel (`verify/core`).
 
 ## Backup, restore and integrity
 

@@ -1218,6 +1218,7 @@ dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
  "pico2peta-core",
+ "pico2peta-kernel",
  "pico2peta-prov",
  "pico2peta-repo",
  "proptest",
@@ -1360,6 +1361,7 @@ dependencies = [
  "memmap2",
  "pico2peta-chunk",
  "pico2peta-core",
+ "pico2peta-kernel",
  "proptest",
  "tempfile",
  "zstd",
@@ -1370,6 +1372,7 @@ name = "pico2peta-prov"
 version = "0.1.0"
 dependencies = [
  "pico2peta-core",
+ "pico2peta-kernel",
  "pico2peta-refs",
  "pico2peta-repo",
  "proptest",
@@ -1394,6 +1397,7 @@ version = "0.1.0"
 dependencies = [
  "pico2peta-chunk",
  "pico2peta-core",
+ "pico2peta-kernel",
  "pico2peta-order",
  "pico2peta-pack",
  "pico2peta-refs",

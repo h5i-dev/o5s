@@ -11,8 +11,14 @@
 //! adapters, `&Vec` rather than slices, `while` loops over indices, and
 //! byte strings (`Vec<u8>`) instead of `String`.
 
+pub mod codec;
+pub mod fronts;
+pub mod gc;
 pub mod names;
+pub mod objects;
+pub mod promote;
 pub mod refs;
+pub mod retention;
 
 /// A BLAKE3-256 content address.
 pub type Hash = [u8; 32];

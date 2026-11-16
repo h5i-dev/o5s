@@ -29,33 +29,14 @@ pub struct RetentionReport {
     pub conflicts: Vec<String>,
 }
 
-/// Version-aware comparison: digit runs compare numerically, the rest as text.
+/// Version-aware comparison: digit runs compare numerically, the rest as text
+/// (the extracted kernel's `retention::version_cmp`).
 pub fn version_cmp(a: &str, b: &str) -> Ordering {
-    let split = |s: &str| -> Vec<(bool, String)> {
-        let mut out: Vec<(bool, String)> = Vec::new();
-        for c in s.chars() {
-            let d = c.is_ascii_digit();
-            match out.last_mut() {
-                Some((kd, run)) if *kd == d => run.push(c),
-                _ => out.push((d, c.to_string())),
-            }
-        }
-        out
-    };
-    let (xa, xb) = (split(a), split(b));
-    for (p, q) in xa.iter().zip(&xb) {
-        let o = match (p.0, q.0) {
-            (true, true) => {
-                let (pa, qa) = (p.1.trim_start_matches('0'), q.1.trim_start_matches('0'));
-                pa.len().cmp(&qa.len()).then_with(|| pa.cmp(qa))
-            }
-            _ => p.1.cmp(&q.1),
-        };
-        if o != Ordering::Equal {
-            return o;
-        }
+    match pico2peta_kernel::retention::version_cmp(&a.as_bytes().to_vec(), &b.as_bytes().to_vec()) {
+        c if c < 0 => Ordering::Less,
+        0 => Ordering::Equal,
+        _ => Ordering::Greater,
     }
-    xa.len().cmp(&xb.len()).then_with(|| a.cmp(b))
 }
 
 /// Applies every profile's retention to its namespaces.
@@ -81,39 +62,65 @@ pub fn apply(repo: &LocalRepo, log_ref: &Name, dry_run: bool) -> Result<Retentio
         }
         for (_, mut names) in series {
             names.sort_by(|a, b| version_cmp(last(&a.0), last(&b.0)));
+            // Regenerability only matters for the old ones; the kernel ignores it otherwise.
             let old = names.len().saturating_sub(keep);
-            for (name, v) in names.into_iter().take(old) {
-                if profile.only_if_regenerable {
+            let mut entries = Vec::with_capacity(names.len());
+            for (k, (name, v)) in names.iter().enumerate() {
+                let regenerable = if profile.only_if_regenerable && k < old {
                     if prov.is_none() {
                         prov = Some(Provenance::load(repo, log_ref)?);
                     }
                     let p = prov.as_ref().ok_or_else(|| pico2peta_core::Error::Corrupt("provenance".into()))?;
-                    if p.regenerable(repo, &v.hash)?.is_none() {
-                        report.kept_not_regenerable.push(name);
-                        continue;
-                    }
-                }
+                    p.regenerable(repo, &v.hash)?.is_some()
+                } else {
+                    true
+                };
                 let nm = Name::new(name.clone())?;
-                if !pico2peta_refs::RefState::rules_allow_delete(&rules, &nm) {
-                    report.kept_by_rule.push(name);
-                    continue;
-                }
-                if dry_run {
-                    report.deleted.push(name);
-                    continue;
-                }
-                match repo.delete_ref(&nm, &[(nm.clone(), pico2peta_core::Observed::Version(v.version))]) {
-                    Ok(ReplaceOutcome::Ok { .. }) => report.deleted.push(name),
-                    Ok(ReplaceOutcome::Conflict { .. }) => report.conflicts.push(name),
-                    Err(pico2peta_core::Error::Forbidden { .. }) | Err(pico2peta_core::Error::Unauthorized(_)) => {
-                        report.kept_by_rule.push(name)
+                let covering = rules
+                    .iter()
+                    .filter(|(pfx, _)| nm.is_under(pfx))
+                    .map(|(pfx, r)| (pfx.as_bytes().to_vec(), kernel_rule(*r)))
+                    .collect();
+                entries.push(pico2peta_kernel::retention::Entry {
+                    name: name.as_bytes().to_vec(),
+                    version: last(name).as_bytes().to_vec(),
+                    regenerable,
+                    rules: covering,
+                });
+            }
+            // The decision is the extracted kernel's (`retention::plan`).
+            let actions = pico2peta_kernel::retention::plan(keep, profile.only_if_regenerable, &entries)
+                .map_err(|_| pico2peta_core::Error::Corrupt("retention: series not sorted".into()))?;
+            for ((name, v), action) in names.into_iter().zip(actions) {
+                use pico2peta_kernel::retention::Action;
+                match action {
+                    Action::Keep => {}
+                    Action::KeepNotRegenerable => report.kept_not_regenerable.push(name),
+                    Action::KeepByRule => report.kept_by_rule.push(name),
+                    Action::Delete if dry_run => report.deleted.push(name),
+                    Action::Delete => {
+                        let nm = Name::new(name.clone())?;
+                        match repo.delete_ref(&nm, &[(nm.clone(), pico2peta_core::Observed::Version(v.version))]) {
+                            Ok(ReplaceOutcome::Ok { .. }) => report.deleted.push(name),
+                            Ok(ReplaceOutcome::Conflict { .. }) => report.conflicts.push(name),
+                            Err(pico2peta_core::Error::Forbidden { .. })
+                            | Err(pico2peta_core::Error::Unauthorized(_)) => report.kept_by_rule.push(name),
+                            Err(e) => return Err(e),
+                        }
                     }
-                    Err(e) => return Err(e),
                 }
             }
         }
     }
     Ok(report)
+}
+
+fn kernel_rule(r: pico2peta_core::Rule) -> pico2peta_kernel::Rule {
+    match r {
+        pico2peta_core::Rule::Mutable => pico2peta_kernel::Rule::Mutable,
+        pico2peta_core::Rule::ImmutableAfterPublish => pico2peta_kernel::Rule::Immutable,
+        pico2peta_core::Rule::HeadMutableReleaseImmutable => pico2peta_kernel::Rule::HeadRelease,
+    }
 }
 
 fn last(name: &str) -> &str {

@@ -4,7 +4,7 @@
 [extract]
 crate = "../../crates/kernel"
 # Charon starts here and extracts what it reaches.
-start-from = ["refs::decide", "refs::decide_set_rule", "names::validate"]
+start-from = ["refs::decide", "refs::decide_set_rule", "names::validate", "fronts::may_write", "fronts::may_set_rule", "gc::is_victim", "gc::delete_ok", "gc::skip_lone_live", "promote::decide_promote", "retention::plan", "retention::version_cmp", "objects::put_action", "objects::accept_read", "codec::parse_header", "codec::journal_step"]
 
 [check]
 # Must exist and use only Lean's standard axioms (every theorem in a
@@ -18,6 +18,17 @@ theorems = [
     "pico2peta_kernel.Proofs.governing_spec",
     "pico2peta_kernel.Proofs.is_under_spec",
     "pico2peta_kernel.Proofs.cmp_spec",
+    "pico2peta_kernel.Proofs.guard_owner",
+    "pico2peta_kernel.Proofs.may_set_rule_spec",
+    "pico2peta_kernel.Proofs.delete_keeps_live",
+    "pico2peta_kernel.Proofs.is_victim_spec",
+    "pico2peta_kernel.Proofs.promote_plan",
+    "pico2peta_kernel.Proofs.promote_src_fresh",
+    "pico2peta_kernel.Proofs.plan_spec",
+    "pico2peta_kernel.Proofs.read_accepts_only_key",
+    "pico2peta_kernel.Proofs.put_never_overwrites",
+    "pico2peta_kernel.Proofs.parse_header_spec",
+    "pico2peta_kernel.Proofs.journal_step_spec",
 ]
 
 # Bugs the proofs must reject (`h5i app mutate`).
@@ -69,3 +80,57 @@ name = "prefix_not_segment_aligned"
 file = "../../crates/kernel/src/names.rs"
 old = "s.len() == prefix.len() || s[prefix.len()] == b'/'"
 new = "s.len() >= prefix.len()"
+
+[[mutant]]
+name = "non_owner_writes"
+file = "../../crates/kernel/src/fronts.rs"
+old = "Some(w) => o == w,"
+new = "Some(w) => o != w,"
+
+[[mutant]]
+name = "delete_with_live_in_doomed_pack"
+file = "../../crates/kernel/src/gc.rs"
+old = "if is_doomed(doomed, p) {"
+new = "if !is_doomed(doomed, p) {"
+
+[[mutant]]
+name = "victim_ratio_off_by_10x"
+file = "../../crates/kernel/src/gc.rs"
+old = "garbage * 1000 >= "
+new = "garbage * 100 >= "
+
+[[mutant]]
+name = "promote_without_provenance"
+file = "../../crates/kernel/src/promote.rs"
+old = "if no_provenance || keys.len() > 0 {"
+new = "if keys.len() > 0 {"
+
+[[mutant]]
+name = "unsigned_attestation_counts"
+file = "../../crates/kernel/src/promote.rs"
+old = "if counts(policy, &atts[i]) && has_key(&atts[i].verified_keys, k) {"
+new = "if has_key(&atts[i].verified_keys, k) {"
+
+[[mutant]]
+name = "retention_deletes_newest"
+file = "../../crates/kernel/src/retention.rs"
+old = "if k >= old {"
+new = "if k > old {"
+
+[[mutant]]
+name = "read_checks_31_bytes"
+file = "../../crates/kernel/src/objects.rs"
+old = "while i < 32 {"
+new = "while i < 31 {"
+
+[[mutant]]
+name = "header_skips_kind_check"
+file = "../../crates/kernel/src/codec.rs"
+old = "if kind > 5 {"
+new = "if kind > 6 {"
+
+[[mutant]]
+name = "journal_truncates_history"
+file = "../../crates/kernel/src/codec.rs"
+old = "        if end == rest_len {"
+new = "        if end <= rest_len {"

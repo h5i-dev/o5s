@@ -4,6 +4,19 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 
 ## [Unreleased]
 
+### Changed: verified decisions (h5i-app rebuild, docs/H5I_PLAN.md)
+- **Every core decision is an extracted, proved kernel** (`crates/kernel`, proofs in `verify/core`):
+  - the name grammar, rule governance and mobility, and the OCC batch decision (`refs::decide`);
+  - front ownership (P6), promotion (P7), retention, GC victim selection and verify-before-delete (P5);
+  - the verified-read digest check and put dedup (P1);
+  - the pack record header decoder and the ref-journal framing decision.
+  The shells call them. The hand-written Lean model (`lean/`) and its Rust↔Lean difftest are removed.
+- When several targets of one batch are invalid, the error now names the first in name order (it was the first in
+  argument order).
+- **Object reads by hash are authorized by reachability** (with net's authz kernel): a principal reads an object
+  only if a name it may read reaches it. An object that no name references is not readable through the server,
+  so `put` then `get` by hash needs a name first. The core building block is `pico2peta_repo::reach`.
+
 ### Changed (breaking before v0.1)
 - **CLI cleanup (plumbing over a domain-agnostic core).**
   - `put`: removed `--delta-base`, `--delta-from-ref` and `--no-byte-group`, and the automatic safetensors detection. Storage choices come from namespace profiles: `put --for-name NAME` applies NAME's profile, also with `--remote` (`PUT /v1/objects?for_name=`). The low-level override is the generic `--encoding KEY=VALUE` (`chunker`, `group-width`, `derive-from`, `patch=xor|xor-anchored`).

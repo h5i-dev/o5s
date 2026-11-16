@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+pico2peta-kernel.workspace = true
 pico2peta-core.workspace = true
 pico2peta-pack.workspace = true
 pico2peta-refs.workspace = true

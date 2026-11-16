@@ -514,26 +514,27 @@ pub fn parse_records(buf: &[u8]) -> (Vec<Mutation>, usize, Option<Error>) {
         let rest = &buf[off..];
         // A crash can leave a partially written *last* record, or a zero-filled
         // tail (size persisted, data not). Both are torn tails, not corruption.
-        if rest.len() < 8 || rest.iter().all(|b| *b == 0) {
-            break;
-        }
-        let len = u32::from_le_bytes([rest[0], rest[1], rest[2], rest[3]]);
-        let crc = u32::from_le_bytes([rest[4], rest[5], rest[6], rest[7]]);
-        if len > MAX_RECORD {
-            return (out, off, corrupt(off, "record length out of range"));
-        }
-        let end = 8 + len as usize;
-        if end > rest.len() {
-            break; // the last record is incomplete: torn
-        }
+        // The framing decision is the extracted kernel's (`codec::journal_step`): a bad record
+        // followed by more data is corruption, never a torn tail (valid history is never truncated).
+        let all_zero = rest.iter().all(|b| *b == 0);
+        let (len, crc) = if rest.len() >= 8 {
+            (
+                u32::from_le_bytes([rest[0], rest[1], rest[2], rest[3]]),
+                u32::from_le_bytes([rest[4], rest[5], rest[6], rest[7]]),
+            )
+        } else {
+            (0, 0)
+        };
+        let complete = rest.len() >= 8 && (len as usize) <= rest.len() - 8;
+        let crc_ok = complete && crc32fast::hash(&rest[8..8 + len as usize]) == crc;
+        use pico2peta_kernel::codec::JournalStep;
+        let end = match pico2peta_kernel::codec::journal_step(rest.len(), all_zero, len, MAX_RECORD, crc_ok) {
+            JournalStep::Torn => break,
+            JournalStep::TooLong => return (out, off, corrupt(off, "record length out of range")),
+            JournalStep::Checksum => return (out, off, corrupt(off, "checksum mismatch")),
+            JournalStep::Record(end) => end,
+        };
         let p = &rest[8..end];
-        if crc32fast::hash(p) != crc {
-            if end == rest.len() {
-                break; // a bad *last* record is a torn write
-            }
-            // A bad record followed by more data is corruption: never truncate valid history.
-            return (out, off, corrupt(off, "checksum mismatch"));
-        }
         match decode_payload(p) {
             Ok(m) => out.push(m),
             // A CRC-valid but undecodable record is real corruption (or a newer format).

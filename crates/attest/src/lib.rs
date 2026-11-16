@@ -22,7 +22,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use base64::Engine;
-use pico2peta_core::{Error, Hash, Name, Observed, RefValue, Repository, Result};
+use pico2peta_core::{Error, Hash, Name, Observed, Repository, Result};
 use pico2peta_prov::{Provenance, Record};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -362,48 +362,80 @@ pub fn promote(
     verifiers: &[&dyn Verifier],
     actor: &str,
 ) -> Result<PromoteOutcome> {
-    let Some(sv) = repo.resolve(src)? else {
-        return Ok(PromoteOutcome::Refused(vec![format!("{src} does not exist")]));
+    // The shell gathers the facts (signatures verified, provenance read); the
+    // extracted kernel decides (`promote::decide_promote`, P7).
+    use pico2peta_kernel as kernel;
+    let kref = |v: Option<pico2peta_core::RefValue>| {
+        v.map(|v| kernel::RefVal { hash: *v.hash.as_bytes(), version: v.version })
     };
-    let obj = sv.hash;
-    let mut reasons = Vec::new();
-    let p = Provenance::load(repo, log_ref)?;
-    if policy.require_provenance && p.producers(&obj)?.is_empty() {
-        reasons.push(format!("{obj} has no provenance record"));
-    }
-    let mut signed: Vec<String> = Vec::new();
-    for (_, r) in p.consumers(&obj)? {
-        if r.op != OP_ATTEST {
-            continue;
-        }
-        let Some(eh) = r.params else { continue };
-        let Ok(env) = load_envelope(repo, &eh) else { continue };
-        let Ok(st) = env.statement() else { continue };
-        if !st.subjects.iter().any(|s| s.hash == obj) {
-            continue;
-        }
-        if policy.predicate_type.as_ref().is_some_and(|t| *t != st.predicate_type) {
-            continue;
-        }
-        for k in env.verified_by(verifiers) {
-            if !signed.contains(&k) {
-                signed.push(k);
-            }
-        }
-    }
-    for k in &policy.required_keys {
-        if !signed.contains(k) {
-            reasons.push(format!("missing a valid signature by {k}"));
-        }
-    }
-    if !reasons.is_empty() {
-        return Ok(PromoteOutcome::Refused(reasons));
-    }
+    let sv = repo.resolve(src)?;
     let dv = repo.resolve(dst)?;
-    let read_set = [(src.clone(), Observed::Version(sv.version)), (dst.clone(), RefValue::observed(dv))];
+    let mut atts: Vec<kernel::promote::Attestation> = Vec::new();
+    let mut has_producer = false;
+    if let Some(sv) = sv {
+        let obj = sv.hash;
+        let p = Provenance::load(repo, log_ref)?;
+        if policy.require_provenance {
+            has_producer = !p.producers(&obj)?.is_empty();
+        }
+        for (_, r) in p.consumers(&obj)? {
+            if r.op != OP_ATTEST {
+                continue;
+            }
+            let Some(eh) = r.params else { continue };
+            let Ok(env) = load_envelope(repo, &eh) else { continue };
+            let Ok(st) = env.statement() else { continue };
+            atts.push(kernel::promote::Attestation {
+                about_object: st.subjects.iter().any(|s| s.hash == obj),
+                predicate_type: st.predicate_type.as_bytes().to_vec(),
+                verified_keys: env.verified_by(verifiers).into_iter().map(String::into_bytes).collect(),
+            });
+        }
+    }
+    let kpolicy = kernel::promote::Policy {
+        required_keys: policy.required_keys.iter().map(|k| k.as_bytes().to_vec()).collect(),
+        predicate_type: policy.predicate_type.as_ref().map(|t| t.as_bytes().to_vec()),
+        require_provenance: policy.require_provenance,
+    };
+    let plan = match kernel::promote::decide_promote(&kpolicy, &kref(sv), &kref(dv), has_producer, &atts) {
+        Ok(plan) => plan,
+        Err(r) => {
+            let mut reasons = Vec::new();
+            if r.no_source {
+                reasons.push(format!("{src} does not exist"));
+            }
+            if r.no_provenance
+                && let Some(sv) = sv
+            {
+                reasons.push(format!("{} has no provenance record", sv.hash));
+            }
+            for k in r.keys {
+                reasons.push(format!("missing a valid signature by {}", String::from_utf8_lossy(&k)));
+            }
+            return Ok(PromoteOutcome::Refused(reasons));
+        }
+    };
+    let obj = Hash(plan.object);
+    let obs = |o: kernel::Observed| match o {
+        kernel::Observed::Absent => Observed::Absent,
+        kernel::Observed::Version(v) => Observed::Version(v),
+    };
+    let read_set = [(src.clone(), obs(plan.src_observed)), (dst.clone(), obs(plan.dst_observed))];
     match repo.update_many(&[(dst.clone(), Some(obj))], &read_set)? {
         pico2peta_core::ReplaceManyOutcome::Ok { .. } => {}
         pico2peta_core::ReplaceManyOutcome::Conflict { .. } => return Ok(PromoteOutcome::Conflict),
+    }
+    // The keys whose signatures counted (for the audit record).
+    let mut signed: Vec<String> = Vec::new();
+    for a in &atts {
+        if kernel::promote::counts(&kpolicy, a) {
+            for k in &a.verified_keys {
+                let k = String::from_utf8_lossy(k).to_string();
+                if !signed.contains(&k) {
+                    signed.push(k);
+                }
+            }
+        }
     }
     let rec = Record {
         op: OP_PROMOTE.into(),

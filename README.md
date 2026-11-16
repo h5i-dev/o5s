@@ -25,7 +25,7 @@ that replaces Git hosting, Hugging Face, Artifactory and registries with a singl
   - per-profile retention.
 - **Storage:** local disk or any S3-compatible store; many writers per repository; crash consistency tested at
   every write and fsync point, and with real SIGKILLs.
-- **Verification:** a Lean 4 model with machine-checked proofs, and a Rust↔Lean differential test (`lean/README.md`).
+- **Verification:** every decision (name layer, rules, fronts' ownership, promotion, retention, GC, object reads) is an h5i-app kernel in `crates/kernel`, extracted to Lean with Charon/Aeneas and proved there (`verify/core/README.md`); authorization is net's kernel (`verify/net`).
   The proofs cover content immutability, no lost updates, immutable names never moving, authorization, GC safety,
   front-owned prefixes, and promotion.
 
@@ -98,7 +98,8 @@ audit log and policy cover every front.
 | `pico2peta-weights` | the safetensors front (tensor-aligned deltas, byte grouping) |
 | `pico2peta-cli` | the `pico2peta` binary |
 | `pico2peta-server`, `-client`, `-backend-s3` | HTTP server with every front, remote client, S3 backend |
-| `bench/*`, `fuzz/`, `lean/` | experiments and benchmarks, fuzz targets, the Lean model |
+| `pico2peta-kernel` | the decision kernels (Aeneas subset), extracted and proved in `verify/core` |
+| `bench/*`, `fuzz/`, `verify/` | experiments and benchmarks, fuzz targets, proofs about the extracted kernels |
 
 - **Design:** `docs/VISION.md`, `docs/ARCHITECTURE.md`, `docs/PLAN.md`.
 - **Status:** `docs/PROGRESS.md`, `docs/NET_PROGRESS.md`, `docs/ROADMAP.md`.

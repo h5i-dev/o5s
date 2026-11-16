@@ -344,12 +344,20 @@ impl LocalRepo {
             }
             self.packs.flush()?;
             self.packs.refresh()?;
+            // Verify-before-delete: the extracted kernel's decision (`gc::delete_ok`, P5).
+            let doomed_bytes: Vec<Vec<u8>> = rec.packs.iter().map(|p| p.as_bytes().to_vec()).collect();
+            let mut serving: Vec<Option<Vec<u8>>> = Vec::with_capacity(live.len());
+            let mut first_bad = None;
             for h in &live {
-                if self.packs.serving_pack(h)?.is_some_and(|p| doomed.contains(&p)) {
-                    return Err(Error::Corrupt(format!(
-                        "live object {h} still only in a condemned pack; aborting delete"
-                    )));
+                let sp = self.packs.serving_pack(h)?;
+                if first_bad.is_none() && sp.as_ref().is_some_and(|p| doomed.contains(p)) {
+                    first_bad = Some(*h);
                 }
+                serving.push(sp.map(|p| p.into_bytes()));
+            }
+            if !pico2peta_kernel::gc::delete_ok(&doomed_bytes, &serving) {
+                let h = first_bad.map_or_else(|| "?".to_string(), |h| h.to_string());
+                return Err(Error::Corrupt(format!("live object {h} still only in a condemned pack; aborting delete")));
             }
             report.rescued_records += rescued;
             report.copied_records += rescued;
@@ -382,14 +390,20 @@ impl LocalRepo {
                 let total: u64 = entries.iter().map(|e| e.stored_len as u64).sum();
                 let live_bytes: u64 =
                     entries.iter().filter(|e| live.contains(&e.hash)).map(|e| e.stored_len as u64).sum();
-                let garbage = if total == 0 { 1.0 } else { 1.0 - live_bytes as f64 / total as f64 };
                 let size = self.packs.pack_bytes(p)?;
-                if opts.repack_all || garbage >= opts.min_garbage_ratio || size < opts.small_pack_bytes {
+                // The victim rule is the extracted kernel's (`gc::is_victim`), in permille.
+                let t = pico2peta_kernel::gc::Thresholds {
+                    min_garbage_permille: (opts.min_garbage_ratio.clamp(0.0, 1.0) * 1000.0).round() as u64,
+                    small_pack_bytes: opts.small_pack_bytes,
+                    repack_all: opts.repack_all,
+                };
+                if pico2peta_kernel::gc::is_victim(&t, total, live_bytes, size) {
                     victims.push((p.clone(), entries));
                 }
             }
             // Consolidating a single small, fully live pack is pointless churn.
-            if !opts.repack_all && victims.len() == 1 && victims[0].1.iter().all(|e| live.contains(&e.hash)) {
+            let lone_live = victims.len() == 1 && victims[0].1.iter().all(|e| live.contains(&e.hash));
+            if pico2peta_kernel::gc::skip_lone_live(victims.len(), lone_live, opts.repack_all) {
                 victims.clear();
             }
             if !opts.dry_run {

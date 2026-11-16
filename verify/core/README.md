@@ -8,20 +8,32 @@ kernel, and apply its result.
 
 ## What is proved (all on the extracted functions; gate: no `sorry`, only `propext`, `Classical.choice`, `Quot.sound`)
 
+Every kernel function has a `*_spec` theorem (the `⦃ ⦄` triple), which also proves it total: no panic,
+overflow or out-of-bounds index on any input. Where a function writes to a `Vec`, the bound comes from its
+input sizes, not from an assumption. The properties:
+
 | property | theorem | statement |
 |---|---|---|
-| totality | `decide_spec` (and every `*_spec`) | `refs::decide` never fails: no panic, overflow or out-of-bounds index, for every view |
-| P2, no undetected overwrite | `commit_validated` | a committed batch validated its whole read set: every observed state equals the current one |
-| P2, versions | `commit_versions` | a committed write sets the version to the last version (current, else tombstone) + 1 |
-| P3, published names never move | `commit_respects_rules` | in a committed batch, an existing name under a create-once rule is neither written nor deleted; under a forbidding rule nothing is written |
-| governance | `governing_spec`, `mobility_of_spec`, `mobilityOf_unique` | the governing rule is the longest covering prefix (first on ties) and is unique; `mobility` follows the rule table (`heads/*` mutable, `releases/*` create-once, otherwise forbidden) |
-| name grammar helpers | `is_under_spec`, `starts_with_spec`, `cmp_spec` | segment-aligned prefixes; byte order equals `BTreeMap<Name>` order |
+| P1 reads | `read_accepts_only_key` | a verified read accepts bytes only if their digest is the key (`objects::accept_read`) |
+| P1 puts | `put_never_overwrites` | a put of a present object writes nothing; only absent objects are appended |
+| P2 no undetected overwrite | `commit_validated` | a committed batch validated its whole read set: every observed state equals the current one |
+| P2 versions | `commit_versions` | a committed write sets the version to the last version (current, else tombstone) + 1 |
+| P3 published names never move | `commit_respects_rules` | in a committed batch, an existing name under a create-once rule is neither written nor deleted; under a forbidding rule nothing is written |
+| governance | `governing_spec`, `mobility_of_spec`, `mobilityOf_unique` | the governing rule is the longest covering prefix (first on ties) and is unique; `mobility` follows the rule table |
+| P5 GC | `delete_keeps_live` | the delete phase passes only if no live object is served by a pack it deletes |
+| GC victims | `is_victim_spec` | the repack rule exactly: `repack_all`, small pack, empty, inconsistent, or garbage ≥ min (permille, no overflow) |
+| P6 fronts | `guard_owner`, `may_set_rule_spec`, `ownerOf_unique` | an accepted write (or rule) is by the name's owner, the front with the longest claimed prefix, or the name is unowned |
+| P7 promotion | `promote_plan`, `promote_src_fresh` | an accepted plan meets every policy requirement and targets `src`'s current object at its current version; committed, `src` was still at that version (with P2) |
+| decoders | `parse_header_spec`, `le32_spec`, `le64_spec`, `hash_at_spec` | the pack record header decoder equals its little-endian spec on every input: the first failing check (short, magic, kind, codec, bounds) or every field decoded |
+| journal framing | `journal_step_spec` | a CRC-invalid record followed by more data is corruption, never a torn tail: valid history is never truncated |
+| retention | `plan_spec` | one action per entry; the newest `keep` are kept; a deletion is old, regenerable when required, and allowed by the rules |
 
-The remaining properties (P1, P4–P7) and the decoders follow as their kernels land (H2 order in
-docs/PROGRESS.md). P4, authorization, is net's kernel (`verify/net`).
+P4, authorization, is net's kernel (`verify/net`, `h5i_app_std::authz::guard`).
 
 ## What is trusted
 
+- **Trusted infrastructure:** BLAKE3 (collision resistance), signature verification (ed25519), the backend's
+  create-only puts, fsync and flock. These sit behind the kernels, as in h5i-app's trust model.
 - **The shell builds the view from its state.** It supplies each read-set name's current state and each
   target's value, tombstone and covering rules (`RefState::decide_kernel`). This is tested
   (`crates/kernel/tests/kernel.rs` against a direct model of the old semantics, plus every refs test); the
@@ -32,18 +44,25 @@ docs/PROGRESS.md). P4, authorization, is net's kernel (`verify/net`).
 
 ## Proof sensitivity (`h5i app mutate`, 2026-11-16)
 
-8/8 mutants caught, 0 survived:
+15/15 mutants caught, 0 survived (the two decoder mutants were added afterwards and run with the next `mutate`):
 
 | mutant | caught by |
 |---|---|
-| a stale read accepted (`Absent` observations skipped) | `stale_reads_spec` |
-| conflict needs two stale entries | `decide_spec` |
-| a published name moves (`is_some` → `is_none`) | `decide_target_spec` |
-| deleting an immutable name allowed | `decide_target_spec` |
-| versions skip (+2) | `decide_target_spec` |
-| `releases/*` mutable | `mobility_spec` |
-| the last of equally long rules wins | `pick_spec` |
-| prefixes not segment-aligned | `is_under_spec` |
+| `stale_read_accepted` | stale_reads_spec |
+| `conflict_needs_two_stale` | decide_spec |
+| `published_name_moves` | decide_target_spec |
+| `immutable_delete_allowed` | decide_target_spec |
+| `version_skips` | decide_target_spec |
+| `releases_mutable` | mobility_spec |
+| `governing_last_of_ties` | pick_spec |
+| `prefix_not_segment_aligned` | is_under_spec |
+| `non_owner_writes` | may_write_spec |
+| `delete_with_live_in_doomed_pack` | delete_ok_spec |
+| `victim_ratio_off_by_10x` | is_victim_spec |
+| `promote_without_provenance` | decide_promote_spec |
+| `unsigned_attestation_counts` | counts_spec, signed_by_spec |
+| `retention_deletes_newest` | action_spec |
+| `read_checks_31_bytes` | accept_read_spec |
 
 ## Running
 
