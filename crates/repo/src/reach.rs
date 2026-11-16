@@ -11,12 +11,16 @@
 //!
 //! **Freshness.** The index registers as a ref observer of its repository
 //! handle: every successful `replace` / `replace_many` / `update_many` /
-//! `delete_ref` on any clone of that `LocalRepo` notifies it before returning
-//! (read-your-writes). A name created from nothing (version 1) adds its
-//! target's closure to its cell at once. A move, a re-creation after a delete,
-//! or a delete may make objects unreachable, so it marks the cell **dirty**; a
-//! query on a dirty cell recomputes that cell exactly first. "Unreadable as soon
-//! as its last readable name is deleted" therefore holds immediately.
+//! `delete_ref` on any clone of that `LocalRepo` notifies it before returning.
+//! A name created from nothing (version 1) only adds objects, so its target is
+//! queued as a **pending root** of its cell; the commit does no traversal. A
+//! background worker drains pending roots (one cell at a time, under that
+//! cell's lock), and a query on a cell with pending roots drains them first, so
+//! answers are exact and read-your-writes holds. A move, a re-creation after a
+//! delete, or a delete may make objects unreachable, so it marks the cell
+//! **dirty** at once (dropping its pending roots); a query on a dirty cell
+//! recomputes that cell exactly first. "Unreadable as soon as its last readable
+//! name is deleted" therefore holds immediately.
 //!
 //! **Limits (v1).** In memory only (rebuilt at open, about one GC mark per
 //! cell). Writes by other processes or hosts to the same repository are not
@@ -26,8 +30,10 @@
 use crate::{LocalRepo, Tracer};
 use pico2peta_core::{Error, Hash, Name, ObjectStore, Repository, Result};
 use std::collections::{HashSet, VecDeque};
-use std::sync::Weak;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, Weak};
+
+/// The cell prefixes and one state per cell.
+type Cells = (Arc<Vec<String>>, Vec<Arc<Cell>>);
 
 /// A cell: an index into the cell list given at open or reload.
 pub type CellId = u32;
@@ -46,66 +52,105 @@ pub struct ReachIndex {
 
 struct Inner {
     repo: LocalRepo,
-    state: Mutex<State>,
+    /// The cell prefixes and one state per cell (replaced together on a policy reload).
+    cells: RwLock<Cells>,
+    /// Cells with pending roots, for the worker (which holds the queue, not the index).
+    queue: Arc<Queue>,
 }
 
-struct State {
-    cells: Vec<String>,
-    members: Vec<HashSet<Hash>>,
-    dirty: Vec<bool>,
+#[derive(Default)]
+struct Queue {
+    work: Mutex<(VecDeque<Arc<Cell>>, bool)>,
+    wake: Condvar,
+}
+
+impl Drop for Inner {
+    fn drop(&mut self) {
+        // Tell the worker to stop now rather than at its next timeout.
+        if let Ok(mut w) = self.queue.work.lock() {
+            w.1 = true;
+        }
+        self.queue.wake.notify_all();
+    }
+}
+
+/// One cell. Commits touch only `inbox` (briefly); whoever settles the cell holds `members`.
+#[derive(Default)]
+struct Cell {
+    members: Mutex<Members>,
+    inbox: Mutex<Inbox>,
+}
+
+#[derive(Default)]
+struct Members {
+    set: HashSet<Hash>,
+    /// Recompute from the cell's names before the next answer.
+    dirty: bool,
+}
+
+/// Changes committed since the cell was last settled.
+#[derive(Default)]
+struct Inbox {
+    /// Targets of names created from nothing (only additions).
+    roots: Vec<Hash>,
+    /// A move or delete happened: the next settle recomputes exactly.
+    dirty: bool,
 }
 
 impl ReachIndex {
     /// Builds the index over `cells` (each a name prefix; `""` covers every
     /// name) and registers it with `repo` (and every clone of it).
     pub fn open(repo: &LocalRepo, cells: Vec<String>) -> Result<ReachIndex> {
-        let n = cells.len();
         let idx = ReachIndex {
             inner: Arc::new(Inner {
                 repo: repo.clone(),
-                state: Mutex::new(State { cells, members: vec![HashSet::new(); n], dirty: vec![true; n] }),
+                cells: RwLock::new(Self::fresh(cells)),
+                queue: Arc::default(),
             }),
         };
         idx.rebuild_all()?;
-        // The observer holds the index weakly, so dropping the index makes it a no-op.
+        // The observer and the worker hold the index weakly: dropping the index stops both.
         repo.add_ref_observer(Arc::new(Observer(Arc::downgrade(&idx.inner))));
+        let weak = Arc::downgrade(&idx.inner);
+        let queue = idx.inner.queue.clone();
+        std::thread::Builder::new()
+            .name("p2p-reach".into())
+            .spawn(move || worker(weak, queue))
+            .map_err(|e| Error::Corrupt(format!("reach worker: {e}")))?;
         Ok(idx)
+    }
+
+    fn fresh(cells: Vec<String>) -> Cells {
+        let states = (0..cells.len())
+            .map(|_| {
+                Arc::new(Cell { members: Mutex::new(Members { set: HashSet::new(), dirty: true }), ..Cell::default() })
+            })
+            .collect();
+        (Arc::new(cells), states)
     }
 
     /// Replaces the cell list (a policy reload) and rebuilds every cell.
     pub fn on_policy_reload(&self, cells: Vec<String>) -> Result<()> {
-        {
-            let mut st = self.lock()?;
-            let n = cells.len();
-            st.cells = cells;
-            st.members = vec![HashSet::new(); n];
-            st.dirty = vec![true; n];
-        }
+        *self.inner.cells.write().map_err(|_| poisoned())? = Self::fresh(cells);
         self.rebuild_all()
     }
 
     /// For each hash, the candidate cells whose names reach it (in candidate
     /// order). Unknown cell ids are ignored.
     pub fn cells_reaching_many(&self, hashes: &[Hash], candidates: &[CellId]) -> Result<Vec<Vec<CellId>>> {
-        let mut st = self.lock()?;
+        let (cells, states) = self.snapshot()?;
+        let mut out = vec![Vec::new(); hashes.len()];
         for &c in candidates {
-            let c = c as usize;
-            if c < st.dirty.len() && st.dirty[c] {
-                let members = self.mark_cell(&st.cells, c)?;
-                st.members[c] = members;
-                st.dirty[c] = false;
+            let Some(state) = states.get(c as usize) else { continue };
+            let mut m = lock(&state.members)?;
+            self.settle(&cells, c as usize, state, &mut m)?;
+            for (i, h) in hashes.iter().enumerate() {
+                if m.set.contains(h) {
+                    out[i].push(c);
+                }
             }
         }
-        Ok(hashes
-            .iter()
-            .map(|h| {
-                candidates
-                    .iter()
-                    .copied()
-                    .filter(|&c| (c as usize) < st.members.len() && st.members[c as usize].contains(h))
-                    .collect()
-            })
-            .collect())
+        Ok(out)
     }
 
     /// Whether each hash is reachable from some candidate cell.
@@ -124,18 +169,46 @@ impl ReachIndex {
         best.map(|(i, _)| i as CellId)
     }
 
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, State>> {
-        self.inner.state.lock().map_err(|_| Error::Corrupt("reach index lock poisoned".into()))
+    fn snapshot(&self) -> Result<Cells> {
+        let g = self.inner.cells.read().map_err(|_| poisoned())?;
+        Ok((g.0.clone(), g.1.clone()))
     }
 
     fn rebuild_all(&self) -> Result<()> {
-        let mut st = self.lock()?;
-        for c in 0..st.cells.len() {
-            let members = self.mark_cell(&st.cells, c)?;
-            st.members[c] = members;
-            st.dirty[c] = false;
+        let (cells, states) = self.snapshot()?;
+        for (c, state) in states.iter().enumerate() {
+            let mut m = lock(&state.members)?;
+            self.settle(&cells, c, state, &mut m)?;
         }
         Ok(())
+    }
+
+    /// Brings a cell up to date (the caller holds its `members`): applies its inbox until the inbox
+    /// is empty, an exact recompute if anything made it dirty, else the new roots' closures.
+    fn settle(&self, cells: &[String], c: usize, cell: &Cell, m: &mut Members) -> Result<()> {
+        loop {
+            let (roots, dirty) = {
+                let mut inbox = cell.inbox.lock().map_err(|_| poisoned())?;
+                (std::mem::take(&mut inbox.roots), std::mem::take(&mut inbox.dirty))
+            };
+            m.dirty |= dirty;
+            if m.dirty {
+                m.set = self.mark_cell(cells, c)?;
+                m.dirty = false;
+            } else if !roots.is_empty() {
+                let repo = &self.inner.repo;
+                let tracer = repo.fronts().tracer(repo)?;
+                for h in roots {
+                    if let Err(e) = closure(repo, &tracer, h, &mut m.set) {
+                        // Never guess: recompute exactly on the next answer.
+                        m.dirty = true;
+                        return Err(e);
+                    }
+                }
+            } else {
+                return Ok(());
+            }
+        }
     }
 
     /// Everything reachable from the names whose cell is `c`.
@@ -152,32 +225,75 @@ impl ReachIndex {
         Ok(members)
     }
 
+    /// The commit path: O(changes), no traversal, never waits for a traversal.
     fn on_change(&self, changes: &[(Name, Option<Hash>, u64)]) {
-        let Ok(mut st) = self.lock() else { return };
-        let repo = &self.inner.repo;
-        // One tracer per batch, built now: fronts' snapshots (e.g. git's oid map) then see the
-        // objects the writer stored before moving the names.
-        let tracer = repo.fronts().tracer(repo);
+        let Ok((cells, states)) = self.snapshot() else { return };
+        let mut queued: Vec<usize> = Vec::new();
         for (name, new, version) in changes {
-            let Some(c) = Self::cell_of(&st.cells, name.as_str()) else { continue };
+            let Some(c) = Self::cell_of(&cells, name.as_str()) else { continue };
             let c = c as usize;
-            if st.dirty[c] {
-                continue;
-            }
+            let Ok(mut inbox) = states[c].inbox.lock() else { continue };
             match (new, *version) {
                 (Some(h), 1) => {
-                    // Created from nothing: only additions. On any error, fall
-                    // back to an exact recompute (dirty) rather than guess.
-                    let ok = match &tracer {
-                        Ok(t) => closure(repo, t, *h, &mut st.members[c]),
-                        Err(_) => Err(Error::Corrupt("front tracer".into())),
-                    };
-                    if ok.is_err() {
-                        st.dirty[c] = true;
+                    inbox.roots.push(*h);
+                    if !queued.contains(&c) {
+                        queued.push(c);
                     }
                 }
-                _ => st.dirty[c] = true,
+                _ => {
+                    inbox.dirty = true;
+                    inbox.roots.clear();
+                }
             }
+        }
+        if !queued.is_empty()
+            && let Ok(mut w) = self.inner.queue.work.lock()
+        {
+            for c in queued {
+                w.0.push_back(states[c].clone());
+            }
+            self.inner.queue.wake.notify_one();
+        }
+    }
+}
+
+fn poisoned() -> Error {
+    Error::Corrupt("reach index lock poisoned".into())
+}
+
+fn lock(m: &Mutex<Members>) -> Result<MutexGuard<'_, Members>> {
+    m.lock().map_err(|_| poisoned())
+}
+
+/// Drains pending roots in the background until the index is dropped. Holds
+/// the index only while settling one cell, so dropping it ends the thread.
+fn worker(weak: Weak<Inner>, queue: Arc<Queue>) {
+    loop {
+        let state = {
+            let Ok(mut w) = queue.work.lock() else { return };
+            loop {
+                if w.1 {
+                    return;
+                }
+                if let Some(s) = w.0.pop_front() {
+                    break s;
+                }
+                w = match queue.wake.wait(w) {
+                    Ok(w) => w,
+                    Err(_) => return,
+                };
+            }
+        };
+        let Some(inner) = weak.upgrade() else { return };
+        let idx = ReachIndex { inner };
+        let Ok((cells, states)) = idx.snapshot() else { return };
+        // A cell from before a policy reload is gone: skip it.
+        let Some(c) = states.iter().position(|s| Arc::ptr_eq(s, &state)) else { continue };
+        // Only additions are worth doing early; a dirty cell is recomputed by the next query.
+        if let Ok(mut m) = lock(&state.members)
+            && !m.dirty
+        {
+            let _ = idx.settle(&cells, c, &state, &mut m);
         }
     }
 }
@@ -192,26 +308,35 @@ impl RefObserver for Observer {
     }
 }
 
-/// Adds everything reachable from `root` to `seen` (stopping at members).
-/// Objects that are missing (a dangling ref) contribute nothing.
+/// Adds everything reachable from `root` to `seen` (stopping at members), one
+/// breadth-first wave at a time so fronts can resolve a wave's children in one
+/// batch. Objects that are missing (a dangling ref) contribute nothing.
 fn closure(repo: &LocalRepo, tracer: &dyn Tracer, root: Hash, seen: &mut HashSet<Hash>) -> Result<()> {
-    let mut queue = VecDeque::from([root]);
-    while let Some(h) = queue.pop_front() {
-        if seen.contains(&h) {
-            continue;
+    let mut wave = vec![root];
+    while !wave.is_empty() {
+        let mut live = Vec::with_capacity(wave.len());
+        for h in wave.drain(..) {
+            if seen.contains(&h) || !repo.packs().contains(&h)? {
+                continue;
+            }
+            seen.insert(h);
+            live.push(h);
         }
-        if !repo.packs().contains(&h)? {
-            continue;
-        }
-        seen.insert(h);
-        if let Some(kids) = repo.packs().chunks(&h)? {
-            queue.extend(kids.into_iter().filter(|k| !seen.contains(k)));
-        }
-        for k in tracer.children(&h, repo as &dyn ObjectStore)? {
-            if !seen.contains(&k) {
-                queue.push_back(k);
+        let mut next = Vec::new();
+        for h in &live {
+            if let Some(kids) = repo.packs().chunks(h)? {
+                next.extend(kids.into_iter().filter(|k| !seen.contains(k)));
             }
         }
+        for kids in children_of_wave(tracer, &live, repo)? {
+            next.extend(kids.into_iter().filter(|k| !seen.contains(k)));
+        }
+        wave = next;
     }
     Ok(())
+}
+
+/// The front children of each object of a wave.
+fn children_of_wave(tracer: &dyn Tracer, live: &[Hash], repo: &LocalRepo) -> Result<Vec<Vec<Hash>>> {
+    tracer.children_many(live, repo as &dyn ObjectStore)
 }

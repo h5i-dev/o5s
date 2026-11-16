@@ -97,3 +97,28 @@ fn batched_updates_and_versions_after_delete() {
     set(&r, "a/1", h1);
     assert_eq!(idx.readable_many(&[h1], &[0]).unwrap(), vec![true]);
 }
+
+#[test]
+fn pending_creates_settle_exactly_with_or_without_the_worker() {
+    let d = tempfile::tempdir().unwrap();
+    let r = LocalRepo::init(d.path(), &PackConfig::default()).unwrap();
+    let idx = ReachIndex::open(&r, vec![String::new(), "t".to_string()]).unwrap();
+    let hs: Vec<Hash> = (0..50u64).map(|i| r.put(&blob(i + 10, 1000)).unwrap()).collect();
+    // Creates only queue roots; a query right after them answers exactly (read-your-writes).
+    for (i, h) in hs.iter().enumerate() {
+        set(&r, &format!("t/n{i}"), *h);
+    }
+    // A delete while roots are still pending: the cell is recomputed, the target revoked at once.
+    del(&r, "t/n0");
+    let got = idx.readable_many(&hs, &[1]).unwrap();
+    assert!(!got[0], "deleted name's target is unreadable immediately");
+    assert!(got[1..].iter().all(|b| *b));
+    // More creates, then let the background worker settle them before asking.
+    let more: Vec<Hash> = (0..20u64).map(|i| r.put(&blob(i + 100, 1000)).unwrap()).collect();
+    for (i, h) in more.iter().enumerate() {
+        set(&r, &format!("t/m{i}"), *h);
+    }
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(idx.readable_many(&more, &[1]).unwrap().iter().all(|b| *b));
+    assert!(idx.readable_many(&more, &[0]).unwrap().iter().all(|b| !*b), "other cells are unaffected");
+}
