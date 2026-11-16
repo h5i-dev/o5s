@@ -788,8 +788,9 @@ async fn update_document(
         return npm_err(StatusCode::NOT_FOUND, format!("{} has no versions in this registry", pkg.full()));
     }
     let current = doc_rev(&local, &deps);
+    // A named revision must be the current one (the extracted kernel's `publish::decide_rev`).
     if let Some(r) = rev.or_else(|| doc["_rev"].as_str())
-        && r != current
+        && !pico2peta_net_kernel::publish::decide_rev(&r.as_bytes().to_vec(), &current.as_bytes().to_vec())
     {
         return npm_err(StatusCode::CONFLICT, "document update conflict: the package changed since it was read");
     }
@@ -866,7 +867,10 @@ async fn unpublish_all(
         Ok(d) => d,
         Err(r) => return r,
     };
-    if rev.is_some_and(|r| r != doc_rev(&local, &deps)) {
+    let current = doc_rev(&local, &deps);
+    if rev.is_some_and(|r| {
+        !pico2peta_net_kernel::publish::decide_rev(&r.as_bytes().to_vec(), &current.as_bytes().to_vec())
+    }) {
         return npm_err(StatusCode::CONFLICT, "document update conflict: the package changed since it was read");
     }
     for v in local.0.keys() {

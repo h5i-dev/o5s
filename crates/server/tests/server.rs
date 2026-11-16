@@ -9,6 +9,7 @@ fn object_roundtrip_through_client() {
     let c = s.client(ALICE);
     let d = data(100_000, 1);
     let h = c.put(&d).unwrap();
+    keep(&c, "alice", &h);
     assert_eq!(h, Hash::of(&d));
     assert_eq!(c.get(&h, None).unwrap(), d);
     assert_eq!(c.get(&h, Some(10..20)).unwrap(), &d[10..20]);
@@ -21,6 +22,7 @@ fn object_roundtrip_through_client() {
     assert!(matches!(c.get(&h, Some(0..100_001)), Err(Error::InvalidRange { len: 100_000, .. })));
     // Empty object.
     let e = c.put(b"").unwrap();
+    keep(&c, "alice", &e);
     assert_eq!(c.get(&e, None).unwrap(), b"");
     // Idempotent put.
     assert_eq!(c.put(&d).unwrap(), h);
@@ -33,6 +35,7 @@ fn streaming_put_and_open_large() {
     let c = s.client(ALICE);
     let d = data(24 << 20, 2);
     let h = c.put_stream(&mut &d[..]).unwrap();
+    keep(&c, "alice", &h);
     assert_eq!(h, Hash::of(&d));
     let mut r = c.open(&h, None).unwrap();
     let mut got = Vec::new();
@@ -197,6 +200,7 @@ fn audit_log_records_and_chains() {
 fn http_ranges_and_headers() {
     let s = TestServer::start(|_| {});
     let h = s.client(ALICE).put(b"0123456789").unwrap();
+    keep(&s.client(ALICE), "alice", &h);
     let url = format!("{}/v1/objects/{}", s.url(), h.to_hex());
     let get = |range: Option<&str>| {
         let mut rb = http().get(&url).bearer_auth(ALICE);
@@ -259,6 +263,7 @@ fn metrics_endpoint() {
     let s = TestServer::start(|_| {});
     let c = s.client(ALICE);
     let h = c.put(b"m").unwrap();
+    keep(&c, "alice", &h);
     c.get(&h, None).unwrap();
     let _ = http().get(format!("{}/v1/whoami", s.url())).send().unwrap();
     let text = http().get(format!("{}/metrics", s.url())).send().unwrap().text().unwrap();
@@ -275,6 +280,7 @@ fn overload_is_shed_with_503() {
     let c = s.client(ALICE);
     let d = data(32 << 20, 3);
     let h = c.put(&d).unwrap();
+    keep(&c, "alice", &h);
     // Hold one request open by not reading its (large) body.
     let held = http().get(format!("{}/v1/objects/{}", s.url(), h.to_hex())).bearer_auth(ALICE).send().unwrap();
     assert_eq!(held.status(), 200);
@@ -515,6 +521,7 @@ fn put_delta_over_http() {
     let c = s.client(ALICE);
     let base = data(4 << 20, 11);
     let hb = c.put(&base).unwrap();
+    keep(&c, "alice", &hb);
     c.flush().unwrap();
     let repo_dir = s.dir.path().join("repo");
     let before = tree_bytes(&repo_dir);
@@ -524,6 +531,7 @@ fn put_delta_over_http() {
         v2[i] ^= 0x5a;
     }
     let h2 = c.put_delta(&hb, &mut &v2[..]).unwrap();
+    keep(&c, "alice", &h2);
     assert_eq!(h2, Hash::of(&v2), "identity is the content hash");
     c.flush().unwrap();
     let delta_cost = tree_bytes(&repo_dir) - before;
@@ -704,9 +712,11 @@ fn put_for_name_uses_namespace_chunker() {
     let d2 = data(4 << 20, 22);
     let before = chunk_records();
     let h1 = c.put_stream_for(&n("alice/models/m1"), &mut &d1[..]).unwrap();
+    keep(&c, "alice", &h1);
     c.flush().unwrap();
     let xet = chunk_records() - before;
     let h2 = c.put_stream_for(&n("alice/code/x"), &mut &d2[..]).unwrap();
+    keep(&c, "alice", &h2);
     c.flush().unwrap();
     let fast = chunk_records() - before - xet;
     assert_eq!(xet, chunk_lengths(&mut XetChunker::new(), &d1).len(), "Xet chunk count for alice/models/");
@@ -740,6 +750,8 @@ fn grouped_upload_saves_space_on_bf16_like_data() {
     eprintln!("plain {plain} B, grouped {grouped} B");
     // Deterministic data: ~7.5% measured; assert a margin that proves the codec ran.
     assert!(grouped < plain * 96 / 100, "grouping should save > 4% here: plain {plain}, grouped {grouped}");
+    keep(&c, "alice", &ha);
+    keep(&c, "alice", &hb);
     assert!(c.get(&ha, None).unwrap() == a && c.get(&hb, None).unwrap() == b);
     assert_eq!(hb, Hash::of(&b), "identity unaffected by the codec");
     // Bad widths are rejected.
@@ -779,6 +791,7 @@ fn read_verify_parameter_follows_repo_policy() {
     // Default repository: eof refused.
     let s = TestServer::start(|_| {});
     let h = s.client(ADMIN).put(&data).unwrap();
+    keep(&s.client(ADMIN), "admin", &h);
     assert_eq!(get(&s, &h, "?verify=strict").bytes().unwrap().as_ref(), data.as_slice());
     assert_eq!(get(&s, &h, "?verify=eof").status(), 403);
     assert_eq!(get(&s, &h, "?verify=fast").status(), 400);
@@ -794,6 +807,7 @@ fn read_verify_parameter_follows_repo_policy() {
         pico2peta_repo::LocalRepo::init_config(&cfg.repo.path, &rc).unwrap();
     });
     let h = s.client(ADMIN).put(&data).unwrap();
+    keep(&s.client(ADMIN), "admin", &h);
     let r = get(&s, &h, "?verify=eof");
     assert_eq!(r.status(), 200);
     assert_eq!(r.bytes().unwrap().as_ref(), data.as_slice());
@@ -844,10 +858,12 @@ fn put_named_applies_the_profile_remotely() {
     let n = Name::new("alice/ckpt/model").unwrap();
     let v1: Vec<u8> = (0..2_000_000u32).map(|i| (i % 251) as u8).collect();
     let h1 = c.put_named(&n, &mut &v1[..]).unwrap();
+    keep(&c, "alice", &h1);
     c.replace(&n, &[(n.clone(), Observed::Absent)], h1).unwrap();
     let mut v2 = v1.clone();
     v2[1_000_000] ^= 0xff;
     let h2 = c.put_named(&n, &mut &v2[..]).unwrap();
+    keep(&c, "alice", &h2);
     assert_eq!(h2, pico2peta_core::Hash::of(&v2), "identity is the content hash");
     assert_eq!(c.get(&h2, None).unwrap(), v2);
     // No write access on the name: refused.
@@ -919,4 +935,93 @@ fn namespace_rate_and_quota() {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     assert!(ok, "quota never lifted");
+}
+
+/// Object reads by hash are authorized by reachability: a principal reads an object only if
+/// a name it may read reaches it. Unauthorized and nonexistent look the same.
+#[test]
+fn object_reads_follow_reachability() {
+    let s = TestServer::start(|cfg| {
+        cfg.policy.push(grant("alice", "team-a", Access::Write));
+        cfg.policy.push(grant("reader", "team-b", Access::Write));
+    });
+    let a = s.client(ALICE);
+    let b = s.client(READER);
+    let private = a.put(b"team a's private data").unwrap();
+    let na = Name::new("team-a/secret").unwrap();
+    a.replace(&na, &[(na.clone(), Observed::Absent)], private).unwrap();
+    let shared = a.put(b"a blob both teams use").unwrap();
+    let sa = Name::new("team-a/shared").unwrap();
+    a.replace(&sa, &[(sa.clone(), Observed::Absent)], shared).unwrap();
+    let sb = Name::new("team-b/shared").unwrap();
+    b.replace(&sb, &[(sb.clone(), Observed::Absent)], shared).unwrap();
+    let get = |tok: &str, h: &Hash| {
+        let r = http().get(format!("{}/v1/objects/{}", s.url(), h.to_hex())).bearer_auth(tok).send().unwrap();
+        (r.status(), r.text().unwrap())
+    };
+    // A cross-team read is denied, exactly like a missing object.
+    let denied = get(READER, &private);
+    let missing = get(READER, &Hash::of(b"never stored"));
+    assert_eq!(denied.0, 404);
+    assert_eq!(missing.0, 404);
+    assert_eq!(
+        denied.1.replace(&private.to_hex(), "H"),
+        missing.1.replace(&Hash::of(b"never stored").to_hex(), "H"),
+        "unauthorized and nonexistent must be indistinguishable"
+    );
+    let head = http().head(format!("{}/v1/objects/{}", s.url(), private.to_hex())).bearer_auth(READER).send().unwrap();
+    assert_eq!(head.status(), 404);
+    assert_eq!(get(ALICE, &private).0, 200);
+    // A shared blob reachable from both teams is readable by both.
+    assert_eq!(get(ALICE, &shared).0, 200);
+    assert_eq!(get(READER, &shared).0, 200);
+    // After its last readable name is deleted, an object is unreadable at once.
+    let v = b.resolve(&sb).unwrap().unwrap();
+    b.delete_ref(&sb, &[(sb.clone(), Observed::Version(v.version))]).unwrap();
+    assert_eq!(get(READER, &shared).0, 404);
+    assert_eq!(get(ALICE, &shared).0, 200, "still reachable from team-a");
+    // Unreferenced objects are readable by no one, admins included.
+    let loose = a.put(b"not named yet").unwrap();
+    assert_eq!(get(ALICE, &loose).0, 404);
+    assert_eq!(get(ADMIN, &loose).0, 404);
+    // An admin reads anything named.
+    assert_eq!(get(ADMIN, &private).0, 200);
+}
+
+/// With `auth.token_key_file`, the token API issues h5i-app tokens: parsed by the extracted,
+/// proven `h5i_app_token::parse`, signed with HMAC-SHA256, and still revocable through the table.
+#[test]
+fn issued_tokens_are_h5i_app_tokens() {
+    let s = TestServer::start(|c| {
+        let dir = c.repo.path.parent().unwrap().to_path_buf();
+        c.auth.token_file = Some(dir.join("tokens.toml"));
+        std::fs::write(dir.join("token.key"), [7u8; 32]).unwrap();
+        c.auth.token_key_file = Some(dir.join("token.key"));
+    });
+    let admin = |m: reqwest::Method, p: &str| http().request(m, format!("{}{p}", s.url())).bearer_auth(ADMIN);
+    let v: serde_json::Value = admin(reqwest::Method::POST, "/v1/admin/tokens")
+        .json(&serde_json::json!({"principal": "robot", "ttl_secs": 3600}))
+        .send()
+        .unwrap()
+        .json()
+        .unwrap();
+    let tok = v["token"].as_str().unwrap().to_string();
+    let sha = v["sha256"].as_str().unwrap().to_string();
+    assert!(tok.starts_with("v1.0."), "{tok}");
+    let who = |t: &str| http().get(format!("{}/v1/whoami", s.url())).bearer_auth(t).send().unwrap();
+    let r = who(&tok);
+    assert_eq!(r.status(), 200);
+    assert!(r.text().unwrap().contains("robot"));
+    // A tampered signature, user or expiry is refused.
+    let mut bad = tok.clone().into_bytes();
+    let last = bad.len() - 1;
+    bad[last] = if bad[last] == b'0' { b'1' } else { b'0' };
+    assert_eq!(who(std::str::from_utf8(&bad).unwrap()).status(), 401);
+    let parts: Vec<&str> = tok.split('.').collect();
+    let forged = format!("v1.0.{}.{}.{}", parts[2].parse::<u64>().unwrap() + 1, parts[3], parts[4]);
+    assert_eq!(who(&forged).status(), 401);
+    // Static tokens keep working; revocation still works for issued ones.
+    assert_eq!(who(ALICE).status(), 200);
+    assert_eq!(admin(reqwest::Method::DELETE, &format!("/v1/admin/tokens/{sha}")).send().unwrap().status(), 204);
+    assert_eq!(who(&tok).status(), 401);
 }

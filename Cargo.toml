@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/pack", "crates/refs", "crates/repo", "crates/cli", "crates/prov", "crates/weights", "crates/chunk", "crates/order", "crates/kernel", "crates/attest", "crates/backend-s3", "crates/server", "crates/client", "bench/exp1", "bench/exp1c", "bench/exp3", "bench/micro"]
+members = ["crates/core", "crates/pack", "crates/refs", "crates/repo", "crates/cli", "crates/prov", "crates/weights", "crates/chunk", "crates/order", "crates/kernel", "crates/attest", "crates/backend-s3", "crates/server", "crates/client", "crates/net-kernel", "bench/exp1", "bench/exp1c", "bench/exp3", "bench/micro"]
 exclude = ["fuzz"]
 
 [workspace.package]
@@ -9,6 +9,9 @@ edition = "2024"
 license = "Apache-2.0"
 
 [workspace.dependencies]
+# h5i-app (H5I_PLAN): kernel helpers and the guard, extracted with our kernels.
+h5i-app-std = { path = "/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std" }
+h5i-app-core = { path = "/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-core" }
 pico2peta-core = { path = "crates/core" }
 pico2peta-pack = { path = "crates/pack" }
 pico2peta-refs = { path = "crates/refs" }

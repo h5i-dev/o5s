@@ -132,21 +132,25 @@ jobs:
           if-no-files-found: ignore
 
   proofs:
-    name: Extracted-kernel proofs (h5i app, verify/core)
+    name: Extracted-kernel proofs (h5i app, ${{ matrix.project }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [verify/core, verify/net]
     steps:
       - uses: actions/checkout@v4
-      - name: Install elan (toolchain from verify/core/proofs/lean-toolchain)
+      - name: Install elan (toolchain from ${{ matrix.project }}/proofs/lean-toolchain)
         run: |
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: No sorry in hand-written proofs
-        run: "! grep -n -w sorry verify/core/proofs/Proofs.lean"
+        run: "! grep -n -w sorry ${{ matrix.project }}/proofs/*.lean"
       - name: Build the proofs about the checked-in extraction
-        working-directory: verify/core/proofs
+        working-directory: ${{ matrix.project }}/proofs
         run: lake build
       # Re-extracting (`h5i app extract --check`) needs Charon/Aeneas at the pins in
-      # h5i's pins.rs; the dev host runs it (verify/core/README.md).
+      # h5i's pins.rs; the dev host runs it (verify/*/README.md).
 
   fuzz-smoke:
     name: Fuzz smoke (30 s per target)

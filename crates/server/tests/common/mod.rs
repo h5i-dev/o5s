@@ -45,6 +45,7 @@ impl TestServer {
                 tokens: vec![token("admin", ADMIN), token("alice", ALICE), token("reader", READER)],
                 token_file: None,
                 oidc: None,
+                token_key_file: None,
             },
             policy: vec![
                 grant("admin", "", Access::Admin),
@@ -135,4 +136,13 @@ pub fn data(len: usize, seed: u64) -> Vec<u8> {
             (x >> 24) as u8
         })
         .collect()
+}
+
+/// Names `h` (as `<prefix>/keep/<hex>`) so it may be read by hash: objects are readable only
+/// when reachable from a name the reader may read.
+pub fn keep(c: &RemoteRepo, prefix: &str, h: &Hash) {
+    let n = Name::new(format!("{prefix}/keep/{}", h.to_hex())).unwrap();
+    if c.resolve(&n).unwrap().is_none() {
+        c.replace(&n, &[(n.clone(), Observed::Absent)], *h).unwrap();
+    }
 }

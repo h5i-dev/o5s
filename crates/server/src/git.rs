@@ -2926,53 +2926,121 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
         warn!(repo, error = %e, "push rejected");
         return Ok(PushResult { unpack, statuses, sideband, applied: Vec::new() });
     }
-    // Validate commands.
+    // Validate commands: the shell gathers each command's facts, the extracted kernel decides
+    // (`net-kernel/src/gitpush.rs`, `verify/net/proofs`), including `--atomic`.
+    use pico2peta_net_kernel::gitpush::{Accept, Ng, PushCmd, decide_push};
     let mut statuses: Vec<(String, std::result::Result<(), String>)> = Vec::new();
     // `None` hash = delete.
     let mut updates: Vec<(Name, Option<Hash>, Observed, usize)> = Vec::new();
-    for (i, c) in cmds.iter().enumerate() {
-        let check = (|| -> std::result::Result<(Name, Option<Hash>, Observed), String> {
-            let name = ref_name(repo, &c.gitref).ok_or("unsupported ref name")?;
-            if c.new == fmt.zero() {
-                let cur = git.repo.resolve(&name).map_err(|e| e.to_string())?;
-                let cur_oid = match &cur {
-                    Some(v) => Some(fmt.hash(&git.repo.get(&v.hash, None).map_err(|e| e.to_string())?)),
-                    None => None,
+    let mut facts: Vec<PushCmd> = Vec::new();
+    let mut ctx: Vec<Option<(Name, Option<Hash>, Observed)>> = Vec::new();
+    for c in cmds.iter() {
+        type Gathered = (PushCmd, Option<(Name, Option<Hash>, Observed)>);
+        let gathered = (|| -> std::result::Result<Gathered, String> {
+            let Some(name) = ref_name(repo, &c.gitref) else {
+                let f = PushCmd {
+                    ref_ok: false,
+                    is_branch: false,
+                    delete: false,
+                    old: None,
+                    cur: None,
+                    new_present: false,
+                    new_is_commit: false,
                 };
-                if cur_oid != Some(c.old) && c.old != fmt.zero() {
-                    return Err("fetch first (stale old value)".into());
-                }
-                return Ok((name, None, RefValue::observed(cur)));
-            }
-            let (kind, h) = view.lookup(&c.new).map_err(|e| e.to_string())?.ok_or("missing new object")?;
-            // Not in this push: the client assumes we have it, so make sure it stays.
-            if !view.extra.contains_key(&c.new) && !git.repo.ensure_live(&h).map_err(|e| e.to_string())? {
-                return Err("missing new object".into());
-            }
-            if c.gitref.starts_with("refs/heads/") && kind != Kind::Commit {
-                return Err("branch must point at a commit".into());
-            }
+                return Ok((f, None));
+            };
             let cur = git.repo.resolve(&name).map_err(|e| e.to_string())?;
             let cur_oid = match &cur {
-                Some(v) => Some(fmt.hash(&git.repo.get(&v.hash, None).map_err(|e| e.to_string())?)),
+                Some(v) => Some(match git.graph.oid_of_hash(&v.hash) {
+                    Some(o) if o.len() == fmt.hash_len() => o,
+                    _ => fmt.hash(&git.repo.get(&v.hash, None).map_err(|e| e.to_string())?),
+                }),
                 None => None,
             };
-            let expected = if c.old == fmt.zero() { None } else { Some(c.old) };
-            if cur_oid != expected {
-                return Err("fetch first (stale old value)".into());
-            }
-            Ok((name, Some(h), RefValue::observed(cur)))
+            let delete = c.new == fmt.zero();
+            let (present, is_commit, h) = if delete {
+                (false, false, None)
+            } else {
+                match view.lookup(&c.new).map_err(|e| e.to_string())? {
+                    // Not in this push: the client assumes we have it, so make sure it stays.
+                    Some((kind, h)) => {
+                        let live =
+                            view.extra.contains_key(&c.new) || git.repo.ensure_live(&h).map_err(|e| e.to_string())?;
+                        (live, kind == Kind::Commit, Some(h))
+                    }
+                    None => (false, false, None),
+                }
+            };
+            let f = PushCmd {
+                ref_ok: true,
+                is_branch: c.gitref.starts_with("refs/heads/"),
+                delete,
+                old: (c.old != fmt.zero()).then(|| c.old.to_vec()),
+                cur: cur_oid.map(|o| o.to_vec()),
+                new_present: present,
+                new_is_commit: is_commit,
+            };
+            Ok((f, Some((name, h, RefValue::observed(cur)))))
         })();
-        match check {
-            Ok((n, h, o)) => {
-                updates.push((n, h, o, i));
-                statuses.push((c.gitref.clone(), Ok(())));
+        match gathered {
+            Ok((f, x)) => {
+                facts.push(f);
+                ctx.push(x);
             }
-            Err(e) => statuses.push((c.gitref.clone(), Err(e))),
+            Err(e) => {
+                // A store error while gathering: refuse this command with it.
+                facts.push(PushCmd {
+                    ref_ok: false,
+                    is_branch: false,
+                    delete: false,
+                    old: None,
+                    cur: None,
+                    new_present: false,
+                    new_is_commit: false,
+                });
+                ctx.push(None);
+                statuses.push((c.gitref.clone(), Err(e)));
+            }
         }
+    }
+    let decisions = decide_push(&facts, atomic);
+    let gather_failed: Vec<Option<String>> = {
+        // Commands whose facts failed to load keep that error instead of the kernel's reason.
+        let mut v = vec![None; cmds.len()];
+        for (gitref, st) in statuses.drain(..) {
+            if let Some(i) = cmds.iter().position(|c| c.gitref == gitref)
+                && let Err(e) = st
+            {
+                v[i] = Some(e);
+            }
+        }
+        v
+    };
+    for (i, (c, d)) in cmds.iter().zip(decisions).enumerate() {
+        let r = match (&gather_failed[i], d) {
+            (Some(e), _) => Err(e.clone()),
+            (None, Ok(a)) => match ctx[i].take() {
+                Some((n, h, o)) => {
+                    updates.push((n, if a == Accept::Delete { None } else { h }, o, i));
+                    Ok(())
+                }
+                None => Err("unsupported ref name".to_string()),
+            },
+            (None, Err(ng)) => Err(match ng {
+                Ng::UnsupportedRef => "unsupported ref name",
+                Ng::StaleOld => "fetch first (stale old value)",
+                Ng::MissingNew => "missing new object",
+                Ng::BranchNotCommit => "branch must point at a commit",
+                Ng::AtomicFailed => "atomic push failed",
+            }
+            .to_string()),
+        };
+        statuses.push((c.gitref.clone(), r));
     }
     let planned: Vec<(usize, Option<Hash>)> = updates.iter().map(|x| (x.3, x.1)).collect();
     if atomic {
+        // (The kernel refused every command if any was refused; a store error while gathering
+        // facts refuses the rest here too.)
         if statuses.iter().any(|s| s.1.is_err()) {
             for s in statuses.iter_mut() {
                 if s.1.is_ok() {

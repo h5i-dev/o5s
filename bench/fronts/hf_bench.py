@@ -43,6 +43,11 @@ def main():
                 t = timed(["curl", "-sf", "-o", os.path.join(d, "put.json"), "-H", f"Authorization: Bearer {TOKEN}", "-T", BASE, f"{base}/v1/objects"])
                 h = json.load(open(os.path.join(d, "put.json")))["hash"]
                 record("hf", "upload_s", "v1-reference", t, "s", run=i)
+                # Objects are readable by hash only once a name reaches them (H2 object-read
+                # authorization): name it, untimed, as any real client would before reading.
+                body = json.dumps({"name": f"bench/v1ref/{i}", "read_set": [{"name": f"bench/v1ref/{i}", "observed": None}], "new": h})
+                run(["curl", "-sf", "-o", os.devnull, "-H", f"Authorization: Bearer {TOKEN}", "-H", "Content-Type: application/json",
+                     "-d", body, f"{base}/v1/replace"])
                 out = os.path.join(d, "get.bin")
                 t = timed(["curl", "-sf", "-o", out, "-H", f"Authorization: Bearer {TOKEN}", f"{base}/v1/objects/{h}"])
                 record("hf", "download_s", "v1-reference", t, "s", run=i)

@@ -39,6 +39,7 @@ fn large_upload_and_download_use_bounded_memory() {
     let before = vm_hwm_kib();
     let len: u64 = 512 << 20;
     let h = c.put_stream(&mut Gen { left: len, x: 12345 }).unwrap();
+    keep(&c, "alice", &h);
     assert_eq!(c.size(&h).unwrap(), len);
     let mut r = c.open(&h, None).unwrap();
     let mut buf = vec![0u8; 1 << 20];

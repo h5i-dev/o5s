@@ -17,6 +17,17 @@ pico2peta-prov.workspace = true
 pico2peta-weights.workspace = true
 pico2peta-attest = { path = "../attest" }
 pico2peta-client = { path = "../client" }
+pico2peta-net-kernel = { path = "../net-kernel" }
+# Issued bearer tokens: h5i-app's token encoding and strict parser (extracted, proven), signed
+# with HMAC-SHA256 from libcrux (HACL*-verified), as h5i-app-http's `HmacAuth` does.
+h5i-app-token = { path = "/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-token" }
+# The access kernel runs on h5i-app-http's `H5iApp` with our own executor (src/h5iapp.rs).
+h5i-app-http = { path = "/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-http" }
+h5i-app-core = { workspace = true }
+h5i-app-std = { workspace = true }
+h5i-app-json = { path = "/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-json" }
+h5i-app-pg = { path = "/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-pg" }
+libcrux-hmac = "0.0.8"
 pico2peta-backend-s3 = { path = "../backend-s3" }
 serde.workspace = true
 toml.workspace = true

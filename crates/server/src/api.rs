@@ -43,7 +43,7 @@ const DOWNLOAD_CHUNK: usize = 256 * 1024;
 pub struct AppState {
     pub repo: Arc<dyn Repository>,
     pub authn: Arc<dyn Authenticator>,
-    pub authz: Authorizer,
+    pub authz: Arc<Authorizer>,
     /// The token authenticator, if that is what `authn` is (for SIGHUP reload).
     pub tokens: Option<Arc<crate::auth::TokenAuthenticator>>,
     pub audit: AuditLog,
@@ -76,6 +76,13 @@ pub struct AppState {
     pub promotion: Vec<crate::config::PromotionRule>,
     /// The domain fronts and their write handles (`None` only in tests that build state by hand).
     pub fronts: Option<Arc<crate::fronts::Fronts>>,
+    /// Which policy cells reach each object (`None` only in tests that build state by hand,
+    /// where object reads are refused).
+    pub reach: Option<pico2peta_repo::reach::ReachIndex>,
+    /// The cells: every policy namespace, and `""`.
+    pub cells: Arc<std::sync::RwLock<Vec<String>>>,
+    /// The access kernel on h5i-app-http (`crate::h5iapp`).
+    pub kernel: crate::h5iapp::NetApp,
     /// `[[limits]]` (per-namespace rate and quota); `None` without rules.
     pub ns_limits: Option<Arc<crate::limits::NamespaceLimits>>,
     /// Quota re-measurement period.
@@ -372,6 +379,39 @@ impl AppState {
         Err(ApiError::denied(format!("{} may not {action} {target}", p.name)))
     }
 
+    /// May `p` read each of `hashes`? An object is readable only if it is reachable from a
+    /// name `p` may read: the extracted access kernel decides (`guarded_transition`,
+    /// `ReadObject`), on a view holding, for each hash, the cells `p` can read that reach it
+    /// (core's reachability index). Unreferenced objects are readable by no one.
+    pub(crate) async fn objects_readable(&self, p: &Principal, hashes: Vec<Hash>) -> ApiResult<Vec<bool>> {
+        use h5i_app_core::Kernel as _;
+        use pico2peta_net_kernel::access::Command;
+        // The kernel's snapshots (one batched reachability lookup), then h5i's guarded
+        // transition (`guard_viewed`, proven) for each hash.
+        let actor = self.authz.grants(p);
+        let hs: Vec<Vec<u8>> = hashes.iter().map(|h| h.0.to_vec()).collect();
+        let snaps =
+            self.kernel.engine().object_snapshots(&actor, &hs).await.map_err(|e| ApiError::internal(e.to_string()))?;
+        Ok(hs
+            .into_iter()
+            .zip(snaps)
+            .map(|(h, snap)| crate::h5iapp::NetKernel::transition(&actor, &snap, &Command::ReadObject(h)).is_ok())
+            .collect())
+    }
+
+    /// One object read through h5i-app-http (`H5iApp::run` with the server's principal and
+    /// the store's executor), refusing exactly as a missing object is refused (same error,
+    /// before any store access), so the two can't be told apart.
+    pub(crate) async fn require_object(&self, p: &Principal, h: Hash) -> ApiResult<()> {
+        let actor = h5i_app_http::Actor::<crate::h5iapp::NetKernel>::assume_authenticated(self.authz.grants(p));
+        let cmd = pico2peta_net_kernel::access::Command::ReadObject(h.0.to_vec());
+        match self.kernel.run(&actor, cmd, &HeaderMap::new()).await {
+            Ok(_) => Ok(()),
+            Err(r) if r.status() == StatusCode::NOT_FOUND => Err(ApiError::from(pico2peta_core::Error::NotFound(h))),
+            Err(r) => Err(ApiError::internal(format!("object read check failed ({})", r.status()))),
+        }
+    }
+
     /// Applies the `[[limits]]` rule for `name` (after authorization). `write`: the request may
     /// add data, so the quota applies (except for global admins, who must be able to clean up).
     pub(crate) fn admit(&self, p: &Principal, name: &str, write: bool) -> ApiResult<()> {
@@ -424,6 +464,18 @@ impl AppState {
             ApiError::internal(format!("operation applied but audit write failed: {e}"))
         })
     }
+}
+
+/// The cells of object-read authorization: `""` and every policy namespace. Every grant is
+/// one of them, so a grant covers a ref iff it covers the ref's cell (the deepest cell over it).
+pub fn policy_cells(policy: &[crate::config::PolicyEntry]) -> Vec<String> {
+    let mut cells: Vec<String> = vec![String::new()];
+    for e in policy {
+        if !cells.contains(&e.namespace) {
+            cells.push(e.namespace.clone());
+        }
+    }
+    cells
 }
 
 /// Token buckets keyed by principal (bounded table).
@@ -709,6 +761,7 @@ async fn head_object(
 ) -> ApiResult<Response> {
     st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &c, "get", "objects")?;
     let hash = parse_hash(&hash)?;
+    st.require_object(&p, hash).await?;
     let repo = st.repo.clone();
     let size = blocking(move || repo.size(&hash)).await?;
     let mut r = StatusCode::OK.into_response();
@@ -734,6 +787,7 @@ async fn get_object(
 ) -> ApiResult<Response> {
     st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &c, "get", "objects")?;
     let hash = parse_hash(&hash)?;
+    st.require_object(&p, hash).await?;
     let verify = match q.verify.as_deref() {
         None => None,
         Some(v) => Some(
@@ -1146,6 +1200,8 @@ pub struct TokenAdmin {
     pub inline: Vec<crate::config::TokenEntry>,
     pub allow_anonymous: bool,
     pub lock: tokio::sync::Mutex<()>,
+    /// `auth.token_key_file`: issue h5i-app tokens instead of random secrets.
+    pub key: Option<Vec<u8>>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Default)]
@@ -1198,6 +1254,9 @@ impl TokenAdmin {
 #[derive(serde::Deserialize)]
 struct CreateToken {
     principal: String,
+    /// Lifetime of an issued (h5i-app) token; default one year.
+    #[serde(default)]
+    ttl_secs: Option<u64>,
 }
 
 async fn create_token(
@@ -1214,9 +1273,15 @@ async fn create_token(
         return Err(ApiError::bad_request("invalid principal name"));
     }
     st.require_audit_healthy()?;
-    let mut raw = [0u8; 32];
-    getrandom::fill(&mut raw).map_err(|e| ApiError::internal(format!("no system randomness: {e}")))?;
-    let token = format!("p2p_{}", raw.iter().map(|b| format!("{b:02x}")).collect::<String>());
+    let token = match &ta.key {
+        // An h5i-app token (`v1.0.<user>.<expiry>.<hmac>`), accepted while listed and unexpired.
+        Some(key) => crate::auth::issue_token(key, &req.principal, req.ttl_secs.unwrap_or(365 * 24 * 3600)),
+        None => {
+            let mut raw = [0u8; 32];
+            getrandom::fill(&mut raw).map_err(|e| ApiError::internal(format!("no system randomness: {e}")))?;
+            format!("p2p_{}", raw.iter().map(|b| format!("{b:02x}")).collect::<String>())
+        }
+    };
     let sha: String = crate::auth::sha256(token.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
     let _g = ta.lock.lock().await;
     let mut file = ta.read().map_err(ApiError::internal)?;

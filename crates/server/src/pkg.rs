@@ -223,10 +223,17 @@ pub(crate) fn create_once(
     record: &[u8],
     same: &dyn Fn(&[u8]) -> bool,
 ) -> Result<std::result::Result<bool, String>> {
+    use pico2peta_net_kernel::publish::{CreateOnce, Existing, decide_create_once};
     for _ in 0..4 {
+        // The create-once rule is the extracted kernel's (`publish::decide_create_once`).
         if let Some(v) = repo.resolve(name)? {
-            return Ok(if same(&repo.get(&v.hash, None)?) { Ok(false) } else { Err(format!("{name} already exists")) });
+            let e = if same(&repo.get(&v.hash, None)?) { Existing::Same } else { Existing::Different };
+            return Ok(match decide_create_once(e) {
+                CreateOnce::Unchanged => Ok(false),
+                _ => Err(format!("{name} already exists")),
+            });
         }
+        debug_assert_eq!(decide_create_once(Existing::Absent), CreateOnce::Create);
         let h = repo.put(record)?;
         if let ReplaceOutcome::Ok { .. } = repo.replace(name, &[(name.clone(), Observed::Absent)], h)? {
             return Ok(Ok(true));

@@ -25,6 +25,7 @@ fn provenance_attestation_promotion_and_audit_across_fronts() {
         cfg.policy.push(grant("alice", "dev", Access::Write));
         cfg.policy.push(grant("alice", "prod", Access::Write));
         cfg.policy.push(grant("alice", "staging", Access::Write));
+        cfg.policy.push(grant("reader", "git/other", Access::Read));
         cfg.promotion.push(PromotionRule {
             dst: "prod".into(),
             required_keys: vec![pk.clone()],
@@ -70,6 +71,13 @@ fn provenance_attestation_promotion_and_audit_across_fronts() {
     assert_eq!(p0["meta"]["ref"], "refs/heads/main");
     assert_eq!(p0["meta"]["oid"], oid.as_str());
     let commit_hash = prov["object"].as_str().unwrap().to_string();
+    // Git oids are global, but resolving one needs a readable name reaching it: a reader of
+    // another repository can't resolve team/app's commit through its own repo's prefix.
+    let r = http.get(format!("{}/v1/provenance?ref=git:other/x@{oid}", srv.url())).bearer_auth(READER).send().unwrap();
+    assert_eq!(r.status(), 404, "cross-repo git id must not resolve");
+    let r =
+        http.get(format!("{}/v1/provenance?ref=blake3:{commit_hash}", srv.url())).bearer_auth(READER).send().unwrap();
+    assert_eq!(r.status(), 404, "an unreadable object by hash must not resolve");
 
     // A "wheel" built from that commit (a plain object under dev/), with declared lineage.
     let client = srv.client(ALICE);

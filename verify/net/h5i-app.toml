@@ -1,0 +1,189 @@
+# Read by `h5i app`: extract, check, prove, mutate, doctor.
+# The extracted crate is pico2peta's net kernel (front decisions and wire parsers).
+
+[extract]
+crate = "../../crates/net-kernel"
+start-from = [
+  "parse::decode_hex",
+  "parse::pkt_len",
+  "parse::parse_dec_u64",
+  "parse::parse_lfs_pointer",
+  "parse::xet_chunk_header",
+  "gitpush::decide_push",
+  "publish::decide_create_once",
+  "publish::decide_manifest",
+  "publish::decide_commit",
+  "publish::decide_rev",
+  "guarded_transition",
+  "read_only",
+]
+include = ["h5i_app_std"]
+std-specs = true
+
+[obligations]
+# `check` requires exactly `H5iAppLib.Obligation.PanicFree pico2peta_net_kernel.transition` and
+# `ReadOnlySound pico2peta_net_kernel.read_only pico2peta_net_kernel.transition (·.val)`.
+panic-free = "pico2peta_net_kernel.Spec.Obligations.panic_free"
+read-only = "pico2peta_net_kernel.Spec.Obligations.read_only_sound"
+
+[check]
+theorems = [
+  "pico2peta_net_kernel.Spec.decode_hex_spec",
+  "pico2peta_net_kernel.Spec.pkt_len_spec",
+  "pico2peta_net_kernel.Spec.parse_dec_u64_spec",
+  "pico2peta_net_kernel.Spec.xet_chunk_header_spec",
+  "pico2peta_net_kernel.Spec.GitPush.decide_push_spec",
+  "pico2peta_net_kernel.Spec.GitPush.accepted_update",
+  "pico2peta_net_kernel.Spec.GitPush.accepted_delete",
+  "pico2peta_net_kernel.Spec.GitPush.atomic_all_or_nothing",
+  "pico2peta_net_kernel.Spec.Policy.is_under_spec",
+  "pico2peta_net_kernel.Spec.Policy.allows_spec",
+  "pico2peta_net_kernel.Spec.Policy.reads_some_spec",
+  "pico2peta_net_kernel.Spec.Policy.cells_of_spec",
+  "pico2peta_net_kernel.Spec.Policy.visible_object_spec",
+  "pico2peta_net_kernel.Spec.Policy.permits_spec",
+  "pico2peta_net_kernel.Spec.Publish.decide_create_once_spec",
+  "pico2peta_net_kernel.Spec.Publish.release_files_never_change",
+  "pico2peta_net_kernel.Spec.Publish.decide_manifest_spec",
+  "pico2peta_net_kernel.Spec.Publish.manifest_accepted",
+  "pico2peta_net_kernel.Spec.Publish.decide_commit_spec",
+  "pico2peta_net_kernel.Spec.Publish.commit_accepted",
+  "pico2peta_net_kernel.Spec.Publish.decide_rev_spec",
+  "pico2peta_net_kernel.Spec.Lfs.parse_lfs_pointer_spec",
+  "pico2peta_net_kernel.Spec.Lfs.ptr_accepted",
+  "pico2peta_net_kernel.Spec.Obligations.ref_of_spec",
+  "pico2peta_net_kernel.guarded_transition.authorized",
+  "pico2peta_net_kernel.guarded_transition.read_only_sound",
+]
+
+# Bugs the proofs must reject (`h5i app mutate`). Each `old` occurs once in `file`.
+[[mutant]]
+name = "grant_access_ignored"
+file = "../../crates/net-kernel/src/access.rs"
+old = "if g.access >= need && is_under(name, &g.prefix) {"
+new = "if is_under(name, &g.prefix) {"
+
+[[mutant]]
+name = "prefix_not_segment_aligned"
+file = "../../crates/net-kernel/src/access.rs"
+old = "s.len() == prefix.len() || s[prefix.len()] == 47"
+new = "true"
+
+[[mutant]]
+name = "object_visible_without_cells"
+file = "../../crates/net-kernel/src/access.rs"
+old = """            Row::Object(h) => match cells_of(s, h) {
+                Some(cells) => reads_some(actor, &cells),
+                None => false,
+            },"""
+new = """            Row::Object(h) => match cells_of(s, h) {
+                Some(_) => true,
+                None => false,
+            },"""
+
+[[mutant]]
+name = "write_needs_only_read"
+file = "../../crates/net-kernel/src/access.rs"
+old = "Write::Ref(n) => allows(actor, n, WRITE),"
+new = "Write::Ref(n) => allows(actor, n, READ),"
+
+[[mutant]]
+name = "push_skips_stale_check"
+file = "../../crates/net-kernel/src/gitpush.rs"
+old = """    if !same(&c.cur, &c.old) {
+        return Err(Ng::StaleOld);
+    }
+    Ok(Accept::Update)"""
+new = """    Ok(Accept::Update)"""
+
+[[mutant]]
+name = "branch_may_point_at_a_blob"
+file = "../../crates/net-kernel/src/gitpush.rs"
+old = "if c.is_branch && !c.new_is_commit {"
+new = "if c.is_branch && c.new_is_commit && false {"
+
+[[mutant]]
+name = "atomic_not_all_or_nothing"
+file = "../../crates/net-kernel/src/gitpush.rs"
+old = "if atomic && any_err { refuse_all(&out) } else { out }"
+new = "if atomic && false { refuse_all(&out) } else { out }"
+
+[[mutant]]
+name = "hex_accepts_uppercase_when_lower"
+file = "../../crates/net-kernel/src/parse.rs"
+old = "} else if !lower && c >= 65 && c <= 70 {"
+new = "} else if c >= 65 && c <= 70 {"
+
+[[mutant]]
+name = "decimal_allows_leading_zero"
+file = "../../crates/net-kernel/src/parse.rs"
+old = "if s.len() > 1 { s[0] == 48 } else { false }"
+new = "false"
+
+[[mutant]]
+name = "xet_stored_chunk_lengths_unchecked"
+file = "../../crates/net-kernel/src/parse.rs"
+old = "if scheme == 0 && clen != ulen {"
+new = "if scheme == 0 && clen != ulen && false {"
+
+[[mutant]]
+name = "release_file_overwritten"
+file = "../../crates/net-kernel/src/publish.rs"
+old = "Existing::Different => CreateOnce::Conflict,"
+new = "Existing::Different => CreateOnce::Create,"
+
+[[mutant]]
+name = "manifest_digest_unchecked"
+file = "../../crates/net-kernel/src/publish.rs"
+old = "if !digest_matches {"
+new = "if !digest_matches && false {"
+
+[[mutant]]
+name = "manifest_missing_blobs_allowed"
+file = "../../crates/net-kernel/src/publish.rs"
+old = "if missing_blobs > 0 {"
+new = "if missing_blobs > 1 {"
+
+[[mutant]]
+name = "hf_stale_parent_accepted"
+file = "../../crates/net-kernel/src/publish.rs"
+old = "if !same_opt(parent, head) {"
+new = "if false {"
+
+[[mutant]]
+name = "hf_missing_lfs_accepted"
+file = "../../crates/net-kernel/src/publish.rs"
+old = "if !lfs_ok {"
+new = "if !lfs_ok && paths_ok && false {"
+
+[[mutant]]
+name = "npm_any_rev_accepted"
+file = "../../crates/net-kernel/src/publish.rs"
+old = "    *given == *current\n"
+new = "    true\n"
+
+[[mutant]]
+name = "lfs_oid_length_unchecked"
+file = "../../crates/net-kernel/src/parse.rs"
+old = "if end - vs == 64 && all_hex(body, vs, end) {"
+new = "if all_hex(body, vs, end) {"
+
+[[mutant]]
+name = "lfs_first_size_wins"
+file = "../../crates/net-kernel/src/parse.rs"
+old = """            Some(n) => LfsScan {
+                start: sc.start,
+                has_oid: sc.has_oid,
+                oid_s: sc.oid_s,
+                oid_e: sc.oid_e,
+                has_size: true,
+                size: n,
+            },"""
+new = """            Some(n) => LfsScan {
+                start: sc.start,
+                has_oid: sc.has_oid,
+                oid_s: sc.oid_s,
+                oid_e: sc.oid_e,
+                has_size: true,
+                size: if sc.has_size { sc.size } else { n },
+            },"""

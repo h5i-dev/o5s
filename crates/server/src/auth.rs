@@ -60,6 +60,34 @@ pub trait Authenticator: Send + Sync + 'static {
 /// Static bearer tokens. Only SHA-256 hashes are kept in memory or config.
 pub struct TokenAuthenticator {
     inner: std::sync::RwLock<Arc<TokenTable>>,
+    /// The HMAC key of issued (h5i-app) tokens, if configured.
+    key: Option<Vec<u8>>,
+}
+
+/// The h5i-app token user id of a principal: stable and derived from its name.
+pub fn user_id(principal: &str) -> u64 {
+    let h = sha256(principal.as_bytes());
+    u64::from_be_bytes(h[..8].try_into().unwrap_or([0; 8])) >> 1
+}
+
+fn hmac(key: &[u8], payload: &[u8]) -> Vec<u8> {
+    libcrux_hmac::hmac(libcrux_hmac::Algorithm::Sha256, key, payload, None)
+}
+
+/// Constant-time equality (the tag must not leak through timing).
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Issues an h5i-app token for `principal`, valid for `ttl_secs`.
+pub fn issue_token(key: &[u8], principal: &str, ttl_secs: u64) -> String {
+    let payload = h5i_app_token::encode_payload(0, user_id(principal), now_secs().saturating_add(ttl_secs));
+    let token = h5i_app_token::join(&payload, &hmac(key, &payload));
+    String::from_utf8(token).unwrap_or_default()
 }
 
 struct TokenTable {
@@ -77,7 +105,13 @@ fn parse_hex32(s: &str) -> Option<[u8; 32]> {
 
 impl TokenAuthenticator {
     pub fn new(tokens: &[TokenEntry], allow_anonymous: bool) -> Self {
-        TokenAuthenticator { inner: std::sync::RwLock::new(Arc::new(Self::table(tokens, allow_anonymous))) }
+        TokenAuthenticator { inner: std::sync::RwLock::new(Arc::new(Self::table(tokens, allow_anonymous))), key: None }
+    }
+
+    /// With an HMAC key: issued h5i-app tokens are accepted (see [`Self::check`]).
+    pub fn with_key(mut self, key: Option<Vec<u8>>) -> Self {
+        self.key = key;
+        self
     }
 
     fn table(tokens: &[TokenEntry], allow_anonymous: bool) -> TokenTable {
@@ -92,6 +126,11 @@ impl TokenAuthenticator {
         if let Ok(mut g) = self.inner.write() {
             *g = t;
         }
+    }
+
+    /// Static and issued tokens, synchronously (`h5iapp::NetAuth`).
+    pub fn check_sync(&self, headers: &HeaderMap) -> Result<Principal, AuthError> {
+        self.check(headers)
     }
 
     fn check(&self, headers: &HeaderMap) -> Result<Principal, AuthError> {
@@ -117,7 +156,22 @@ impl TokenAuthenticator {
         if tok.is_empty() {
             return Err(AuthError::Malformed);
         }
-        // The lookup key is a hash of the secret, so timing reveals nothing usable.
+        // An issued token (`v1.`): h5i-app's proven parser, then the HMAC tag (constant time),
+        // the expiry, and the token table (revocation removes the entry). Its user must be the
+        // listed principal's.
+        if let Some(key) = &self.key
+            && tok.starts_with("v1.")
+        {
+            let t = h5i_app_token::parse(tok.as_bytes()).ok_or(AuthError::Invalid)?;
+            if !ct_eq(&hmac(key, &t.payload), &t.sig) || t.exp < now_secs() || t.tenant != 0 {
+                return Err(AuthError::Invalid);
+            }
+            return match table.by_hash.get(&sha256(tok.as_bytes())) {
+                Some(p) if user_id(p) == t.user => Ok(Principal { name: p.clone(), authenticated: true }),
+                _ => Err(AuthError::Invalid),
+            };
+        }
+        // A static token: the lookup key is a hash of the secret, so timing reveals nothing usable.
         match table.by_hash.get(&sha256(tok.as_bytes())) {
             Some(p) => Ok(Principal { name: p.clone(), authenticated: true }),
             None => Err(AuthError::Invalid),
@@ -129,6 +183,15 @@ impl Authenticator for TokenAuthenticator {
     fn authenticate<'a>(&'a self, headers: &'a HeaderMap) -> AuthFuture<'a> {
         let r = self.check(headers);
         Box::pin(async move { r })
+    }
+}
+
+/// The access kernel's level for `a` (1 read, 2 write, 3 admin).
+pub fn level(a: Access) -> u8 {
+    match a {
+        Access::Read => pico2peta_net_kernel::access::READ,
+        Access::Write => pico2peta_net_kernel::access::WRITE,
+        Access::Admin => pico2peta_net_kernel::access::ADMIN,
     }
 }
 
@@ -159,11 +222,26 @@ impl Authorizer {
         if p.authenticated { e.principal == p.name || e.principal == "*" } else { e.principal == ANONYMOUS }
     }
 
-    /// May `p` perform `access` on name (or namespace prefix) `path`?
-    pub fn allows(&self, p: &Principal, path: &str, access: Access) -> bool {
-        self.snapshot()
+    /// The grants that apply to `p`, as the access kernel takes them (`net-kernel/src/access.rs`).
+    /// Which policy entries apply to a principal (its name, `*`, or anonymous) is this shell's
+    /// part; what they allow is the kernel's.
+    pub fn grants(&self, p: &Principal) -> pico2peta_net_kernel::access::Principal {
+        let grants = self
+            .snapshot()
             .iter()
-            .any(|e| Self::applies(e, p) && e.access >= access && pico2peta_core::is_under(path, &e.namespace))
+            .filter(|e| Self::applies(e, p))
+            .map(|e| pico2peta_net_kernel::access::Grant {
+                prefix: e.namespace.as_bytes().to_vec(),
+                access: level(e.access),
+            })
+            .collect();
+        pico2peta_net_kernel::access::Principal { grants }
+    }
+
+    /// May `p` perform `access` on name (or namespace prefix) `path`? Decided by the extracted
+    /// access kernel (`access::allows`).
+    pub fn allows(&self, p: &Principal, path: &str, access: Access) -> bool {
+        pico2peta_net_kernel::access::allows(&self.grants(p), path.as_bytes(), level(access))
     }
 
     /// Does `p` hold `access` on at least one namespace?
