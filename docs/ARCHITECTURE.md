@@ -182,6 +182,7 @@ by fault injection at every write/fsync point plus real SIGKILLs.
 | names | 10⁷: replace 7.5k/s, resolve p99 7.6 µs, open 6.4 s | The whole ref state is in memory: ≈ 208 B per name (2.1 GB at 10⁷). For more names, use idmaps (sorted segments behind one ref) for name-like tables, as the Git and OCI fronts do. |
 | provenance | 10⁶ records: load 0.35 s (checkpointed index) | Records are objects; the index grows with records since the last checkpoint. |
 | batch name updates | `update_many` linear in the batch (≤ 2²⁰ entries) | |
+| verified read (§6.4, 1 GiB, 2026-11-16) | strict 0.30×, eof 0.41× of warm `cat` on 4 cores: **the 0.50× target is missed** (recorded by the human's decision) | The whole-object BLAKE3 runs on several cores (`o5s_pack::phash`), but strict hashes every byte twice (per chunk and whole object). More cores would raise both ratios; re-measuring on a many-core host is a post-RC item. |
 
 ## Deployment topology and limits
 
