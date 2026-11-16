@@ -128,6 +128,11 @@ impl TokenAuthenticator {
         }
     }
 
+    /// Static and issued tokens, synchronously (`h5iapp::NetAuth`).
+    pub fn check_sync(&self, headers: &HeaderMap) -> Result<Principal, AuthError> {
+        self.check(headers)
+    }
+
     fn check(&self, headers: &HeaderMap) -> Result<Principal, AuthError> {
         let table = self.inner.read().map_err(|_| AuthError::Unavailable("token table poisoned".into()))?.clone();
         let Some(v) = headers.get(axum::http::header::AUTHORIZATION) else {

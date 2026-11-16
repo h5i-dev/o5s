@@ -13,7 +13,8 @@ pub mod error;
 pub mod fronts;
 pub mod git;
 pub(crate) mod gitgraph;
-pub(crate) mod hexs;
+pub mod h5iapp;
+mod hexs;
 pub mod hf;
 pub mod limits;
 pub mod maven;
@@ -180,6 +181,8 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         Arc::new(auth::TokenAuthenticator::new(&cfg.auth.tokens, cfg.auth.allow_anonymous).with_key(token_key.clone()));
     let audit = audit::AuditLog::open_with(&cfg.audit.path, cfg.audit.rotate_bytes)
         .map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
+    let authz = Arc::new(auth::Authorizer::new(cfg.policy.clone()));
+    let shared_cells = Arc::new(std::sync::RwLock::new(cells));
     Ok(Arc::new(AppState {
         repo,
         authn: match &cfg.auth.oidc {
@@ -189,8 +192,8 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
             }),
             None => tokens.clone(),
         },
-        tokens: Some(tokens),
-        authz: auth::Authorizer::new(cfg.policy.clone()),
+        tokens: Some(tokens.clone()),
+        authz: authz.clone(),
         audit,
         log_reads: cfg.audit.log_reads,
         metrics: Arc::new(metrics),
@@ -233,8 +236,12 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         maven,
         search: Default::default(),
         promotion: cfg.promotion.clone(),
+        kernel: h5i_app_http::H5iApp::with_executor(
+            Arc::new(h5iapp::NetExecutor { reach: Some(reach.clone()), cells: shared_cells.clone() }),
+            h5iapp::NetAuth { tokens: Some(tokens.clone()), authz: authz.clone() },
+        ),
         reach: Some(reach),
-        cells: std::sync::RwLock::new(cells),
+        cells: shared_cells,
         ns_limits: (!cfg.limits.is_empty()).then(|| Arc::new(limits::NamespaceLimits::new(cfg.limits.clone()))),
         limits_scan: Duration::from_secs(cfg.server.limits_scan_secs.max(1)),
         fronts: Some(fronts),

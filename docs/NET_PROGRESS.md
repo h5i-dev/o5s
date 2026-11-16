@@ -414,7 +414,16 @@ The contended run checks that no update is lost: the final version equals the nu
     - publish: release file overwritten, manifest digest unchecked, missing blob allowed, stale HF parent, missing LFS, any npm rev.
     - `net-kernel` gets h5i-app paths from workspace dependencies, so the mutation sandbox copy builds.
   - **h5i obligations proven** (`Obligations.lean`, `[obligations]`): `panic_free` (the access kernel's `transition` returns on every principal, snapshot and command; with `ref_of_spec`) and `read_only_sound` (`ReadObject`/`ReadRef` write nothing).
-  - Open (net): the h5i-app-http shell; static tokens behind a legacy flag, with the bench configs moved to issued tokens.
+  - **Server on h5i-app-http** (`crates/server/src/h5iapp.rs`). The access kernel runs as `H5iApp<App, NetStore, NetExecutor>` (`App = h5i_app_core::Authz<Access>`, whose `transition` is the proven `guard_viewed`), held in `AppState::kernel`.
+    - `GET`/`HEAD /v1/objects/<h>` go through `H5iApp::run` with an `Actor`.
+    - `NetExecutor` (an `h5i_app_core::Executor`) builds each command's snapshot from core's reach index (the caller's readable cells reaching the object, one batched lookup) and runs the kernel. Batched object checks (`objects_readable`) use the same snapshots and h5i's `Kernel::transition`.
+    - Writes stay with core's name-layer kernel, so the executor refuses `WriteRef`/`ReadRef` as unsupported.
+    - Deviations, by design:
+      - (1) Principals come from the server's own authentication middleware via `Actor::assume_authenticated`, h5i-app-http's documented hatch, because ours is async (OIDC/JWKS) and h5i-app-http's `Authenticator` is synchronous. `NetAuth`, the synchronous authenticator `H5iApp` requires, accepts static and issued bearer tokens.
+      - (2) `H5iApp` names a PostgreSQL `Store`. `NetStore` fills that slot (reply/refusal rendering only), and its `Store` methods are never called.
+    - The rest of the routes, streaming and fronts are unchanged (axum, as the plan says).
+    - Tests: `h5iapp::tests` (executor refusals; `NetAuth` resolves tokens to grants), and all of `server`/`p5` pass through the new path.
+    - Static `[[auth.tokens]]` (sha256) stay supported alongside issued tokens. Disabling them would change every deployment's config and the bench setup right before H3, so that is left for the release decision. static tokens behind a legacy flag, with the bench configs moved to issued tokens.
 - **Security fix (fuzz finding from the core's smoke run, oci_parsers): strict hex decoding everywhere** (`crates/server/src/hexs.rs`).
   - `oci::hex_key` sliced a 64-*byte* `&str` at byte offsets, so a digest containing a multi-byte character panicked (500, and possibly a poisoned lock). It is reachable from a URL (`/v2/<repo>/blobs/sha256:<64 bytes>`).
   - `u8::from_str_radix` also accepts a leading `+`, so non-canonical digest spellings mapped to the same key.

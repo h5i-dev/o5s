@@ -43,7 +43,7 @@ const DOWNLOAD_CHUNK: usize = 256 * 1024;
 pub struct AppState {
     pub repo: Arc<dyn Repository>,
     pub authn: Arc<dyn Authenticator>,
-    pub authz: Authorizer,
+    pub authz: Arc<Authorizer>,
     /// The token authenticator, if that is what `authn` is (for SIGHUP reload).
     pub tokens: Option<Arc<crate::auth::TokenAuthenticator>>,
     pub audit: AuditLog,
@@ -80,7 +80,9 @@ pub struct AppState {
     /// where object reads are refused).
     pub reach: Option<pico2peta_repo::reach::ReachIndex>,
     /// The cells: every policy namespace, and `""`.
-    pub cells: std::sync::RwLock<Vec<String>>,
+    pub cells: Arc<std::sync::RwLock<Vec<String>>>,
+    /// The access kernel on h5i-app-http (`crate::h5iapp`).
+    pub kernel: crate::h5iapp::NetApp,
     /// `[[limits]]` (per-namespace rate and quota); `None` without rules.
     pub ns_limits: Option<Arc<crate::limits::NamespaceLimits>>,
     /// Quota re-measurement period.
@@ -382,44 +384,31 @@ impl AppState {
     /// `ReadObject`), on a view holding, for each hash, the cells `p` can read that reach it
     /// (core's reachability index). Unreferenced objects are readable by no one.
     pub(crate) async fn objects_readable(&self, p: &Principal, hashes: Vec<Hash>) -> ApiResult<Vec<bool>> {
-        use pico2peta_net_kernel::access::{Command, READ, Snapshot};
-        let Some(reach) = self.reach.clone() else { return Ok(vec![false; hashes.len()]) };
-        let grants = self.authz.grants(p);
-        let cells = self.cells.read().map(|c| c.clone()).unwrap_or_default();
-        // The candidate cells: those the caller's grants cover (the kernel's `allows`).
-        let candidates: Vec<u32> = (0..cells.len() as u32)
-            .filter(|&i| pico2peta_net_kernel::access::allows(&grants, cells[i as usize].as_bytes(), READ))
-            .collect();
-        if candidates.is_empty() {
-            return Ok(vec![false; hashes.len()]);
-        }
-        let hs = hashes.clone();
-        let reaching = blocking(move || reach.cells_reaching_many(&hs, &candidates)).await?;
-        Ok(hashes
-            .iter()
-            .zip(reaching)
-            .map(|(h, cs)| {
-                let objects = if cs.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![(
-                        h.0.to_vec(),
-                        cs.iter().map(|&c| cells.get(c as usize).cloned().unwrap_or_default().into_bytes()).collect(),
-                    )]
-                };
-                let snap = Snapshot { refs: Vec::new(), objects };
-                pico2peta_net_kernel::guarded_transition(&grants, &snap, &Command::ReadObject(h.0.to_vec())).is_ok()
-            })
+        use h5i_app_core::Kernel as _;
+        use pico2peta_net_kernel::access::Command;
+        // The kernel's snapshots (one batched reachability lookup), then h5i's guarded
+        // transition (`guard_viewed`, proven) for each hash.
+        let actor = self.authz.grants(p);
+        let hs: Vec<Vec<u8>> = hashes.iter().map(|h| h.0.to_vec()).collect();
+        let snaps =
+            self.kernel.engine().object_snapshots(&actor, &hs).await.map_err(|e| ApiError::internal(e.to_string()))?;
+        Ok(hs
+            .into_iter()
+            .zip(snaps)
+            .map(|(h, snap)| crate::h5iapp::NetKernel::transition(&actor, &snap, &Command::ReadObject(h)).is_ok())
             .collect())
     }
 
-    /// [`Self::objects_readable`] for one object, refusing exactly as a missing object is
-    /// refused (same error, before any store access), so the two can't be told apart.
+    /// One object read through h5i-app-http (`H5iApp::run` with the server's principal and
+    /// the store's executor), refusing exactly as a missing object is refused (same error,
+    /// before any store access), so the two can't be told apart.
     pub(crate) async fn require_object(&self, p: &Principal, h: Hash) -> ApiResult<()> {
-        if self.objects_readable(p, vec![h]).await?.first() == Some(&true) {
-            Ok(())
-        } else {
-            Err(ApiError::from(pico2peta_core::Error::NotFound(h)))
+        let actor = h5i_app_http::Actor::<crate::h5iapp::NetKernel>::assume_authenticated(self.authz.grants(p));
+        let cmd = pico2peta_net_kernel::access::Command::ReadObject(h.0.to_vec());
+        match self.kernel.run(&actor, cmd, &HeaderMap::new()).await {
+            Ok(_) => Ok(()),
+            Err(r) if r.status() == StatusCode::NOT_FOUND => Err(ApiError::from(pico2peta_core::Error::NotFound(h))),
+            Err(r) => Err(ApiError::internal(format!("object read check failed ({})", r.status()))),
         }
     }
 
