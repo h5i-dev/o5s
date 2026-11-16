@@ -801,60 +801,54 @@ async fn get_object(
 
 /// Streams `reader` (exactly `len` bytes) as a response body with bounded buffering.
 pub(crate) fn stream_reader(reader: Box<dyn Read + Send>, len: u64, metrics: Arc<Metrics>) -> Body {
-    let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(4);
-    tokio::spawn(async move {
-        let mut reader = Some(reader);
+    let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(8);
+    let handle = tokio::runtime::Handle::current();
+    // One blocking task per stream, reading into one reused buffer (zeroed once). Each piece
+    // is sent as its own small allocation: fresh buffers of 128 KiB or more come from mmap and
+    // page-fault on every read. A stream holds one blocking thread while it runs; the number of
+    // streams is bounded by `server.max_concurrent_requests`, below tokio's blocking-pool cap.
+    tokio::task::spawn_blocking(move || {
+        let mut r = reader;
+        let mut buf = vec![0u8; DOWNLOAD_CHUNK];
         let mut sent = 0u64;
+        let send = |item: Result<Bytes, std::io::Error>| -> bool {
+            matches!(handle.block_on(tokio::time::timeout(IDLE_TIMEOUT, tx.send(item))), Ok(Ok(())))
+        };
         while sent < len {
-            let Some(mut r) = reader.take() else { return };
             let want = DOWNLOAD_CHUNK.min((len - sent) as usize);
-            let res = tokio::task::spawn_blocking(move || {
-                let mut buf = vec![0u8; want];
-                let mut filled = 0;
-                while filled < want {
-                    match r.read(&mut buf[filled..]) {
-                        Ok(0) => break,
-                        Ok(n) => filled += n,
-                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-                        Err(e) => return (r, Err(e)),
+            let mut filled = 0;
+            while filled < want {
+                match r.read(&mut buf[filled..want]) {
+                    Ok(0) => break,
+                    Ok(n) => filled += n,
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(e) => {
+                        tracing::error!(error = %e, "object stream failed");
+                        send(Err(e));
+                        return;
                     }
                 }
-                buf.truncate(filled);
-                (r, Ok(buf))
-            })
-            .await;
-            let (r, chunk) = match res {
-                Ok(x) => x,
-                Err(e) => {
-                    let _ = tx.send(Err(std::io::Error::other(format!("reader task: {e}")))).await;
-                    return;
-                }
-            };
-            reader = Some(r);
-            let chunk = match chunk {
-                Ok(c) if c.is_empty() => {
-                    // Fewer bytes than promised: abort the body so the client sees truncation.
-                    tracing::error!(sent, len, "object stream ended early");
-                    let _ = tx.send(Err(std::io::Error::other("object stream ended early"))).await;
-                    return;
-                }
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::error!(error = %e, "object stream failed");
-                    let _ = tx.send(Err(e)).await;
-                    return;
-                }
-            };
-            sent += chunk.len() as u64;
-            metrics.bytes_out.inc_by(chunk.len() as u64);
-            match tokio::time::timeout(IDLE_TIMEOUT, tx.send(Ok(Bytes::from(chunk)))).await {
-                Ok(Ok(())) => {}
-                _ => return, // client gone or stalled
             }
+            if filled == 0 {
+                // Fewer bytes than promised: abort the body so the client sees truncation.
+                tracing::error!(sent, len, "object stream ended early");
+                send(Err(std::io::Error::other("object stream ended early")));
+                return;
+            }
+            for piece in buf[..filled].chunks(SEND_PIECE) {
+                if !send(Ok(Bytes::copy_from_slice(piece))) {
+                    return; // client gone or stalled
+                }
+            }
+            sent += filled as u64;
+            metrics.bytes_out.inc_by(filled as u64);
         }
     });
     Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move { rx.recv().await.map(|i| (i, rx)) }))
 }
+
+/// Size of the body pieces `stream_reader` sends (below glibc's mmap threshold).
+const SEND_PIECE: usize = 64 * 1024;
 
 async fn flush(
     State(st): St,
