@@ -79,9 +79,11 @@ jobs:
     env:
       MINIO_TAG: RELEASE.2025-09-07T16-13-09Z
       MINIO_BIN: ${{ github.workspace }}/.minio/minio
-      MINIO_TEST_DIR: ${{ runner.temp }}/minio-test
-      SCRATCH: ${{ runner.temp }}
     steps:
+      # The runner context isn't available in job-level env, so set these from a step.
+      - run: |
+          echo "MINIO_TEST_DIR=$RUNNER_TEMP/minio-test" >> "$GITHUB_ENV"
+          echo "SCRATCH=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
