@@ -1699,6 +1699,8 @@ dependencies = [
  "h5i-app-http",
  "h5i-app-json",
  "h5i-app-pg",
+ "h5i-app-pgsql",
+ "h5i-app-sql",
  "h5i-app-std",
  "h5i-app-token",
  "http-body",
