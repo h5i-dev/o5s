@@ -374,6 +374,20 @@ The contended run checks that no update is lost: the final version equals the nu
 - **read_verify, server side: DONE** (as agreed with the core: one policy source, the repo's `[read]` config, and no server setting).
   - `GET /v1/objects/<h>?verify=strict|eof` calls `open_verified`. `eof` gets 403 unless the repo allows it, and a bad value gets 400. With no parameter, the plain `open` follows `[read] verify`, so strict is the default by construction.
   - `RemoteRepo::open_verified` sends the parameter. Test `read_verify_parameter_follows_repo_policy`.
+- **Git first push into an empty store (human's request): DONE, target met** (≤1.2×). `index_pack` was rebuilt the way git's index-pack works:
+  - pass 1 is one sequential buffered read; it used to seek back and refill a fresh 64 KiB buffer per entry. The trailer checksum is verified on another thread at the same time;
+  - pass 1 keeps the inflated data (256 MiB budget: deltas and small whole objects), so pass 2 doesn't inflate twice;
+  - pass 2 resolves delta trees on all cores. Each worker takes a whole object (round 1) or a thin pack's base from the repository (round 2), and walks its OFS and REF children depth-first, holding only the chain of bases;
+  - storing overlaps resolution: the request thread deduplicates and batches (4096 objects / 16 MiB), and two storer threads each do one `lookup_many` and one core `put_many` (v1.19) per batch.
+  - Dev check, redis heads+tags (108,836 objects), first push into a fresh server, under the bench lock; host load 3–5 from other sessions:
+
+    | | wall time |
+    |---|---|
+    | before (serial parse, one put per object) | 30.5–33.0 s |
+    | after | 16.2–17.2 s |
+    | git daemon, same window | 14.9–15.0 s |
+
+    That is 1.08–1.15× git daemon, from ~2.7×. Phases now: pass 1 2.2–2.6 s; resolve+store 10–12 s at ~33 CPU-seconds total. The rest is CPU-bound in zstd (the core's level-3 default; level 1 is the human's decision, see the core's BENCH "put/get pass").
 - **Git clone/fetch vs git daemon (human's priority 1): DONE, target met** (≤1.2× on redis, cold and warm). It took three changes, each chosen by measurement:
   1. **Clone pack cache.** A clone with no haves, no shallow and no filter produces a pack that is a function of (object format, sorted wants). The front keeps the last one per repository as an object (`P2PCPK01` + key + pack) behind `git/_clonepack/<repo>`, and streams it when the key matches. The ref keeps it alive for GC, and a stale one is simply replaced. It is filled when a clone misses, and refreshed in the background after every push (heads+tags wants), so the first clone after a push is a hit too. Config `[git] clone_pack_cache` (default on). Cost: one pack of storage per cloned repository.
      - Of options (a)–(c), (c) alone gets clones below git daemon. (a)/(b) would cost extra per-object storage for little gain once (c) and the commit graph are in.
