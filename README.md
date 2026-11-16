@@ -68,51 +68,35 @@ o5s put --for-name models/acme/main model.safetensors
 Each front speaks its domain's protocol, so the real client works unmodified
 (`S=o5s.example.com`, `TOKEN=o5s_...`).
 
-**Git** (SHA-1 and SHA-256, shallow and partial clone)
 ```sh
+# Git (SHA-1 and SHA-256, shallow and partial clone)
 git clone https://any:$TOKEN@$S/git/team/proj.git
 git push
-```
 
-**OCI**
-```sh
+# OCI
 docker login $S -u any -p "$TOKEN"
 docker push $S/team/app:1.0
 oras push $S/team/app:sbom ./sbom.json
-```
 
-**Hugging Face** (LFS and Xet)
-```sh
+# Hugging Face (LFS and Xet)
 export HF_ENDPOINT=https://$S HF_TOKEN=$TOKEN
 hf upload team/tiny ./model
 hf download team/tiny
-```
 
-**PyPI**
-```sh
+# PyPI
 twine upload --repository-url https://$S/pypi/team/ -u token -p "$TOKEN" dist/*
 pip install --index-url https://token:$TOKEN@$S/pypi/team/simple/ mypkg
-```
 
-**npm**
-```sh
+# npm
 npm config set registry https://$S/npm/team/
 npm config set //$S/npm/team/:_authToken $TOKEN
 npm publish
 npm install mypkg
-```
 
-**Maven**
-```xml
-<!-- ~/.m2/settings.xml -->
-<servers><server><id>o5s</id><username>token</username><password>${env.TOKEN}</password></server></servers>
-```
-```sh
+# Maven (~/.m2/settings.xml: <server><id>o5s</id><username>token</username><password>${env.TOKEN}</password></server>)
 mvn deploy -DaltDeploymentRepository=o5s::https://$S/maven/releases
-```
 
-**Native API**
-```sh
+# Native API
 curl -T big.bin -H "Authorization: Bearer $TOKEN" https://$S/v1/objects   # {"hash","size"}
 curl -H "Authorization: Bearer $TOKEN" -r 0-1023 https://$S/v1/objects/<hash>
 ```
