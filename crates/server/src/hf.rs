@@ -567,6 +567,24 @@ fn remove_path(root: &mut BTreeMap<String, Node>, path: &str, folder: bool) {
     }
 }
 
+/// Fuzzing: tree parsing, and commit path operations on a tree built from the input's lines.
+pub(crate) fn fuzz_paths(data: &[u8]) {
+    let _ = parse_tree(data);
+    let text = String::from_utf8_lossy(data);
+    let mut root: BTreeMap<String, Node> = BTreeMap::new();
+    let oid = Oid::from_slice(&[7u8; 20]).unwrap_or_else(|| unreachable!("20 bytes is an oid"));
+    for (i, line) in text.lines().enumerate() {
+        if !valid_repo_path(line) {
+            continue;
+        }
+        if i % 3 == 2 {
+            remove_path(&mut root, line, i % 2 == 0);
+        } else {
+            let _ = insert_path(&mut root, line, Node::File { mode: "100644".into(), oid });
+        }
+    }
+}
+
 fn valid_repo_path(p: &str) -> bool {
     !p.is_empty()
         && p.len() <= 4096

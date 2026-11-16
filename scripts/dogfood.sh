@@ -3,7 +3,7 @@
 # itself uses: this repo mirrored through the Git front, and pip/npm routed through the
 # PyPI and npm proxy-caches.
 #
-#   scripts/dogfood.sh start | stop | status | mirror | env
+#   scripts/dogfood.sh start | stop | status | mirror | env | drill | upgrade-drill
 #
 # Data: /mnt/scratch/pico2peta/dogfood (repo, audit, tokens, log). Port 18100 on 127.0.0.1.
 set -euo pipefail
@@ -86,6 +86,59 @@ case "${1:-status}" in
     git push -q "http://dogfood:$(cat "$D/token")@127.0.0.1:$PORT/git/pico2peta/pico2peta.git" \
       'refs/remotes/origin/*:refs/heads/*' 'refs/tags/*:refs/tags/*' 2>&1 | grep -v "^$" || true
     echo "mirrored to git/pico2peta/pico2peta"
+    ;;
+  drill)
+    # Backup -> restore -> fsck drill (docs/ARCHITECTURE.md "Backup, restore and integrity"):
+    # refs/ first, then objects/, while the server keeps running; then restore elsewhere,
+    # fsck it, serve it on another port and clone the mirror from it.
+    CLI=${DOGFOOD_CLI:-/mnt/scratch/pico2peta/cargo-target-net/release/pico2peta}
+    B="$D/drill"
+    rm -rf "$B"; mkdir -p "$B/backup"
+    t0=$(date +%s.%N)
+    cp -a "$D/repo/refs" "$B/backup/refs"
+    for f in "$D/repo"/*; do
+      n=$(basename "$f"); [ "$n" = refs ] && continue
+      cp -a "$f" "$B/backup/$n"
+    done
+    echo "backup: $(du -sh "$B/backup" | cut -f1) in $(echo "$(date +%s.%N) - $t0" | bc) s"
+    cp -a "$B/backup" "$B/restored"
+    "$CLI" --repo "$B/restored" fsck && echo "fsck of the restore: clean"
+    sed -e "s#$D/repo#$B/restored#; s#127.0.0.1:$PORT#127.0.0.1:$((PORT + 1))#; s#$D/audit#$B#; s#interval_secs = 21600#interval_secs = 0#" \
+      "$D/server.toml" > "$B/server.toml"
+    "$BIN" serve --config "$B/server.toml" >> "$B/server.log" 2>&1 &
+    pid=$!
+    sleep 2
+    t=$(cat "$D/token")
+    git clone -q --mirror "http://dogfood:$t@127.0.0.1:$((PORT + 1))/git/pico2peta/pico2peta.git" "$B/clone.git"
+    git -C "$B/clone.git" fsck --full --no-progress && echo "git fsck of a clone from the restore: clean"
+    live=$(git ls-remote "http://dogfood:$t@127.0.0.1:$PORT/git/pico2peta/pico2peta.git" | sort | sha256sum)
+    rest=$(git ls-remote "http://dogfood:$t@127.0.0.1:$((PORT + 1))/git/pico2peta/pico2peta.git" | sort | sha256sum)
+    [ "$live" = "$rest" ] && echo "refs: restore == live" || echo "refs DIFFER (writes after the backup?)"
+    kill $pid
+    ;;
+  upgrade-drill)
+    # An old binary (DOGFOOD_OLD_BIN, e.g. built from origin/main) creates a repository and
+    # writes through its fronts; the new binary then opens it, serves it and fscks it.
+    OLD=${DOGFOOD_OLD_BIN:?set DOGFOOD_OLD_BIN}
+    CLI=${DOGFOOD_CLI:-/mnt/scratch/pico2peta/cargo-target-net/release/pico2peta}
+    U="$D/upgrade"
+    rm -rf "$U"; mkdir -p "$U"
+    sed -e "s#$D/repo#$U/repo#; s#127.0.0.1:$PORT#127.0.0.1:$((PORT + 2))#; s#$D/audit/audit.jsonl#$U/audit.jsonl#; s#interval_secs = 21600#interval_secs = 0#" \
+      "$D/server.toml" | grep -v "^rotate_bytes" > "$U/server.toml"
+    t=$(cat "$D/token")
+    url="http://dogfood:$t@127.0.0.1:$((PORT + 2))/git/pico2peta/pico2peta.git"
+    "$OLD" serve --config "$U/server.toml" >> "$U/old.log" 2>&1 & pid=$!; sleep 2
+    git push -q "$url" 'refs/remotes/origin/main:refs/heads/main' 2>&1 | grep -v "^$" || true
+    curl -sf -H "Authorization: Bearer $t" -T README.md "http://127.0.0.1:$((PORT + 2))/v1/objects" > "$U/put.json"
+    kill $pid; sleep 1
+    "$BIN" serve --config "$U/server.toml" >> "$U/new.log" 2>&1 & pid=$!; sleep 2
+    h=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["hash"])' "$U/put.json")
+    curl -sf -H "Authorization: Bearer $t" "http://127.0.0.1:$((PORT + 2))/v1/objects/$h" | cmp - README.md && echo "object written by the old binary: readable"
+    git clone -q --bare "$url" "$U/clone.git" && git -C "$U/clone.git" fsck --full --no-progress && echo "git repo written by the old binary: clone + fsck clean"
+    git push -q "$url" 'refs/remotes/origin/net:refs/heads/net' 2>&1 | grep -v "^$" || true
+    git clone -q --bare "$url" "$U/clone2.git" && git -C "$U/clone2.git" fsck --full --no-progress && echo "new pushes on the upgraded repo: clone + fsck clean"
+    kill $pid; sleep 1
+    "$CLI" --repo "$U/repo" fsck && echo "fsck after the upgrade: clean"
     ;;
   env)
     # Source this to route pip/uv/npm through the proxy-caches.

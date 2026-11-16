@@ -270,7 +270,23 @@ The contended run checks that no update is lost: the final version equals the nu
   - devpi-server 6.14.0, verdaccio 6.1.6, reposilite 3.5.19 and Maven 3.9.9.
 
   Every binary was checksum- or signature-verified, and all of them live under `/mnt/scratch/pico2peta/tools`.
-  - **ROADMAP Net 4 batch (2026-11-15), windows 1–2 done, window 3 (Maven) pending.** Report: `/mnt/scratch/pico2peta/bench-fronts-report-w2.md` (§6.5 tiers, medians of 3, with load averages of 2.8–5.0 on 4 cores, which is why the core's builds ran at nice/-j1). Git rows are window 2's rerun; window 1's are kept as superseded. These are the binaries from before the idmap merge-join and the batched git walk.
+  - **ROADMAP Net 4, final batch (2026-11-16), after the performance work.** Results: `/mnt/scratch/pico2peta/bench-fronts-results-final.jsonl`. Reports: `bench-fronts-report-final-A.md` (git, OCI) and `bench-fronts-report-final.md` (all fronts). §6.5 tiers, medians of 3; host load 1.9–6.2 (other sessions on the host).
+    - **Git: PASS** (was FAIL), 90/90 functional checks.
+      - clone v2: jq 1.01×, redis 0.74×, ripgrep 0.80×;
+      - clone v0: 0.74–0.95×;
+      - fetch10: 0.74–0.91×;
+      - push: jq 0.87×, redis 0.84×, ripgrep 1.05×;
+      - clone bytes: redis 0.58×, jq 1.15×, ripgrep 1.12×.
+      - Untiered `first_push_s` (fresh server per run): redis 1.22×, jq 1.32×, ripgrep 1.38×. The small repos pay fixed per-push costs.
+    - **OCI: FAIL on pull only**, 24/24 functional checks: push 0.62×, storage 1.00×, pull 1.99× (0.377 s vs 0.189 s).
+      - Root cause is core-side. Strict verified reads hash every byte twice (per chunk before delivery, plus the whole object at EOF), and distribution verifies nothing. The core's own §6.4 run measures verified read at 0.184× warm `cat`, also FAIL.
+      - The front adds nothing measurable (same `stream_reader` as `/v1`). The core plans multi-core whole-object BLAKE3 per stream after the RC.
+    - **HF: FAIL** on transfer times, 6/6 functional checks; storage is STRONG PASS (family 0.91× of Xet dedup).
+      - Times vs curl `/v1`: LFS upload 2.08×, LFS download 2.35×, Xet upload 7.66×, Xet download 1.56×.
+      - Server-side they are ~1.0× (downloads) and 1.27× (LFS PUT, mostly the Xet-chunker profile); see "HF transfers vs /v1". The end-to-end gap is the HF clients' own hashing, chunking and disk writes, which this protocol counts against pico2peta.
+    - **PyPI: PASS** (cold 1.02×, hot 1.19×, storage 0.47×). **npm: PASS** (1.05×, 1.06×, storage 0.11×). **Maven: PASS** (cold 0.99×, hot 1.01×, storage 0.93×; 3/3 functional checks).
+    - **This batch is the pre-h5i baseline** (H5I_PLAN H0). Committed: raw rows `bench/results/fronts-baseline-pre-h5i.jsonl`, the report `bench/results/fronts-baseline-pre-h5i-report.md`, and per-metric run-to-run ranges `bench/results/fronts-baseline-pre-h5i-ranges.md` (for the no-regression rule).
+  - Earlier batch (superseded) — **windows 1–2 (2026-11-15), window 3 (Maven) pending.** Report: `/mnt/scratch/pico2peta/bench-fronts-report-w2.md` (§6.5 tiers, medians of 3, with load averages of 2.8–5.0 on 4 cores, which is why the core's builds ran at nice/-j1). Git rows are window 2's rerun; window 1's are kept as superseded. These are the binaries from before the idmap merge-join and the batched git walk.
     - Functional: 132/132 checks pass (git 90, OCI 24, HF 6, PyPI 6, npm 6).
     - PASS or better: PyPI (hot 1.23×, cold 1.06×, storage 0.47×), npm (1.05×, 1.04×, storage 0.11×), git push redis 1.02× / jq 1.16×, git fetch jq 1.09× / ripgrep 0.99×, git clone bytes 0.58–1.10×, OCI push 0.61× and storage 1.00×, HF family storage 0.91× of Xet dedup.
     - FAIL: git clone 1.7–2.8× (redis 22.4 s vs 12.1 s), git push ripgrep 1.98×, git fetch redis 2.75× (0.63 s vs 0.23 s), OCI pull 2.07×, HF transfers 2.2–8.1× the /v1 reference.

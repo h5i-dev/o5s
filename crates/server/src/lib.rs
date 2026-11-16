@@ -552,6 +552,11 @@ pub mod fuzzing {
     pub fn pkg_parsers(data: &[u8]) {
         crate::xet::fuzz_parsers(data);
         let _ = crate::hf::parse_lfs_pointer(data);
+        crate::hf::fuzz_paths(data);
+        crate::gitgraph::fuzz_decode(data);
+        if let Ok(s) = std::str::from_utf8(data) {
+            let _ = crate::hexs::decode32(s);
+        }
         let text = String::from_utf8_lossy(data);
         let _ = crate::pypi::fuzz_names(&text);
         let _ = crate::npm::fuzz_names(&text);

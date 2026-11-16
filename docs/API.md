@@ -138,6 +138,10 @@ git push --atomic origin main v1.0 :old-branch
 - Served packs are deltified against the previous version of each path.
 - Shallow clones (`--depth`, `--deepen`, `--shallow-since`, `--unshallow`) and partial clones (`--filter=blob:none`, `blob:limit=<n>`, with lazy fetches of missing objects) work over protocol v2 (git's default). A want that isn't a ref tip is served only if it's reachable from this repo's refs.
 - SHA-256 repositories (`git init --object-format=sha256`): configure their name prefixes in `[git] sha256_repos = ["team/s256"]`, since git learns a repository's format before its first push. Every operation works in both formats, and a push in the other format is refused.
+- Derived data, refreshed in the background after every push. Both are ordinary objects behind refs, so GC keeps the current ones and reclaims stale ones; losing them costs speed, never correctness:
+  - `git/_commitgraph/<repo>`: commit and tag graph, used for negotiation and history walks;
+  - `git/_clonepack/<repo>`: the pack of the last full clone (heads+tags), streamed as-is to the next clone with the same wants. `[git] clone_pack_cache = false` turns it off; it costs one pack of storage per cloned repository.
+- Pushes are indexed in parallel (index-pack style) and stored in batches.
 - Limits are listed in `docs/NET_PROGRESS.md` under "Production gaps": `deepen-not` is unsupported.
 
 ## Hugging Face Hub (`/api`, `/<repo>/resolve`)
