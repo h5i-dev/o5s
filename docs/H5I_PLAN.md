@@ -51,3 +51,11 @@ Rerun every benchmark in BASELINE.md, same protocol, in announced bench windows.
 - Kernel calls must not add measurable overhead; measure with short dev checks.
 - Keep the gate, push and disk rules from ROADMAP.md. No Claude attribution.
 - Coordinate kernel boundaries between the sessions with messages: who owns which kernel crate, and the shared types.
+
+## Order after H2 (from the human, 2026-11-16)
+1. **H2 done:** every kernel extracted, with proofs in Lean on the extracted code (no `sorry`). `h5i app mutate` results are recorded, and the hand-written model and difftest are deleted.
+2. **H3, the no-regression rerun:** every benchmark in BASELINE.md, per PLAN §6.8, judged with `scripts/baseline-summary.py`. Fix any regression before going on.
+3. **H4, performance, only after H3 passes.** Each item is measured against the baseline, and the proofs must stay green.
+   - **net: Xet front.** Upload is 7.66× and download 1.56× the `/v1` reference; LFS is 2.08×/2.35×. Target ≤ 1.2× for each.
+   - **core: multi-core whole-object BLAKE3 for verified reads,** e.g. BLAKE3 subtree hashing over large windows in parallel, so a stream's whole-object hash keeps up with decode. It must produce exactly the serial hash: prove or proptest that equality, and keep the `strict` semantics. Targets: §6.4 verified read ≥ 0.50× `cat` (now 0.18×), and OCI pull ≤ 1.0× Distribution (now 1.99×).
+4. Then release prep and `v0.1.0-rc.1`.
