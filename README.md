@@ -10,29 +10,16 @@ unmodified.
 
 ## Potential pushback
 
-- **"Git's three-way merge is an operation specific to source code."**
-  → Why do we need `git merge` at all? It was a great choice when humans had to compose several people's
-  changes by hand. Now we can let AI agents overwrite. Overwriting is fine:
-  - every version stays, immutable and addressed by its hash;
-  - a name moves only by compare-and-swap against what the writer read, so no update is silently lost.
-- **"Hugging Face uses Xet, a special format for processing large model weights fast."**
-  → If it's a good way to process data, why not use it for every domain? In o5s, content-defined chunking and
-  deduplication are part of the core, not of one front. Xet's byte-exact chunker is a namespace profile that
-  any namespace can choose.
-- **"Git packs source code far better than a generic store could."**
-  → Not if the generic store lays data out by content similarity. o5s's repack does that for every domain, and
-  on our Git corpus it stores 0.79–0.95× of `git gc --aggressive` (`docs/EXP1.md`).
-- **"Registries need rules: a released PyPI version never changes, a Docker tag moves, a branch is
-  mutable."**
-  → Those are just per-namespace rules (`mutable`, `immutable`, `head-release`), not separate products.
-- **"With one store for everything, one bug corrupts everything."**
-  → Every decision (name updates and rules, authorization, promotion, retention, GC) is an
-  [h5i-app](https://github.com/h5i-dev/h5i) kernel. It is extracted to Lean 4 with Charon/Aeneas, and theorems
-  are proved about the extracted code (`verify/`). Crash consistency is tested at every write and fsync point,
-  and with real SIGKILLs.
-- **"Separate systems are separate silos, so lineage across them is lost."**
-  → In one store, one provenance log links a commit → build → wheel → image → model checkpoint, with signed
-  attestations and policy-gated promotion (dev → prod) as one transaction.
+- **Git's three-way merge is specific to source code** → Why merge at all? It suited humans composing
+  changes by hand. AI agents can just overwrite: every version is kept, and names move only by compare-and-swap.
+- **Hugging Face's Xet makes large weights fast** → If it's good, use it everywhere: chunking and dedup are in
+  the core, for every domain.
+- **Git packs source better** → Similarity repack works for every domain and stores 0.79–0.95× of
+  `git gc --aggressive`.
+- **Registries need their own rules** → They are per-namespace rules: `mutable`, `immutable`, `head-release`.
+- **One store means one bug breaks everything** → Every decision is an h5i-app kernel, proved in Lean on the
+  extracted code.
+- **Separate systems lose lineage** → One store has one provenance log: commit → build → package → image → model.
 
 ## CLI example
 
