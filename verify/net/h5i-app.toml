@@ -43,6 +43,8 @@ theorems = [
   "pico2peta_net_kernel.Spec.Publish.decide_commit_spec",
   "pico2peta_net_kernel.Spec.Publish.commit_accepted",
   "pico2peta_net_kernel.Spec.Publish.decide_rev_spec",
+  "pico2peta_net_kernel.Spec.Lfs.parse_lfs_pointer_spec",
+  "pico2peta_net_kernel.Spec.Lfs.ptr_accepted",
   "pico2peta_net_kernel.guarded_transition.authorized",
   "pico2peta_net_kernel.guarded_transition.read_only_sound",
 ]
@@ -152,3 +154,29 @@ name = "npm_any_rev_accepted"
 file = "../../crates/net-kernel/src/publish.rs"
 old = "    *given == *current\n"
 new = "    true\n"
+
+[[mutant]]
+name = "lfs_oid_length_unchecked"
+file = "../../crates/net-kernel/src/parse.rs"
+old = "if end - vs == 64 && all_hex(body, vs, end) {"
+new = "if all_hex(body, vs, end) {"
+
+[[mutant]]
+name = "lfs_first_size_wins"
+file = "../../crates/net-kernel/src/parse.rs"
+old = """            Some(n) => LfsScan {
+                start: sc.start,
+                has_oid: sc.has_oid,
+                oid_s: sc.oid_s,
+                oid_e: sc.oid_e,
+                has_size: true,
+                size: n,
+            },"""
+new = """            Some(n) => LfsScan {
+                start: sc.start,
+                has_oid: sc.has_oid,
+                oid_s: sc.oid_s,
+                oid_e: sc.oid_e,
+                has_size: true,
+                size: if sc.has_size { sc.size } else { n },
+            },"""
