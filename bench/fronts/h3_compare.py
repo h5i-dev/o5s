@@ -37,8 +37,8 @@ def tiers(report):
     out = {}
     for line in open(report):
         c = [x.strip() for x in line.split("|")]
-        if len(c) > 8 and c[6] in TIER:
-            out[(c[1], c[2], c[3], c[4].split(" (")[1].split(",")[0] if " (" in c[4] else "")] = c[6]
+        if len(c) > 8 and c[7] in TIER:
+            out[(c[1], c[2], c[3], c[4].split(" (")[1].split(",")[0] if " (" in c[4] else "")] = c[7]
     return out
 
 

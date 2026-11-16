@@ -40,7 +40,9 @@ def intervals(log_path):
         us = float(lat.split()[0])
         end = datetime.datetime.fromisoformat(e["timestamp"].replace("Z", "+00:00")).timestamp()
         span = e.get("span", {}) or {}
-        out.append((end - us / 1e6, end, route(span.get("path", ""))))
+        path = span.get("path", "")
+        rt = route(path)
+        out.append((end - us / 1e6, end, rt if rt != "other" else "other:" + "/".join(path.split("/")[:4])))
     return out
 
 
@@ -64,8 +66,10 @@ def main():
             p2p = os.path.join(d, f"p2p-{mode}")
             os.makedirs(p2p)
             with pico_server(p2p, server_bin, repo_toml=REPO_TOML, log_format="json", log_filter="info") as (base, _):
-                for op, args in (("upload", ("upload", "bench/split", BASE, "model.safetensors")),
-                                 ("download", ("download", "bench/split", "model.safetensors", os.path.join(d, f"cache-{mode}")))):
+                runs = [(f"{op}{i}", args) for i in range(2) for op, args in (
+                    ("upload", ("upload", f"bench/split{i}", BASE, "model.safetensors")),
+                    ("download", ("download", f"bench/split{i}", "model.safetensors", os.path.join(d, f"cache-{mode}-{i}"))))]
+                for op, args in runs:
                     log = os.path.join(p2p, "server.log")
                     seen = len(intervals(log))
                     r = client(base, d, xet, *args)
