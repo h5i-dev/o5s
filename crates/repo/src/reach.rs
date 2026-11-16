@@ -16,7 +16,8 @@
 //! queued as a **pending root** of its cell; the commit does no traversal. A
 //! background worker drains pending roots (one cell at a time, under that
 //! cell's lock), and a query on a cell with pending roots drains them first, so
-//! answers are exact and read-your-writes holds. A move, a re-creation after a
+//! answers are exact and read-your-writes holds. (The worker never runs an
+//! exact recompute: that is left to the next query of a dirty cell.) A move, a re-creation after a
 //! delete, or a delete may make objects unreachable, so it marks the cell
 //! **dirty** at once (dropping its pending roots); a query on a dirty cell
 //! recomputes that cell exactly first. "Unreadable as soon as its last readable
@@ -289,7 +290,13 @@ fn worker(weak: Weak<Inner>, queue: Arc<Queue>) {
         let Ok((cells, states)) = idx.snapshot() else { return };
         // A cell from before a policy reload is gone: skip it.
         let Some(c) = states.iter().position(|s| Arc::ptr_eq(s, &state)) else { continue };
-        // Only additions are worth doing early; a dirty cell is recomputed by the next query.
+        // Only additions are done early. A cell that a move or delete made dirty is recomputed
+        // by its next query instead: an exact recompute is a full mark of the cell, and running
+        // it in the background right after a push would compete with the next push.
+        let inbox_dirty = state.inbox.lock().map(|i| i.dirty).unwrap_or(true);
+        if inbox_dirty {
+            continue;
+        }
         if let Ok(mut m) = lock(&state.members)
             && !m.dirty
         {

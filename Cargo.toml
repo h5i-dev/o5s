@@ -10,8 +10,8 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 # h5i-app (H5I_PLAN): kernel helpers and the guard, extracted with our kernels.
-h5i-app-std = { path = "/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std" }
-h5i-app-core = { path = "/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-core" }
+h5i-app-std = "=0.5.5"
+h5i-app-core = "=0.5.5"
 pico2peta-core = { path = "crates/core" }
 pico2peta-pack = { path = "crates/pack" }
 pico2peta-refs = { path = "crates/refs" }

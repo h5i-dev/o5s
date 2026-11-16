@@ -66,6 +66,36 @@ P4, authorization, is net's kernel (`verify/net`, `h5i_app_std::authz::guard`).
 | `header_skips_kind_check` | parse_header_spec |
 | `journal_truncates_history` | journal_step_spec |
 
+## Toolchain (pinned)
+
+Everything is on the released h5i **v0.5.5**, with nothing taken from an unreleased checkout:
+- **The CLI:** the official release binary (`curl -fsSL https://h5i.dev/install.sh | H5I_VERSION=v0.5.5 sh`,
+  checksum-verified by the installer; `h5i --version` prints `h5i 0.5.5`).
+- **Rust:** every h5i crate comes from crates.io, pinned `=0.5.5` (root `Cargo.toml`, `crates/server`).
+  Never use a path dependency on a local h5i checkout.
+- **Lean:** `h5i_app_lib` at the v0.5.5 tag commit `365703f6f4d84841e6829cb5e262780b0600fc47`
+  (`proofs/lakefile.lean`).
+- **Extraction:** Charon and Aeneas exactly as v0.5.5 pins them (`pins.rs`): Charon 0.1.273
+  `4bd5a29f6e97ce2201ed35251afe5716e53b0a3a`, Aeneas `b86120db3183b0107eb5f2637b11c424cd06ef1c`; Lean v4.31.0.
+
+`h5i --version` and `h5i app doctor` (2026-11-16, in `verify/core`):
+
+```
+h5i 0.5.5
+tools
+  ok    cargo                  cargo 1.100.0 (3acc79c0c 2026-11-05)
+  ok    charon                 0.1.273 (4bd5a29f6e97ce2201ed35251afe5716e53b0a3a)
+  ok    aeneas                 aeneas b86120db
+  ok    lake                   on PATH (elan picks Lean from each project's lean-toolchain)
+project core
+  ok    lean-toolchain         leanprover/lean4:v4.31.0
+  ok    aeneas require         b86120db3183
+  ok    lake packages          /mnt/scratch/ec2-user/lake/arith/packages
+  ok    kernel crate           ../../crates/kernel
+  ok    extraction             proofs/generated
+0 failed, 0 warnings
+```
+
 ## Running
 
 On the dev host, the tools and prebuilt Lean packages are under `/mnt/scratch/ec2-user`. Use that toolchain
