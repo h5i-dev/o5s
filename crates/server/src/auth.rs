@@ -108,7 +108,7 @@ impl TokenAuthenticator {
         TokenAuthenticator { inner: std::sync::RwLock::new(Arc::new(Self::table(tokens, allow_anonymous))), key: None }
     }
 
-    /// With an HMAC key: issued h5i-app tokens are accepted (see [`Self::check`]).
+    /// With an HMAC key: issued h5i-app tokens are accepted (see `Self::check`).
     pub fn with_key(mut self, key: Option<Vec<u8>>) -> Self {
         self.key = key;
         self

@@ -1,4 +1,4 @@
-//! The access kernel on `h5i-app-http` (docs/H5I_PLAN.md, H2): an [`H5iApp`] over o5s's
+//! The access kernel on `h5i-app-http` (docs/H5I_PLAN.md, H2): an `H5iApp` over o5s's
 //! own store instead of PostgreSQL.
 //!
 //! - The kernel is `o5s_net_kernel::App`, i.e. `h5i_app_core::Authz<Access>`: its

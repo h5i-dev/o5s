@@ -1040,7 +1040,7 @@ impl Engine for Journal {
 /// one store:
 /// * [`RefStore::open`]: a local journal directory. Commits are serialized by an exclusive
 ///   `flock`, so all writers must be on one host.
-/// * [`RefStore::open_backend`]: a create-only log on any [`Backend`], e.g. S3. Commits are
+/// * [`RefStore::open_backend`]: a create-only log on any `Backend`, e.g. S3. Commits are
 ///   linearized by atomic conditional create, so writers may be on many hosts.
 pub struct RefStore {
     engine: Box<dyn Engine>,

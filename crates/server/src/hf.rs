@@ -1150,7 +1150,7 @@ async fn xet_xorb(hf: &Arc<HfState>, token: &str, headers: &HeaderMap) -> Respon
     }
 }
 
-/// `/xet/{*rest}`: the Xet CAS API, authorized by the bearer capability from [`xet_token`].
+/// `/xet/{*rest}`: the Xet CAS API, authorized by the bearer capability from `xet_token`.
 pub async fn xet_cas(
     State(st): State<Arc<AppState>>,
     method: Method,
