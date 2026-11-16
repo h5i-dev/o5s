@@ -12,12 +12,15 @@ import os
 import subprocess
 import sys
 
-from common import RUNS, SCRATCH, TOKEN, TOOLS, check, du, log, pico_server, record, run, sha256_file, timed, workdir
+from common import (RUNS, SCRATCH, TOKEN, TOOLS, busy, check, du, log, log_lines, pico_server, record, run, server_cpu,
+                    server_intervals, sha256_file, timed, workdir)
 
 PY = f"{TOOLS}/venv/bin/python"
 CLIENT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hf_client.py")
 W = f"{SCRATCH}/bench-data/weights"
 BASE, INSTRUCT = f"{W}/SmolLM2-135M.safetensors", f"{W}/SmolLM2-135M-Instruct.safetensors"
+# The server logs each response and the end of each streamed body (PLAN §6.8 HF amendment).
+LOG = {"log_format": "json", "log_filter": "info"}
 REPO_TOML = '[profiles.hf]\nchunker = "xet"\n\n[namespaces]\n"hf/" = "hf"\n'
 
 
@@ -38,31 +41,49 @@ def main():
         # Reference: plain objects through /v1.
         p2p = os.path.join(d, "ref")
         os.makedirs(p2p)
-        with pico_server(p2p, server_bin) as (base, _):
+        slog = os.path.join(p2p, "server.log")
+        with pico_server(p2p, server_bin, **LOG) as (base, _):
             for i in range(RUNS):
+                n0, c0 = log_lines(slog), server_cpu(base)
                 t = timed(["curl", "-sf", "-o", os.path.join(d, "put.json"), "-H", f"Authorization: Bearer {TOKEN}", "-T", BASE, f"{base}/v1/objects"])
                 h = json.load(open(os.path.join(d, "put.json")))["hash"]
                 record("hf", "upload_s", "v1-reference", t, "s", run=i)
+                record("hf", "upload_server_s", "v1-reference", busy(server_intervals(slog, n0)), "s", run=i)
+                record("hf", "upload_server_cpu_s", "v1-reference", server_cpu(base) - c0, "s", run=i)
                 # Objects are readable by hash only once a name reaches them (H2 object-read
                 # authorization): name it, untimed, as any real client would before reading.
                 body = json.dumps({"name": f"bench/v1ref/{i}", "read_set": [{"name": f"bench/v1ref/{i}", "observed": None}], "new": h})
                 run(["curl", "-sf", "-o", os.devnull, "-H", f"Authorization: Bearer {TOKEN}", "-H", "Content-Type: application/json",
                      "-d", body, f"{base}/v1/replace"])
                 out = os.path.join(d, "get.bin")
+                n0, c0 = log_lines(slog), server_cpu(base)
                 t = timed(["curl", "-sf", "-o", out, "-H", f"Authorization: Bearer {TOKEN}", f"{base}/v1/objects/{h}"])
                 record("hf", "download_s", "v1-reference", t, "s", run=i)
+                record("hf", "download_server_s", "v1-reference", busy(server_intervals(slog, n0)), "s", run=i)
+                record("hf", "download_server_cpu_s", "v1-reference", server_cpu(base) - c0, "s", run=i)
                 os.remove(out)
         run(["rm", "-rf", p2p])
         for mode, xet in (("xet", True), ("lfs", False)):
             p2p = os.path.join(d, f"p2p-{mode}")
             os.makedirs(p2p)
-            with pico_server(p2p, server_bin, repo_toml=REPO_TOML) as (base, repo):
+            slog = os.path.join(p2p, "server.log")
+            with pico_server(p2p, server_bin, repo_toml=REPO_TOML, **LOG) as (base, repo):
                 for i in range(RUNS):
+                    # create_repo runs before the client's timer: not in the operation's server time.
+                    n0, c0 = log_lines(slog), server_cpu(base)
                     r = client(base, d, xet, "upload", f"bench/base-{i}", BASE, "model.safetensors")
+                    iv = [x for x in server_intervals(slog, n0) if not x[2].endswith("/repos/create")]
                     record("hf", "upload_s", f"pico2peta-{mode}", r["s"], "s", run=i)
+                    record("hf", "upload_server_s", f"pico2peta-{mode}", busy(iv), "s", run=i)
+                    record("hf", "upload_client_cpu_s", f"pico2peta-{mode}", r["cpu_s"], "s", run=i)
+                    record("hf", "upload_server_cpu_s", f"pico2peta-{mode}", server_cpu(base) - c0, "s", run=i)
                     cache = os.path.join(d, f"cache-{mode}-{i}")
+                    n0, c0 = log_lines(slog), server_cpu(base)
                     r = client(base, d, xet, "download", f"bench/base-{i}", "model.safetensors", cache)
                     record("hf", "download_s", f"pico2peta-{mode}", r["s"], "s", run=i)
+                    record("hf", "download_server_s", f"pico2peta-{mode}", busy(server_intervals(slog, n0)), "s", run=i)
+                    record("hf", "download_client_cpu_s", f"pico2peta-{mode}", r["cpu_s"], "s", run=i)
+                    record("hf", "download_server_cpu_s", f"pico2peta-{mode}", server_cpu(base) - c0, "s", run=i)
                     check("hf", f"download_sha256_{mode}_{i}", r["sha256"] == want)
                     run(["rm", "-rf", cache, os.path.join(d, "hfhome")])
                 if mode == "xet":

@@ -2468,13 +2468,18 @@ pub(crate) fn refresh_derived(git: Arc<GitState>, repo: String, delay: std::time
                 git.graph.persist(&*git.repo, &repo, &nodes)?;
             }
             if git.clone_cache {
-                let mut wants: Vec<Oid> = refs
-                    .iter()
-                    .filter(|r| r.0.starts_with("refs/heads/") || r.0.starts_with("refs/tags/"))
+                // In the order a clone sends them (HEAD's target, then the advertised refs by
+                // name; the first occurrence of each): the walk visits tips in this order, and
+                // each path's first version becomes its delta base, so the order decides the
+                // pack's size (oid order made redis's 11 % bigger than a client's clone). The
+                // cache key does not depend on the order.
+                let mut seen_w: HashSet<Oid> = HashSet::new();
+                let wants: Vec<Oid> = head_target(&refs)
+                    .into_iter()
+                    .chain(refs.iter().filter(|r| r.0.starts_with("refs/heads/") || r.0.starts_with("refs/tags/")))
                     .map(|r| r.1)
+                    .filter(|o| seen_w.insert(*o))
                     .collect();
-                wants.sort();
-                wants.dedup();
                 if !wants.is_empty() && !clone_pack_cached(&git, &repo, &clone_pack_key(view.fmt, &wants))? {
                     // Encode into a drained channel; write_pack spools and stores the pack.
                     let (tx, mut rx) = mpsc::channel::<std::result::Result<Bytes, std::io::Error>>(8);

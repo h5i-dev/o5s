@@ -12,12 +12,14 @@ import sys
 
 BASELINE = {"git": "git-daemon", "oci": "distribution", "pypi": "devpi", "npm": "verdaccio", "maven": "reposilite"}
 # HF: times vs the /v1 reference; family storage vs Xet chunk dedup.
-HF_BASE = {"upload_s": "v1-reference", "download_s": "v1-reference", "family_stored_bytes": "xet-dedup"}
+# Since the PLAN §6.8 HF amendment (2026-11-16): times are judged on server-side busy time; the
+# end-to-end times and the client's CPU are reported untiered.
+HF_BASE = {"upload_server_s": "v1-reference", "download_server_s": "v1-reference", "family_stored_bytes": "xet-dedup"}
 # Measured (tiered) metrics per front; everything else is reported but not tiered.
 TIERED = {
     "git": ["clone_v2_s", "clone_v0_s", "clone_wire_bytes", "fetch10_s", "push_s"],
     "oci": ["push_s", "pull_s", "stored_bytes"],
-    "hf": ["upload_s", "download_s", "family_stored_bytes"],
+    "hf": ["upload_server_s", "download_server_s", "family_stored_bytes"],
     "pypi": ["hot_p50_s", "cold_p50_s", "stored_bytes"],
     "npm": ["hot_p50_s", "cold_p50_s", "stored_bytes"],
     "maven": ["hot_p50_s", "cold_p50_s", "stored_bytes"],
@@ -81,7 +83,7 @@ def main():
         fs = func.get(front, [])
         print(f"| {front} | {sum(1 for _, ok, _ in fs if ok)}/{len(fs)} passed | {verdict.get(front, 'not run')} |")
     # Untiered ratios added after pre-registration (not part of the verdicts).
-    for (f, m, base_sys) in [("git", "first_push_s", "git-daemon")]:
+    for (f, m, base_sys) in [("git", "first_push_s", "git-daemon"), ("hf", "upload_s", "v1-reference"), ("hf", "download_s", "v1-reference")]:
         for (f2, m2, corpus, system), v in sorted(med.items()):
             if (f2, m2) == (f, m) and system.startswith("pico2peta") and (f, m, corpus, base_sys) in med:
                 b = med[(f, m, corpus, base_sys)]

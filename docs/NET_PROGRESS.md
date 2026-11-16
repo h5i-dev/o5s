@@ -391,6 +391,32 @@ The contended run checks that no update is lost: the final version equals the nu
   - `GET /v1/objects/<h>?verify=strict|eof` calls `open_verified`. `eof` gets 403 unless the repo allows it, and a bad value gets 400. With no parameter, the plain `open` follows `[read] verify`, so strict is the default by construction.
   - `RemoteRepo::open_verified` sends the parameter. Test `read_verify_parameter_follows_repo_policy`.
 - **H3 (no-regression rerun), 2026-11-16: waiting for the bench windows.** H3 runs on demo 9f3ee03, which has both sessions' H2. The core's windows run first (suite, §6.4, Exp3), then net's §6.5 batch (windows A and B), compared against `bench/results/fronts-baseline-pre-h5i-ranges.md`. A 1-run harness smoke of hf/oci/npm/pypi on the H2 build passed all 14 functional checks; it is not counted as H3 numbers.
+- **H4 (net: Xet/LFS), 2026-11-16, in progress. Dev checks only** (`bench/fronts/hf_split.py`: the client's wall and CPU time, and the server's busy time from its response log, per operation; run 2 is the bench's median case, a re-upload of the same file).
+
+  | op (270 MB model) | client wall | client CPU | server busy | `/v1` | 1.2× target |
+  |---|---|---|---|---|---|
+  | Xet upload | 1.74 s | 1.87 s | 0.37 s (xorbs 0.35, shard 0.01) | 0.257 s | 0.31 s |
+  | Xet download | 0.43 s | 0.40 s | ~0.02 s* | 0.294 s | 0.35 s |
+  | LFS upload | 0.54 s | 0.37 s | 0.33 s | 0.257 s | 0.31 s |
+  | LFS download | 0.76 s | 0.75 s | ~0.01 s* | 0.294 s | 0.35 s |
+
+  \* until the response starts; the streamed body is not in the access log.
+  - **The targets, as defined, are below the client's own floor.** The client (`huggingface_hub` and `hf_xet`) spends that CPU in its own process, whatever the server does:
+    - Xet upload: 1.87 s of chunking, hashing and LZ4. On 4 cores that is ≥ 0.47 s, i.e. ≥ 1.8× `/v1` with a zero-time server; measured, the client-only part is ~1.2 s.
+    - Downloads are client-bound (wall ≈ client CPU): reconstruction for Xet, Python streaming and hashing for LFS.
+    - Only Xet download is near (floor ~1.37×).
+    - Reported to the human with these numbers; the server side keeps being reduced toward `/v1` parity.
+  - **Human decision (2026-11-16):** judge server-side busy time against `/v1` (≤ 1.2×); report client wall and CPU as informational (PLAN §6.8 HF amendment, drafted).
+    - The server now logs `response body done` with the time since the request came in, so streamed bodies count. `hf_split.py` and `hf_bench.py` record `*_server_s` (busy) and `*_server_cpu_s` (server process CPU) per operation, `/v1` included.
+    - Server busy, run 2: Xet upload 0.10 s; Xet download 0.30 s; LFS upload 0.38 s; LFS download 0.67 s.
+    - **Open question to the human:** a download's busy interval lasts until the client has read the body, so it measures the reader. `huggingface_hub`'s LFS download is CPU-bound at 0.69 s, while curl on the same URL takes 0.258 s (`/v1` 0.251 s, 1.03×). Options: keep the busy interval; judge downloads on server CPU; or replay the requests with a fast reader.
+  - **Open before the final batch (2026-11-16, dev A/B on one host):**
+    - **`/v1` GET +25 %:** a733d8e 0.248–0.258 s and 9aba438 0.248–0.253 s, against 0.310–0.321 s after core's d6bfd5f (parallel whole-object BLAKE3 for verified reads). PUT is unchanged. Sent to the core with the binaries and script.
+    - **LFS upload, server busy:** 0.372 s against `/v1` PUT 0.242 s (1.54×). Without the `hf/` Xet-chunker profile it is ~0.27 s. The Xet chunker runs at 1.42 GB/s (FastCDC 1.98), on the store's serial put thread with the whole-object BLAKE3; a 4-way unrolled gear loop gave no gain and was reverted. Proposed to the core: speculative parallel Xet chunking in `put_stream` (byte-identical cuts, proptested), or the whole-object hash off the chunker's thread.
+  - **Done:**
+    - A Xet xorb POST for an already-stored xorb drains the body unbuffered (0.35 → 0.08–0.13 s on a re-upload).
+    - The H3-found background-walk interference is gone (core's eb357b9 scheduling): LFS upload 0.80–0.92 → 0.54–0.62 s.
+    - A Xet shard for an already-stored file only registers it (shard POST 0.72 → 0.007 s on a re-upload).
 - **H4 plan (net: Xet/LFS front), starts only after H3 passes.** Baseline (pre-h5i), against `/v1`'s 0.257 s upload and 0.294 s download of the 270 MB model: Xet upload 1.967 s (7.66×), Xet download 0.457 s (1.56×), LFS upload 0.533 s (2.08×), LFS download 0.689 s (2.35×). The timer is `huggingface_hub.upload_file`/`hf_hub_download`, so it includes the client's own work (hf_xet's CDC chunking, hashing and LZ4 compression on upload), which `/v1` does not do.
   1. First, split the time: per-request server time (xorb POST, shard POST, LFS PUT/GET; a tracing span plus the access log) against the client's wall clock, and `perf record --no-buildid-cache` of the server during an upload. That shows how much of the 7.66× is reachable from the server at all. If the client's floor exceeds 1.2× of `/v1`, report it to the human with the numbers instead of claiming the target.
   2. Server suspects on upload, per xorb: LZ4/BG4 decode of every chunk; the keyed chunk hashes; `put_chunked` hashing and compressing the chunks again; then at shard time `put_concat` rereading the bytes for the whole-object hash, plus SHA-256 for the LFS key. Candidates: verify chunk hashes during decode (one pass); store already-compressed chunks without recompressing where the codec allows; do the shard-time whole-object and SHA-256 hashing incrementally at xorb time or in parallel (with core's multi-core BLAKE3 for the whole-object hash).

@@ -2,7 +2,7 @@
 //! `flock /mnt/scratch/pico2peta/bench.lock target/release/chunk-bench`).
 //! Reports GB/s for 1 thread and 4 threads (each thread chunks its own buffer).
 
-use pico2peta_chunk::{Chunker, FastCdcChunker, XetChunker};
+use pico2peta_chunk::{Chunker, FastCdcChunker, XetChunker, xet_lengths_parallel};
 use std::time::Instant;
 
 fn data(n: usize, seed: u64) -> Vec<u8> {
@@ -56,5 +56,19 @@ fn main() {
         let (g1, avg1) = best(1);
         let (g4, _) = best(4);
         println!("{name:<28} 1 thread {g1:5.2} GB/s   4 threads {g4:5.2} GB/s   mean chunk {avg1} B");
+    }
+    // One stream chunked on several threads (byte-identical to the serial chunker).
+    let one = &bufs[0];
+    let serial = pico2peta_chunk::chunk_lengths(&mut XetChunker::new(), one);
+    for threads in [2usize, 3, 4] {
+        let mut best = 0.0f64;
+        for _ in 0..3 {
+            let t = Instant::now();
+            let got = xet_lengths_parallel(one, threads);
+            let g = one.len() as f64 / t.elapsed().as_secs_f64() / 1e9;
+            assert_eq!(got, serial, "parallel xet chunking differs");
+            best = best.max(g);
+        }
+        println!("xet one stream, {threads} threads   {best:5.2} GB/s (identical cuts)");
     }
 }

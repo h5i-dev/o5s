@@ -20,7 +20,7 @@ set_option maxRecDepth 2048
 namespace pico2peta_net_kernel
 
 /-- [h5i_app_std::authz::Guarded]
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 21:0-21:19
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 21:0-21:19
     Name pattern: [h5i_app_std::authz::Guarded]
     Visibility: public -/
 @[discriminant isize, rust_type "h5i_app_std::authz::Guarded"]
@@ -29,7 +29,7 @@ inductive h5i_app_std.authz.Guarded (E : Type) where
 | Denied : h5i_app_std.authz.Guarded E
 
 /-- Trait declaration: [h5i_app_std::authz::Transition]
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 31:0-31:38
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 31:0-31:38
     Name pattern: [h5i_app_std::authz::Transition]
     Visibility: public -/
 @[rust_trait "h5i_app_std::authz::Transition"]
@@ -40,7 +40,7 @@ structure h5i_app_std.authz.Transition (Self : Type) (A : Type) (S : Type) (C :
   kernel_apply : S → alloc.vec.Vec W → Result S
 
 /-- Trait declaration: [h5i_app_std::authz::Policy]
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 39:0-39:28
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 39:0-39:28
     Name pattern: [h5i_app_std::authz::Policy]
     Visibility: public -/
 @[rust_trait "h5i_app_std::authz::Policy"]
@@ -51,7 +51,7 @@ structure h5i_app_std.authz.Policy (Self : Type) (A : Type) (S : Type) (W :
   stored : S → D → Result Bool
 
 /-- Trait declaration: [h5i_app_std::authz::Disclose]
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 53:0-53:21
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 53:0-53:21
     Name pattern: [h5i_app_std::authz::Disclose]
     Visibility: public -/
 @[rust_trait "h5i_app_std::authz::Disclose"]
@@ -59,7 +59,7 @@ structure h5i_app_std.authz.Disclose (Self : Type) (D : Type) where
   disclosed : Self → Result (alloc.vec.Vec D)
 
 /-- [h5i_app_std::authz::prefix]: loop body 0:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 61:4-64:5
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 61:4-64:5
     Name pattern: [h5i_app_std::authz::prefix]
     Visibility: public -/
 @[rust_loop_body, rust_fun "h5i_app_std::authz::prefix"]
@@ -83,7 +83,7 @@ def h5i_app_std.authz.prefix_loop.body
   else ok (done out)
 
 /-- [h5i_app_std::authz::prefix]: loop 0:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 61:4-64:5
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 61:4-64:5
     Name pattern: [h5i_app_std::authz::prefix]
     Visibility: public -/
 @[rust_loop, rust_fun "h5i_app_std::authz::prefix"]
@@ -98,7 +98,7 @@ def h5i_app_std.authz.prefix_loop
     (out, i)
 
 /-- [h5i_app_std::authz::prefix]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 58:0-58:56
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 58:0-58:56
     Name pattern: [h5i_app_std::authz::prefix]
     Visibility: public -/
 @[reducible, rust_fun "h5i_app_std::authz::prefix"]
@@ -111,7 +111,7 @@ def h5i_app_std.authz.prefix
     0#usize
 
 /-- [h5i_app_std::authz::check_writes]: loop body 0:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 85:4-93:1
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 75:4-83:1
     Name pattern: [h5i_app_std::authz::check_writes]
     Visibility: public -/
 @[rust_loop_body, rust_fun "h5i_app_std::authz::check_writes"]
@@ -138,7 +138,7 @@ def h5i_app_std.authz.check_writes_loop.body
   else ok (done true)
 
 /-- [h5i_app_std::authz::check_writes]: loop 0:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 85:4-93:1
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 75:4-83:1
     Name pattern: [h5i_app_std::authz::check_writes]
     Visibility: public -/
 @[rust_loop, rust_fun "h5i_app_std::authz::check_writes"]
@@ -156,7 +156,7 @@ def h5i_app_std.authz.check_writes_loop
     i
 
 /-- [h5i_app_std::authz::check_writes]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 69:0-83:9
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 69:0-73:9
     Name pattern: [h5i_app_std::authz::check_writes]
     Visibility: public -/
 @[reducible, rust_fun "h5i_app_std::authz::check_writes"]
@@ -172,7 +172,7 @@ def h5i_app_std.authz.check_writes
     PolicyInst actor s ws 0#usize
 
 /-- [h5i_app_std::authz::shown]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 96:0-96:80
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 86:0-86:80
     Name pattern: [h5i_app_std::authz::shown]
     Visibility: public -/
 @[rust_fun "h5i_app_std::authz::shown"]
@@ -187,7 +187,7 @@ def h5i_app_std.authz.shown
   else ok false
 
 /-- [h5i_app_std::authz::check_reads]: loop body 0:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 111:4-120:1
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 96:4-103:1
     Name pattern: [h5i_app_std::authz::check_reads]
     Visibility: public -/
 @[rust_loop_body, rust_fun "h5i_app_std::authz::check_reads"]
@@ -215,7 +215,7 @@ def h5i_app_std.authz.check_reads_loop.body
   else ok (done true)
 
 /-- [h5i_app_std::authz::check_reads]: loop 0:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 111:4-120:1
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 96:4-103:1
     Name pattern: [h5i_app_std::authz::check_reads]
     Visibility: public -/
 @[rust_loop, rust_fun "h5i_app_std::authz::check_reads"]
@@ -231,7 +231,7 @@ def h5i_app_std.authz.check_reads_loop
     i
 
 /-- [h5i_app_std::authz::check_reads]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 104:0-109:9
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 94:0-94:108
     Name pattern: [h5i_app_std::authz::check_reads]
     Visibility: public -/
 @[reducible, rust_fun "h5i_app_std::authz::check_reads"]
@@ -244,7 +244,7 @@ def h5i_app_std.authz.check_reads
   h5i_app_std.authz.check_reads_loop PolicyInst actor before after ds 0#usize
 
 /-- [h5i_app_std::authz::guard]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 124:0-138:36
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 107:0-111:36
     Name pattern: [h5i_app_std::authz::guard]
     Visibility: public -/
 @[rust_fun "h5i_app_std::authz::guard"]
@@ -277,7 +277,7 @@ def h5i_app_std.authz.guard
     ok (core.result.Result.Err (h5i_app_std.authz.Guarded.App e))
 
 /-- Trait declaration: [h5i_app_std::authz::View]
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 158:0-158:23
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 131:0-131:23
     Name pattern: [h5i_app_std::authz::View]
     Visibility: public -/
 @[rust_trait "h5i_app_std::authz::View"]
@@ -287,7 +287,7 @@ structure h5i_app_std.authz.View (Self : Type) (A : Type) (S : Type) (C : Type)
   view : A → S → Result S
 
 /-- [h5i_app_std::authz::guard_viewed]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 168:0-183:36
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 141:0-156:36
     Name pattern: [h5i_app_std::authz::guard_viewed]
     Visibility: public -/
 @[rust_fun "h5i_app_std::authz::guard_viewed"]
@@ -1068,7 +1068,7 @@ def access.Write.Insts.CoreCloneClone : core.clone.Clone access.Write := {
 }
 
 /-- [pico2peta_net_kernel::guarded_transition]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 239:8-245:9
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 212:8-218:9
     Visibility: public -/
 def guarded_transition
   (actor : access.Principal) (s : access.Snapshot) (cmd : access.Command) :
@@ -1083,7 +1083,7 @@ def guarded_transition
     cmd
 
 /-- [pico2peta_net_kernel::read_only]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 248:8-250:9
+    Source: '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/h5i-app-std-0.5.5/src/authz.rs', lines 221:8-223:9
     Visibility: public -/
 def read_only (cmd : access.Command) : Result Bool := do
   access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.read_only

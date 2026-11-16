@@ -8,7 +8,7 @@ requests count once), split by route. The rest is the client's own work and the 
 usage: hf_split.py <pico2peta-server binary>      (run under the bench lock)
 """
 import datetime, json, os, sys, tempfile
-from common import SCRATCH, pico_server, run
+from common import SCRATCH, busy, log_lines, pico_server, run, server_cpu, server_intervals
 from hf_bench import BASE, REPO_TOML, client
 
 ROUTES = (("xorb_post", "/v1/xorbs/"), ("shard_post", "/v1/shards"), ("xorb_get", "/xorb/"),
@@ -23,37 +23,13 @@ def route(path):
     return "other"
 
 
-def intervals(log_path):
-    """(start, end, route) of every finished request, in epoch seconds."""
-    out = []
-    for line in open(log_path, errors="replace"):
-        try:
-            e = json.loads(line)
-        except ValueError:
-            continue
-        f = e.get("fields", {})
-        if f.get("message") != "finished processing request":
-            continue
-        lat = str(f.get("latency", ""))
-        if not lat.endswith("μs") and not lat.endswith("µs"):
-            continue
-        us = float(lat.split()[0])
-        end = datetime.datetime.fromisoformat(e["timestamp"].replace("Z", "+00:00")).timestamp()
-        span = e.get("span", {}) or {}
-        out.append((end - us / 1e6, end, route(span.get("path", ""))))
-    return out
+def intervals(log_path, start_line=0):
+    return [(a, b, route(p) if route(p) != "other" else "other:" + "/".join(p.split("/")[:4]))
+            for a, b, p in server_intervals(log_path, start_line)]
 
 
 def union(iv):
-    total, cur = 0.0, None
-    for s, e in sorted(iv):
-        if cur and s <= cur[1]:
-            cur[1] = max(cur[1], e)
-        else:
-            if cur:
-                total += cur[1] - cur[0]
-            cur = [s, e]
-    return total + (cur[1] - cur[0] if cur else 0.0)
+    return busy(iv)
 
 
 def main():
@@ -64,17 +40,20 @@ def main():
             p2p = os.path.join(d, f"p2p-{mode}")
             os.makedirs(p2p)
             with pico_server(p2p, server_bin, repo_toml=REPO_TOML, log_format="json", log_filter="info") as (base, _):
-                for op, args in (("upload", ("upload", "bench/split", BASE, "model.safetensors")),
-                                 ("download", ("download", "bench/split", "model.safetensors", os.path.join(d, f"cache-{mode}")))):
+                runs = [(f"{op}{i}", args) for i in range(2) for op, args in (
+                    ("upload", ("upload", f"bench/split{i}", BASE, "model.safetensors")),
+                    ("download", ("download", f"bench/split{i}", "model.safetensors", os.path.join(d, f"cache-{mode}-{i}"))))]
+                for op, args in runs:
                     log = os.path.join(p2p, "server.log")
-                    seen = len(intervals(log))
+                    seen, c0 = log_lines(log), server_cpu(base)
                     r = client(base, d, xet, *args)
-                    iv = intervals(log)[seen:]
+                    scpu = server_cpu(base) - c0
+                    iv = intervals(log, seen)
                     by = {}
                     for s, e, rt in iv:
                         by.setdefault(rt, []).append((s, e))
-                    print(json.dumps({"mode": mode, "op": op, "client_s": round(r["s"], 3),
-                                      "server_busy_s": round(union([(s, e) for s, e, _ in iv]), 3),
+                    print(json.dumps({"mode": mode, "op": op, "client_s": round(r["s"], 3), "client_cpu_s": round(r.get("cpu_s", 0), 3),
+                                      "server_busy_s": round(union([(s, e) for s, e, _ in iv]), 3), "server_cpu_s": round(scpu, 3),
                                       "requests": len(iv),
                                       "by_route": {k: {"n": len(v), "busy_s": round(union(v), 3)} for k, v in sorted(by.items())}}),
                           flush=True)

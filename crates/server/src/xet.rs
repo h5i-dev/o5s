@@ -458,6 +458,20 @@ pub(crate) fn put_shard(hf: &HfState, repo: &RepoId, body: &[u8]) -> Result<usiz
         if file_hash(&chunk_list) != f.hash {
             return Err(bad("file hash does not match its chunks"));
         }
+        // Already stored (a re-upload of the same file, verified when it was first stored): the
+        // record for this file hash, with the shard's sha256 and length, and its content still
+        // present. Only this repository's LFS registration is new; nothing is read again.
+        let want = to_hex(&sha);
+        if let Some(v) = hf.xetfile.get_live_blocking(&f.hash)?
+            && v.aux == total
+            && let Some(rec) = FileRecord::decode(&hf.git_repo().get(&v.hash, None)?)
+            && rec.file_hash == f.hash
+            && rec.sha256 == sha_bytes(&want)?
+            && hf.git_repo().size(&rec.content).ok() == Some(total)
+        {
+            hf.register_lfs(repo, &want, rec.content, total)?;
+            continue;
+        }
         // Rebuild the file into a core object while hashing it.
         // The file is the concatenation of xorb ranges the store already holds, chunk-aligned:
         // put_concat reuses their chunks, reading the bytes once for the object hash and, via
@@ -483,7 +497,6 @@ pub(crate) fn put_shard(hf: &HfState, repo: &RepoId, body: &[u8]) -> Result<usiz
         })?;
         // The shard stores sha256 as a DataHash built with `from_be_bytes`: its word-wise hex
         // is the ordinary sha256 hex.
-        let want = to_hex(&sha);
         if got != want || n != total {
             return Err(bad(format!("file content is sha256 {got}, shard says {want}")));
         }

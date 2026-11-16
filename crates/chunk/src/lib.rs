@@ -36,6 +36,124 @@ pub fn chunk_lengths(c: &mut dyn Chunker, data: &[u8]) -> Vec<usize> {
     out
 }
 
+/// The chunk lengths of `data` exactly as one [`XetChunker`] gives them (update + finish), on up
+/// to `threads` threads.
+///
+/// Each 8 MiB segment is chunked speculatively from a fresh state on a worker. The true
+/// chunking then runs from its last cut until it produces a cut that the segment's speculative
+/// run also produced, and adopts the rest of that run. This is exact because the chunker's state
+/// after a cut is always the fresh state: from a common cut on, both runs make the same cuts.
+/// Without a common cut (e.g. data with no natural boundaries), it just continues serially.
+pub fn xet_lengths_parallel(data: &[u8], threads: usize) -> Vec<usize> {
+    xet_lengths_parallel_seg(data, threads, 8 << 20)
+}
+
+fn feed(c: &mut XetChunker, data: &[u8], from: usize, to: usize, base: &mut usize, cuts: &mut Vec<usize>) {
+    let mut out = Vec::new();
+    c.update(&data[from..to], &mut out);
+    for l in out {
+        *base += l;
+        cuts.push(*base);
+    }
+}
+
+fn xet_lengths_parallel_seg(data: &[u8], threads: usize, seg: usize) -> Vec<usize> {
+    let n = data.len();
+    if threads <= 1 || seg == 0 || n < 2 * seg {
+        return chunk_lengths(&mut XetChunker::new(), data);
+    }
+    let nseg = n.div_ceil(seg);
+    // Speculative cut positions (absolute) of segments 1.., each run over its segment plus
+    // `XET_MAX` (enough to reach a common cut in the usual case).
+    let jobs: Vec<usize> = (1..nseg).collect();
+    let mut spec: Vec<Vec<usize>> = vec![Vec::new(); nseg];
+    std::thread::scope(|sc| {
+        let per = jobs.len().div_ceil(threads).max(1);
+        let hs: Vec<_> = jobs
+            .chunks(per)
+            .map(|ks| {
+                sc.spawn(move || {
+                    ks.iter()
+                        .map(|&k| {
+                            let (s, e) = (k * seg, ((k + 1) * seg + XET_MAX).min(n));
+                            let mut out = Vec::new();
+                            XetChunker::new().update(&data[s..e], &mut out);
+                            let mut p = s;
+                            let abs: Vec<usize> = out
+                                .into_iter()
+                                .map(|l| {
+                                    p += l;
+                                    p
+                                })
+                                .collect();
+                            (k, abs)
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for h in hs {
+            // A worker that panicked leaves its segments to the serial run.
+            if let Ok(v) = h.join() {
+                for (k, cs) in v {
+                    spec[k] = cs;
+                }
+            }
+        }
+    });
+    let mut cuts: Vec<usize> = Vec::new();
+    let mut c = XetChunker::new();
+    // `fed`: bytes the true chunker has consumed; `base`: its last cut (where its state began).
+    let (mut fed, mut base) = (0usize, 0usize);
+    for (k, sp) in spec.iter().enumerate().skip(1) {
+        let s = k * seg;
+        if fed < s {
+            feed(&mut c, data, fed, s, &mut base, &mut cuts);
+            fed = s;
+        }
+        if sp.is_empty() {
+            continue;
+        }
+        let end_k = ((k + 1) * seg + XET_MAX).min(n);
+        let mut hit = (fed == base && sp.binary_search(&base).is_ok()).then_some(base);
+        while hit.is_none() && fed < end_k {
+            let to = (fed + XET_MAX).min(end_k);
+            let before = cuts.len();
+            feed(&mut c, data, fed, to, &mut base, &mut cuts);
+            fed = to;
+            hit = cuts[before..].iter().copied().find(|x| sp.binary_search(x).is_ok());
+        }
+        if let Some(h) = hit {
+            // From the common cut `h` on, the speculative cuts are the true ones.
+            while cuts.last().is_some_and(|&x| x > h) {
+                cuts.pop();
+            }
+            let i = sp.partition_point(|&x| x <= h);
+            cuts.extend_from_slice(&sp[i..]);
+            base = cuts.last().copied().unwrap_or(0).max(h);
+            fed = base;
+            c = XetChunker::new();
+        }
+    }
+    if fed < n {
+        feed(&mut c, data, fed, n, &mut base, &mut cuts);
+    }
+    let mut tail = Vec::new();
+    c.finish(&mut tail);
+    for l in tail {
+        base += l;
+        cuts.push(base);
+    }
+    let mut prev = 0;
+    cuts.into_iter()
+        .map(|x| {
+            let l = x - prev;
+            prev = x;
+            l
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Xet
 // ---------------------------------------------------------------------------
@@ -250,6 +368,37 @@ mod tests {
                 (x >> 24) as u8
             })
             .collect()
+    }
+
+    #[test]
+    fn xet_parallel_equals_serial() {
+        // Seams every `seg` bytes, random and low-entropy data, several thread counts.
+        for (n, seed) in [(3_000_000usize, 1u64), (1_234_567, 2), (900_000, 3)] {
+            let d = data(n, seed);
+            let want = chunk_lengths(&mut XetChunker::new(), &d);
+            for seg in [131_072usize, 200_000, 333_333, 1 << 20] {
+                for threads in [2usize, 3, 4] {
+                    assert_eq!(xet_lengths_parallel_seg(&d, threads, seg), want, "n={n} seg={seg} t={threads}");
+                }
+            }
+        }
+        let zeros = vec![0u8; 2_000_000];
+        let want = chunk_lengths(&mut XetChunker::new(), &zeros);
+        assert_eq!(xet_lengths_parallel_seg(&zeros, 4, 150_000), want);
+        let mut mixed = data(2_500_000, 9);
+        mixed[400_000..900_000].fill(7);
+        let want = chunk_lengths(&mut XetChunker::new(), &mixed);
+        assert_eq!(xet_lengths_parallel_seg(&mixed, 3, 250_000), want);
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(48))]
+        #[test]
+        fn xet_parallel_equals_serial_prop(n in 0usize..1_500_000, seed in 0u64..1000, seg in 1usize..400_000, threads in 1usize..5, run in 0usize..300_000) {
+            let mut d = data(n, seed);
+            if n > 0 { let a = (seed as usize * 7919) % n; let b = (a + run).min(n); d[a..b].fill((seed & 0xff) as u8); }
+            proptest::prop_assert_eq!(xet_lengths_parallel_seg(&d, threads, seg), chunk_lengths(&mut XetChunker::new(), &d));
+        }
     }
 
     /// Straight transcription of the spec's pseudocode (no skip-ahead), as an oracle.

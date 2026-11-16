@@ -136,6 +136,16 @@ class Proc:
         self.log.close()
 
 
+# Base URL -> pid of each running pico_server (for `server_cpu`).
+SERVER_PIDS = {}
+
+
+def server_cpu(base):
+    """CPU seconds (user + system, all threads) the server at `base` has used so far."""
+    f = open(f"/proc/{SERVER_PIDS[base]}/stat").read().rsplit(")", 1)[1].split()
+    return (int(f[11]) + int(f[12])) / os.sysconf("SC_CLK_TCK")
+
+
 @contextlib.contextmanager
 def pico_server(d, server_bin, extra_toml="", repo_toml="", principal="bench", log_format="text", log_filter="warn"):
     """A pico2peta-server in d with one admin token. Yields (base_url, repo_path). Its log is
@@ -186,6 +196,7 @@ filter = "{log_filter}"
     p = Proc([server_bin, "serve", "--config", path], log_path=os.path.join(d, "server.log"))
     try:
         wait_port(port)
+        SERVER_PIDS[f"http://127.0.0.1:{port}"] = p.p.pid
         yield f"http://127.0.0.1:{port}", repo
     finally:
         p.stop()
@@ -249,3 +260,44 @@ class CountingProxy:
 
     def close(self):
         self.sock.close()
+
+
+def server_intervals(log_path, start_line=0):
+    """(start, end, path) of every request whose response finished in the server's JSON log from
+    `start_line`: from when the request came in to when its response body was dropped (fully
+    sent), so streamed bodies count, not just the time to the first byte. Written by the
+    server's `response body done` event (PLAN §6.8 HF amendment, 2026-11-16).
+    """
+    import datetime
+    out = []
+    for line in open(log_path, errors="replace").read().splitlines()[start_line:]:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        f = e.get("fields", {})
+        if f.get("message") != "response body done" or "elapsed_us" not in f:
+            continue
+        ts = datetime.datetime.fromisoformat(e["timestamp"].replace("Z", "+00:00")).timestamp()
+        out.append((ts - int(f["elapsed_us"]) / 1e6, ts, str(f.get("path", ""))))
+    return out
+
+
+def log_lines(log_path):
+    try:
+        return sum(1 for _ in open(log_path, errors="replace"))
+    except OSError:
+        return 0
+
+
+def busy(intervals):
+    """The union of the intervals' lengths (overlapping requests count once)."""
+    total, cur = 0.0, None
+    for s, e, *_ in sorted(intervals):
+        if cur and s <= cur[1]:
+            cur[1] = max(cur[1], e)
+        else:
+            if cur:
+                total += cur[1] - cur[0]
+            cur = [s, e]
+    return total + (cur[1] - cur[0] if cur else 0.0)

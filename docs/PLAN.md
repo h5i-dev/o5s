@@ -625,3 +625,22 @@ metric still regresses, it is a real regression, found and fixed before H4, not 
 3. **Redis A3 peak RSS (Exp3).** The redis A3 build (`exp3 run <redis work dir> a3 4 10000`), **3 reps** each
    with the baseline and the H3 `exp3` binary, interleaved. The verdict compares the two medians of
    `peak_rss_kb` against the §6.8 allowance: max(3 %, the baseline binary's range in these 3 reps).
+
+**Amendment 2026-11-16 (human ruling, H4 HF target; written before the final batch).** For HF, the §6.5
+upload and download times and the H4 target (≤ 1.2× the `/v1` reference) are judged on **server-side busy
+time**, not on the client's wall time. The reason: dev checks showed that the real client's own CPU
+(`huggingface_hub` and `hf_xet`: chunking, hashing, LZ4, reconstruction, SHA-256) is above the target even
+with a zero-time server (NET_PROGRESS, H4).
+- **Measured.** The same file bytes for each operation, Xet upload, Xet download, LFS upload and LFS
+  download, compared with `/v1` PUT and GET of the same file. Medians of 3 runs, as before.
+- **Server-side busy time.** The union over the operation of each request's interval on the server. A
+  request starts when it is received and ends when its response body has been fully sent (the
+  end-of-stream event), so streamed download bodies count, not just time to first byte. Overlapping
+  requests count once. It is computed from the server's response log exactly as in
+  `bench/fronts/hf_split.py`, for the HF operations and for the `/v1` reference alike.
+- **Verdict.** Per operation, H4 meets its target when the server busy time is ≤ 1.2× `/v1`'s. The §6.5
+  tiers apply to the same ratio (STRONG PASS ≤ 1.00×, PASS ≤ 1.25×).
+- **Informational rows (not judged against the H4 target).** End-to-end client wall time and client CPU
+  (`getrusage`, all threads) per operation, next to `/v1`'s wall time. The baseline's end-to-end rows stay as
+  recorded. The new server-side rows have no pre-h5i baseline. This amendment does not change how §6.8
+  treats the end-to-end rows.
