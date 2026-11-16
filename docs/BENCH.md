@@ -270,8 +270,8 @@ repack, `gc` with `repack_all`, zero grace):
 - Level 1 is about 12 % faster end to end in `put_many` (median of 3) for +6.3 % bytes until GC. A full
   similarity repack erases the difference (level-19 frames).
 - A *normal* GC doesn't rewrite fully live packs, so the default stays 3.
-- The opt-in recipe is `init --zstd-level 1` plus a periodic `gc --repack-all` (new in the CLI). Making it the
-  default is a question for the human (PROGRESS.md).
+- The opt-in recipe is `init --zstd-level 1` plus a periodic `gc --repack-all` (new in the CLI). The human decided
+  (2026-11-16) that level 3 stays the default, with no pack-marker format change for now; the recipe stays opt-in.
 - Level −1 is not faster than 1 on these objects.
 
 ## 2026-11-15: scale tests (PLAN §6.7), window 1

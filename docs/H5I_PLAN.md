@@ -19,7 +19,7 @@ A hand-written Lean model plus a differential test against the Rust is **worth n
    - A regression is a FAIL. Fix it before RC. Don't rationalize it.
 
 ## Phase H1: learn h5i-app (both sessions, read-only)
-- Source: `/mnt/scratch/ec2-user/h5i-src` (h5i 0.5.5; `crates/h5i-app*`, `docs/design/design-app*.md`, especially `design-app-trust.md` and `design-app-authz.md`, and the examples in `examples/app/*`, especially `calculator/TUTORIAL.md`).
+- Source, as read-only documentation only: `/mnt/scratch/ec2-user/h5i-src`. It is an unreleased commit (5dd7e3a): never depend on it by path. Builds use crates.io `=0.5.5` and the official v0.5.5 CLI (`verify/core/README.md`, Toolchain). (h5i 0.5.5; `crates/h5i-app*`, `docs/design/design-app*.md`, especially `design-app-trust.md` and `design-app-authz.md`, and the examples in `examples/app/*`, especially `calculator/TUTORIAL.md`).
 - Tools are already built:
   - `/mnt/scratch/ec2-user/bin/{h5i,charon,aeneas}`, with the env in `/mnt/scratch/ec2-user/env.sh`. Don't source it wholesale; it redirects `CARGO_TARGET_DIR`.
   - Lean packages are prebuilt for Lean 4.31 under `/mnt/scratch/ec2-user/lake/arith/packages/` (`h5i_app_lib`, `aeneas`, mathlib, ...). Use them by local path; don't download or rebuild.
@@ -59,3 +59,13 @@ Rerun every benchmark in BASELINE.md, same protocol, in announced bench windows.
    - **net: Xet front.** Upload is 7.66× and download 1.56× the `/v1` reference; LFS is 2.08×/2.35×. Target ≤ 1.2× for each.
    - **core: multi-core whole-object BLAKE3 for verified reads,** e.g. BLAKE3 subtree hashing over large windows in parallel, so a stream's whole-object hash keeps up with decode. It must produce exactly the serial hash: prove or proptest that equality, and keep the `strict` semantics. Targets: §6.4 verified read ≥ 0.50× `cat` (now 0.18×), and OCI pull ≤ 1.0× Distribution (now 1.99×).
 4. Then release prep and `v0.1.0-rc.1`.
+
+## Re-plan (from the human, 2026-11-16 11:40): H4 before any further H3
+The H3 run already done on the local h5i checkout counts. It is effectively v0.5.5, so repeating H3 or `h5i app mutate` just because of the crates.io switch is wasted time.
+1. **v0.5.5 switch:** build, `h5i app prove` (the proofs must still check), gate, push. No `mutate` rerun and no H3 rerun.
+2. **H4 now:**
+   - **core:** multi-core whole-object BLAKE3 for verified reads, exactly equal to the serial hash (proptest), with the `strict` semantics kept. Also the reach-drain scheduling answer net is waiting on (back-to-back re-push slowdown).
+   - **net:** the Xet and LFS front, ≤ 1.2× the `/v1` reference.
+   - Development checks only.
+3. **One final batch** after H4, judged against BASELINE.md with the §6.8 rule. It serves as the no-regression check and as the H4 result. Include the controlled re-measurement of the three H3 FAILs in that batch.
+4. Release prep and `v0.1.0-rc.1`.
