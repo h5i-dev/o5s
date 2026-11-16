@@ -15,7 +15,20 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
   argument order).
 - **Object reads by hash are authorized by reachability** (with net's authz kernel): a principal reads an object
   only if a name it may read reaches it. An object that no name references is not readable through the server,
-  so `put` then `get` by hash needs a name first. The core building block is `pico2peta_repo::reach`.
+  so `put` then `get` by hash needs a name first. The core building block is `pico2peta_repo::reach`:
+  - commits never traverse; created names queue their targets for a background worker, and a query settles its
+    cell first, so answers are exact;
+  - deletes and moves still revoke at once (the cell is recomputed by its next query);
+  - the walk skips the tracer on chunk edges and keeps a separate traced set, so a hash that is both a chunk and
+    a front object is still traced; GC's mark uses the same rule.
+- **h5i v0.5.5 everywhere:** every h5i crate comes from crates.io, pinned `=0.5.5`; the CLI is the official v0.5.5
+  release; Lean `h5i_app_lib` stays at the v0.5.5 tag (`verify/core/README.md`, Toolchain).
+
+### Performance (H4)
+- **Verified reads hash the whole object on several cores** (`pico2peta_pack::phash`): 1 MiB segments are hashed
+  at their offsets and combined by BLAKE3's tree rule, giving exactly the serial hash (proptested). `strict` is
+  unchanged, and the extra threads engage only when hashing is the bottleneck. On a 4-core host, 64 MiB
+  incompressible reads: strict `open` +24 %, eof `open` +50 %; compressible reads are unchanged.
 
 ### Changed (breaking before v0.1)
 - **CLI cleanup (plumbing over a domain-agnostic core).**
