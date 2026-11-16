@@ -1341,3 +1341,45 @@ fn put_chunked_keeps_the_given_boundaries() {
     let tiny = s.put_chunked(&[b"ab", b"cd"]).unwrap();
     assert_eq!(s.get(&tiny, None).unwrap(), b"abcd");
 }
+
+/// Parallel Xet chunking across 32 MiB windows (the last chunk of each window is carried into the
+/// next): the cuts are still exactly the serial chunker's, through readers that return short reads,
+/// at sizes around one window, a window plus a carried tail, and several windows, with a constant
+/// run (max-size cuts) across a window boundary.
+#[test]
+fn put_stream_xet_parallel_windows_cut_exactly_like_serial() {
+    use pico2peta_pack::ChunkerKind;
+    struct Jagged<'a>(&'a [u8], u64);
+    impl std::io::Read for Jagged<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.1 ^= self.1 << 13;
+            self.1 ^= self.1 >> 7;
+            self.1 ^= self.1 << 17;
+            let n = (1 + (self.1 % 300_000) as usize).min(buf.len()).min(self.0.len());
+            buf[..n].copy_from_slice(&self.0[..n]);
+            self.0 = &self.0[n..];
+            Ok(n)
+        }
+    }
+    const W: usize = 32 << 20;
+    for (i, len) in [W - 5, W, W + 1, W + 100_000, 2 * W + 77_777, 3 * W + 1].into_iter().enumerate() {
+        let mut data = pseudo(len, 40 + i as u64);
+        // Constant bytes across the first window boundary: forced max-size cuts there.
+        let (a, b) = (W.saturating_sub(300_000), (W + 300_000).min(len));
+        data[a..b].fill(7);
+        let d = tempfile::tempdir().unwrap();
+        let s = open(d.path(), PackConfig { chunk_threshold: 1 << 20, ..PackConfig::default() });
+        let h = s.put_stream_with(ChunkerKind::Xet, &mut Jagged(&data, 0x9e37 + i as u64)).unwrap();
+        assert_eq!(h, Hash::of(&data));
+        let lens = pico2peta_chunk::chunk_lengths(&mut pico2peta_chunk::XetChunker::new(), &data);
+        let mut off = 0;
+        for l in lens {
+            assert!(
+                s.contains(&Hash::of(&data[off..off + l])).unwrap(),
+                "len {len}: serial chunk {off}+{l} not stored"
+            );
+            off += l;
+        }
+        assert_eq!(s.get(&h, None).unwrap(), data, "len {len}");
+    }
+}
