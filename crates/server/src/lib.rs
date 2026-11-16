@@ -279,10 +279,61 @@ pub fn app(state: Arc<AppState>, request_timeout: Duration) -> axum::Router {
     api::router(state)
         .layer(TimeoutLayer::with_status_code(axum::http::StatusCode::REQUEST_TIMEOUT, request_timeout))
         .layer(CatchPanicLayer::new())
+        .layer(axum::middleware::from_fn(body_timing))
         .layer(trace)
         .layer(SetSensitiveRequestHeadersLayer::new([axum::http::header::AUTHORIZATION]))
         .layer(PropagateRequestIdLayer::new(rid.clone()))
         .layer(SetRequestIdLayer::new(rid, RandomRequestId))
+}
+
+/// With INFO logging: one `response body done` event per request when its response body is
+/// dropped (fully sent, or the connection went away), carrying the time since the request came
+/// in. A request's server-side interval for the HF benchmark (PLAN §6.8 HF amendment): a
+/// streamed download's body counts, not just the time to its first byte.
+async fn body_timing(req: Request<axum::body::Body>, next: axum::middleware::Next) -> axum::response::Response {
+    if !tracing::enabled!(tracing::Level::INFO) {
+        return next.run(req).await;
+    }
+    let start = std::time::Instant::now();
+    let (method, path) = (req.method().to_string(), req.uri().path().to_string());
+    let resp = next.run(req).await;
+    let (parts, body) = resp.into_parts();
+    axum::response::Response::from_parts(parts, axum::body::Body::new(TimedBody { inner: body, start, method, path }))
+}
+
+struct TimedBody {
+    inner: axum::body::Body,
+    start: std::time::Instant,
+    method: String,
+    path: String,
+}
+
+impl http_body::Body for TimedBody {
+    type Data = axum::body::Bytes;
+    type Error = axum::Error;
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<std::result::Result<http_body::Frame<axum::body::Bytes>, axum::Error>>> {
+        std::pin::Pin::new(&mut self.inner).poll_frame(cx)
+    }
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+    fn size_hint(&self) -> http_body::SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+impl Drop for TimedBody {
+    fn drop(&mut self) {
+        tracing::info!(
+            method = %self.method,
+            path = %self.path,
+            elapsed_us = self.start.elapsed().as_micros() as u64,
+            "response body done"
+        );
+    }
 }
 
 /// Serves the ops router (`/metrics`, `/healthz`, `/readyz`) on `listener`

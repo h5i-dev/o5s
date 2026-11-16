@@ -406,7 +406,12 @@ The contended run checks that no update is lost: the final version equals the nu
     - Downloads are client-bound (wall ≈ client CPU): reconstruction for Xet, Python streaming and hashing for LFS.
     - Only Xet download is near (floor ~1.37×).
     - Reported to the human with these numbers; the server side keeps being reduced toward `/v1` parity.
+  - **Human decision (2026-11-16):** judge server-side busy time against `/v1` (≤ 1.2×); report client wall and CPU as informational (PLAN §6.8 HF amendment, drafted).
+    - The server now logs `response body done` with the time since the request came in, so streamed bodies count. `hf_split.py` and `hf_bench.py` record `*_server_s` (busy) and `*_server_cpu_s` (server process CPU) per operation, `/v1` included.
+    - Server busy, run 2: Xet upload 0.10 s; Xet download 0.30 s; LFS upload 0.38 s; LFS download 0.67 s.
+    - **Open question to the human:** a download's busy interval lasts until the client has read the body, so it measures the reader. `huggingface_hub`'s LFS download is CPU-bound at 0.69 s, while curl on the same URL takes 0.258 s (`/v1` 0.251 s, 1.03×). Options: keep the busy interval; judge downloads on server CPU; or replay the requests with a fast reader.
   - **Done:**
+    - A Xet xorb POST for an already-stored xorb drains the body unbuffered (0.35 → 0.08–0.13 s on a re-upload).
     - The H3-found background-walk interference is gone (core's eb357b9 scheduling): LFS upload 0.80–0.92 → 0.54–0.62 s.
     - A Xet shard for an already-stored file only registers it (shard POST 0.72 → 0.007 s on a re-upload).
 - **H4 plan (net: Xet/LFS front), starts only after H3 passes.** Baseline (pre-h5i), against `/v1`'s 0.257 s upload and 0.294 s download of the 270 MB model: Xet upload 1.967 s (7.66×), Xet download 0.457 s (1.56×), LFS upload 0.533 s (2.08×), LFS download 0.689 s (2.35×). The timer is `huggingface_hub.upload_file`/`hf_hub_download`, so it includes the client's own work (hf_xet's CDC chunking, hashing and LZ4 compression on upload), which `/v1` does not do.
