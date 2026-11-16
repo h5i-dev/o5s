@@ -14,6 +14,80 @@ Other modes: `p2p-bench stream <dir> [MiB]` (put_stream only; `P2P_BENCH_NO_PROB
 
 Comparisons against Git storage size are in `docs/EXP1.md` (Experiment 1).
 
+## 2026-11-15: scale tests (PLAN §6.7), window 2
+
+Under the bench lock, load 1.4–2.0. Objects as in window 1 (64-byte distinct objects, one `put` each, `flush`
+every 10⁵).
+
+| N = 10⁷ | window 1 | window 2, before | window 2, after the index hard-link fix |
+|---|---|---|---|
+| put | 188k/s | 187k/s | 201k/s |
+| cold open | 5.97 s | 6.63 s | **3.60 s** |
+| get p50 / p99 | 4.5 / 14.2 µs | 4.2 / 13.7 µs | 3.8 / 13.2 µs |
+| RSS | 1.05 GB (110 B/object) | 1,048 MB | 1,048 MB |
+| of which RssAnon / RssFile | (not measured) | **32 MB (3.4 B/object)** / 1,015 MB | 32 MB / 1,016 MB |
+| disk | | 2.92 GB (292 B/object) | **2.26 GB (226 B/object)** |
+
+**RSS.** The heap is 3.4 B/object, so the ≤ 64 B/object target is met for anonymous memory. Plain RSS
+(110 B/object) is mapped index and MIDX pages: file-backed and reclaimable under memory pressure. The
+pre-registered metric was plain RSS, so it is reported as **missed**; the split above is the analysis.
+
+**Disk, and the 10⁸ run.**
+- The pre-registration projected ≈ 160 B/object. The measured 292 B/object was:
+  - 120 B pack: 64 B of data plus 56 B of record header and CRC;
+  - 66 B pack index;
+  - 66 B for a second copy of that index in `idx-cache`, the verified local cache that gets mapped;
+  - ≈ 40 B MIDX.
+- **Fix:** on a local-file backend the cache entry is now a hard link to the pack index. Pack indexes are
+  content-named and never modified, and the mapped view is checksum-verified either way. A new backend hook,
+  `Backend::local_path`, is `None` for S3, which still copies. The fix saves 66 B/object and also roughly halves
+  cold open, because the first open no longer copies every index. Test:
+  `mapped_index_cache_is_hard_linked_on_local_disk`.
+- **10⁸ was not run.** At 226 B/object it needs ≈ 22.6 GB, and only ≈ 22 GB is available after keeping 5 GB free
+  (27 GB free). By the pre-registered disk rule, that scale is reported as not run. A first attempt at the old
+  292 B/object projection was stopped early, as soon as the 10⁷ disk number showed it could not fit.
+- The bench's disk number now counts each inode once.
+
+## 2026-11-15: put/get pass, part 2: reads (`p2p-bench reads`)
+
+One thread, warm page cache, default config (`chunk_threshold` 1 MiB, so 4 MiB and 64 MiB objects are chunked
+and read through the read-ahead pool). MB/s, two runs each after the change; load 1.3–1.9 (2.8–3.0 before, so
+the before/after columns are only indicative).
+
+| object | `get` before | `get` after | `open` strict after | `open` eof after |
+|---|---|---|---|---|
+| text 4 KiB × 20,000 | 193–234 | 288 | 289 | 290 |
+| text 64 KiB × 2,000 | 408–554 | 387–565 | 528–566 | 495–566 |
+| text 512 KiB × 256 | 410–602 | 571–637 | 599–625 | 593–623 |
+| text 4 MiB × 32 | 733–911 | 630–959 | 753–979 | 971–1,128 |
+| text 64 MiB × 4 | 613–620 | 872–874 | 1,053–1,079 | 1,224–1,239 |
+| random 4 KiB | 499–573 | 730–737 | 766–776 | 763–776 |
+| random 64 KiB | 1,478–1,487 | 1,617–1,618 | 1,633–1,639 | 1,617–1,637 |
+| random 512 KiB | 1,538–1,554 | 1,737–1,747 | 1,642–1,650 | 1,651–1,666 |
+| random 4 MiB | 1,329–1,345 | 1,690–1,700 | 1,689–1,691 | 1,799–1,809 |
+| random 64 MiB | 942–956 | 1,033–1,317 | 1,670–1,966 | 1,568–2,096 |
+
+**Change.**
+- `get` of a whole blob returns the verified record bytes directly. Before, the bytes went through a `Cursor`
+  plus `to_vec` plus `read_to_end`: two copies and the growth reallocations.
+- `open` of a whole blob wraps the Vec without copying it.
+- `get` of a chunked object pre-sizes its buffer.
+- Covered by `whole_and_ranged_reads_of_small_blobs_agree`.
+
+**Findings:**
+- **Small objects are bound by per-record work, not copies.** Raw 4 KiB records cost about 5.3 µs each:
+  index lookup, `pread`, CRC, BLAKE3 verify. zstd 4 KiB records cost about 14 µs; the ~8 µs difference is
+  zstd's per-frame table setup (`ZSTD_buildFSETable`, `HUF_readDTable`) on tiny inputs. GC's similarity frames
+  amortize that over a frame.
+- **Streaming medium/large objects is already parallel.** The read-ahead threads do the zstd decoding (37 % of
+  samples on a 64 MiB text read) and whole-object verification has its own thread (7 %). One stream reads at
+  1–2 GB/s, faster than the fronts' HTTP transfer rates that net reports. So no change was made there before
+  net's OCI/HF profiles point at a core frame.
+- **`get` of 64 MiB stays slower than streaming:** page faults on a fresh 64 MiB Vec. That is inherent to
+  materializing the object, and the fronts stream with `open` anyway.
+- **The `LocalDisk` fstat per cached pack read** (net: ~4.6 % of a cold git fetch) is the deletion check that
+  keeps `ensure_live` GC-safe. It is kept (see SECURITY.md, Races).
+
 ## 2026-11-15: put/get pass for the fronts (human priority), part 1: small-object ingest
 
 **Workload.** The empty-store git push from net's repro: redis heads and tags, 274,683 objects, 9.0 GB of

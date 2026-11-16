@@ -771,6 +771,21 @@ impl PackStore {
         let dir = self.inner.staging_dir.with_file_name("idx-cache");
         fs::create_dir_all(&dir)?;
         let path = dir.join(format!("{name}.idx3"));
+        // On a local-file backend a v3 index is hard-linked, not copied: pack
+        // indexes are content-named and never modified, and the mapped view is
+        // checksum-verified either way (saves the index's size on disk, ~66 B per object).
+        if !path.exists()
+            && let Some(src) = self.inner.backend.local_path(key)
+            && File::open(&src)
+                .and_then(|mut f| {
+                    let mut head = [0u8; 8];
+                    f.read_exact(&mut head).map(|_| head)
+                })
+                .is_ok_and(|h| &h == IDX_MAGIC_V3)
+            && fs::hard_link(&src, &path).is_ok()
+        {
+            fsync_dir(&dir)?;
+        }
         if !path.exists() {
             let tmp = dir.join(format!(".{name}.{}.tmp", unique_id()));
             {
@@ -2248,7 +2263,24 @@ impl ObjectStore for PackStore {
     }
 
     fn get(&self, hash: &Hash, range: Option<Range<u64>>) -> Result<Vec<u8>> {
-        let mut out = Vec::new();
+        // Whole-record fast path: the verified bytes are returned as they are
+        // (no reader, no extra copies). Everything else streams into a buffer
+        // sized up front.
+        let loc = self.lookup(hash)?.ok_or(Error::NotFound(*hash))?;
+        if matches!(loc.kind, Kind::Blob | Kind::Frame3) {
+            let r = check_range(range, loc.raw_len)?;
+            let mut d = self.read_blob(hash, loc)?;
+            if d.len() as u64 != loc.raw_len {
+                return Err(Error::Corrupt(format!("index length disagrees with data for {hash}")));
+            }
+            if r.start == 0 && r.end == loc.raw_len {
+                return Ok(d);
+            }
+            d.truncate(r.end as usize);
+            return Ok(d.split_off(r.start as usize));
+        }
+        let len = check_range(range.clone(), loc.raw_len)?;
+        let mut out = Vec::with_capacity((len.end - len.start).min(1 << 30) as usize);
         self.open(hash, range)?.read_to_end(&mut out).map_err(unwrap_io)?;
         Ok(out)
     }
@@ -2356,11 +2388,15 @@ impl PackStore {
             }
             Kind::Frame | Kind::Frame2 => Err(Error::Corrupt("frame record indexed as an object".into())),
             Kind::Blob | Kind::Frame3 => {
-                let d = self.read_blob(hash, loc)?;
-                let slice = d
-                    .get(r.start as usize..r.end as usize)
-                    .ok_or_else(|| Error::Corrupt(format!("index length disagrees with data for {hash}")))?;
-                Ok(Box::new(std::io::Cursor::new(slice.to_vec())))
+                let mut d = self.read_blob(hash, loc)?;
+                if d.len() as u64 != loc.raw_len {
+                    return Err(Error::Corrupt(format!("index length disagrees with data for {hash}")));
+                }
+                if r.start == 0 && r.end == loc.raw_len {
+                    return Ok(Box::new(std::io::Cursor::new(d))); // no copy for whole reads
+                }
+                d.truncate(r.end as usize);
+                Ok(Box::new(std::io::Cursor::new(d.split_off(r.start as usize))))
             }
             Kind::Manifest => {
                 let pieces = overlapping(self.read_manifest(hash, loc)?, r.start, r.end);
