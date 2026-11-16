@@ -39,10 +39,10 @@ use pico2peta_core::{
     Error, Hash, Name, ObjectStore, Observed, RefValue, ReplaceManyOutcome, ReplaceOutcome, Repository, Result,
 };
 use sha1::{Digest, Sha1};
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::io::{BufReader, Read, Seek, SeekFrom, Write};
+use std::collections::{HashMap, HashSet};
+use std::io::{BufReader, Read, Write};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -152,11 +152,6 @@ impl PackHasher {
     }
 }
 const AGENT: &str = "agent=pico2peta/0.1";
-/// Budget for resolved delta bases kept in memory while indexing a pack.
-const DELTA_CACHE_BYTES: usize = 256 << 20;
-/// Canonical object bytes kept while indexing a pushed pack, until the batched "already
-/// stored?" lookup; objects beyond it are re-resolved if they turn out to be new.
-const KEEP_CANON_BYTES: usize = 256 << 20;
 /// Largest single object accepted in a push.
 const MAX_OBJECT: usize = 1 << 30;
 const MAX_DELTA_DEPTH: usize = 10_000;
@@ -440,8 +435,6 @@ pub(crate) struct View<'a> {
 
 /// A looked-up object: kind, stored object, recorded body length (`None` for this push's).
 pub(crate) type Located = (Kind, Hash, Option<u64>);
-/// A unique object of a received pack: (entry, kind, oid, body length, canonical bytes if kept).
-type PackObj = (usize, Kind, Oid, usize, Option<Vec<u8>>);
 /// One looked-up object of a walk wave: (oid, path, kind, stored object, body length).
 type WaveItem = (Oid, String, Kind, Hash, Option<u64>);
 
@@ -658,8 +651,6 @@ struct Entry {
     size: usize,
     data_off: u64,
     base: Base,
-    /// Filled once resolved.
-    done: Option<(Kind, Oid)>,
 }
 
 fn read_entry_header(r: &mut dyn Read, offset: u64, hash_len: usize) -> Result<(u8, usize, Base, u64)> {
@@ -711,50 +702,6 @@ fn read_entry_header(r: &mut dyn Read, offset: u64, hash_len: usize) -> Result<(
         return Err(bad("object too large"));
     }
     Ok((code, size, base, used))
-}
-
-/// Inflates the zlib stream at `off`; returns `(data, compressed length)`.
-fn inflate_at(f: &mut std::fs::File, off: u64, expect: usize) -> Result<(Vec<u8>, u64)> {
-    f.seek(SeekFrom::Start(off))?;
-    let mut z = flate2::bufread::ZlibDecoder::new(BufReader::with_capacity(64 << 10, &mut *f));
-    // Never trust the declared size for allocation; grow as data arrives.
-    let mut out = Vec::with_capacity(expect.min(1 << 20));
-    (&mut z)
-        .take(expect as u64 + 1)
-        .read_to_end(&mut out)
-        .map_err(|e| Error::Parse(format!("pack inflate at {off}: {e}")))?;
-    if out.len() != expect {
-        return Err(Error::Parse(format!("pack entry at {off}: inflated {} bytes, header says {expect}", out.len())));
-    }
-    // Drain to the end of the zlib stream so total_in is the full compressed length.
-    let mut sink = [0u8; 1];
-    if z.read(&mut sink).map_err(|e| Error::Parse(format!("pack inflate at {off}: {e}")))? != 0 {
-        return Err(Error::Parse(format!("pack entry at {off}: trailing data in zlib stream")));
-    }
-    Ok((out, z.total_in()))
-}
-
-/// Like [`inflate_at`] but discards the output: returns the compressed length.
-/// Used to find entry boundaries without allocating the declared size.
-fn skip_zlib_at(f: &mut std::fs::File, off: u64, expect: usize) -> Result<u64> {
-    f.seek(SeekFrom::Start(off))?;
-    let mut z = flate2::bufread::ZlibDecoder::new(BufReader::with_capacity(64 << 10, &mut *f));
-    let mut buf = [0u8; 64 << 10];
-    let mut total = 0usize;
-    loop {
-        let n = z.read(&mut buf).map_err(|e| Error::Parse(format!("pack inflate at {off}: {e}")))?;
-        if n == 0 {
-            break;
-        }
-        total += n;
-        if total > expect {
-            return Err(Error::Parse(format!("pack entry at {off}: inflates beyond its declared {expect} bytes")));
-        }
-    }
-    if total != expect {
-        return Err(Error::Parse(format!("pack entry at {off}: inflated {total} bytes, header says {expect}")));
-    }
-    Ok(z.total_in())
 }
 
 fn delta_varint(d: &[u8], i: &mut usize) -> Result<usize> {
@@ -834,240 +781,440 @@ pub fn apply_delta(base: &[u8], d: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// Bounded cache of resolved bodies by pack offset.
-struct BodyCache {
-    map: HashMap<u64, Arc<Vec<u8>>>,
-    order: VecDeque<u64>,
-    bytes: usize,
-}
-
-impl BodyCache {
-    fn new() -> Self {
-        BodyCache { map: HashMap::new(), order: VecDeque::new(), bytes: 0 }
-    }
-    fn get(&self, off: u64) -> Option<Arc<Vec<u8>>> {
-        self.map.get(&off).cloned()
-    }
-    fn put(&mut self, off: u64, b: Arc<Vec<u8>>) {
-        if b.len() > DELTA_CACHE_BYTES / 4 {
-            return;
-        }
-        self.bytes += b.len();
-        self.map.insert(off, b);
-        self.order.push_back(off);
-        while self.bytes > DELTA_CACHE_BYTES {
-            let Some(o) = self.order.pop_front() else { break };
-            if let Some(v) = self.map.remove(&o) {
-                self.bytes -= v.len();
-            }
-        }
-    }
-}
-
 /// Result of indexing a received pack.
 struct Indexed {
     objects: usize,
     new_entries: Vec<(Key, Value)>,
+    /// Every object of the pack: oid -> (kind, stored object).
+    stored: HashMap<Oid, (Kind, Hash)>,
 }
 
-/// Reads, verifies and stores every object of the pack at `pack_off` in `file`.
+/// Positional reader over a shared file (pass-2 workers read the spool concurrently).
+struct PosReader<'a> {
+    f: &'a std::fs::File,
+    pos: u64,
+}
+
+impl Read for PosReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use std::os::unix::fs::FileExt;
+        let n = self.f.read_at(buf, self.pos)?;
+        self.pos += n as u64;
+        Ok(n)
+    }
+}
+
+/// Inflates exactly `expect` bytes of the zlib stream at `off` (positional; thread-safe).
+fn inflate_pos(f: &std::fs::File, off: u64, expect: usize) -> Result<Vec<u8>> {
+    let mut z = flate2::bufread::ZlibDecoder::new(BufReader::with_capacity(
+        (expect / 2).clamp(4 << 10, 256 << 10),
+        PosReader { f, pos: off },
+    ));
+    // Never trust the declared size for allocation; grow as data arrives.
+    let mut out = Vec::with_capacity(expect.min(1 << 20));
+    (&mut z)
+        .take(expect as u64 + 1)
+        .read_to_end(&mut out)
+        .map_err(|e| Error::Parse(format!("pack inflate at {off}: {e}")))?;
+    if out.len() != expect {
+        return Err(Error::Parse(format!("pack entry at {off}: inflated {} bytes, header says {expect}", out.len())));
+    }
+    Ok(out)
+}
+
+/// A pack entry to resolve: (entry, its base's kind and body, depth).
+type PendingDelta = (usize, Option<(Kind, Arc<Vec<u8>>)>, usize);
+
+/// One resolved object, from a pass-2 worker to the storer.
+struct Resolved {
+    kind: Kind,
+    oid: Oid,
+    body_len: usize,
+    canon: Vec<u8>,
+    refs: Vec<Oid>,
+}
+
+/// Threads storing batches of a received pack concurrently.
+const STORE_THREADS: usize = 2;
+
+/// Stores one batch of resolved objects: objects already stored under their oid (a re-push, or
+/// a fork's objects) are skipped, without a put or an oid-map entry (`ensure_live` rewrites one
+/// GC condemned); the rest go through one `put_many`.
+fn store_batch(
+    v: &View<'_>,
+    batch: &[Resolved],
+    new_entries: &mut Vec<(Key, Value)>,
+    stored: &mut HashMap<Oid, (Kind, Hash)>,
+) -> Result<()> {
+    let oids: Vec<Oid> = batch.iter().map(|r| r.oid).collect();
+    let found = v.lookup_many(&oids)?;
+    let mut new_idx = Vec::new();
+    for (j, (r, f)) in batch.iter().zip(&found).enumerate() {
+        match f {
+            Some((k, h)) if *k == r.kind && v.st.repo.ensure_live(h)? => {
+                stored.insert(r.oid, (r.kind, *h));
+            }
+            _ => new_idx.push(j),
+        }
+    }
+    let items: Vec<&[u8]> = new_idx.iter().map(|&j| batch[j].canon.as_slice()).collect();
+    let hs = v.st.repo.put_many(&items)?;
+    for (&j, h) in new_idx.iter().zip(hs) {
+        let r = &batch[j];
+        new_entries.push((key_of(&r.oid), Value { hash: h, aux: ((r.kind as u64) << 56) | r.body_len as u64 }));
+        stored.insert(r.oid, (r.kind, h));
+    }
+    Ok(())
+}
+
+/// Objects per store batch, and canonical bytes per batch: one `lookup_many` and one
+/// `put_many` each.
+const STORE_BATCH: usize = 4096;
+const STORE_BATCH_BYTES: usize = 16 << 20;
+/// Inflated entry data kept from pass 1 of a received pack.
+const PASS1_KEEP_BYTES: usize = 256 << 20;
+
+/// Reads, verifies and stores every object of the pack at `pack_off` in `file`, as git's
+/// index-pack does:
+/// 1. one sequential pass finds the entry boundaries (inflating to find each end), while
+///    another thread verifies the trailer checksum;
+/// 2. worker threads resolve delta trees in parallel, each from a whole object (or a thin
+///    pack's base from the repository) down through its OFS and REF children, holding only the
+///    chain of bases;
+/// 3. meanwhile this thread stores what they resolve in batches: one oid-map lookup (objects
+///    already stored are skipped) and one `put_many` per batch, so compression overlaps
+///    resolution.
 fn index_pack(view: &mut View<'_>, file: &mut std::fs::File, pack_off: u64) -> Result<Indexed> {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     let len = file.metadata()?.len();
     if len < pack_off + 32 {
         return Err(Error::Parse("pack too short".into()));
     }
-    let tl = view.fmt.hash_len() as u64;
-    // Trailer: the repository's hash (SHA-1 or SHA-256) of everything before it.
-    {
-        file.seek(SeekFrom::Start(pack_off))?;
-        let mut h = PackHasher::new(view.fmt);
-        let mut left = len - pack_off - tl;
-        let mut buf = vec![0u8; 1 << 20];
-        let mut r = BufReader::new(&mut *file);
-        while left > 0 {
-            let n = (left as usize).min(buf.len());
-            r.read_exact(&mut buf[..n])?;
-            h.update(&buf[..n]);
-            left -= n as u64;
-        }
-        let mut trailer = vec![0u8; tl as usize];
-        r.read_exact(&mut trailer)?;
-        if h.finish() != trailer {
-            return Err(Error::Parse("pack checksum mismatch".into()));
-        }
-    }
-    file.seek(SeekFrom::Start(pack_off))?;
-    let mut hdr = [0u8; 12];
-    file.read_exact(&mut hdr)?;
-    if &hdr[..4] != b"PACK" || !matches!(u32::from_be_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]), 2 | 3) {
-        return Err(Error::Parse("not a version 2/3 pack".into()));
-    }
-    let count = u32::from_be_bytes([hdr[8], hdr[9], hdr[10], hdr[11]]) as usize;
+    let fmt = view.fmt;
+    let hl = fmt.hash_len();
+    let tl = hl as u64;
+    let file: &std::fs::File = file;
     let end = len - tl;
-    // Pass 1: entry boundaries.
-    let mut entries: Vec<Entry> = Vec::with_capacity(count.min(1 << 16));
-    let mut off = pack_off + 12;
-    for _ in 0..count {
-        if off >= end {
-            return Err(Error::Parse("pack truncated".into()));
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 8);
+    let t0 = std::time::Instant::now();
+    std::thread::scope(|sc| -> Result<Indexed> {
+        // Trailer: the repository's hash (SHA-1 or SHA-256) of everything before it.
+        let trailer = sc.spawn(move || -> Result<()> {
+            let mut r = BufReader::with_capacity(1 << 20, PosReader { f: file, pos: pack_off });
+            let mut h = PackHasher::new(fmt);
+            let mut left = end - pack_off;
+            let mut buf = vec![0u8; 1 << 20];
+            while left > 0 {
+                let n = (left as usize).min(buf.len());
+                r.read_exact(&mut buf[..n])?;
+                h.update(&buf[..n]);
+                left -= n as u64;
+            }
+            let mut t = vec![0u8; hl];
+            r.read_exact(&mut t)?;
+            if h.finish() != t {
+                return Err(Error::Parse("pack checksum mismatch".into()));
+            }
+            Ok(())
+        });
+        // Pass 1: entry boundaries, in one buffered sequential read. flate2's bufread decoder
+        // consumes exactly its stream, so the reader is left at the next entry.
+        let mut br = BufReader::with_capacity(1 << 20, PosReader { f: file, pos: pack_off });
+        let mut hdr = [0u8; 12];
+        br.read_exact(&mut hdr)?;
+        if &hdr[..4] != b"PACK" || !matches!(u32::from_be_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]), 2 | 3) {
+            return Err(Error::Parse("not a version 2/3 pack".into()));
         }
-        file.seek(SeekFrom::Start(off))?;
-        let (code, size, base, hl) = read_entry_header(&mut BufReader::new(&mut *file), off, view.fmt.hash_len())?;
-        let data_off = off + hl;
-        // Inflate (discarding output) only to find the entry boundary.
-        let clen = skip_zlib_at(file, data_off, size)?;
-        entries.push(Entry { offset: off, code, size, data_off, base, done: None });
-        off = data_off + clen;
-    }
-    if off != end {
-        return Err(Error::Parse("trailing garbage after pack entries".into()));
-    }
-    let by_offset: HashMap<u64, usize> = entries.iter().enumerate().map(|(i, e)| (e.offset, i)).collect();
-    let mut cache = BodyCache::new();
-    let mut new_entries = Vec::new();
-    let mut needed: HashSet<Oid> = HashSet::new();
-    let mut in_pack: HashSet<Oid> = HashSet::new();
-    // Unique objects in pack order: (entry, kind, oid, body length, canonical bytes if kept).
-    // Whether each is already stored is decided afterwards with one batched oid-map lookup.
-    let mut objs: Vec<PackObj> = Vec::new();
-    let mut kept = 0usize;
-    // Resolved in-pack objects by oid (REF_DELTA bases).
-    let mut by_oid: HashMap<Oid, usize> = HashMap::new();
-
-    // Resolve in rounds: REF_DELTA bases may appear later in the pack.
-    let mut pending: Vec<usize> = (0..entries.len()).collect();
-    while !pending.is_empty() {
-        let mut next = Vec::new();
-        let before = pending.len();
-        for idx in pending {
-            match resolve(view, file, &mut entries, &by_offset, &by_oid, &mut cache, idx, 0)? {
-                Some((kind, body)) => {
-                    let canon = canonical(kind, &body);
-                    let oid = view.fmt.hash(&canon);
-                    if !in_pack.contains(&oid) {
-                        needed.extend(view.refs(kind, &body)?);
-                        in_pack.insert(oid);
-                        // Keep canonical bytes up to a budget; the rest is re-resolved if new.
-                        let keep = kept + canon.len() <= KEEP_CANON_BYTES;
-                        if keep {
-                            kept += canon.len();
-                        }
-                        objs.push((idx, kind, oid, body.len(), keep.then_some(canon)));
-                    }
-                    entries[idx].done = Some((kind, oid));
-                    by_oid.entry(oid).or_insert(idx);
+        let count = u32::from_be_bytes([hdr[8], hdr[9], hdr[10], hdr[11]]) as usize;
+        let mut entries: Vec<Entry> = Vec::with_capacity(count.min(1 << 20));
+        // Inflated data kept from pass 1 (so pass 2 doesn't inflate twice), within a budget:
+        // deltas (usually small) and small whole objects.
+        let mut kept_data: Vec<Mutex<Option<Vec<u8>>>> = Vec::with_capacity(count.min(1 << 20));
+        let mut kept_bytes = 0usize;
+        let mut off = pack_off + 12;
+        let mut sink = vec![0u8; 64 << 10];
+        for _ in 0..count {
+            if off >= end {
+                return Err(Error::Parse("pack truncated".into()));
+            }
+            let (code, size, base, h) = read_entry_header(&mut br, off, hl)?;
+            let data_off = off + h;
+            let mut z = flate2::bufread::ZlibDecoder::new(&mut br);
+            let keep = kept_bytes + size <= PASS1_KEEP_BYTES && (!matches!(base, Base::None) || size <= 64 << 10);
+            let mut data = if keep { Vec::with_capacity(size) } else { Vec::new() };
+            let mut total = 0usize;
+            loop {
+                let n = z.read(&mut sink).map_err(|e| Error::Parse(format!("pack inflate at {data_off}: {e}")))?;
+                if n == 0 {
+                    break;
                 }
-                None => next.push(idx),
+                if keep && total + n <= size {
+                    data.extend_from_slice(&sink[..n]);
+                }
+                total += n;
+                if total > size {
+                    return Err(Error::Parse(format!(
+                        "pack entry at {data_off}: inflates beyond its declared {size} bytes"
+                    )));
+                }
+            }
+            if keep {
+                kept_bytes += size;
+            }
+            kept_data.push(Mutex::new(keep.then_some(data)));
+            if total != size {
+                return Err(Error::Parse(format!(
+                    "pack entry at {data_off}: inflated {total} bytes, header says {size}"
+                )));
+            }
+            let clen = z.total_in();
+            entries.push(Entry { offset: off, code, size, data_off, base });
+            off = data_off + clen;
+        }
+        if off != end {
+            return Err(Error::Parse("trailing garbage after pack entries".into()));
+        }
+        drop(br);
+        tracing::debug!(entries = entries.len(), ms = t0.elapsed().as_millis() as u64, "pack pass 1 done");
+        // Delta children by base.
+        let by_offset: HashMap<u64, usize> = entries.iter().enumerate().map(|(i, e)| (e.offset, i)).collect();
+        let mut ofs_kids: HashMap<usize, Vec<usize>> = HashMap::new();
+        let mut ref_kids: HashMap<Oid, Vec<usize>> = HashMap::new();
+        let mut roots: Vec<usize> = Vec::new();
+        for (i, e) in entries.iter().enumerate() {
+            match e.base {
+                Base::None => roots.push(i),
+                Base::Ofs(b) => {
+                    let bi = *by_offset.get(&b).ok_or_else(|| Error::Parse("ofs-delta base is not an entry".into()))?;
+                    ofs_kids.entry(bi).or_default().push(i);
+                }
+                Base::Ref(o) => ref_kids.entry(o).or_default().push(i),
             }
         }
-        if next.len() == before {
-            let missing: Vec<String> = next
-                .iter()
-                .filter_map(|&i| match entries[i].base {
-                    Base::Ref(o) => Some(hex(&o)),
-                    _ => None,
-                })
-                .take(3)
-                .collect();
-            return Err(Error::Parse(format!("unresolvable delta bases: {}", missing.join(", "))));
-        }
-        pending = next;
-    }
-    // One batched lookup: the pack's objects (already stored under this oid, e.g. a re-push or
-    // a fork's objects: skip the put and the oid-map entry; `ensure_live` rewrites it if GC
-    // condemned it) and the outside objects the pack references (connectivity).
-    let outside: Vec<Oid> = needed.into_iter().filter(|o| !in_pack.contains(o)).collect();
-    let all: Vec<Oid> = objs.iter().map(|o| o.2).chain(outside.iter().copied()).collect();
-    let found = view.lookup_many(&all)?;
-    let (found_pack, found_out) = found.split_at(objs.len());
-    for ((idx, kind, oid, body_len, canon), f) in objs.into_iter().zip(found_pack) {
-        let known = match f {
-            Some((k, h)) if *k == kind && view.st.repo.ensure_live(h)? => Some(*h),
-            _ => None,
-        };
-        let h = match known {
-            Some(h) => h,
-            None => {
-                let canon = match canon {
-                    Some(c) => c,
-                    None => {
-                        let (k, body) = resolve(view, file, &mut entries, &by_offset, &by_oid, &mut cache, idx, 0)?
-                            .ok_or_else(|| Error::Corrupt("pack entry no longer resolves".into()))?;
-                        canonical(k, &body)
-                    }
-                };
-                let h = view.st.repo.put(&canon)?;
-                new_entries.push((key_of(&oid), Value { hash: h, aux: ((kind as u64) << 56) | body_len as u64 }));
-                h
-            }
-        };
-        view.extra.insert(oid, (kind, h));
-    }
-    // Connectivity: everything referenced exists in the pack or the repository.
-    for (oid, f) in outside.iter().zip(found_out) {
-        let live = match f {
-            Some((_, h)) => view.st.repo.ensure_live(h)?,
-            None => false,
-        };
-        if !live {
-            return Err(Error::Parse(format!("pack references missing object {}", hex(oid))));
-        }
-    }
-    Ok(Indexed { objects: count, new_entries })
-}
+        let entries = &entries;
+        let kept_data = &kept_data;
+        let ofs_kids = &ofs_kids;
+        let ref_kids = Mutex::new(ref_kids);
+        let ref_kids = &ref_kids;
+        let resolved: Vec<AtomicBool> = (0..entries.len()).map(|_| AtomicBool::new(false)).collect();
+        let resolved = &resolved;
+        let failed: Mutex<Option<Error>> = Mutex::new(None);
+        let failed = &failed;
+        let abort = AtomicBool::new(false);
+        let abort = &abort;
+        let v: &View<'_> = view;
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Resolved>(1024);
 
-/// Resolves entry `idx` to `(kind, body)`. `None` = its REF_DELTA base is not available yet.
-#[allow(clippy::too_many_arguments)]
-fn resolve(
-    view: &View<'_>,
-    file: &mut std::fs::File,
-    entries: &mut [Entry],
-    by_offset: &HashMap<u64, usize>,
-    by_oid: &HashMap<Oid, usize>,
-    cache: &mut BodyCache,
-    idx: usize,
-    depth: usize,
-) -> Result<Option<(Kind, Arc<Vec<u8>>)>> {
-    if depth > MAX_DELTA_DEPTH {
-        return Err(Error::Parse("delta chain too deep".into()));
-    }
-    let e = &entries[idx];
-    let (off, code, size, data_off, base) = (e.offset, e.code, e.size, e.data_off, e.base);
-    if let (Some((kind, _)), Some(b)) = (e.done, cache.get(off)) {
-        return Ok(Some((kind, b)));
-    }
-    let (kind, body) = match base {
-        Base::None => {
-            let kind = Kind::from_code(code).ok_or_else(|| Error::Parse("bad object type".into()))?;
-            (kind, Arc::new(inflate_at(file, data_off, size)?.0))
-        }
-        Base::Ofs(boff) => {
-            let bidx = *by_offset.get(&boff).ok_or_else(|| Error::Parse("ofs-delta base is not an entry".into()))?;
-            let Some((kind, b)) = resolve(view, file, entries, by_offset, by_oid, cache, bidx, depth + 1)? else {
-                return Ok(None);
-            };
-            let delta = inflate_at(file, data_off, size)?.0;
-            (kind, Arc::new(apply_delta(&b, &delta)?))
-        }
-        Base::Ref(boid) => {
-            let in_pack = by_oid.get(&boid).copied();
-            let (kind, b) = match in_pack {
-                Some(bidx) => match resolve(view, file, entries, by_offset, by_oid, cache, bidx, depth + 1)? {
-                    Some(x) => x,
-                    None => return Ok(None),
-                },
-                None => match view.load(&boid)? {
-                    // Thin pack: base already in the repository.
-                    Some((k, body)) => (k, Arc::new(body)),
-                    None => return Ok(None),
-                },
-            };
-            let delta = inflate_at(file, data_off, size)?.0;
-            (kind, Arc::new(apply_delta(&b, &delta)?))
-        }
-    };
-    cache.put(off, body.clone());
-    Ok(Some((kind, body)))
+        // One delta tree from entry `root`, whose base body (for a thin REF delta) is `base`.
+        let run_tree = move |tx: &std::sync::mpsc::SyncSender<Resolved>,
+                             root: usize,
+                             base: Option<(Kind, Arc<Vec<u8>>)>|
+              -> Result<()> {
+            // (entry, its base's kind and body, depth)
+            let mut stack: Vec<PendingDelta> = vec![(root, base, 0)];
+            while let Some((i, parent, depth)) = stack.pop() {
+                if abort.load(Ordering::Relaxed) {
+                    return Ok(());
+                }
+                if depth > MAX_DELTA_DEPTH {
+                    return Err(Error::Parse("delta chain too deep".into()));
+                }
+                let e = &entries[i];
+                let kept = kept_data[i].lock().ok().and_then(|mut d| d.take());
+                let data = match kept {
+                    Some(d) => d,
+                    None => inflate_pos(file, e.data_off, e.size)?,
+                };
+                let (kind, body) = match (&e.base, parent) {
+                    (Base::None, _) => {
+                        (Kind::from_code(e.code).ok_or_else(|| Error::Parse("bad object type".into()))?, data)
+                    }
+                    (_, Some((k, b))) => (k, apply_delta(&b, &data)?),
+                    (_, None) => return Err(Error::Corrupt("delta without its base".into())),
+                };
+                resolved[i].store(true, Ordering::Relaxed);
+                let canon = canonical(kind, &body);
+                let oid = fmt.hash(&canon);
+                let refs = refs_of_fmt(fmt, kind, &body)?;
+                let body = Arc::new(body);
+                if let Some(ks) = ofs_kids.get(&i) {
+                    stack.extend(ks.iter().map(|&k| (k, Some((kind, body.clone())), depth + 1)));
+                }
+                let claimed =
+                    ref_kids.lock().map_err(|_| Error::Corrupt("pack index lock poisoned".into()))?.remove(&oid);
+                if let Some(ks) = claimed {
+                    stack.extend(ks.into_iter().map(|k| (k, Some((kind, body.clone())), depth + 1)));
+                }
+                if tx.send(Resolved { kind, oid, body_len: body.len(), canon, refs }).is_err() {
+                    return Ok(()); // the storer stopped (error); it reports why
+                }
+            }
+            Ok(())
+        };
+        let fail = move |e: Error| {
+            abort.store(true, Ordering::Relaxed);
+            if let Ok(mut f) = failed.lock() {
+                f.get_or_insert(e);
+            }
+        };
+        // Round 1 (whole objects) and round 2 (thin-pack bases from the repository), each over
+        // all workers; the storer runs on this thread meanwhile.
+        std::thread::scope(|sc2| -> Result<Indexed> {
+            let rounds = sc2.spawn(move || {
+                let next = AtomicUsize::new(0);
+                std::thread::scope(|ws| {
+                    for _ in 0..workers {
+                        let tx = tx.clone();
+                        let (next, roots) = (&next, &roots);
+                        ws.spawn(move || {
+                            loop {
+                                let k = next.fetch_add(1, Ordering::Relaxed);
+                                let Some(&r) = roots.get(k) else { break };
+                                if let Err(e) = run_tree(&tx, r, None) {
+                                    fail(e);
+                                    break;
+                                }
+                            }
+                        });
+                    }
+                });
+                if abort.load(Ordering::Relaxed) {
+                    return;
+                }
+                // Bases no in-pack object produced: a thin pack's, stored in the repository.
+                let thin: Vec<(Oid, Vec<usize>)> = match ref_kids.lock() {
+                    Ok(mut m) => m.drain().collect(),
+                    Err(_) => return fail(Error::Corrupt("pack index lock poisoned".into())),
+                };
+                let mut missing = Vec::new();
+                let mut items: Vec<(usize, Kind, Arc<Vec<u8>>)> = Vec::new();
+                for (b, kids) in thin {
+                    match v.load(&b) {
+                        Ok(Some((k, body))) => {
+                            let body = Arc::new(body);
+                            items.extend(kids.into_iter().map(|i| (i, k, body.clone())));
+                        }
+                        Ok(None) => missing.push(hex(&b)),
+                        Err(e) => return fail(e),
+                    }
+                }
+                if !missing.is_empty() {
+                    missing.truncate(3);
+                    return fail(Error::Parse(format!("unresolvable delta bases: {}", missing.join(", "))));
+                }
+                let next = AtomicUsize::new(0);
+                std::thread::scope(|ws| {
+                    for _ in 0..workers {
+                        let tx = tx.clone();
+                        let (next, items) = (&next, &items);
+                        ws.spawn(move || {
+                            loop {
+                                let k = next.fetch_add(1, Ordering::Relaxed);
+                                let Some((i, kind, body)) = items.get(k) else { break };
+                                if let Err(e) = run_tree(&tx, *i, Some((*kind, body.clone()))) {
+                                    fail(e);
+                                    break;
+                                }
+                            }
+                        });
+                    }
+                });
+                drop(tx);
+            });
+
+            // Storers: this thread batches what the workers resolve (deduplicating), and
+            // STORE_THREADS threads store the batches: one oid-map lookup (objects already stored
+            // are skipped) and one put_many each, so their serial parts overlap too.
+            type Stored = (Vec<(Key, Value)>, HashMap<Oid, (Kind, Hash)>, std::time::Duration);
+            let (btx, brx) = std::sync::mpsc::sync_channel::<Vec<Resolved>>(STORE_THREADS);
+            let brx = Arc::new(Mutex::new(brx));
+            let storers: Vec<_> = (0..STORE_THREADS)
+                .map(|_| {
+                    let brx = brx.clone();
+                    sc2.spawn(move || -> Stored {
+                        let mut out: Stored = (Vec::new(), HashMap::new(), std::time::Duration::ZERO);
+                        loop {
+                            let next = match brx.lock() {
+                                Ok(rx) => rx.recv(),
+                                Err(_) => break,
+                            };
+                            let Ok(batch) = next else { break };
+                            if abort.load(Ordering::Relaxed) {
+                                continue; // drain
+                            }
+                            let tp = std::time::Instant::now();
+                            if let Err(e) = store_batch(v, &batch, &mut out.0, &mut out.1) {
+                                fail(e);
+                            }
+                            out.2 += tp.elapsed();
+                        }
+                        out
+                    })
+                })
+                .collect();
+            let mut needed: HashSet<Oid> = HashSet::new();
+            let mut in_pack: HashSet<Oid> = HashSet::new();
+            let mut batch: Vec<Resolved> = Vec::new();
+            let mut batch_bytes = 0usize;
+            for r in rx.iter() {
+                if abort.load(Ordering::Relaxed) {
+                    continue; // drain so the workers can finish
+                }
+                if !in_pack.insert(r.oid) {
+                    continue; // duplicate entry
+                }
+                needed.extend(r.refs.iter().copied());
+                batch_bytes += r.canon.len();
+                batch.push(r);
+                if batch.len() >= STORE_BATCH || batch_bytes >= STORE_BATCH_BYTES {
+                    batch_bytes = 0;
+                    if btx.send(std::mem::take(&mut batch)).is_err() {
+                        break;
+                    }
+                }
+            }
+            if !batch.is_empty() {
+                let _ = btx.send(batch);
+            }
+            drop(btx);
+            let mut new_entries = Vec::new();
+            let mut stored: HashMap<Oid, (Kind, Hash)> = HashMap::new();
+            let mut busy = std::time::Duration::ZERO;
+            for h in storers {
+                let (n, st, b) = h.join().map_err(|_| Error::Corrupt("pack storer panicked".into()))?;
+                new_entries.extend(n);
+                stored.extend(st);
+                busy += b;
+            }
+            rounds.join().map_err(|_| Error::Corrupt("pack worker panicked".into()))?;
+            trailer.join().map_err(|_| Error::Corrupt("pack checksum worker panicked".into()))??;
+            if let Some(e) = failed.lock().map_err(|_| Error::Corrupt("pack index lock poisoned".into()))?.take() {
+                return Err(e);
+            }
+            tracing::debug!(
+                objects = stored.len(),
+                ms = t0.elapsed().as_millis() as u64,
+                storers_busy_ms = busy.as_millis() as u64,
+                "pack stored"
+            );
+            if let Some(i) = (0..entries.len()).find(|&i| !resolved[i].load(Ordering::Relaxed)) {
+                return Err(Error::Parse(format!("pack entry at {} does not resolve", entries[i].offset)));
+            }
+            // Connectivity: everything referenced exists in the pack or the repository.
+            let outside: Vec<Oid> = needed.into_iter().filter(|o| !in_pack.contains(o)).collect();
+            for (oid, f) in outside.iter().zip(v.lookup_many(&outside)?) {
+                let live = match f {
+                    Some((_, h)) => v.st.repo.ensure_live(&h)?,
+                    None => false,
+                };
+                if !live {
+                    return Err(Error::Parse(format!("pack references missing object {}", hex(oid))));
+                }
+            }
+            Ok(Indexed { objects: count, new_entries, stored })
+        })
+    })
+    .inspect(|ix| view.extra.extend(ix.stored.iter().map(|(o, x)| (*o, *x))))
 }
 
 // ---------------------------------------------------------------------------
@@ -2769,7 +2916,9 @@ fn process_push(git: &GitState, repo: &str, path: &std::path::Path) -> Result<Pu
     let unpack = if has_pack {
         match index_pack(&mut view, &mut f, pack_off) {
             Ok(ix) => {
+                let t = std::time::Instant::now();
                 git.oidmap.insert_blocking(ix.new_entries)?;
+                tracing::debug!(ms = t.elapsed().as_millis() as u64, "oid map updated");
                 Ok(ix.objects)
             }
             Err(e) => Err(e.to_string()),
