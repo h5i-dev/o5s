@@ -11,6 +11,7 @@
 //! # tls = { cert = "/etc/pico2peta/tls.crt", key = "/etc/pico2peta/tls.key" }  # native HTTPS
 //! # metrics_listen = "10.0.0.5:9100"   # /metrics only there
 //! # rate_limit = { per_sec = 50.0, burst = 200.0 }   # per principal
+//! # limits_scan_secs = 3600           # how often [[limits]] quotas are re-measured
 //!
 //! [repo]
 //! path = "/var/lib/pico2peta/repo"
@@ -56,6 +57,11 @@
 //! [log]
 //! format = "json"                    # json | text
 //! filter = "info"                    # RUST_LOG syntax
+//!
+//! [[limits]]                         # per namespace; the longest prefix applies
+//! prefix = "git/team-a"
+//! rate = { per_sec = 100.0, burst = 500.0 }   # all callers of the namespace together
+//! max_stored_bytes = 107374182400    # 100 GiB reachable from its names; writes get 507 over it
 //! ```
 
 use serde::{Deserialize, Serialize};
@@ -94,6 +100,24 @@ pub struct Config {
     /// `[[promotion]]`: which destination namespaces accept promotions, and what they require.
     #[serde(default)]
     pub promotion: Vec<PromotionRule>,
+    /// `[[limits]]`: per-namespace request rate and storage quota (see `crate::limits`).
+    #[serde(default)]
+    pub limits: Vec<LimitRule>,
+}
+
+/// Limits for the names under `prefix` (the longest matching rule applies).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LimitRule {
+    /// Name prefix, segment-aligned (e.g. `git/team-a`, `oci/ml`, `pypi/internal`). Not empty.
+    pub prefix: String,
+    /// Requests per second against names under the prefix, all callers together.
+    #[serde(default)]
+    pub rate: Option<RateLimit>,
+    /// Quota on the logical bytes the names under the prefix reach (measured every
+    /// `server.limits_scan_secs`).
+    #[serde(default)]
+    pub max_stored_bytes: Option<u64>,
 }
 
 /// A promotion gate (`POST /v1/promote`): promotions into names under `dst` must satisfy it.
@@ -233,11 +257,15 @@ pub struct GitSection {
     /// Repository-name prefixes whose repositories use `object-format=sha256` (e.g.
     /// `["team/sha256"]`). Fixed per repository: git learns the format before its first push.
     pub sha256_repos: Vec<String>,
+    /// Keep the pack of the last full clone of each repository (as an object behind
+    /// `git/_clonepack/<repo>`) and stream it to the next clone with the same wants, instead
+    /// of re-encoding. Costs one pack of storage per cloned repository.
+    pub clone_pack_cache: bool,
 }
 
 impl Default for GitSection {
     fn default() -> Self {
-        GitSection { enabled: true, spool_dir: None, sha256_repos: Vec::new() }
+        GitSection { enabled: true, spool_dir: None, sha256_repos: Vec::new(), clone_pack_cache: true }
     }
 }
 
@@ -334,6 +362,8 @@ pub struct ServerSection {
     pub metrics_listen: Option<SocketAddr>,
     /// Per-principal request rate limit (anonymous callers are keyed by client address).
     pub rate_limit: Option<RateLimit>,
+    /// How often `[[limits]]` quotas are re-measured (seconds).
+    pub limits_scan_secs: u64,
 }
 
 /// Token bucket: `per_sec` sustained, `burst` peak.
@@ -365,6 +395,7 @@ impl Default for ServerSection {
             tls: None,
             metrics_listen: None,
             rate_limit: None,
+            limits_scan_secs: 3600,
         }
     }
 }
@@ -557,6 +588,22 @@ impl Config {
             && !(r.per_sec > 0.0 && r.burst >= 1.0 && r.per_sec.is_finite() && r.burst.is_finite())
         {
             return bad("server.rate_limit needs per_sec > 0 and burst >= 1".into());
+        }
+        for l in &self.limits {
+            if l.prefix.is_empty() || pico2peta_core::Name::new(&l.prefix).is_err() {
+                return bad(format!("limits.prefix {:?} must be a non-empty name prefix", l.prefix));
+            }
+            if let Some(r) = l.rate
+                && !(r.per_sec > 0.0 && r.burst >= 1.0 && r.per_sec.is_finite() && r.burst.is_finite())
+            {
+                return bad(format!("limits {:?}: rate needs per_sec > 0 and burst >= 1", l.prefix));
+            }
+            if l.rate.is_none() && l.max_stored_bytes.is_none() {
+                return bad(format!("limits {:?}: set rate and/or max_stored_bytes", l.prefix));
+            }
+        }
+        if self.limits.iter().any(|l| l.max_stored_bytes.is_some()) && self.server.limits_scan_secs == 0 {
+            return bad("server.limits_scan_secs must be >= 1 when quotas are set".into());
         }
         if self.server.request_timeout_secs == 0 {
             return bad("server.request_timeout_secs must be >= 1".into());

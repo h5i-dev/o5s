@@ -178,7 +178,7 @@ impl Kind {
             Kind::Tag => "tag",
         }
     }
-    fn from_code(c: u8) -> Option<Kind> {
+    pub(crate) fn from_code(c: u8) -> Option<Kind> {
         Some(match c {
             1 => Kind::Commit,
             2 => Kind::Tree,
@@ -384,6 +384,10 @@ pub struct GitState {
     max_push_bytes: u64,
     /// Repo-name prefixes whose repositories use SHA-256 (`[git] sha256_repos`).
     sha256: Vec<String>,
+    /// `[git] clone_pack_cache`.
+    clone_cache: bool,
+    /// Commit graph (history walks without object reads; see `crate::gitgraph`).
+    pub(crate) graph: crate::gitgraph::Graph,
 }
 
 impl GitState {
@@ -394,12 +398,26 @@ impl GitState {
         std::fs::create_dir_all(&spool)?;
         let n = Name::new("git/_oidmap").unwrap_or_else(|_| unreachable!("static name is valid"));
         let oidmap = Arc::new(SegMap::new(repo.clone(), n, Arc::new(SegCache::default())));
-        Ok(GitState { repo, oidmap, spool, max_push_bytes, sha256: Vec::new() })
+        Ok(GitState {
+            repo,
+            oidmap,
+            spool,
+            max_push_bytes,
+            sha256: Vec::new(),
+            clone_cache: false,
+            graph: Default::default(),
+        })
     }
 
     /// Repositories under these name prefixes are SHA-256 repositories.
     pub fn with_sha256_repos(mut self, prefixes: Vec<String>) -> GitState {
         self.sha256 = prefixes;
+        self
+    }
+
+    /// Enables the full-clone pack cache (see [`write_pack`]).
+    pub fn with_clone_pack_cache(mut self, on: bool) -> GitState {
+        self.clone_cache = on;
         self
     }
 
@@ -460,6 +478,41 @@ impl<'a> View<'a> {
     /// [`Self::lookup`] for many oids with one batched oid-map query (results in input order).
     pub(crate) fn lookup_many(&self, oids: &[Oid]) -> Result<Vec<Option<(Kind, Hash)>>> {
         Ok(self.lookup_many_len(oids)?.into_iter().map(|x| x.map(|(k, h, _)| (k, h))).collect())
+    }
+
+    /// History nodes (commits and tags) for `oids`, from the commit graph; misses are read with
+    /// one batched lookup and parallel loads, and added to the graph. `None`: unknown, or not a
+    /// commit or tag.
+    pub(crate) fn hist_many(&self, oids: &[Oid]) -> Result<Vec<Option<Arc<crate::gitgraph::HistNode>>>> {
+        let mut out: Vec<Option<Arc<crate::gitgraph::HistNode>>> = oids.iter().map(|o| self.st.graph.get(o)).collect();
+        let miss: Vec<usize> = (0..oids.len()).filter(|&i| out[i].is_none()).collect();
+        if miss.is_empty() {
+            return Ok(out);
+        }
+        let moids: Vec<Oid> = miss.iter().map(|&i| oids[i]).collect();
+        let found = self.lookup_many(&moids)?;
+        let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 8);
+        let nodes = par_map(miss.len(), workers, |j| {
+            let Some((kind, h)) = found[j] else { return Ok(None) };
+            if !matches!(kind, Kind::Commit | Kind::Tag) {
+                return Ok(None);
+            }
+            let Some(body) = self.load_stored(kind, &h)? else { return Ok(None) };
+            let time = if kind == Kind::Commit { commit_time(&body) } else { 0 };
+            Ok(Some(Arc::new(crate::gitgraph::HistNode { kind, refs: self.refs(kind, &body)?, time, hash: h })))
+        })?;
+        for (j, n) in nodes.into_iter().enumerate() {
+            if let Some(n) = n {
+                self.st.graph.insert(moids[j], n.clone());
+                out[miss[j]] = Some(n);
+            }
+        }
+        Ok(out)
+    }
+
+    /// One history node (see [`Self::hist_many`]).
+    pub(crate) fn hist(&self, oid: &Oid) -> Result<Option<Arc<crate::gitgraph::HistNode>>> {
+        Ok(self.hist_many(std::slice::from_ref(oid))?.pop().flatten())
     }
 
     /// [`Self::lookup_many`] plus the recorded body length (`None` for objects of this push).
@@ -525,12 +578,24 @@ pub(crate) fn ref_name(repo: &str, gitref: &str) -> Option<Name> {
 /// Current refs of `repo`: `(gitref, oid, core value)`, sorted.
 pub(crate) fn list_refs(st: &GitState, repo: &str) -> Result<Vec<(String, Oid, RefValue)>> {
     let prefix = format!("git/{repo}/refs");
+    // Ref targets resolve to oids through the commit graph; only unknown ones are read.
+    let t = std::time::Instant::now();
+    st.graph.ensure_loaded(&*st.repo, repo)?;
+    tracing::debug!(repo, ms = t.elapsed().as_millis() as u64, "commit graph ready");
     let mut out = Vec::new();
     for (n, v) in st.repo.list_refs(&prefix)? {
         let Some(gitref) = n.as_str().strip_prefix(&format!("git/{repo}/")) else { continue };
-        let bytes = st.repo.get(&v.hash, None)?;
-        out.push((gitref.to_string(), st.fmt_for(repo).hash(&bytes), v));
+        let oid = match st.graph.oid_of_hash(&v.hash) {
+            Some(o) if o.len() == st.fmt_for(repo).hash_len() => o,
+            _ => {
+                let o = st.fmt_for(repo).hash(&st.repo.get(&v.hash, None)?);
+                st.graph.note_hash(v.hash, o);
+                o
+            }
+        };
+        out.push((gitref.to_string(), oid, v));
     }
+    tracing::debug!(repo, refs = out.len(), ms = t.elapsed().as_millis() as u64, "refs listed");
     out.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(out)
 }
@@ -1200,8 +1265,8 @@ fn shallow_cut(view: &View<'_>, wants: &[Oid], opts: &FetchOpts) -> Result<(Hash
         // Peel tags to commits; non-commit wants (blobs, trees) need no cut.
         let mut o = *w;
         for _ in 0..8 {
-            match view.load(&o)? {
-                Some((Kind::Tag, body)) => match view.refs(Kind::Tag, &body)?.first() {
+            match view.hist(&o)?.as_deref() {
+                Some(n) if n.kind == Kind::Tag => match n.refs.first() {
                     Some(t) => o = *t,
                     None => break,
                 },
@@ -1211,11 +1276,11 @@ fn shallow_cut(view: &View<'_>, wants: &[Oid], opts: &FetchOpts) -> Result<(Hash
         queue.push_back((o, 1));
     }
     while let Some((c, d)) = queue.pop_front() {
-        let Some((Kind::Commit, body)) = view.load(&c)? else { continue };
+        let Some(node) = view.hist(&c)?.filter(|n| n.kind == Kind::Commit) else { continue };
         if !included.insert(c) {
             continue;
         }
-        let parents: Vec<Oid> = view.refs(Kind::Commit, &body)?.into_iter().skip(1).collect();
+        let parents: Vec<Oid> = node.refs.iter().skip(1).copied().collect();
         let mut cut = opts.depth.is_some_and(|n| d >= n);
         let mut kept = Vec::new();
         for p in &parents {
@@ -1223,8 +1288,9 @@ fn shallow_cut(view: &View<'_>, wants: &[Oid], opts: &FetchOpts) -> Result<(Hash
                 break;
             }
             if let Some(t) = opts.since
-                && let Some((Kind::Commit, pb)) = view.load(p)?
-                && commit_time(&pb) < t
+                && let Some(pn) = view.hist(p)?
+                && pn.kind == Kind::Commit
+                && pn.time < t
             {
                 cut = true;
                 break;
@@ -1257,9 +1323,11 @@ fn shallow_depth(view: &View<'_>, wants: &[Oid], shallow: &HashSet<Oid>) -> Resu
             deepest = deepest.max(d);
             continue; // the client has nothing behind it
         }
-        if let Some((Kind::Commit, body)) = view.load(&c)? {
-            for p in view.refs(Kind::Commit, &body)?.into_iter().skip(1) {
-                queue.push_back((p, d + 1));
+        if let Some(n) = view.hist(&c)?
+            && n.kind == Kind::Commit
+        {
+            for p in n.refs.iter().skip(1) {
+                queue.push_back((*p, d + 1));
             }
         }
     }
@@ -1276,31 +1344,113 @@ fn commit_time(body: &[u8]) -> u64 {
         .unwrap_or(0)
 }
 
-fn boundary_exclude(view: &View<'_>, common: &[Oid], stop: &HashSet<Oid>) -> Result<HashSet<Oid>> {
+/// What the client has: every commit reachable from `common` (over the commit graph), plus the
+/// trees and blobs of the newest [`MAX_BOUNDARY`] common commits. Any subset of what the client
+/// has is safe here (a smaller set only sends more).
+fn boundary_exclude(view: &View<'_>, wants: &[Oid], common: &[Oid], stop: &HashSet<Oid>) -> Result<HashSet<Oid>> {
     let mut ex: HashSet<Oid> = HashSet::new();
-    let mut stack: Vec<Oid> = common.to_vec();
-    while let Some(o) = stack.pop() {
-        if !ex.insert(o) {
-            continue;
+    let mut wave: Vec<Oid> = common.to_vec();
+    let mut tops: Vec<(u64, Oid)> = Vec::new();
+    while !wave.is_empty() {
+        wave.retain(|o| ex.insert(*o));
+        let nodes = view.hist_many(&wave)?;
+        let mut next = Vec::new();
+        for (o, n) in wave.iter().zip(nodes) {
+            // The client has no history behind its shallow commits.
+            if let Some(n) = n.as_deref()
+                && n.kind == Kind::Commit
+            {
+                if let Some(t) = n.refs.first()
+                    && common.contains(o)
+                {
+                    tops.push((n.time, *t));
+                }
+                if !stop.contains(o) {
+                    next.extend(n.refs.iter().skip(1));
+                }
+            }
         }
-        // The client has no history behind its shallow commits.
-        if !stop.contains(&o)
-            && let Some((Kind::Commit, body)) = view.load(&o)?
+        wave = next;
+    }
+    // The trees that matter are those of the edge: client commits that are parents of commits
+    // being sent (git's "uninteresting edges"). Walk the history to send over the graph.
+    let mut edge: Vec<Oid> = Vec::new();
+    let mut seen: HashSet<Oid> = HashSet::new();
+    let mut wave: Vec<Oid> = wants.iter().filter(|w| !ex.contains(*w)).copied().collect();
+    while !wave.is_empty() && seen.len() < 1 << 20 {
+        wave.retain(|o| seen.insert(*o));
+        let nodes = view.hist_many(&wave)?;
+        let mut next = Vec::new();
+        for n in nodes.iter().flatten() {
+            let parents: &[Oid] = if n.kind == Kind::Commit { n.refs.get(1..).unwrap_or(&[]) } else { &n.refs };
+            for par in parents {
+                if ex.contains(par) {
+                    edge.push(*par);
+                } else {
+                    next.push(*par);
+                }
+            }
+        }
+        wave = next;
+    }
+    edge.sort();
+    edge.dedup();
+    let mut roots: Vec<(u64, Oid)> = Vec::new();
+    for n in view.hist_many(&edge)?.iter().flatten() {
+        if n.kind == Kind::Commit
+            && let Some(t) = n.refs.first()
         {
-            stack.extend(view.refs(Kind::Commit, &body)?.into_iter().skip(1));
+            roots.push((n.time, *t));
         }
     }
-    let commits: HashSet<Oid> = ex.clone();
-    for c in common.iter().take(MAX_BOUNDARY) {
-        if let Some((Kind::Commit, body)) = view.load(c)?
-            && let Some(tree) = view.refs(Kind::Commit, &body)?.first().copied()
-        {
-            let got = walk(view, &[tree], &ex, |_, _, _| Ok(()))?;
-            ex.extend(got);
-        }
+    // No edge found (e.g. wants the client already has): fall back to the newest common commits.
+    if roots.is_empty() {
+        roots = tops;
     }
-    debug_assert!(commits.is_subset(&ex));
+    roots.sort_by_key(|a| std::cmp::Reverse(a.0));
+    let roots: Vec<Oid> = roots.into_iter().take(MAX_BOUNDARY).map(|t| t.1).collect();
+    exclude_trees(view, roots, &mut ex)?;
     Ok(ex)
+}
+
+/// Adds the trees under `roots` and their entries to `ex`, level by level with batched lookups.
+/// Only trees are read: blob ids come from the tree entries.
+fn exclude_trees(view: &View<'_>, roots: Vec<Oid>, ex: &mut HashSet<Oid>) -> Result<()> {
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 8);
+    let mut level = roots;
+    while !level.is_empty() {
+        level.retain(|o| ex.insert(*o));
+        let found = view.lookup_many(&level)?;
+        let bodies = par_map(level.len(), workers, |j| match found[j] {
+            Some((Kind::Tree, h)) => view.load_stored(Kind::Tree, &h),
+            _ => Ok(None),
+        })?;
+        let mut next = Vec::new();
+        for (tree, body) in level.iter().zip(bodies) {
+            let Some(body) = body else { continue };
+            let hl = tree.len();
+            let mut i = 0;
+            while i < body.len() {
+                let Some(sp) = body[i..].iter().position(|&c| c == b' ').map(|x| x + i) else { break };
+                let Some(nul) = body[sp..].iter().position(|&c| c == 0).map(|x| x + sp) else { break };
+                if nul + 1 + hl > body.len() {
+                    break;
+                }
+                let mode = &body[i..sp];
+                let Some(o) = Oid::from_slice(&body[nul + 1..nul + 1 + hl]) else { break };
+                if mode == b"40000" {
+                    if !ex.contains(&o) {
+                        next.push(o);
+                    }
+                } else if mode != b"160000" {
+                    ex.insert(o);
+                }
+                i = nul + 1 + hl;
+            }
+        }
+        level = next;
+    }
+    Ok(())
 }
 
 const MAX_BOUNDARY: usize = 16;
@@ -1361,7 +1511,9 @@ fn walk_paths_with(
     };
     let mut trees: Vec<(Oid, String)> = Vec::new();
     let mut blobs: Vec<(Oid, String)> = Vec::new();
-    // 1. Commits and tags, generation by generation.
+    // History found by the waves: object -> (its entry, root tree if a commit, next objects).
+    let mut hist: HashMap<Oid, (Walked, Option<Oid>, Vec<Oid>)> = HashMap::new();
+    // 1. Commits and tags, generation by generation (batched lookups and loads).
     let mut wave: Vec<(Oid, String)> = tips.iter().map(|o| (*o, String::new())).collect();
     while !wave.is_empty() {
         let items = take(std::mem::take(&mut wave), &mut seen)?;
@@ -1375,25 +1527,42 @@ fn walk_paths_with(
                 _ => blobs.push((o, p)),
             }
         }
-        let bodies = load_all(&history)?;
-        for ((o, p, k, h, len), body) in history.into_iter().zip(bodies) {
-            let refs = view.refs(k, &body)?;
-            match k {
-                Kind::Commit => {
-                    if let Some(t) = refs.first() {
-                        trees.push((*t, String::new()));
-                    }
-                    for par in refs.iter().skip(1) {
-                        if commits.is_none_or(|c| c.contains(par)) {
-                            wave.push((*par, String::new()));
-                        }
-                    }
-                }
-                _ => wave.extend(refs.into_iter().map(|r| (r, String::new()))),
-            }
-            out.push(Walked { oid: o, kind: k, path: p, hash: h, len });
+        let hoids: Vec<Oid> = history.iter().map(|x| x.0).collect();
+        let nodes = view.hist_many(&hoids)?;
+        for ((o, p, k, h, len), node) in history.into_iter().zip(nodes) {
+            let refs = node
+                .map(|n| n.refs.clone())
+                .ok_or_else(|| Error::Corrupt(format!("missing git object {}", hex(&o))))?;
+            let (tree, next): (Option<Oid>, Vec<Oid>) = match k {
+                Kind::Commit => (
+                    refs.first().copied(),
+                    refs.iter().skip(1).filter(|par| commits.is_none_or(|c| c.contains(*par))).copied().collect(),
+                ),
+                _ => (None, refs),
+            };
+            wave.extend(next.iter().map(|r| (*r, String::new())));
+            hist.insert(o, (Walked { oid: o, kind: k, path: p, hash: h, len }, tree, next));
         }
     }
+    // Emit history in depth-first order from the tips (first parent first), as git does: each
+    // path's versions then follow one line of history, which keeps "previous version at this
+    // path" a good delta base. (Breadth-first generations across many tips interleave eras.)
+    let mut stack: Vec<Oid> = tips.iter().rev().copied().collect();
+    let mut done: HashSet<Oid> = HashSet::new();
+    let mut root_trees: Vec<(Oid, String)> = Vec::new();
+    while let Some(o) = stack.pop() {
+        if !done.insert(o) {
+            continue;
+        }
+        let Some((w, tree, next)) = hist.remove(&o) else { continue };
+        if let Some(t) = tree {
+            root_trees.push((t, String::new()));
+        }
+        stack.extend(next.iter().rev().copied());
+        out.push(w);
+    }
+    // Trees named directly (tips, tag targets) first, then commits' root trees in that order.
+    trees.extend(root_trees);
     // 2. Trees, level by level.
     let mut level = trees;
     while !level.is_empty() {
@@ -1457,31 +1626,6 @@ fn pack_entry_header(kind: Kind, size: usize) -> Vec<u8> {
     out
 }
 
-/// Every object reachable from `tips`, skipping `exclude` (and what it reaches).
-fn walk(
-    view: &View<'_>,
-    tips: &[Oid],
-    exclude: &HashSet<Oid>,
-    mut visit: impl FnMut(Oid, Kind, &[u8]) -> Result<()>,
-) -> Result<HashSet<Oid>> {
-    let mut seen: HashSet<Oid> = HashSet::new();
-    let mut stack: Vec<Oid> = tips.iter().filter(|o| !exclude.contains(*o)).copied().collect();
-    while let Some(oid) = stack.pop() {
-        if !seen.insert(oid) {
-            continue;
-        }
-        let (kind, body) =
-            view.load(&oid)?.ok_or_else(|| Error::Corrupt(format!("missing git object {}", hex(&oid))))?;
-        for child in view.refs(kind, &body)? {
-            if !seen.contains(&child) && !exclude.contains(&child) {
-                stack.push(child);
-            }
-        }
-        visit(oid, kind, &body)?;
-    }
-    Ok(seen)
-}
-
 // ---------------------------------------------------------------------------
 // HTTP
 // ---------------------------------------------------------------------------
@@ -1543,6 +1687,9 @@ pub async fn dispatch(
             remote: c.remote.clone(),
         });
         return git_error(StatusCode::FORBIDDEN, format!("{} may not access {repo}", p.name));
+    }
+    if let Err(e) = st.admit(&p, &ns(&repo), need == Access::Write) {
+        return e.into_response();
     }
     match (method, action) {
         (Method::GET, "refs") => {
@@ -1666,6 +1813,10 @@ async fn upload_pack(
         Ok(b) => b,
         Err((status, msg)) => return git_error(status, msg),
     };
+    // First use of this repository in this process: load or build its derived data.
+    if !git.graph.is_loaded(&repo) {
+        refresh_derived(git.clone(), repo.clone(), std::time::Duration::from_secs(5));
+    }
     if wants_v2(headers) {
         let req = match parse_v2_request(&body) {
             Ok(r) => r,
@@ -1763,31 +1914,26 @@ fn negotiate(view: &View<'_>, git: &GitState, repo: &str, wants: &[Oid], haves: 
     }
     let mut common: Vec<Oid> = Vec::new();
     if !haves.is_empty() {
-        let mut repo_commits: HashSet<Oid> = HashSet::new();
-        let mut stack: Vec<Oid> = tips.iter().copied().collect();
+        // A have counts only if this repo's history reaches it (oids are global across repos, so
+        // ACKing others would leak their existence). Walked in batched waves over the graph.
+        let mut seen: HashSet<Oid> = HashSet::new();
         let haves: HashSet<Oid> = haves.iter().copied().collect();
-        while let Some(o) = stack.pop() {
-            if !repo_commits.insert(o) {
-                continue;
-            }
-            let Some((kind, body)) = view.load(&o)? else { continue };
-            match kind {
-                Kind::Commit => {
-                    for (i, child) in view.refs(kind, &body)?.into_iter().enumerate() {
-                        if i > 0 {
-                            stack.push(child); // parents only (index 0 is the tree)
-                        }
-                    }
+        let mut wave: Vec<Oid> = tips.iter().copied().collect();
+        while !wave.is_empty() && common.len() < haves.len() {
+            wave.retain(|o| seen.insert(*o));
+            let nodes = view.hist_many(&wave)?;
+            let mut next = Vec::new();
+            for (o, n) in wave.iter().zip(nodes) {
+                if haves.contains(o) {
+                    common.push(*o);
                 }
-                Kind::Tag => stack.extend(view.refs(kind, &body)?),
-                _ => {}
+                match n.as_deref() {
+                    Some(n) if n.kind == Kind::Commit => next.extend(n.refs.iter().skip(1)), // parents
+                    Some(n) => next.extend(n.refs.iter()),                                   // tag target
+                    None => {}
+                }
             }
-            if haves.len() == common.len() {
-                break;
-            }
-            if haves.contains(&o) {
-                common.push(o);
-            }
+            wave = next;
         }
         common.sort();
         common.dedup();
@@ -1944,7 +2090,15 @@ fn v2_fetch(
         return Err(Error::Parse("fetch without wants".into()));
     }
     let view = View::for_repo(git, repo)?;
+    let t = std::time::Instant::now();
     let common = negotiate(&view, git, repo, &wants, &haves)?;
+    tracing::debug!(
+        repo,
+        haves = haves.len(),
+        common = common.len(),
+        ms = t.elapsed().as_millis() as u64,
+        "negotiated"
+    );
     if relative && let Some(n) = opts.depth {
         // `--deepen N`: N more commits behind the client's current boundary.
         opts.depth = Some(shallow_depth(&view, &wants, &opts.client_shallow)?.saturating_add(n));
@@ -2054,7 +2208,174 @@ fn par_map<T: Send>(n: usize, workers: usize, f: impl Fn(usize) -> Result<T> + S
     Ok(out)
 }
 
-/// Streams a pack of everything reachable from `wants` but not from `common`.
+/// Magic of a cached clone pack: magic, 32-byte key, then the pack bytes.
+const CLONE_PACK_MAGIC: &[u8; 8] = b"P2PCPK01";
+
+/// The pack for `wants` with nothing in common, no shallow and no filter is a function of the
+/// wants alone (and the repository format), so it can be cached under this key.
+fn clone_pack_key(fmt: Fmt, wants: &[Oid]) -> [u8; 32] {
+    let mut w: Vec<&Oid> = wants.iter().collect();
+    w.sort();
+    w.dedup();
+    let mut h = blake3::Hasher::new();
+    h.update(b"p2p git clone pack v1\0");
+    h.update(fmt.name().as_bytes());
+    for o in w {
+        h.update(&[o.len() as u8]);
+        h.update(o);
+    }
+    *h.finalize().as_bytes()
+}
+
+fn clone_pack_ref(repo: &str) -> Option<Name> {
+    Name::new(format!("git/_clonepack/{repo}")).ok()
+}
+
+/// Streams the cached pack for `key`, if `repo` has one. `Ok(false)`: no usable cache (nothing
+/// sent yet).
+fn serve_cached_pack(
+    git: &GitState,
+    repo: &str,
+    key: &[u8; 32],
+    sideband_on: bool,
+    tx: &mpsc::Sender<std::result::Result<Bytes, std::io::Error>>,
+    metrics: &crate::metrics::Metrics,
+) -> Result<bool> {
+    let Some(n) = clone_pack_ref(repo) else { return Ok(false) };
+    let Some(v) = git.repo.resolve(&n)? else { return Ok(false) };
+    let mut r = match git.repo.open(&v.hash, None) {
+        Ok(r) => r,
+        Err(Error::NotFound(_)) => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    let mut head = [0u8; 40];
+    if r.read_exact(&mut head).is_err() || &head[..8] != CLONE_PACK_MAGIC || head[8..] != key[..] {
+        return Ok(false);
+    }
+    let mut buf = vec![0u8; 1 << 16];
+    let mut sent = 0u64;
+    loop {
+        let mut n = 0;
+        while n < buf.len() {
+            match r.read(&mut buf[n..]) {
+                Ok(0) => break,
+                Ok(k) => n += k,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(Error::Io(e)),
+            }
+        }
+        if n == 0 {
+            break;
+        }
+        let mut framed = Vec::with_capacity(n + 64);
+        sideband(&mut framed, 1, &buf[..n], sideband_on);
+        metrics.bytes_out.inc_by(n as u64);
+        sent += n as u64;
+        send(tx, framed)?;
+    }
+    info!(repo, bytes = sent, "upload-pack served from the clone pack cache");
+    Ok(true)
+}
+
+/// Whether `repo`'s clone pack cache holds the pack for `key`.
+fn clone_pack_cached(git: &GitState, repo: &str, key: &[u8; 32]) -> Result<bool> {
+    let Some(n) = clone_pack_ref(repo) else { return Ok(false) };
+    let Some(v) = git.repo.resolve(&n)? else { return Ok(false) };
+    match git.repo.get(&v.hash, Some(0..40)) {
+        Ok(h) => Ok(h.len() == 40 && &h[..8] == CLONE_PACK_MAGIC && h[8..] == key[..]),
+        Err(Error::NotFound(_)) | Err(Error::InvalidRange { .. }) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// Brings `repo`'s derived data up to date in the background, after a push or on its first
+/// use in this process: the persisted commit graph, and (with `[git] clone_pack_cache`) the
+/// clone pack for its current heads and tags, so the next clone streams it. One refresh per
+/// repository at a time; best effort.
+pub(crate) fn refresh_derived(git: Arc<GitState>, repo: String, delay: std::time::Duration) {
+    if !git.graph.start_refresh(&repo) {
+        return;
+    }
+    std::thread::spawn(move || {
+        // On first use, let the request that triggered us go first.
+        std::thread::sleep(delay);
+        let r = (|| -> Result<()> {
+            let refs = list_refs(&git, &repo)?;
+            let view = View::for_repo(&git, &repo)?;
+            let mut seen: HashSet<Oid> = HashSet::new();
+            let mut nodes = Vec::new();
+            let mut wave: Vec<Oid> = refs.iter().map(|r| r.1).collect();
+            while !wave.is_empty() {
+                wave.retain(|o| seen.insert(*o));
+                let ns = view.hist_many(&wave)?;
+                let mut next = Vec::new();
+                for (o, n) in wave.iter().zip(ns) {
+                    if let Some(n) = n {
+                        match n.kind {
+                            Kind::Commit => next.extend(n.refs.iter().skip(1)),
+                            _ => next.extend(n.refs.iter()),
+                        }
+                        nodes.push((*o, n));
+                    }
+                }
+                wave = next;
+            }
+            // A persisted superset (e.g. after a branch deletion) is still correct.
+            if !git.graph.persisted_at_least(&repo, nodes.len()) {
+                git.graph.persist(&*git.repo, &repo, &nodes)?;
+            }
+            if git.clone_cache {
+                let mut wants: Vec<Oid> = refs
+                    .iter()
+                    .filter(|r| r.0.starts_with("refs/heads/") || r.0.starts_with("refs/tags/"))
+                    .map(|r| r.1)
+                    .collect();
+                wants.sort();
+                wants.dedup();
+                if !wants.is_empty() && !clone_pack_cached(&git, &repo, &clone_pack_key(view.fmt, &wants))? {
+                    // Encode into a drained channel; write_pack spools and stores the pack.
+                    let (tx, mut rx) = mpsc::channel::<std::result::Result<Bytes, std::io::Error>>(8);
+                    let drain = std::thread::spawn(move || while rx.blocking_recv().is_some() {});
+                    let metrics = crate::metrics::Metrics::new();
+                    let r = write_pack(&view, &repo, &wants, &[], &FetchOpts::default(), None, false, &tx, &metrics);
+                    drop(tx);
+                    let _ = drain.join();
+                    r?;
+                }
+            }
+            Ok(())
+        })();
+        if let Err(e) = r {
+            warn!(repo, error = %e, "refreshing git derived data failed");
+        }
+        git.graph.end_refresh(&repo);
+    });
+}
+
+/// Stores a pack just served (spooled at `path`, header included) as `repo`'s clone pack, in
+/// the background. Best effort: a lost race or a failure only means the next clone encodes.
+fn store_clone_pack(repo: Arc<dyn Repository>, name: Name, path: PathBuf) {
+    std::thread::spawn(move || {
+        let r = (|| -> Result<()> {
+            let mut f = std::fs::File::open(&path)?;
+            let h = repo.put_stream(&mut f)?;
+            let obs = match repo.resolve(&name)? {
+                Some(v) => Observed::Version(v.version),
+                None => Observed::Absent,
+            };
+            repo.replace(&name, &[(name.clone(), obs)], h)?;
+            Ok(())
+        })();
+        if let Err(e) = r {
+            warn!(error = %e, "storing the clone pack failed");
+        }
+        let _ = std::fs::remove_file(&path);
+    });
+}
+
+/// Streams a pack of everything reachable from `wants` but not from `common`. A full clone
+/// (nothing in common, no shallow, no filter) is served from the repository's clone pack cache
+/// when its wants match, and otherwise spooled and cached for the next one.
 #[allow(clippy::too_many_arguments)]
 fn write_pack(
     view: &View<'_>,
@@ -2067,9 +2388,60 @@ fn write_pack(
     tx: &mpsc::Sender<std::result::Result<Bytes, std::io::Error>>,
     metrics: &crate::metrics::Metrics,
 ) -> Result<()> {
+    let git = view.st;
+    let cacheable = git.clone_cache
+        && common.is_empty()
+        && commits.is_none()
+        && opts.client_shallow.is_empty()
+        && opts.blob_limit.is_none()
+        && !opts.deepens();
+    let mut tee: Option<(std::fs::File, PathBuf, Name)> = None;
+    if cacheable {
+        let key = clone_pack_key(view.fmt, wants);
+        if serve_cached_pack(git, repo, &key, sideband_on, tx, metrics)? {
+            return Ok(());
+        }
+        if let Some(n) = clone_pack_ref(repo) {
+            let path = git.spool.join(format!("{:016x}{:016x}.clonepack", fastrand::u64(..), fastrand::u64(..)));
+            let mut f = std::fs::File::create(&path)?;
+            f.write_all(CLONE_PACK_MAGIC)?;
+            f.write_all(&key)?;
+            tee = Some((f, path, n));
+        }
+    }
+    let r =
+        encode_pack(view, repo, wants, common, opts, commits, sideband_on, tx, metrics, tee.as_mut().map(|t| &mut t.0));
+    if let Some((f, path, n)) = tee {
+        drop(f);
+        match r {
+            Ok(()) => store_clone_pack(git.repo.clone(), n, path),
+            Err(_) => {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+    r
+}
+
+/// Encodes and streams the pack ([`write_pack`]), copying the raw pack bytes to `tee`.
+#[allow(clippy::too_many_arguments)]
+fn encode_pack(
+    view: &View<'_>,
+    repo: &str,
+    wants: &[Oid],
+    common: &[Oid],
+    opts: &FetchOpts,
+    commits: Option<&HashSet<Oid>>,
+    sideband_on: bool,
+    tx: &mpsc::Sender<std::result::Result<Bytes, std::io::Error>>,
+    metrics: &crate::metrics::Metrics,
+    mut tee: Option<&mut std::fs::File>,
+) -> Result<()> {
     // Objects to send: reachable from wants minus reachable from common.
+    let t0 = std::time::Instant::now();
     let exclude =
-        if common.is_empty() { HashSet::new() } else { boundary_exclude(view, common, &opts.client_shallow)? };
+        if common.is_empty() { HashSet::new() } else { boundary_exclude(view, wants, common, &opts.client_shallow)? };
+    tracing::debug!(repo, excluded = exclude.len(), ms = t0.elapsed().as_millis() as u64, "boundary computed");
     // Deepening: the client's shallow commits are excluded (it has them), so start the walk
     // at their parents that are now included as well.
     let mut tips: Vec<Oid> = wants.to_vec();
@@ -2081,6 +2453,7 @@ fn write_pack(
         }
     }
     let objs = walk_paths_with(view, &tips, &exclude, commits, opts.blob_limit)?;
+    tracing::debug!(repo, objects = objs.len(), ms = t0.elapsed().as_millis() as u64, "walked");
     // Stream the pack. Blobs and trees are deltified against the previously
     // sent version at the same path (newest first, so older versions are deltas).
     let mut h = PackHasher::new(view.fmt);
@@ -2091,8 +2464,11 @@ fn write_pack(
     h.update(&header);
     buf.extend_from_slice(&header);
     let mut offset = header.len() as u64;
-    let flush = |buf: &mut Vec<u8>, force: bool| -> Result<()> {
+    let mut flush = |buf: &mut Vec<u8>, force: bool| -> Result<()> {
         if buf.len() >= 1 << 16 || (force && !buf.is_empty()) {
+            if let Some(t) = tee.as_mut() {
+                t.write_all(buf)?;
+            }
             let mut framed = Vec::with_capacity(buf.len() + 64);
             sideband(&mut framed, 1, buf, sideband_on);
             metrics.bytes_out.inc_by(buf.len() as u64);
@@ -2299,6 +2675,9 @@ async fn receive_pack(
         })
         .collect();
     crate::prov_api::record_publishes(st, "git", &p.name, items);
+    if res.unpack.is_ok() && !res.applied.is_empty() {
+        refresh_derived(git.clone(), repo.clone(), std::time::Duration::ZERO);
+    }
     let mut report = Vec::new();
     match &res.unpack {
         Ok(_) => report.extend_from_slice(&pkt(b"unpack ok\n")),

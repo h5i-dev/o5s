@@ -60,7 +60,8 @@ All bodies are JSON unless noted. Every error has the form `{"error":{"code","me
 | `unauthenticated` | 401 | |
 | `rule_change_on_non_empty` | 409 | |
 | `payload_too_large` | 413 | `server.max_upload_bytes` |
-| `overloaded` | 429 or 503 | rate limit (429) or concurrency limit (503); honour `Retry-After` |
+| `overloaded` | 429 or 503 | rate limit, per principal or per namespace (429), or concurrency limit (503); honour `Retry-After` |
+| `quota_exceeded` | 507 | the namespace (`subject`) was at or over its `[[limits]] max_stored_bytes` at the last usage scan; `/v1` ref deletes and admins are not blocked |
 | `shutting_down` | 503 | draining |
 | `backend`, `corrupt`, `io`, `internal` | 5xx | server-side failure |
 

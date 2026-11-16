@@ -63,6 +63,7 @@ impl TestServer {
             npm: Default::default(),
             maven: Default::default(),
             promotion: Vec::new(),
+            limits: Vec::new(),
         };
         tweak(&mut cfg);
         let state = pico2peta_server::build_state(&cfg).unwrap();

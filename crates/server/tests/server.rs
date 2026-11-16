@@ -853,3 +853,70 @@ fn put_named_applies_the_profile_remotely() {
     // No write access on the name: refused.
     assert!(s.client(READER).put_named(&n, &mut &v2[..]).is_err());
 }
+
+/// `[[limits]]`: a namespace rate shared by all callers, and a storage quota measured by the
+/// background scan (writes refused over it; reads, deletes and admins are not).
+#[test]
+fn namespace_rate_and_quota() {
+    use pico2peta_server::config::{LimitRule, RateLimit};
+    let srv = TestServer::start(|cfg| {
+        cfg.limits.push(LimitRule {
+            prefix: "alice/hot".into(),
+            rate: Some(RateLimit { per_sec: 0.01, burst: 3.0 }),
+            max_stored_bytes: None,
+        });
+        cfg.limits.push(LimitRule { prefix: "alice/small".into(), rate: None, max_stored_bytes: Some(1000) });
+        cfg.server.limits_scan_secs = 1;
+    });
+    let alice = srv.client(ALICE);
+    let admin = srv.client(ADMIN);
+    // Rate: 3 requests against alice/hot, then 429 (other namespaces are unaffected).
+    let hot = Name::new("alice/hot/x").unwrap();
+    for _ in 0..3 {
+        assert!(alice.resolve(&hot).unwrap().is_none());
+    }
+    let http = reqwest::blocking::Client::new();
+    let r = http.get(format!("{}/v1/refs/alice/hot/x", srv.url())).bearer_auth(ALICE).send().unwrap();
+    assert_eq!(r.status(), 429);
+    assert!(r.headers().get("retry-after").is_some());
+    assert!(alice.resolve(&Name::new("alice/other").unwrap()).unwrap().is_none());
+
+    // Quota: 1000 bytes under alice/small. A 4000-byte object pushes it over at the next scan.
+    let big = alice.put(&vec![7u8; 4000]).unwrap();
+    let n1 = Name::new("alice/small/a").unwrap();
+    alice.replace(&n1, &[(n1.clone(), Observed::Absent)], big).unwrap();
+    let small = alice.put(b"tiny").unwrap();
+    let n2 = Name::new("alice/small/b").unwrap();
+    let mut refused = false;
+    for _ in 0..100 {
+        match alice.replace(&n2, &[(n2.clone(), Observed::Absent)], small) {
+            Err(e) if e.to_string().contains("quota") => {
+                refused = true;
+                break;
+            }
+            Err(e) => panic!("unexpected error {e}"),
+            Ok(_) => {}
+        }
+        // Not measured yet: undo and retry after the next scan.
+        let v = alice.resolve(&n2).unwrap().unwrap();
+        alice.delete_ref(&n2, &[(n2.clone(), Observed::Version(v.version))]).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(refused, "quota never applied");
+    // Reads and deletes still work; an admin may write (cleanup).
+    assert_eq!(alice.resolve(&n1).unwrap().unwrap().hash, big);
+    admin.replace(&n2, &[(n2.clone(), Observed::Absent)], small).unwrap();
+    let v = alice.resolve(&n1).unwrap().unwrap();
+    alice.delete_ref(&n1, &[(n1.clone(), Observed::Version(v.version))]).unwrap();
+    // Under the quota again after the next scan.
+    let n3 = Name::new("alice/small/c").unwrap();
+    let mut ok = false;
+    for _ in 0..100 {
+        if alice.replace(&n3, &[(n3.clone(), Observed::Absent)], small).is_ok() {
+            ok = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(ok, "quota never lifted");
+}

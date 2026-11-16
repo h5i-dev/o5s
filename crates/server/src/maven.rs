@@ -149,7 +149,7 @@ fn record_name(repo: &str, path: &str) -> Option<Name> {
 fn check(st: &AppState, p: &Principal, c: &Caller, repo: &str, need: Access) -> std::result::Result<(), Response> {
     let ns = format!("maven/{repo}");
     if st.authz.allows(p, &ns, need) {
-        return Ok(());
+        return st.admit(p, &ns, need >= Access::Write).map_err(IntoResponse::into_response);
     }
     st.metrics.denied.inc();
     st.audit.record_nowait(Event {

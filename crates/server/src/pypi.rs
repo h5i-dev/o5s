@@ -184,7 +184,7 @@ fn authz_ns(index: &str) -> String {
 fn check(st: &AppState, p: &Principal, c: &Caller, index: &str, need: Access) -> std::result::Result<(), Response> {
     let ns = authz_ns(index);
     if st.authz.allows(p, &ns, need) {
-        return Ok(());
+        return st.admit(p, &ns, need >= Access::Write).map_err(IntoResponse::into_response);
     }
     st.metrics.denied.inc();
     st.audit.record_nowait(Event {

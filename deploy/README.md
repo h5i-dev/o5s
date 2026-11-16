@@ -56,6 +56,24 @@ For large uploads, disable request buffering in the proxy (`proxy_request_buffer
 - Minimal IAM permissions on `arn:aws:s3:::bucket/prefix/*`: `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` (used only by GC), `s3:AbortMultipartUpload`. Add `s3:ListBucket` on the bucket with a prefix condition.
 - Staging (the open pack) and refs stay on the local disk at `repo.path`. Put that path on durable storage (EBS, not instance store) and back it up. Without it, refs are lost.
 
+### S3 deployment guide (production checklist)
+1. **Bucket:** in the same region as the servers. Block all public access. Use default encryption (SSE-S3, or SSE-KMS with a bucket key so KMS isn't called on every request). The server sends no SSE headers, so bucket defaults apply. Leave versioning off (see above) and add the abort-multipart lifecycle rule.
+2. **Network:** reach S3 through a **gateway VPC endpoint**. It is free, and keeps pack traffic off the NAT gateway, which bills per GB. The bucket policy can then require `aws:SourceVpce`.
+3. **Identity:** an instance profile (EC2) or IRSA (EKS; see `k8s/s3.yaml`), scoped to the IAM actions above on `bucket/prefix/*`. With several deployments in one bucket, give each its own `prefix` and its own role.
+4. **Refs:**
+   - Single server: `refs = "local"`. Refs live on `repo.path` (EBS), so snapshot that volume.
+   - Several servers or failover: `refs = "backend"`. Refs live in S3 under the prefix, and each server's `repo.path` holds only staging. This needs `backend.conditional_writes = true` (the default). AWS S3 supports `If-None-Match: *` since 2024. For other S3-compatible stores, check that a second conditional create of the same key gets 412; MinIO does, and is what CI runs against.
+5. **Storage class:** keep packs in S3 Standard (or Intelligent-Tiering without the archive tiers). GC deletes and rewrites packs, which incurs minimum-duration fees in Standard-IA, One Zone-IA and the Glacier classes, and archive tiers make reads fail until restored.
+6. **Throughput:** each server keeps at most `backend.max_in_flight` S3 requests in flight (default 32). Raise it for many concurrent large transfers; S3 serves ≥3,500 PUT and 5,500 GET requests per second per prefix. Throttling shows up as `p2p_s3_throttled_total` and is retried with backoff.
+7. **Cost model:** objects are packed, so S3 request counts scale with packs and ranged chunk reads, not with user objects. GC lists the prefix and rewrites the packs it repacks (PUT and DELETE requests, plus the bytes rewritten).
+8. **Monitoring:** alert on `p2p_s3_failures_total` (requests that failed after retries) and on throttling. Both are in `prometheus-alerts.yml` and the Grafana dashboard.
+9. **Backup and DR:**
+   - Same-region protection: S3 durability, plus snapshots of `repo.path` with `refs = "local"`.
+   - Cross-region: S3 replication of the prefix, and with `refs = "local"` a copy of the refs.
+   - Restore: point a new server at the bucket and prefix (and the restored `repo.path`), then run `pico2peta fsck`.
+   - Packs are immutable, so a replica never holds a torn pack. S3 replication is asynchronous and unordered, though: right after a failover, a replicated ref may point at a pack that hasn't arrived yet. Run `fsck` before serving writes from a replica, and expect a replication lag window (S3 RTC bounds it at 15 minutes).
+10. **Verify before going live:** `pico2peta-server check-config`, a put/get round trip, `POST /v1/admin/gc?dry_run=true`, and a restart (the server must come back with every ref).
+
 ## Reloading configuration
 SIGHUP (`systemctl reload`) re-reads the config file and applies **tokens, policies and the TLS certificate** atomically. Revoked tokens stop working on the next request. If the new file fails validation, nothing changes and an error is logged. Every reload is audited (`action = "config_reload"`). All other settings need a restart.
 
@@ -133,5 +151,9 @@ With `gc.interval_secs > 0`, the server advances the GC protocol on that schedul
 ## Capacity notes
 - Each transfer buffers at most about 2 MiB, whatever the object size. Measured: 19 MiB peak RSS growth while streaming 512 MiB up and back down (`crates/server/tests/memory.rs`).
 - `server.rate_limit = { per_sec, burst }` gives each principal (anonymous callers: each client IP) a token bucket. Excess requests get 429 with `Retry-After`.
+- `[[limits]]` rules set limits per namespace (the longest `prefix` applies). Every front honours them (git, OCI, HF, PyPI, npm, Maven), and so do the `/v1` name operations.
+  - `rate = { per_sec, burst }` is one token bucket shared by all callers of the namespace. Excess requests get 429 with `Retry-After`.
+  - `max_stored_bytes` is a quota on the logical bytes reachable from the namespace's names, following the fronts' references (commits → trees → blobs, manifests → layers). Content shared with other namespaces counts in full in each one. A background scan measures usage every `server.limits_scan_secs` (default 3600; the scan reads every reachable object's size, so size the interval to the data). Writes into a namespace measured at or over its quota get 507 `quota_exceeded`. Not blocked: reads, `/v1` ref deletes, OCI manifest deletes, and global admins (for cleanup through any front). Other front-level deletes count as writes (e.g. a git push that only deletes refs). A namespace can overshoot by what it writes within one scan interval.
+  - Refusals are counted in `p2p_namespace_limited_total{outcome="rate"|"quota"}`, and each scan logs the usage it measured.
 - `max_concurrent_requests` bounds concurrent requests, including those still streaming bodies. Beyond it, the server answers 503 with `Retry-After: 1`.
 - A client that stalls for 60 s in the middle of a transfer is disconnected.

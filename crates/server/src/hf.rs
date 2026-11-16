@@ -223,7 +223,7 @@ fn core_err(e: Error) -> Response {
 
 fn check(st: &AppState, p: &Principal, c: &Caller, repo: &RepoId, need: Access) -> std::result::Result<(), Response> {
     if st.authz.allows(p, &repo.authz(), need) {
-        return Ok(());
+        return st.admit(p, &repo.authz(), need >= Access::Write).map_err(IntoResponse::into_response);
     }
     st.metrics.denied.inc();
     st.audit.record_nowait(Event {
