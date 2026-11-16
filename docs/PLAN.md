@@ -609,3 +609,19 @@ Every number carries its commit, host load and raw-data file.
 
 **Consequence.** A regression is a FAIL. It is fixed before the release candidate, not rationalized. The RC
 (`v0.1.0-rc.1`) is tagged only after the rerun passes this rule.
+
+**Amendment 2026-11-16 (human ruling, written before these runs).** The three core H3 FAILs on `cbbbb8a`
+(BENCH 2026-11-16 H3) stay recorded as FAIL by the letter; those rows are not edited. Each is decided by
+**one** pre-declared, better-controlled re-measurement on the final H3 commit, under the bench lock with the
+other session idle. The start load and a 10 s process log are recorded with each. The result is acted on: if a
+metric still regresses, it is a real regression, found and fixed before H4, not explained away.
+1. **Ingest put.** A quiet window (load < 2.5 at start). The `baseline-pre-h5i` and H3 `p2p-bench` binaries
+   run interleaved (`ingest <redis dump> <dir> 1024`, the same input as the suite) for **5 rounds**,
+   alternating baseline then H3. The verdict compares the two medians of `put` MB/s against the §6.8
+   allowance: max(3 %, the baseline binary's range in these 5 rounds).
+2. **Durable-write tier (§6.4).** The H3 `p2p-bench generic <dir> 1024` runs **5 times** in one window. Each
+   run measures our put and `dd conv=fsync` back to back, giving one ratio per round. The verdict is the median
+   of the 5 ratios against the tier threshold of 0.90×.
+3. **Redis A3 peak RSS (Exp3).** The redis A3 build (`exp3 run <redis work dir> a3 4 10000`), **3 reps** each
+   with the baseline and the H3 `exp3` binary, interleaved. The verdict compares the two medians of
+   `peak_rss_kb` against the §6.8 allowance: max(3 %, the baseline binary's range in these 3 reps).
