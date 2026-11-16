@@ -216,6 +216,23 @@ A parallel Xet upload cutter was tried and reverted (c155ab3): it lost the pipel
   (LFS↔Xet chunk dedup is worth more) and is recorded as a FAIL at 1.34× of `/v1`. Downloads are judged on
   server CPU against `/v1`, with busy time informational.
 
+## Release candidate: checklist status (docs/RELEASE.md), 2026-11-16, demo `0951c7b`
+Not tagged: the human said not to tag yet.
+- **Done:**
+  - **1, 2.** Gate green on `0951c7b`, with net merged.
+  - **3.** CHANGELOG: the rename is listed as breaking; H2 and H4 are listed.
+  - **4.** Docs current: CLI.md regenerated, no changes. SECURITY.md has the reachability section, ARCHITECTURE
+    the verified-read limit, and net updated API.md.
+  - **6.** Proofs: `h5i app prove` ok in both projects after the rename (core 182, net 167 theorems).
+- **Dev pass only:**
+  - **5.** Fuzz: all 20 targets 60 s clean under ASan, no artifacts, but on a lock that had two transitive h5i
+    crates at 0.5.6 (fixed since). It must be rerun on the commit to tag.
+- **Blocked on the human resuming measurements:**
+  - the final batch's core suite (no usable run);
+  - net's §6.5 windows A and B;
+  - a measurement of 95f6a4a (the staging-file writeback, against the durable-write FAIL).
+- **Then:** the fuzz smoke on the tag commit, the tag (7), and its PROGRESS record (8).
+
 ## Post-RC (agreed, not started)
 - Re-measure the §6.4 verified read on a many-core host (the human, 2026-11-16).
 - A double-buffered parallel Xet upload chunker: cut window i while window i+1 is read. The windowed version lost
