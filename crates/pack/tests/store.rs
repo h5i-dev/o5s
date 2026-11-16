@@ -1265,3 +1265,79 @@ fn mapped_index_cache_is_hard_linked_on_local_disk() {
         assert_eq!(e.metadata().unwrap().nlink(), 2, "{:?} is a hard link to the pack index", e.path());
     }
 }
+
+/// Leaf chunk hashes of `h` (a manifest tree), in order.
+fn leaves(s: &PackStore, h: &Hash) -> Vec<Hash> {
+    match s.chunks(h).unwrap() {
+        None => vec![*h],
+        Some(kids) => kids.iter().flat_map(|k| leaves(s, k)).collect(),
+    }
+}
+
+#[test]
+fn put_concat_reuses_source_chunks_and_observes_every_byte() {
+    let d = tempfile::tempdir().unwrap();
+    let s = open(d.path(), PackConfig::default());
+    let a = pseudo(5 << 20, 11); // chunked
+    let small = pseudo(3000, 12); // a blob
+    let ha = s.put(&a).unwrap();
+    let hs = s.put(&small).unwrap();
+    let la = leaves(&s, &ha);
+    assert!(la.len() > 4);
+    // Chunk boundaries of `a` (for aligned ranges).
+    let mut bounds = vec![0u64];
+    for c in &la {
+        bounds.push(bounds.last().unwrap() + s.size(c).unwrap());
+    }
+    let (b1, b3) = (bounds[1], bounds[3]);
+    let n = a.len() as u64;
+    let cases: Vec<Vec<(Hash, std::ops::Range<u64>)>> = vec![
+        vec![(ha, 0..n)],                               // the whole object
+        vec![(ha, b1..b3), (hs, 0..3000), (ha, 0..b1)], // aligned ranges plus a blob
+        vec![(ha, 12_345..n - 999), (hs, 100..200)],    // unaligned ends
+        vec![(hs, 0..10), (hs, 10..3000)],              // small result: one blob
+        vec![],                                         // empty
+    ];
+    for parts in cases {
+        let want: Vec<u8> = parts
+            .iter()
+            .flat_map(|(h, r)| {
+                let src = if *h == ha { &a } else { &small };
+                src[r.start as usize..r.end as usize].to_vec()
+            })
+            .collect();
+        let mut seen = Vec::new();
+        let h = s.put_concat(&parts, &mut |b| seen.extend_from_slice(b)).unwrap();
+        assert_eq!(seen, want, "observe sees every byte in order");
+        assert_eq!(h, Hash::of(&want));
+        assert_eq!(s.get(&h, None).unwrap(), want);
+        if parts.len() == 1 && parts[0].1 == (0..n) {
+            assert_eq!(h, ha);
+        }
+    }
+    // Aligned ranges (above the chunking threshold) reuse the source's chunk records exactly.
+    let k = bounds.iter().position(|&b| b >= b1 + (2 << 20)).unwrap();
+    let h = s.put_concat(&[(ha, b1..bounds[k])], &mut |_| {}).unwrap();
+    assert_eq!(leaves(&s, &h), la[1..k].to_vec());
+    // A bad range is refused.
+    assert!(s.put_concat(&[(hs, 0..3001)], &mut |_| {}).is_err());
+}
+
+#[test]
+fn put_chunked_keeps_the_given_boundaries() {
+    let d = tempfile::tempdir().unwrap();
+    let s = open(d.path(), PackConfig::default());
+    let parts: Vec<Vec<u8>> = (0..40u64).map(|i| pseudo(20_000 + (i as usize * 7919) % 90_000, i)).collect();
+    let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
+    let all = parts.concat();
+    let h = s.put_chunked(&refs).unwrap();
+    assert_eq!(h, Hash::of(&all));
+    assert_eq!(s.get(&h, None).unwrap(), all);
+    let want: Vec<Hash> = parts.iter().map(|p| Hash::of(p)).collect();
+    assert_eq!(leaves(&s, &h), want);
+    // Same object as a plain put of the concatenation (identity is content).
+    assert_eq!(s.put(&all).unwrap(), h);
+    // Small totals become one blob.
+    let tiny = s.put_chunked(&[b"ab", b"cd"]).unwrap();
+    assert_eq!(s.get(&tiny, None).unwrap(), b"abcd");
+}

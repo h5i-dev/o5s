@@ -729,6 +729,12 @@ impl ObjectStore for LocalRepo {
     fn put_many(&self, items: &[&[u8]]) -> Result<Vec<Hash>> {
         self.packs.put_many(items)
     }
+    fn put_concat(&self, parts: &[(Hash, Range<u64>)], observe: &mut dyn FnMut(&[u8])) -> Result<Hash> {
+        self.packs.put_concat(parts, observe)
+    }
+    fn put_chunked(&self, chunks: &[&[u8]]) -> Result<Hash> {
+        self.packs.put_chunked(chunks)
+    }
     fn put_stream(&self, src: &mut dyn Read) -> Result<Hash> {
         self.packs.put_stream_with(self.chunking.default.into(), src)
     }
@@ -860,6 +866,12 @@ impl ObjectStore for FrontHandle {
     }
     fn put_many(&self, items: &[&[u8]]) -> Result<Vec<Hash>> {
         self.repo.put_many(items)
+    }
+    fn put_concat(&self, parts: &[(Hash, std::ops::Range<u64>)], observe: &mut dyn FnMut(&[u8])) -> Result<Hash> {
+        self.repo.put_concat(parts, observe)
+    }
+    fn put_chunked(&self, chunks: &[&[u8]]) -> Result<Hash> {
+        self.repo.put_chunked(chunks)
     }
     fn put_stream(&self, src: &mut dyn Read) -> Result<Hash> {
         self.repo.put_stream(src)

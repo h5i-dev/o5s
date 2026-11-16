@@ -210,6 +210,46 @@ pub trait ObjectStore: Send + Sync {
     fn put_many(&self, items: &[&[u8]]) -> Result<Vec<Hash>> {
         items.iter().map(|d| self.put(d)).collect()
     }
+    /// Stores the concatenation of byte ranges of existing objects (API v1.20)
+    /// and returns its content hash. `observe` sees every byte of the result,
+    /// in order (in slices of any size), e.g. to compute another digest in the
+    /// same pass. Implementations may reuse the sources' stored chunks instead
+    /// of re-chunking (the pack store does, so a file reassembled from chunks
+    /// it already holds costs one read and hash of its bytes). Default: reads
+    /// the ranges and calls [`put_stream`](Self::put_stream).
+    fn put_concat(&self, parts: &[(Hash, Range<u64>)], observe: &mut dyn FnMut(&[u8])) -> Result<Hash> {
+        let mut readers = Vec::with_capacity(parts.len());
+        for (h, r) in parts {
+            readers.push(self.open(h, Some(r.clone()))?);
+        }
+        struct Concat<'a> {
+            readers: std::collections::VecDeque<Box<dyn Read + Send>>,
+            observe: &'a mut dyn FnMut(&[u8]),
+        }
+        impl Read for Concat<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                while let Some(r) = self.readers.front_mut() {
+                    let n = r.read(buf)?;
+                    if n > 0 {
+                        (self.observe)(&buf[..n]);
+                        return Ok(n);
+                    }
+                    self.readers.pop_front();
+                }
+                Ok(0)
+            }
+        }
+        self.put_stream(&mut Concat { readers: readers.into(), observe })
+    }
+    /// Stores the concatenation of `chunks` with exactly these chunk
+    /// boundaries (API v1.20; no content-defined chunking), e.g. a Xet xorb
+    /// whose client chunks are known. The result is the same object (same
+    /// hash and bytes) as a `put` of the concatenation; only its storage
+    /// layout differs. Default: `put_stream` of the concatenation.
+    fn put_chunked(&self, chunks: &[&[u8]]) -> Result<Hash> {
+        let mut r = std::io::Cursor::new(chunks.concat());
+        self.put_stream(&mut r)
+    }
     /// Streams an object of unknown length in with bounded memory.
     fn put_stream(&self, src: &mut dyn Read) -> Result<Hash>;
     /// Streams an object in, stored as a byte-wise XOR delta against `base`

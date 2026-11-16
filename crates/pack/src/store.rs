@@ -910,6 +910,68 @@ impl PackStore {
         Ok(out)
     }
 
+    /// [`ObjectStore::put_concat`]: the result is built from pieces in order.
+    /// A range of a chunked (manifest) source contributes that source's leaf
+    /// chunks, trimmed at the range ends; any other source contributes pieces
+    /// of at most `cdc_max` bytes. Pieces are read (verified), shown to
+    /// `observe`, and fed to the manifest-tree pipeline as chunks, so chunks
+    /// already stored are dedup hits (no chunker, no recompression). Results
+    /// under the chunking threshold are stored as one blob, like `put`.
+    pub fn put_concat_impl(&self, parts: &[(Hash, Range<u64>)], observe: &mut dyn FnMut(&[u8])) -> Result<Hash> {
+        let cfg = &self.inner.cfg;
+        let piece_max = (cfg.cdc_max as u64).clamp(1, cfg.chunk_threshold.max(2) as u64 - 1);
+        let mut plan: Vec<(Hash, Range<u64>)> = Vec::new();
+        let mut total = 0u64;
+        for (h, r) in parts {
+            let loc = self.lookup(h)?.ok_or(Error::NotFound(*h))?;
+            let r = check_range(Some(r.clone()), loc.raw_len)?;
+            total = total.checked_add(r.end - r.start).ok_or_else(|| Error::Parse("put_concat: too long".into()))?;
+            if r.start == r.end {
+                continue;
+            }
+            if loc.kind == Kind::Manifest {
+                for (c, off, len) in self.leaf_chunks(h)? {
+                    let (a, b) = (off.max(r.start), (off + len).min(r.end));
+                    if a < b {
+                        plan.push((c, a - off..b - off));
+                    }
+                }
+            } else {
+                let mut a = r.start;
+                while a < r.end {
+                    let b = (a + piece_max).min(r.end);
+                    plan.push((*h, a..b));
+                    a = b;
+                }
+            }
+        }
+        if total > MAX_BLOB * 64 {
+            return Err(Error::Parse("put_concat: result too large".into()));
+        }
+        let read = |(h, r): &(Hash, Range<u64>)| -> Result<Vec<u8>> {
+            let d = self.get(h, Some(r.clone()))?;
+            if d.len() as u64 != r.end - r.start {
+                return Err(Error::Corrupt(format!("short read of {h}")));
+            }
+            Ok(d)
+        };
+        if total < cfg.chunk_threshold as u64 {
+            let mut all = Vec::with_capacity(total as usize);
+            for p in &plan {
+                let d = read(p)?;
+                observe(&d);
+                all.extend_from_slice(&d);
+            }
+            return self.put(&all);
+        }
+        let chunks = plan.iter().map(|p| {
+            let d = read(p)?;
+            observe(&d);
+            Ok(d)
+        });
+        self.put_chunks(chunks, None)
+    }
+
     /// Seals every staging file whose owner is gone.
     fn recover_orphans(&self) -> Result<()> {
         let mut paths: Vec<PathBuf> = fs::read_dir(&self.inner.staging_dir)?
@@ -1243,7 +1305,9 @@ impl PackStore {
 
     /// Reads the raw bytes of `hash`'s record (CRC verified), following
     /// relocations caused by seals and GC.
-    fn read_raw(&self, hash: &Hash, mut loc: Loc) -> Result<(RecHeader, Vec<u8>, Loc)> {
+    /// `crc = false` skips the record CRC: only for reads whose content is then
+    /// verified by its BLAKE3 hash (the CRC would check the same bytes again).
+    fn read_raw(&self, hash: &Hash, mut loc: Loc, crc: bool) -> Result<(RecHeader, Vec<u8>, Loc)> {
         for _ in 0..4 {
             let total = (REC_HEADER + loc.stored_len as usize + REC_TRAILER) as u64;
             let raw = match loc.pack {
@@ -1290,7 +1354,7 @@ impl PackStore {
                     }
                 }
             };
-            let (h, _) = decode_record(&raw)?;
+            let (h, _) = if crc { decode_record(&raw)? } else { decode_record_unchecked(&raw)? };
             let framed = loc.frame.is_some();
             if framed != h.kind.is_frame() || (!framed && h.hash != *hash) {
                 return Err(Error::Corrupt(format!("record at index location holds {} not {hash}", h.hash)));
@@ -1300,17 +1364,30 @@ impl PackStore {
         Err(Error::Corrupt(format!("could not resolve location of {hash}")))
     }
 
-    fn read_record(&self, hash: &Hash, loc: Loc) -> Result<(RecHeader, Vec<u8>)> {
-        let (h, raw, loc) = self.read_raw(hash, loc)?;
+    fn read_record(&self, hash: &Hash, loc: Loc, crc: bool) -> Result<(RecHeader, Vec<u8>)> {
+        let (h, raw, loc) = self.read_raw(hash, loc, crc)?;
         if loc.frame.is_none() && h.raw_len != loc.raw_len {
             return Err(Error::Corrupt(format!("index length disagrees with record for {hash}")));
         }
-        let (_, payload) = decode_record(&raw)?;
+        let (_, payload) = decode_record_unchecked(&raw)?; // checked (or skipped) by read_raw
         if let Some((inner, _)) = loc.frame {
             let (a, b) = (inner as usize, inner as usize + loc.raw_len as usize);
             let bodies = self.frame_bodies(&h, payload, &loc, b)?;
             let d = bodies.get(a..b).ok_or_else(|| Error::Corrupt(format!("frame member {hash} out of range")))?;
             return Ok((h, d.to_vec()));
+        }
+        if h.codec == Codec::Raw {
+            // Reuse the record buffer: drop the header and trailer in place
+            // (one memmove, no second allocation of the object's size).
+            let end = REC_HEADER + payload.len();
+            let (kind, raw_len) = (h.kind, h.raw_len);
+            let mut raw = raw;
+            raw.truncate(end);
+            raw.drain(..REC_HEADER);
+            if kind == Kind::Blob && raw.len() as u64 != raw_len {
+                return Err(Error::Corrupt(format!("length mismatch for {}", h.hash)));
+            }
+            return Ok((h, raw));
         }
         Ok((h, unpack_payload(&h, payload)?))
     }
@@ -1375,7 +1452,10 @@ impl PackStore {
     }
 
     fn read_blob(&self, hash: &Hash, loc: Loc) -> Result<Vec<u8>> {
-        let (_, data) = self.read_record(hash, loc)?;
+        // A plain blob skips the CRC: the BLAKE3 check below verifies the same
+        // bytes. Frames keep it (one CRC covers all members, and decompression
+        // dominates their cost).
+        let (_, data) = self.read_record(hash, loc, loc.frame.is_some())?;
         if Hash::of(&data) != *hash {
             return Err(Error::Corrupt(format!("content hash mismatch for {hash}")));
         }
@@ -1399,7 +1479,7 @@ impl PackStore {
     }
 
     fn read_manifest_uncached(&self, hash: &Hash, loc: Loc) -> Result<Vec<(Hash, u64)>> {
-        let (_, data) = self.read_record(hash, loc)?;
+        let (_, data) = self.read_record(hash, loc, true)?;
         let m = decode_manifest(&data)?;
         if m.iter().try_fold(0u64, |a, c| a.checked_add(c.1)) != Some(loc.raw_len) {
             return Err(Error::Corrupt(format!("manifest length mismatch for {hash}")));
@@ -1903,7 +1983,7 @@ impl PackStore {
             }
             Kind::Frame3 => {
                 // A member of a frame with a reference prefix: the reference is a child.
-                let (h, raw, _) = self.read_raw(hash, loc)?;
+                let (h, raw, _) = self.read_raw(hash, loc, true)?;
                 let (_, payload) = decode_record(&raw)?;
                 Ok(Some(frame_ref(&h, payload)?.into_iter().collect()))
             }
@@ -1919,7 +1999,7 @@ impl PackStore {
     }
 
     fn read_delta(&self, hash: &Hash, loc: Loc) -> Result<(Hash, Hash, Option<Vec<DeltaSeg>>)> {
-        let (_, data) = self.read_record(hash, loc)?;
+        let (_, data) = self.read_record(hash, loc, true)?;
         decode_delta(&data)
     }
 
@@ -2024,7 +2104,7 @@ impl PackStore {
             self.append(&mut w, Kind::Blob, *hash, data.len() as u64, &data)?;
             return self.maybe_seal(&mut w);
         }
-        let (h, raw, _) = self.read_raw(hash, loc)?;
+        let (h, raw, _) = self.read_raw(hash, loc, true)?;
         let mut w = self.inner.writer.lock().map_err(poisoned)?;
         if w.is_none() {
             *w = Some(self.new_open_pack()?);
@@ -2256,6 +2336,23 @@ impl ObjectStore for PackStore {
 
     fn put_many(&self, items: &[&[u8]]) -> Result<Vec<Hash>> {
         self.put_many_impl(items)
+    }
+
+    fn put_concat(&self, parts: &[(Hash, Range<u64>)], observe: &mut dyn FnMut(&[u8])) -> Result<Hash> {
+        self.put_concat_impl(parts, observe)
+    }
+
+    fn put_chunked(&self, chunks: &[&[u8]]) -> Result<Hash> {
+        // Chunks are stored as blobs, so each must stay below the threshold;
+        // a larger one is split (still the same object, a finer layout).
+        let thr = self.inner.cfg.chunk_threshold;
+        let total: usize = chunks.iter().map(|c| c.len()).sum();
+        if total < thr {
+            return self.put(&chunks.concat());
+        }
+        let piece = thr.max(2) - 1;
+        let it = chunks.iter().filter(|c| !c.is_empty()).flat_map(|c| c.chunks(piece)).map(|c| Ok(c.to_vec()));
+        self.put_chunks(it, None)
     }
 
     fn put_stream(&self, src: &mut dyn Read) -> Result<Hash> {
@@ -2833,7 +2930,7 @@ impl PackStore {
     /// the buffer when the whole chunk is wanted.
     fn chunk_slice(&self, hash: &Hash, loc: Loc, a: u64, b: u64, verify: bool) -> Result<Vec<u8>> {
         // Unverified (eof mode) still checks the record CRC (`read_record`).
-        let mut d = if verify { self.read_blob(hash, loc)? } else { self.read_record(hash, loc)?.1 };
+        let mut d = if verify { self.read_blob(hash, loc)? } else { self.read_record(hash, loc, true)?.1 };
         if a == 0 && b as usize == d.len() {
             return Ok(d);
         }

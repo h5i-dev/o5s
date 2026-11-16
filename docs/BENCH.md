@@ -48,6 +48,51 @@ pre-registered metric was plain RSS, so it is reported as **missed**; the split 
   292 B/object projection was stopped early, as soon as the 10⁷ disk number showed it could not fit.
 - The bench's disk number now counts each inode once.
 
+## 2026-11-16: put/get pass, part 3: verified reads of incompressible blobs (net's OCI profile)
+
+Net's server profile of OCI pulls (gzip layers, stored raw), self time: BLAKE3 36.8 %, CRC32 11.6 %, memset
+6.1 % (the front's buffer), kernel ~12 %. Changes:
+- **The record CRC was computed twice per read** (`read_raw`, then `read_record` decoding the same record again).
+  Now it is computed once.
+- **A plain blob read skips the CRC.** Every blob read is BLAKE3-verified against its content hash, which checks
+  the same bytes. Manifests, deltas, frames (one CRC covers all members), eof-mode chunk reads, `copy_record`
+  and recovery keep it. The strict guarantee is unchanged: a corrupt blob still fails on its hash before any
+  byte is returned.
+- **Raw blobs reuse the record buffer** (header and trailer dropped in place) instead of copying the payload into
+  a second allocation of the object's size. Large fresh allocations were page-faulting on every read: with
+  glibc's default mmap threshold, `open` of 512 KiB blobs ran at 794 MB/s against 2,293 MB/s with
+  `MALLOC_MMAP_THRESHOLD_=32M`.
+
+`p2p-bench reads`, incompressible objects, MB/s (`get` / `open` strict / `open` eof):
+
+| object | part 2 (load 1.3–1.9) | A/B before, 2 runs (load 3.4–3.8) | after (load 2.2–2.7) |
+|---|---|---|---|
+| 4 KiB | 730 / 766 / 763 | 639–728 / 600–748 / 595–750 | 757–873 / 741–928 / 773–930 |
+| 64 KiB | 1,617 / 1,633 / 1,617 | 1,216–1,561 / 1,178–1,568 / 1,219–1,585 | 1,975–2,268 / 2,136–2,308 / 1,686–2,305 |
+| 512 KiB | 1,737 / 1,642 / 1,651 | 1,302–1,724 / 576–688 / 581–682 | 1,745–2,585 / 1,689–2,405 / 1,711–2,407 |
+| 4 MiB | 1,690 / 1,689 / 1,799 | 702–1,538 / 817–1,640 / 954–1,785 | 1,743 / 1,716 / 1,935 |
+| 64 MiB | 1,033–1,317 / 1,670–1,966 / 1,568–2,096 | 707–768 / 695–1,537 / 1,599–1,919 | 1,289 / 2,000 / 2,099 |
+
+- Compressed (text) reads are unchanged: zstd dominates them.
+- Whole-object strict reads still hash every byte twice: per chunk before delivery, and the whole object at EOF.
+  The whole-object hash is what catches a crafted manifest that splices valid chunks. BLAKE3's tree can't be
+  assembled from CDC chunk hashes, because chunk boundaries don't fall on its power-of-two subtrees. So that
+  second pass stays in strict mode; `eof` mode, where the repository allows it, hashes once.
+
+**Xet chunker:** a 4-bytes-per-step gear loop (exact, shorter dependency chain) measured the same as the plain
+loop (1.42–1.45 GB/s on 1 thread, both, under the lock), so it was not kept. The loop is not bound by its
+add/shift chain.
+
+**New primitives for the HF front (API v1.20).**
+- `ObjectStore::put_concat(parts, observe)` stores a concatenation of ranges of existing objects. Chunked sources
+  contribute their own stored chunks (trimmed at unaligned ends), so a file reassembled from chunks the store
+  already holds costs one verified read and hash of its bytes: no chunker, no recompression. `observe` sees every
+  byte in order (for the front's SHA-256).
+- `ObjectStore::put_chunked(chunks)` stores a concatenation with exactly the given chunk boundaries (e.g. Xet
+  client chunks).
+- Tests: `put_concat_reuses_source_chunks_and_observes_every_byte`, `put_chunked_keeps_the_given_boundaries`.
+- Net wires them into the Xet shard and xorb paths.
+
 ## 2026-11-15: put/get pass, part 2: reads (`p2p-bench reads`)
 
 One thread, warm page cache, default config (`chunk_threshold` 1 MiB, so 4 MiB and 64 MiB objects are chunked
@@ -127,6 +172,11 @@ uncommitted; net takes them over. Same push, same host:
 - **11–22 s:** the core compresses at about 2 cores while the request thread mostly waits.
 - The two phases do not overlap. The remaining levers are front-side: parallel pack parsing (as `git
   index-pack` threads it), or starting storage while parsing. Both are handed to net.
+
+**End to end after net's git-front rework (net, f8f8a5c; numbers from NET_PROGRESS).** The push uses `put_many`
+with index-pack-style parallel indexing and two storer threads (~78 % busy each). A redis first push into an
+empty store takes **16.2–17.2 s vs git daemon 14.9–15.0 s (1.08–1.15×; was ~2.7×)**. What remains is zstd
+level-3 CPU and a 2.3 s serial first pass.
 
 **Ingest zstd level** (the same 1 GiB; single-thread compression, then `put_many` and a full similarity
 repack, `gc` with `repack_all`, zero grace):
