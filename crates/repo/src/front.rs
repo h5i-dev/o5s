@@ -6,7 +6,7 @@
 //! - an **encoding plan** per put ([`Front::plan`]): chunker, byte grouping,
 //!   and whether to store the object as a derived `base + patch` object;
 //! - **owned name prefixes** ([`Front::prefixes`]): names under them can only
-//!   be moved through that front's handle ([`LocalRepo::front`]). Claims nest,
+//!   be moved through that front's handle ([`LocalRepo::front`](crate::LocalRepo::front)). Claims nest,
 //!   and the longest claimed prefix decides (e.g. `git/` and `git/hf/`);
 //! - a **GC tracer** and a repack **grouper** for the objects it understands.
 //!
@@ -47,7 +47,7 @@ pub trait Front: Send + Sync {
     fn id(&self) -> &str;
 
     /// Name prefixes this front owns. Names under an owned prefix can only be
-    /// moved through [`LocalRepo::front`]`(id)`. Longest claim wins.
+    /// moved through [`LocalRepo::front`](crate::LocalRepo::front)`(id)`. Longest claim wins.
     fn prefixes(&self) -> Vec<String> {
         Vec::new()
     }

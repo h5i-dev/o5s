@@ -1,5 +1,5 @@
 //! The Gear table used by Xet chunking: `DEFAULT_TABLE` from rust-gearhash
-//! (https://github.com/srijs/rust-gearhash, src/table.rs at adad44e7, MIT/Apache-2.0),
+//! (<https://github.com/srijs/rust-gearhash>, src/table.rs at adad44e7, MIT/Apache-2.0),
 //! referenced by the Xet chunking spec. Copied verbatim; changing any value breaks
 //! boundary compatibility with Hugging Face Xet.
 

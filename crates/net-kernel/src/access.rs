@@ -10,7 +10,7 @@
 //!   covers a ref iff it covers the ref's cell (core's reachability index; its maintenance
 //!   invariant is core's proof obligation).
 //!
-//! Every decision goes through [`guarded`], an instance of `guard_viewed`. h5i-app proves for
+//! Every decision goes through [`guarded_transition`](crate::guarded_transition), an instance of `guard_viewed`. h5i-app proves for
 //! every kernel and policy that a committed command's writes are permitted and its disclosed
 //! rows stored and visible, and that read-only commands are noninterfering with what the view
 //! hides (`verify/net/proofs`). Unauthorized and nonexistent are both refusals, which the shell

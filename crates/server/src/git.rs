@@ -406,7 +406,7 @@ impl GitState {
         self
     }
 
-    /// Enables the full-clone pack cache (see [`write_pack`]).
+    /// Enables the full-clone pack cache (see `write_pack`).
     pub fn with_clone_pack_cache(mut self, on: bool) -> GitState {
         self.clone_cache = on;
         self
