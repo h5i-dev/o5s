@@ -1,0 +1,12 @@
+# reads rep 3 commit 40b6ed6 dirty 4 load_start 1.96 2026-11-16T02:12:18+00:00
+{"mode":"reads","input":"text","size_kib":4,"n":20000,"get_mb_s":295,"open_strict_mb_s":295,"open_eof_mb_s":296,"load":"2.05"}
+{"mode":"reads","input":"text","size_kib":64,"n":2000,"get_mb_s":591,"open_strict_mb_s":568,"open_eof_mb_s":567,"load":"1.88"}
+{"mode":"reads","input":"text","size_kib":512,"n":256,"get_mb_s":660,"open_strict_mb_s":640,"open_eof_mb_s":644,"load":"1.81"}
+{"mode":"reads","input":"text","size_kib":4096,"n":32,"get_mb_s":984,"open_strict_mb_s":995,"open_eof_mb_s":1157,"load":"1.81"}
+{"mode":"reads","input":"text","size_kib":65536,"n":4,"get_mb_s":908,"open_strict_mb_s":1123,"open_eof_mb_s":1284,"load":"1.81"}
+{"mode":"reads","input":"random","size_kib":4,"n":20000,"get_mb_s":868,"open_strict_mb_s":928,"open_eof_mb_s":934,"load":"1.75"}
+{"mode":"reads","input":"random","size_kib":64,"n":2000,"get_mb_s":2307,"open_strict_mb_s":2337,"open_eof_mb_s":2336,"load":"1.75"}
+{"mode":"reads","input":"random","size_kib":512,"n":256,"get_mb_s":2525,"open_strict_mb_s":2324,"open_eof_mb_s":2407,"load":"1.75"}
+{"mode":"reads","input":"random","size_kib":4096,"n":32,"get_mb_s":1748,"open_strict_mb_s":1726,"open_eof_mb_s":1960,"load":"1.75"}
+{"mode":"reads","input":"random","size_kib":65536,"n":4,"get_mb_s":1329,"open_strict_mb_s":2023,"open_eof_mb_s":2144,"load":"1.75"}
+# load_end 1.75
