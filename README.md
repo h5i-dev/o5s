@@ -8,7 +8,7 @@ PyPI and npm for packages, Hugging Face for LLM weights, and so on?
 
 **Our Answer**
 
-- `o5s` treats every kind of data the same way, using only push, pull, and overwrite.
+- `o5s` treats every kind of data the same way, using only `put`, `get`, and `replace`.
 - It also ships adapters for popular tools such as Git, OCI, Hugging Face, PyPI, npm and Maven, so it fits into existing workflows as they are.
 
 ## Potential pushback
