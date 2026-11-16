@@ -1,0 +1,8 @@
+# small rep 2 commit cbbbb8a dirty 0 load_start 0.88 2026-11-16T06:30:30+00:00
+| re-put (all dedup) | 715.4k/s | |
+| ensure_live | 3593.6k/s | |
+| 1 KiB objects (n = 100000) | 1 thread | 4 threads |
+|---|---|---|
+| put (+ flush) | 133.6k/s | 97.3k/s |
+| get (warm, random) | 266.9k/s | 670.4k/s |
+# load_end 0.89

@@ -48,6 +48,43 @@ pre-registered metric was plain RSS, so it is reported as **missed**; the split 
   292 B/object projection was stopped early, as soon as the 10⁷ disk number showed it could not fit.
 - The bench's disk number now counts each inode once.
 
+## 2026-11-16: H3 no-regression rerun, core side (PLAN §6.8), on `cbbbb8a`
+
+**Verdict by the letter of §6.8: three FAILs, all flagged to the human.** The A/B evidence below
+indicates none is a code regression, but §6.8 says regressions are fixed, not rationalized, so the decision
+is the human's. Net's fronts (§6.5) run next on the same commit.
+
+**How the commit was reached.** The first window, on the merge `9f3ee03`, found two real regressions from
+the H2 shells:
+- 1e6-name open +7%: `validate_path` copied each name before calling the kernel.
+- Commits at 4 and 8 threads −3.5% and −4.2%: allocations in the kernel view building.
+
+Interleaved A/B against the `baseline-pre-h5i` binary confirmed both. `cbbbb8a` fixes them (the kernel's
+`validate` takes a slice; `decide_kernel` borrows names). A/B after the fix: commits at 4 and 8 threads
+−1.3% and −1.4%, open equal (`bench/h3/ab-fix.txt`). The first run on `cbbbb8a` overlapped net's clippy
+build (1 of 4 cores) and is kept as unusable (`bench/h3/cbbbb8a-unusable/`). It was rerun once, as §6.8
+allows, with the other session idle and a 10 s process log (`top.log`).
+
+**Raw data:** `bench/h3/cbbbb8a/`, produced by `scripts/h3-core.sh suite|generic|exp3|retime|report`.
+
+| part | result |
+|---|---|
+| core suite (micro, 3 reps; scale, 1 rep), load 1.0–2.0 | 76/77 metrics ok. **FAIL: ingest put 176 MB/s vs 187 (−5.9%, allowance 3%).** Every scale metric is equal or better (put rate +6% and +17%; GC 1e7 98 s vs 107 s); disk bytes identical. |
+| §6.4 generic, 3 runs | metrics within allowance; strict read 0.183× (baseline 0.184×), range p99 0.110 ms, sizes identical. **FAIL (tier): durable write 0.886× vs `dd` (baseline 1.002×, PASS needs ≥ 0.90×).** |
+| Exp3, 28 rows | **sizes 28/28 byte-identical**; every build time is faster (−5% to −25%); read p50/p99 equal or better; 0 failed reads. **FAIL: redis A3 peak RSS 2.72 GB vs 2.39 GB (+14%, 1 rep, allowance 3%).** The RSS tier (≤ 6 GB) is still met. |
+| Exp3 build re-time | ripgrep 0.88 (baseline 0.944), jq 1.061 (baseline decisive 1.179): no tier worse. |
+
+**Evidence on the three FAILs:**
+- **Ingest put.** Interleaved A/B, baseline vs H3 binary, 3 rounds (`bench/h3/ab-ingest.txt`): 191/185/178 vs
+  191/180/178 MB/s. The baseline binary itself spans 7% today. The put path is unchanged by H2 except the
+  read-side digest check.
+- **Durable write tier.** Our put is 184 MB/s in all three runs (baseline 177/189/184, median 184). The
+  ratio fell because the reference `dd conv=fsync` ran at 208 MB/s, against 153–187 in the baseline: the
+  denominator moved.
+- **Redis A3 RSS.** Peak RSS of the 4-thread build scatters in both directions across rows: redis A2 −26%,
+  git A4 −17%, git A0 +27%, redis A4 +13%. H2 changed nothing in the Exp3 build path. An A/B of the redis A3
+  build with the baseline binary is queued after net's windows.
+
 ## 2026-11-16: H2 dev check (not the H3 run): kernel overhead is not measurable
 
 Two `scripts/baseline-core.sh micro` dev runs on the H2 commit failed different metrics: run 1 (load 2.2–3.0)

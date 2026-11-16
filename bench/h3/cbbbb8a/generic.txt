@@ -1,0 +1,6 @@
+load 1.15 commit cbbbb8a
+{"mib":1024,"dd_fsync_mb_s":183,"put_mb_s":184,"write_ratio":1.004,"cat_mb_s":11527,"get_strict_mb_s":2110,"read_ratio_strict":0.183,"get_eof_mb_s":2173,"read_ratio_eof":0.189,"range4k_p99_ms":0.110,"scattered_10v_bytes":1135462813,"inserted_10v_bytes":1091744331,"one_copy_bytes":1073741824}
+load 2.61 commit cbbbb8a
+{"mib":1024,"dd_fsync_mb_s":208,"put_mb_s":184,"write_ratio":0.884,"cat_mb_s":11487,"get_strict_mb_s":2053,"read_ratio_strict":0.179,"get_eof_mb_s":2152,"read_ratio_eof":0.187,"range4k_p99_ms":0.109,"scattered_10v_bytes":1135462813,"inserted_10v_bytes":1091744331,"one_copy_bytes":1073741824}
+load 4.96 commit cbbbb8a
+{"mib":1024,"dd_fsync_mb_s":208,"put_mb_s":184,"write_ratio":0.886,"cat_mb_s":10960,"get_strict_mb_s":2016,"read_ratio_strict":0.184,"get_eof_mb_s":2147,"read_ratio_eof":0.196,"range4k_p99_ms":0.110,"scattered_10v_bytes":1135462813,"inserted_10v_bytes":1091744331,"one_copy_bytes":1073741824}

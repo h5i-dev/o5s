@@ -1,0 +1,8 @@
+# stream rep 3 commit cbbbb8a dirty 0 load_start 2.77 2026-11-16T06:31:12+00:00
+| input | put_stream 512 MiB | re-put (dedup) | open+read (verified) |
+|---|---|---|---|
+| incompressible | 267 MB/s | 954 MB/s | 1881 MB/s |
+| code-like text | 251 MB/s | 1008 MB/s | 847 MB/s |
+
+peak RSS: 21 MB
+# load_end 2.71

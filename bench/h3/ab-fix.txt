@@ -1,0 +1,6 @@
+== base r1 load 1.74 | | 1 | 8055 || 4 | 12724 || 8 | 14478 | | "replace_rate":8067 "open_s":0.55 
+== fix r1 load 1.68 | | 1 | 7842 || 4 | 12648 || 8 | 14272 | | "replace_rate":7916 "open_s":0.56 
+== base r2 load 1.57 | | 1 | 7996 || 4 | 12801 || 8 | 14426 | | "replace_rate":8137 "open_s":0.58 
+== fix r2 load 1.43 | | 1 | 8019 || 4 | 12631 || 8 | 14251 | | "replace_rate":8023 "open_s":0.55 
+== base r3 load 1.43 | | 1 | 8056 || 4 | 12800 || 8 | 14496 | | "replace_rate":8077 "open_s":0.54 
+== fix r3 load 1.28 | | 1 | 8095 || 4 | 12638 || 8 | 14301 | | "replace_rate":8220 "open_s":0.55 

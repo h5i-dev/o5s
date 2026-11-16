@@ -1,0 +1,3 @@
+# scale-names-1e6 rep 1 commit cbbbb8a dirty 0 load_start 1.05 2026-11-16T06:49:56+00:00
+{"part":"names","m":1000000,"bulk_s":16.4,"replace_rate":8096,"resolve_p99_ms":0.0042,"open_s":0.55,"rss_mb":148,"disk_bytes":53841518,"load":"1.11"}
+# load_end 1.11
