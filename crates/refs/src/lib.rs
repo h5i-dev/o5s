@@ -596,7 +596,72 @@ struct Inner {
 /// The tombstone is the commit point. Last, it updates `CURRENT`. A handle
 /// that catches up on an old journal and reaches the tombstone switches to the
 /// new generation, so no write is ever made to a rotated journal.
+/// Name changes a store applied from **other writers**: other processes on a local journal, other
+/// hosts on a backend log. Its own commits are not reported here (callers see those directly).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Foreign {
+    /// These changes, in commit order: (name, new target or `None` for a delete, version after).
+    Changes(Vec<(Name, Option<Hash>, u64)>),
+    /// The whole state was replaced (a snapshot rebase, a journal rotation, a reload after a failed
+    /// fsync): anything may have changed.
+    Reset,
+}
+
+/// Called with every [`Foreign`] change, while the store's lock is held: it must not call back
+/// into the store.
+pub type ForeignObserver = std::sync::Arc<dyn Fn(&Foreign) + Send + Sync>;
+
+/// The observers of one engine (shared with its [`RefStore`]).
+#[derive(Clone, Default)]
+struct Feed(std::sync::Arc<std::sync::RwLock<Vec<ForeignObserver>>>);
+
+impl Feed {
+    fn add(&self, o: ForeignObserver) {
+        if let Ok(mut v) = self.0.write() {
+            v.push(o);
+        }
+    }
+
+    fn emit(&self, f: &Foreign) {
+        if let Ok(v) = self.0.read() {
+            for o in v.iter() {
+                o(f);
+            }
+        }
+    }
+
+    /// Reports mutations applied from other writers (nothing if no observer is registered).
+    fn applied(&self, muts: &[Mutation]) {
+        if self.0.read().map(|v| v.is_empty()).unwrap_or(true) {
+            return;
+        }
+        let mut out = Vec::new();
+        for m in muts {
+            changes_of(m, &mut out);
+        }
+        if !out.is_empty() {
+            self.emit(&Foreign::Changes(out));
+        }
+    }
+}
+
+/// The name changes in a mutation (rules and rotations change no name).
+fn changes_of(m: &Mutation, out: &mut Vec<(Name, Option<Hash>, u64)>) {
+    match m {
+        Mutation::Set(n, v) => out.push((n.clone(), Some(v.hash), v.version)),
+        Mutation::Delete(n, v) => out.push((n.clone(), None, *v)),
+        Mutation::Batch(v) => out.extend(v.iter().map(|(n, rv)| (n.clone(), Some(rv.hash), rv.version))),
+        Mutation::Txn(ms) => {
+            for m in ms {
+                changes_of(m, out);
+            }
+        }
+        Mutation::Rule(..) | Mutation::Rotated(_) => {}
+    }
+}
+
 struct Journal {
+    feed: Feed,
     dir: PathBuf,
     faults: FaultHandle,
     compact_threshold: std::sync::atomic::AtomicU64,
@@ -706,6 +771,7 @@ impl Journal {
             match Self::load_generation(&dir, read_current(&dir)?) {
                 Ok(inner) => {
                     let s = Journal {
+                        feed: Feed::default(),
                         dir,
                         faults,
                         compact_threshold: std::sync::atomic::AtomicU64::new(DEFAULT_COMPACT_THRESHOLD),
@@ -785,6 +851,7 @@ impl Journal {
             return Err(Error::Corrupt("ref journal rotation went backwards".into()));
         }
         *g = fresh;
+        self.feed.emit(&Foreign::Reset);
         Ok(())
     }
 
@@ -802,13 +869,17 @@ impl Journal {
         let mut buf = vec![0u8; (len - g.applied) as usize];
         g.file.read_exact_at(&mut buf, g.applied)?;
         let (muts, used, err) = parse_records(&buf);
+        let mut applied = Vec::new();
         for m in muts {
             if let Mutation::Rotated(next) = m {
+                self.feed.applied(&applied);
                 self.switch(g, next)?;
                 return Ok(true);
             }
-            g.state.apply(m);
+            g.state.apply(m.clone());
+            applied.push(m);
         }
+        self.feed.applied(&applied);
         g.applied += used as u64;
         if let Some(e) = err {
             return Err(e);
@@ -938,6 +1009,7 @@ impl Journal {
                     let ep = g.epoch;
                     let failed = std::mem::take(&mut g.failed);
                     *g = Inner { epoch: ep, failed, ..fresh };
+                    self.feed.emit(&Foreign::Reset);
                 }
                 g.batch = None;
                 self.synced.notify_all();
@@ -1016,6 +1088,8 @@ trait Engine: Send + Sync {
     fn generation(&self) -> Result<u64>;
     fn set_compact_threshold(&self, bytes: u64);
     fn set_trim_grace(&self, _d: std::time::Duration) {}
+    /// Where changes from other writers are reported.
+    fn feed(&self) -> &Feed;
 }
 
 impl Engine for Journal {
@@ -1034,6 +1108,9 @@ impl Engine for Journal {
     fn set_compact_threshold(&self, bytes: u64) {
         Journal::set_compact_threshold(self, bytes)
     }
+    fn feed(&self) -> &Feed {
+        &self.feed
+    }
 }
 
 /// A handle on a ref store. Thread-safe, and any number of handles may share
@@ -1047,6 +1124,19 @@ pub struct RefStore {
 }
 
 impl RefStore {
+    /// Registers an observer of the name changes this store applies from other writers (other
+    /// processes or hosts), as they are applied. See [`Foreign`].
+    pub fn add_foreign_observer(&self, o: ForeignObserver) {
+        self.engine.feed().add(o);
+    }
+
+    /// Applies what other writers committed since the last read (as every read does), reporting
+    /// it to the foreign observers. Cheap when nothing changed: a `stat` on a local journal, one
+    /// lookup of the next entry on a backend log.
+    pub fn catch_up(&self) -> Result<()> {
+        self.engine.read(&mut |_| ())
+    }
+
     /// Opens or creates a journal-backed ref store in `dir`.
     pub fn open(dir: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_faults(dir, Faults::disarmed())

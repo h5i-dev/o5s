@@ -74,6 +74,7 @@ struct LogState {
 const LIST_INTERVAL: Duration = Duration::from_secs(10);
 
 pub(crate) struct LogEngine {
+    feed: crate::Feed,
     backend: Arc<dyn Backend>,
     prefix: String,
     faults: FaultHandle,
@@ -99,6 +100,7 @@ impl LogEngine {
             ));
         }
         let e = LogEngine {
+            feed: crate::Feed::default(),
             backend,
             prefix: prefix.to_string(),
             faults,
@@ -160,6 +162,7 @@ impl LogEngine {
             g.next = seq;
             g.snap = seq;
             g.snap_key = Some(key);
+            self.feed.emit(&crate::Foreign::Reset);
             return Ok(true);
         }
         Err(Error::Backend { transient: true, msg: "ref log: snapshots keep disappearing; retry".into() })
@@ -213,6 +216,7 @@ impl LogEngine {
             if muts.len() != 1 || used != rec.len() {
                 return Err(Error::Corrupt(format!("bad ref log entry {}", g.next)));
             }
+            self.feed.applied(&muts);
             for m in muts {
                 g.state.apply(m);
             }
@@ -253,6 +257,10 @@ impl LogEngine {
 }
 
 impl crate::Engine for LogEngine {
+    fn feed(&self) -> &crate::Feed {
+        &self.feed
+    }
+
     fn read(&self, f: &mut dyn FnMut(&RefState)) -> Result<()> {
         let mut g = self.inner.lock().map_err(poisoned)?;
         self.catch_up(&mut g)?;
