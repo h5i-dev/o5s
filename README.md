@@ -4,9 +4,8 @@ Why do we need a separate GitHub for source code, JFrog for build outputs, Docke
 PyPI and npm for packages, Hugging Face for LLM weights, and so on? They are all just data: sequences of 0s
 and 1s. Why not treat them all the same way? All the operations we really have are push, pull, and overwrite.
 
-o5s is one content-addressed, immutable store for all of it: source code, packages, container images and model
-weights. The clients you already use (`git`, `docker`, `pip`, `npm`, `mvn`, `huggingface_hub`) talk to it
-unmodified.
+o5s keeps all of them in one place. You keep using `git`, `docker`, `pip`, `npm`, `mvn` and `huggingface_hub`
+as they are: o5s speaks each of their protocols.
 
 ## Potential pushback
 
@@ -15,7 +14,7 @@ unmodified.
 - *"Hugging Face's Xet makes large weights fast"* → Then use it for every domain.
 - *"Registries need their own rules"* → They're per-namespace rules: `mutable`, `immutable`, `head-release`.
 - *"One store means one bug breaks everything"* → Every decision is formally verified in Lean 4.
-- *"Separate systems are fine"* → Not for lineage: one store links commit → build → package → image → model.
+- *"Separate systems are fine"* → Then which commit built this image, and which data trained this model?
 
 ## CLI example
 
