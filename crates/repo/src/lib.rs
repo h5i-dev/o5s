@@ -332,6 +332,8 @@ pub struct LocalRepo {
     faults: pico2peta_core::fault::FaultHandle,
     /// Notified of every committed name change on this handle and its clones (`reach`).
     observers: Arc<std::sync::RwLock<Vec<Arc<dyn reach::RefObserver>>>>,
+    /// Whether `observers` is non-empty: commits skip building the change list otherwise.
+    observed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl LocalRepo {
@@ -429,6 +431,7 @@ impl LocalRepo {
             backend,
             faults,
             observers: Arc::default(),
+            observed: Arc::default(),
         })
     }
 
@@ -666,7 +669,9 @@ impl LocalRepo {
         let live = self.packs.ensure_live(&new)?;
         self.packs.flush()?;
         let out = self.refs.replace(name, read_set, new, &|_| Ok(live))?;
-        if let ReplaceOutcome::Ok { version } = out {
+        if let ReplaceOutcome::Ok { version } = out
+            && self.observed()
+        {
             self.notify(&[(name.clone(), Some(new), version)]);
         }
         Ok(out)
@@ -689,7 +694,9 @@ impl LocalRepo {
         }
         self.packs.flush()?;
         let out = self.refs.replace_many(updates, read_set, &|h| Ok(missing != Some(*h)))?;
-        if let pico2peta_core::ReplaceManyOutcome::Ok { versions } = &out {
+        if let pico2peta_core::ReplaceManyOutcome::Ok { versions } = &out
+            && self.observed()
+        {
             let ch: Vec<_> = updates.iter().zip(versions).map(|((n, h), v)| (n.clone(), Some(*h), *v)).collect();
             self.notify(&ch);
         }
@@ -713,7 +720,9 @@ impl LocalRepo {
         }
         self.packs.flush()?;
         let out = self.refs.update_many(updates, read_set, &|h| Ok(!missing.contains(h)))?;
-        if let pico2peta_core::ReplaceManyOutcome::Ok { versions } = &out {
+        if let pico2peta_core::ReplaceManyOutcome::Ok { versions } = &out
+            && self.observed()
+        {
             let ch: Vec<_> = updates.iter().zip(versions).map(|((n, h), v)| (n.clone(), *h, *v)).collect();
             self.notify(&ch);
         }
@@ -723,7 +732,9 @@ impl LocalRepo {
     fn delete_ref_as(&self, who: Option<&str>, name: &Name, read_set: &[(Name, Observed)]) -> Result<ReplaceOutcome> {
         self.guard(name.as_str(), who)?;
         let out = self.refs.delete(name, read_set)?;
-        if let ReplaceOutcome::Ok { version } = out {
+        if let ReplaceOutcome::Ok { version } = out
+            && self.observed()
+        {
             self.notify(&[(name.clone(), None, version)]);
         }
         Ok(out)
@@ -733,7 +744,13 @@ impl LocalRepo {
     pub fn add_ref_observer(&self, o: Arc<dyn reach::RefObserver>) {
         if let Ok(mut v) = self.observers.write() {
             v.push(o);
+            self.observed.store(true, std::sync::atomic::Ordering::Release);
         }
+    }
+
+    /// Whether any observer is registered (one atomic load on the commit path).
+    fn observed(&self) -> bool {
+        self.observed.load(std::sync::atomic::Ordering::Acquire)
     }
 
     fn notify(&self, changes: &[(Name, Option<Hash>, u64)]) {

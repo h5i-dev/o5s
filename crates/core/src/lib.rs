@@ -499,7 +499,7 @@ pub fn is_under(s: &str, prefix: &str) -> bool {
 pub fn validate_path(s: &str) -> Result<()> {
     // The grammar is the extracted kernel's (`pico2peta_kernel::names::validate`).
     use pico2peta_kernel::names::Invalid;
-    match pico2peta_kernel::names::validate(&s.as_bytes().to_vec()) {
+    match pico2peta_kernel::names::validate(s.as_bytes()) {
         Ok(()) => Ok(()),
         Err(e) => Err(Error::InvalidName(
             s.to_string(),
