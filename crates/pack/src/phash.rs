@@ -121,15 +121,28 @@ fn pieces_cv(offset: u64, pieces: &Pieces) -> ChainingValue {
     h.finalize_non_root()
 }
 
-/// BLAKE3 of a stream of buffers whose total length is `len`, on up to
-/// `workers` threads: the buffers are cut into [`SEGMENT`]s (as slices of the
-/// buffers, not copies), hashed in parallel, and combined in order. `None` if
-/// the buffers do not add up to `len` bytes (the caller then reports a
-/// mismatch, as the serial hash of other bytes would). Always equal to
-/// `blake3::hash` of the concatenation.
+/// BLAKE3 of a stream of buffers whose total length is `len`, with every
+/// segment eligible for the worker threads (see [`hash_stream_with`]).
 pub fn hash_stream<I: IntoIterator<Item = std::sync::Arc<Vec<u8>>>>(bufs: I, len: u64, workers: usize) -> Option<Hash> {
-    use std::collections::VecDeque;
-    use std::sync::mpsc;
+    hash_stream_with(bufs, len, workers, || true)
+}
+
+/// BLAKE3 of a stream of buffers whose total length is `len`. The buffers are
+/// cut into [`SEGMENT`]s. When a segment starts, `offload()` decides how it is
+/// hashed: on the calling thread as its bytes arrive (nothing is held), or by
+/// one of up to `workers` threads, from slices of the buffers (no copy). Either
+/// way the chaining values are combined in input order, so the result is always
+/// `blake3::hash` of the concatenation, whatever `offload` answers. `None` if
+/// the buffers do not add up to `len` bytes (the caller then reports a mismatch,
+/// as the serial hash of other bytes would). The workers start on first use.
+///
+/// `offload` lets a reader use the extra cores only when hashing is what it is
+/// waiting for, not when they would compete with decompression.
+pub fn hash_stream_with<I, F>(bufs: I, len: u64, workers: usize, mut offload: F) -> Option<Hash>
+where
+    I: IntoIterator<Item = std::sync::Arc<Vec<u8>>>,
+    F: FnMut() -> bool,
+{
     if !parallel_pays(len) || workers <= 1 {
         let mut h = blake3::Hasher::new();
         let mut n = 0u64;
@@ -139,10 +152,136 @@ pub fn hash_stream<I: IntoIterator<Item = std::sync::Arc<Vec<u8>>>>(bufs: I, len
         }
         return (n == len).then(|| Hash(*h.finalize().as_bytes()));
     }
-    type Job = (u64, Pieces, mpsc::SyncSender<ChainingValue>);
-    let (jobs, rx) = mpsc::channel::<Job>();
+    let mut st = Stream { workers, jobs: None, pending: Default::default(), combiner: Combiner::default() };
+    let mut offset = 0u64;
+    let mut cur = Cur::start(0, offload());
+    let mut seg_len = 0usize;
+    for b in bufs {
+        let mut from = 0usize;
+        while from < b.len() {
+            let take = (SEGMENT - seg_len).min(b.len() - from);
+            match &mut cur {
+                Cur::Inline(h) => {
+                    h.update(&b[from..from + take]);
+                }
+                Cur::Collect(p) => p.push((b.clone(), from, from + take)),
+            }
+            seg_len += take;
+            from += take;
+            if seg_len == SEGMENT {
+                if offset + SEGMENT as u64 > len {
+                    return None; // more bytes than declared
+                }
+                let next = Cur::start(offset + SEGMENT as u64, offload());
+                st.finish_segment(offset, std::mem::replace(&mut cur, next))?;
+                seg_len = 0;
+                offset += SEGMENT as u64;
+            }
+        }
+    }
+    if offset + seg_len as u64 != len {
+        return None;
+    }
+    if seg_len > 0 {
+        st.finish_segment(offset, cur)?;
+    }
+    st.drain(true)?;
+    st.combiner.finish()
+}
+
+/// The segment being read.
+enum Cur {
+    Inline(Box<blake3::Hasher>),
+    Collect(Pieces),
+}
+
+impl Cur {
+    fn start(offset: u64, offload: bool) -> Cur {
+        if offload {
+            Cur::Collect(Vec::new())
+        } else {
+            let mut h = Box::new(blake3::Hasher::new());
+            h.set_input_offset(offset);
+            Cur::Inline(h)
+        }
+    }
+}
+
+/// A chaining value in input order: computed, or due from a worker.
+enum Slot {
+    Ready(ChainingValue),
+    Wait(std::sync::mpsc::Receiver<ChainingValue>),
+}
+
+type Job = (u64, Pieces, std::sync::mpsc::SyncSender<ChainingValue>);
+
+struct Stream {
+    workers: usize,
+    jobs: Option<std::sync::mpsc::Sender<Job>>,
+    pending: std::collections::VecDeque<Slot>,
+    combiner: Combiner,
+}
+
+impl Stream {
+    fn finish_segment(&mut self, offset: u64, seg: Cur) -> Option<()> {
+        match seg {
+            Cur::Inline(h) => self.pending.push_back(Slot::Ready(h.finalize_non_root())),
+            Cur::Collect(p) => self.offload(offset, p)?,
+        }
+        self.drain(false)
+    }
+
+    /// Hands a segment to a worker (starting them on first use), keeping at most twice the
+    /// workers in flight; hashes it here if no worker can take it.
+    fn offload(&mut self, offset: u64, seg: Pieces) -> Option<()> {
+        if self.jobs.is_none() {
+            self.jobs = start_workers(self.workers);
+        }
+        let Some(tx) = &self.jobs else {
+            self.pending.push_back(Slot::Ready(pieces_cv(offset, &seg)));
+            return Some(());
+        };
+        if self.pending.len() >= 2 * self.workers {
+            match self.pending.pop_front()? {
+                Slot::Ready(cv) => self.combiner.push(cv),
+                Slot::Wait(r) => self.combiner.push(r.recv().ok()?),
+            }
+        }
+        let (reply, result) = std::sync::mpsc::sync_channel(1);
+        match tx.send((offset, seg, reply)) {
+            Ok(()) => self.pending.push_back(Slot::Wait(result)),
+            Err(std::sync::mpsc::SendError((offset, seg, _))) => {
+                self.pending.push_back(Slot::Ready(pieces_cv(offset, &seg)));
+            }
+        }
+        Some(())
+    }
+
+    /// Moves finished chaining values from the front into the combiner, in order; `block`
+    /// waits for each one.
+    fn drain(&mut self, block: bool) -> Option<()> {
+        while let Some(front) = self.pending.front() {
+            let cv = match front {
+                Slot::Ready(cv) => *cv,
+                Slot::Wait(r) if block => r.recv().ok()?,
+                Slot::Wait(r) => match r.try_recv() {
+                    Ok(cv) => cv,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => return Some(()),
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => return None,
+                },
+            };
+            self.pending.pop_front();
+            self.combiner.push(cv);
+        }
+        Some(())
+    }
+}
+
+fn start_workers(n: usize) -> Option<std::sync::mpsc::Sender<Job>> {
+    let (tx, rx) = std::sync::mpsc::channel::<Job>();
     let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
-    for _ in 0..workers {
+    let mut any = false;
+    for _ in 0..n {
         let rx = rx.clone();
         let spawned = std::thread::Builder::new().name("p2p-verify-seg".into()).spawn(move || {
             loop {
@@ -154,54 +293,7 @@ pub fn hash_stream<I: IntoIterator<Item = std::sync::Arc<Vec<u8>>>>(bufs: I, len
                 let _ = reply.send(pieces_cv(offset, &seg));
             }
         });
-        if spawned.is_err() {
-            break; // fewer workers; with none, segments are hashed inline below
-        }
+        any |= spawned.is_ok();
     }
-    let window = 2 * workers;
-    let mut combiner = Combiner::default();
-    let mut pending: VecDeque<mpsc::Receiver<ChainingValue>> = VecDeque::new();
-    // Hands one segment to a worker (or hashes it here), keeping at most `window` in flight.
-    let mut dispatch = |offset: u64, seg: Pieces, combiner: &mut Combiner| -> Option<()> {
-        if pending.len() >= window {
-            combiner.push(pending.pop_front()?.recv().ok()?);
-        }
-        let (reply, result) = mpsc::sync_channel(1);
-        if let Err(mpsc::SendError((offset, seg, reply))) = jobs.send((offset, seg, reply)) {
-            reply.send(pieces_cv(offset, &seg)).ok()?;
-        }
-        pending.push_back(result);
-        Some(())
-    };
-    let mut seg: Pieces = Vec::new();
-    let mut seg_len = 0usize;
-    let mut offset = 0u64;
-    for b in bufs {
-        let mut from = 0usize;
-        while from < b.len() {
-            let take = (SEGMENT - seg_len).min(b.len() - from);
-            seg.push((b.clone(), from, from + take));
-            seg_len += take;
-            from += take;
-            if seg_len == SEGMENT {
-                if offset + SEGMENT as u64 > len {
-                    return None; // more bytes than declared
-                }
-                dispatch(offset, std::mem::take(&mut seg), &mut combiner)?;
-                seg_len = 0;
-                offset += SEGMENT as u64;
-            }
-        }
-    }
-    if offset + seg_len as u64 != len {
-        return None;
-    }
-    if seg_len > 0 {
-        dispatch(offset, seg, &mut combiner)?;
-    }
-    drop(dispatch);
-    while let Some(r) = pending.pop_front() {
-        combiner.push(r.recv().ok()?);
-    }
-    combiner.finish()
+    any.then_some(tx)
 }
