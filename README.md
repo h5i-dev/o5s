@@ -19,8 +19,6 @@ unmodified.
 
 ## CLI example
 
-### Store and read objects
-
 The `o5s` CLI is the low-level plumbing over the core (reference: `docs/CLI.md`).
 
 ```sh
@@ -28,40 +26,31 @@ cargo build --release
 alias o5s=target/release/o5s
 R=/data/repo
 
+# Store and read objects
 o5s -C $R init
-H=$(o5s -C $R put model.safetensors)       # stores the file, prints its BLAKE3 hash
-o5s -C $R get $H > model.safetensors       # every read is verified against the hash
+H=$(o5s -C $R put model.safetensors)                    # stores the file, prints its BLAKE3 hash
+o5s -C $R get $H > model.safetensors                    # every read is verified against the hash
 o5s -C $R get $H --range 0..1024 > head.bin
-```
 
-### Move names
-
-```sh
+# Move names
 o5s -C $R replace models/acme/main $H --expect absent   # a name moves only by compare-and-swap; prints "ok 1"
 o5s -C $R replace models/acme/main $H2 --expect 1       # move it from version 1 (exit 3 if someone else moved it)
 o5s -C $R ns set releases immutable                     # published names never move
-```
 
-Exit codes: 0 ok, 1 error, 2 not found, 3 conflict, 4 forbidden, 5 unauthorized.
-
-### Provenance, promotion, GC
-
-```sh
+# Provenance, promotion, GC
 o5s -C $R prov record train --in data=$D --out model=$H
 o5s -C $R prov lineage models/acme/main
 o5s -C $R promote dev/app prod/app --require-provenance  # policy-gated, audited
 o5s -C $R gc
-```
 
-### Run a server
-
-```sh
+# Run a server
 o5s-server gen-token admin                    # prints the token once, plus its tokens.toml entry
 o5s-server serve --config deploy/server.toml  # local disk or any S3-compatible bucket
-
 export O5S_REMOTE=https://o5s.example.com O5S_TOKEN=o5s_...
 o5s put --for-name models/acme/main model.safetensors
 ```
+
+Exit codes: 0 ok, 1 error, 2 not found, 3 conflict, 4 forbidden, 5 unauthorized.
 
 ### Supported fronts
 
