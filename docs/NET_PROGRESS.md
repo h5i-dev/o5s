@@ -1,5 +1,18 @@
 # Net session progress (backends & server, branch `net`)
 
+## Status (2026-11-16, after the o5s rename)
+
+- **Project renamed pico2peta → o5s** (demo 7387883, merged into net 61b45f2). The gate is green, and `verify/net` re-extracts unchanged with the official h5i 0.5.5; `h5i app prove` is ok and both obligations are proven. Local paths (`/mnt/scratch/pico2peta`) and the frozen pre-h5i baseline files keep the old name; the report scripts map it.
+- **H2 (h5i rebuild), net side: done.**
+  - Kernels extracted and proven: access/authz guard, object-read reachability, git push, publish rules, wire parsers, LFS pointer.
+  - h5i obligations: panic-free and read-only.
+  - Mutants: 18/18 caught.
+  - Server on h5i-app-http; issued tokens via h5i-app-token.
+  - Released crates.io h5i 0.5.5 only.
+- **H3:** run partly. Its findings were fixed: first push (reach closure), clone-pack order, GET (core d00980b). Per the human's re-plan it is folded into one final batch.
+- **H4 (Xet/LFS), dev results:** see the H4 section and the PLAN §6.8 HF amendments. Xet up 0.35× and Xet down 1.05× CPU meet the target. LFS up is 1.34×, recorded as FAIL by the human's ruling (Xet chunker kept for LFS↔Xet dedup; parallel chunker post-RC). LFS down is 1.04× CPU.
+- **Final batch:** the core's windows on demo 9914209 partly done (suite to rerun after an outside render loaded the host). Net windows A/B cancelled for now; measurements stopped until the human says otherwise.
+
 ## Status (2026-11-15)
 
 **Summary (verified 2026-11-15):** all six goals in AGENT_TASK_NET.md are done and verified. The checks: clippy `-D warnings`; all 18 net test binaries, including MinIO; OCI conformance 73/0; real-git round-trips; and the cargo-fuzz targets. CI also has Lean and fuzz-smoke jobs. Production hardening continued beyond the goals (see "Hardening after goal 6"). Remaining limits are listed under "Production gaps". The parts:
@@ -415,7 +428,10 @@ The contended run checks that no update is lost: the final version equals the nu
     - LFS upload 1.34× (0.331 vs 0.246 s; serial Xet chunker on the put path; core's parallel-window version was slower, 0.49 s, and is reverted).
     - LFS download 2.28× busy but 1.04× server CPU: its busy interval is `huggingface_hub`'s read speed.
     - Client wall/CPU (informational): Xet up 1.35 s / 1.64 s, Xet down 0.47 / 0.51, LFS up 0.55 / 0.37, LFS down 0.70 / 0.69; `/v1` 0.256 up / 0.294 down.
-    - **Decisions asked of the human:** (1) LFS PUT with FastCDC (measured 1.04×: 0.290 vs 0.278 s on one server; patch ready, losing LFS↔Xet chunk dedup) or keep 1.34× until a double-buffered parallel chunker after RC; (2) judge downloads on busy time or server CPU.
+    - **Human rulings (2026-11-16, PLAN amendment):**
+      - LFS upload keeps the Xet chunker and is recorded as a FAIL at its measured ratio (LFS↔Xet chunk dedup is worth more; FastCDC patch not applied).
+      - Downloads are judged on server CPU vs `/v1`; busy time is informational.
+      - Post-RC: double-buffered parallel Xet chunker in the put path.
     - Fixed meanwhile: `/v1` GET +25 % from d6bfd5f (core's d00980b; A/B back to 0.25 s). Parallel Xet chunking `xet_lengths_parallel`/`xet_cuts_parallel[_seg]` is in `crates/chunk` (exact, proptested) for the after-RC rework.
   - **Open before the final batch (2026-11-16, dev A/B on one host):**
     - **`/v1` GET +25 %:** a733d8e 0.248–0.258 s and 9aba438 0.248–0.253 s, against 0.310–0.321 s after core's d6bfd5f (parallel whole-object BLAKE3 for verified reads). PUT is unchanged. Sent to the core with the binaries and script.

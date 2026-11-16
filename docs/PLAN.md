@@ -644,3 +644,16 @@ with a zero-time server (NET_PROGRESS, H4).
   (`getrusage`, all threads) per operation, next to `/v1`'s wall time. The baseline's end-to-end rows stay as
   recorded. The new server-side rows have no pre-h5i baseline. This amendment does not change how §6.8
   treats the end-to-end rows.
+
+**Amendment 2026-11-16 (human rulings on the H4 HF questions; written before net's final-batch windows).**
+1. **Downloads (Xet and LFS) are judged on server CPU time** (user + system, all threads, of the server
+   process over the operation) against `/v1`'s server CPU for the same bytes, ≤ 1.2× (tiers as above).
+   Server busy time stays an **informational** row for downloads, because a streamed body's interval
+   lasts until the client has read it, so it includes `huggingface_hub`'s own read speed. Uploads stay
+   judged on server busy time.
+2. **LFS upload keeps the Xet chunker** (`hf/` profile) and is **recorded as a FAIL** against the 1.2×
+   target at its measured ratio (dev: 1.34×, serial Xet chunker on the put path). The reason is that
+   LFS↔Xet chunk dedup (the same file uploaded through LFS and through Xet sharing chunks) is worth more
+   than the time. FastCDC for LFS PUTs measured 1.04× in a dev check but is not applied. **Post-RC item:**
+   a double-buffered parallel Xet chunker in the store's put path. `pico2peta_chunk::xet_cuts_parallel[_seg]`
+   already gives byte-identical cuts. A first, non-double-buffered wiring was slower and was reverted.
