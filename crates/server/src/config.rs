@@ -48,6 +48,10 @@
 //! log_reads = false
 //! rotate_bytes = 1073741824        # optional: rotate at 1 GiB, chain continues
 //!
+//! [git]
+//! # sha256_repos = ["team/s256"]     # repo-name prefixes using object-format=sha256
+//! clone_pack_cache = true            # stream the cached pack to repeat full clones
+//!
 //! [gc]
 //! interval_secs = 0                  # background GC period; 0 = off
 //! grace_secs = 3600                  # >= 600; also the put->replace lease

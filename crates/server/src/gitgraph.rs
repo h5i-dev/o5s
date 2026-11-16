@@ -177,6 +177,11 @@ fn encode(nodes: &[(Oid, Arc<HistNode>)]) -> Vec<u8> {
     v
 }
 
+/// Fuzzing: the persisted graph decoder must reject garbage without panicking.
+pub(crate) fn fuzz_decode(b: &[u8]) {
+    let _ = decode(b);
+}
+
 fn decode(b: &[u8]) -> Result<Vec<(Oid, HistNode)>> {
     let bad = || Error::Corrupt("bad commit graph object".into());
     let mut p = 0usize;
