@@ -3,7 +3,7 @@
 //!
 //! **External ids.** Clients name objects by what they know. [`resolve_ref`] maps these to
 //! core objects, checking read access on each front's namespace:
-//! - `blake3:<hex>` (or bare hex): a core object (needs read somewhere);
+//! - `blake3:<hex>` (or bare hex): a core object (readable by reachability, as every id is);
 //! - `name:<core name>`: what a name points at;
 //! - `git:<repo>@<oid>`: a git object (SHA-1 or SHA-256 id);
 //! - `pypi:<index>/<project>/<file>`, `npm:<registry>/<package>@<version>`,
@@ -170,7 +170,11 @@ pub(crate) async fn resolve_ref(st: &Arc<AppState>, p: &Principal, c: &Caller, r
         }
         _ => return Err(bad("unknown id scheme (blake3, name, git, pypi, npm, maven, oci)")),
     };
-    h.ok_or_else(not_found)
+    // Whatever the scheme, the caller must be able to read the object by reachability: a
+    // `blake3:` id needs no name, and git oids are global across repositories, so a namespace
+    // check alone would resolve other teams' objects. Refused exactly like a missing id.
+    let h = h.ok_or_else(not_found)?;
+    if st.objects_readable(p, vec![h]).await?.first() == Some(&true) { Ok(h) } else { Err(not_found()) }
 }
 
 fn record_json(h: &Hash, r: &Record) -> Value {
