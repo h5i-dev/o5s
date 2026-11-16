@@ -1,24 +1,24 @@
 # o5s
 
 Why do we need a separate GitHub for source code, JFrog for build outputs, Docker Hub for container images,
-PyPI and npm for packages, Hugging Face for LLM weights, and so on? They are all just data: sequences of 0s
-and 1s. Why not treat them all the same way? All the operations we really have are push, pull, and overwrite.
+PyPI and npm for packages, Hugging Face for LLM weights, and so on? They are all just data, just sequences of
+0s and 1s. Why not treat them all the same way? All the operations we really have are push, pull, and overwrite.
 
-o5s keeps all of them in one place. You keep using `git`, `docker`, `pip`, `npm`, `mvn` and `huggingface_hub`
-as they are: o5s speaks each of their protocols.
+o5s keeps all of them in one place. You can keep using existing CLIs such as `git`, `docker`, `pip`, `npm`,
+`mvn` and `huggingface_hub`, because o5s speaks each of their protocols.
 
 ## Potential pushback
 
 - *"Merge in Git is necessary"* → Merge is just a special case of overwrite.
 - *"Git packs source code better"* → Then use it for every domain.
 - *"Hugging Face's Xet makes large weights fast"* → Then use it for every domain.
-- *"Registries need their own rules"* → They're per-namespace rules: `mutable`, `immutable`, `head-release`.
+- *"Registries need their own rules"* → They're just per-namespace rules (`mutable`, `immutable`, `head-release`).
 - *"One store means one bug breaks everything"* → Every decision is formally verified in Lean 4.
 - *"Separate systems are fine"* → Then which commit built this image, and which data trained this model?
 
 ## CLI example
 
-The `o5s` CLI is the low-level plumbing over the core (reference: `docs/CLI.md`).
+The `o5s` CLI is the low-level plumbing over the core (see `docs/CLI.md`).
 
 ```sh
 cargo build --release
