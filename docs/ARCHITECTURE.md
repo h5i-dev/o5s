@@ -173,7 +173,7 @@ by fault injection at every write/fsync point plus real SIGKILLs.
 
 | dimension | measured | how it scales |
 |---|---|---|
-| objects | 10⁷ × 64 B: put 188k/s, cold open 6 s, get p99 14 µs; GC full cycle 111 s at 2.1 GB peak | Indexes over 4 MiB are memory-mapped, plus a multi-pack index. Resident memory is ≈ 110 B/object, mostly reclaimable mapped-file pages (BENCH.md). |
+| objects | 10⁷ × 64 B: put 201k/s, cold open 3.6 s, get p99 13 µs; GC full cycle 111 s at 2.1 GB peak; 226 B/object on disk (64 B data + 56 B record framing + 66 B pack index + ~40 B MIDX). 10⁸ not run: ≈ 22.6 GB would not fit the disk rule | Indexes over 4 MiB are memory-mapped (hard links into `idx-cache` on local disk), plus a multi-pack index. Heap is 3.4 B/object; resident memory is ≈ 110 B/object, almost all reclaimable mapped-file pages (RssFile). |
 | names | 10⁷: replace 7.5k/s, resolve p99 7.6 µs, open 6.4 s | The whole ref state is in memory: ≈ 208 B per name (2.1 GB at 10⁷). For more names, use idmaps (sorted segments behind one ref) for name-like tables, as the Git and OCI fronts do. |
 | provenance | 10⁶ records: load 0.35 s (checkpointed index) | Records are objects; the index grows with records since the last checkpoint. |
 | batch name updates | `update_many` linear in the batch (≤ 2²⁰ entries) | |

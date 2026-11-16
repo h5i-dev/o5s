@@ -771,6 +771,21 @@ impl PackStore {
         let dir = self.inner.staging_dir.with_file_name("idx-cache");
         fs::create_dir_all(&dir)?;
         let path = dir.join(format!("{name}.idx3"));
+        // On a local-file backend a v3 index is hard-linked, not copied: pack
+        // indexes are content-named and never modified, and the mapped view is
+        // checksum-verified either way (saves the index's size on disk, ~66 B per object).
+        if !path.exists()
+            && let Some(src) = self.inner.backend.local_path(key)
+            && File::open(&src)
+                .and_then(|mut f| {
+                    let mut head = [0u8; 8];
+                    f.read_exact(&mut head).map(|_| head)
+                })
+                .is_ok_and(|h| &h == IDX_MAGIC_V3)
+            && fs::hard_link(&src, &path).is_ok()
+        {
+            fsync_dir(&dir)?;
+        }
         if !path.exists() {
             let tmp = dir.join(format!(".{name}.{}.tmp", unique_id()));
             {

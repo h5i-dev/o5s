@@ -55,6 +55,12 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 - Record kinds `Frame2` (lengths-only directory) and `Delta`. `Frame` (v1) is still read.
 - Ref journal records: `Txn`, `Delete`, `Rotated`. Snapshot `P2PREFS1`.
 - Local caches: `idx-cache/*.idx3` and `midx-*.midx` (`P2PMIDX1`), derived and safe to delete.
+- Record kind `Frame3` (5): a frame compressed against a reference object (similarity repack; the reference is a GC child).
+- Record codec `GroupedZstd` (2): byte-grouped weights. Readers that predate it refuse it.
+- `Delta` records with segment maps (chunk-anchored XOR deltas).
+- Provenance: records `P2PPROV1`, log nodes `P2PPLOG2` (`P2PPLOG1` read) with checkpoint indexes `P2PPIDX1`. Attestations are provenance records (op `attest`).
+- Front id maps: segment maps `P2PSEG01` / `P2PMAP01`.
+- Compatibility and upgrade policy: docs/RELEASE.md.
 
 ### Fixed (second review and net session, 2026-11-15)
 - Ref log engine: identical decisions by two writers could both report Ok (introduced by the lost-response fix, caught by the net session's multi-host test). Each log entry now carries a per-attempt nonce.

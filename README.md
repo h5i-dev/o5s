@@ -62,6 +62,27 @@ p2p put --for-name models/acme/main model.safetensors
 CLI exit codes: 0 ok, 1 error, 2 not found/absent, 3 OCC conflict, 4 forbidden (namespace rule or promotion
 policy), 5 unauthorized.
 
+## Quick start for each front (server; details in `docs/API.md`, deployment in `deploy/README.md`)
+
+```sh
+pico2peta-server gen-token admin      # prints the token once, plus a [[tokens]] entry for tokens.toml
+pico2peta-server serve --config deploy/server.toml
+export S=p2p.example.com TOKEN=p2p_...
+```
+
+| front | the real client, unmodified |
+|---|---|
+| **Git** | `git clone https://any:$TOKEN@$S/git/team/proj.git`, then `git push` (each ref update is an OCC compare-and-swap) |
+| **OCI** | `docker login $S -u any -p "$TOKEN"`; `docker push $S/team/app:1.0`; `oras push $S/team/app:sbom ./sbom.json` |
+| **Hugging Face** | `export HF_ENDPOINT=https://$S HF_TOKEN=$TOKEN`; `hf upload team/tiny ./model`; `hf_hub_download` / `snapshot_download` (LFS and Xet) |
+| **PyPI** | `twine upload --repository-url https://$S/pypi/team/ -u token -p "$TOKEN" dist/*`; `pip install --index-url https://token:$TOKEN@$S/pypi/team/simple/ mypkg` |
+| **npm** | `.npmrc`: `registry=https://$S/npm/team/` and `//$S/npm/team/:_authToken=${TOKEN}`; `npm publish`, `npm install` |
+| **Maven** | `settings.xml` server `p2p` (user `token`, password = token); `mvn deploy -DaltDeploymentRepository=p2p::https://$S/maven/releases` |
+| **native** | `PUT /v1/objects`, `POST /v1/refs/...` (OCC), provenance/attestations/promotion/search under `/v1` |
+
+PyPI, npm and Maven can proxy-cache their public upstreams (`[pypi.upstream.<index>]` etc.). One provenance log,
+audit log and policy cover every front.
+
 ## Layout
 
 | crate | role |

@@ -752,15 +752,23 @@ fn pct(v: &mut [f64], p: f64) -> f64 {
 /// `p2p-bench scale <dir> <objects|names|prov|gc> <count>` (PLAN §6.7): one JSON line.
 /// `objects` creates (or reuses) `<dir>/scale-objects-<count>`; `gc` runs on it.
 fn scale(dir: &str, part: &str, count: u64) -> Result<(), Box<dyn std::error::Error>> {
+    // Bytes on disk, counting each inode once (idx-cache entries may be hard links).
     let du = |p: &std::path::Path| -> u64 {
-        fn walk(p: &std::path::Path) -> u64 {
+        fn walk(p: &std::path::Path, seen: &mut std::collections::HashSet<(u64, u64)>) -> u64 {
+            use std::os::unix::fs::MetadataExt;
             std::fs::read_dir(p).map_or(0, |rd| {
                 rd.flatten()
-                    .map(|e| if e.path().is_dir() { walk(&e.path()) } else { e.metadata().map_or(0, |m| m.len()) })
+                    .map(|e| {
+                        if e.path().is_dir() {
+                            walk(&e.path(), seen)
+                        } else {
+                            e.metadata().map_or(0, |m| if seen.insert((m.dev(), m.ino())) { m.len() } else { 0 })
+                        }
+                    })
                     .sum()
             })
         }
-        walk(p)
+        walk(p, &mut std::collections::HashSet::new())
     };
     let load = || {
         std::fs::read_to_string("/proc/loadavg")

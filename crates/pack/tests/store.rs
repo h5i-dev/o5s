@@ -1238,3 +1238,30 @@ fn whole_and_ranged_reads_of_small_blobs_agree() {
         }
     }
 }
+
+#[test]
+fn mapped_index_cache_is_hard_linked_on_local_disk() {
+    use std::os::unix::fs::MetadataExt;
+    let d = tempfile::tempdir().unwrap();
+    let hs: Vec<Hash>;
+    {
+        let s = open(d.path(), PackConfig::default());
+        hs = (0..2000u64).map(|i| s.put(&pseudo(80, i)).unwrap()).collect();
+        s.flush().unwrap();
+    }
+    unsafe_env_threshold_zero(|| {
+        let s = open(d.path(), PackConfig::default()); // maps every sealed index
+        for (i, h) in hs.iter().enumerate() {
+            assert_eq!(s.get(h, None).unwrap(), pseudo(80, i as u64));
+        }
+    });
+    let cache: Vec<_> = std::fs::read_dir(d.path().join("idx-cache"))
+        .unwrap()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "idx3"))
+        .collect();
+    assert!(!cache.is_empty(), "an index was mapped through the cache");
+    for e in cache {
+        assert_eq!(e.metadata().unwrap().nlink(), 2, "{:?} is a hard link to the pack index", e.path());
+    }
+}

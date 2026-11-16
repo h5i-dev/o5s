@@ -14,6 +14,40 @@ Other modes: `p2p-bench stream <dir> [MiB]` (put_stream only; `P2P_BENCH_NO_PROB
 
 Comparisons against Git storage size are in `docs/EXP1.md` (Experiment 1).
 
+## 2026-11-15: scale tests (PLAN §6.7), window 2
+
+Under the bench lock, load 1.4–2.0. Objects as in window 1 (64-byte distinct objects, one `put` each, `flush`
+every 10⁵).
+
+| N = 10⁷ | window 1 | window 2, before | window 2, after the index hard-link fix |
+|---|---|---|---|
+| put | 188k/s | 187k/s | 201k/s |
+| cold open | 5.97 s | 6.63 s | **3.60 s** |
+| get p50 / p99 | 4.5 / 14.2 µs | 4.2 / 13.7 µs | 3.8 / 13.2 µs |
+| RSS | 1.05 GB (110 B/object) | 1,048 MB | 1,048 MB |
+| of which RssAnon / RssFile | (not measured) | **32 MB (3.4 B/object)** / 1,015 MB | 32 MB / 1,016 MB |
+| disk | | 2.92 GB (292 B/object) | **2.26 GB (226 B/object)** |
+
+**RSS.** The heap is 3.4 B/object, so the ≤ 64 B/object target is met for anonymous memory. Plain RSS
+(110 B/object) is mapped index and MIDX pages: file-backed and reclaimable under memory pressure. The
+pre-registered metric was plain RSS, so it is reported as **missed**; the split above is the analysis.
+
+**Disk, and the 10⁸ run.**
+- The pre-registration projected ≈ 160 B/object. The measured 292 B/object was:
+  - 120 B pack: 64 B of data plus 56 B of record header and CRC;
+  - 66 B pack index;
+  - 66 B for a second copy of that index in `idx-cache`, the verified local cache that gets mapped;
+  - ≈ 40 B MIDX.
+- **Fix:** on a local-file backend the cache entry is now a hard link to the pack index. Pack indexes are
+  content-named and never modified, and the mapped view is checksum-verified either way. A new backend hook,
+  `Backend::local_path`, is `None` for S3, which still copies. The fix saves 66 B/object and also roughly halves
+  cold open, because the first open no longer copies every index. Test:
+  `mapped_index_cache_is_hard_linked_on_local_disk`.
+- **10⁸ was not run.** At 226 B/object it needs ≈ 22.6 GB, and only ≈ 22 GB is available after keeping 5 GB free
+  (27 GB free). By the pre-registered disk rule, that scale is reported as not run. A first attempt at the old
+  292 B/object projection was stopped early, as soon as the 10⁷ disk number showed it could not fit.
+- The bench's disk number now counts each inode once.
+
 ## 2026-11-15: put/get pass, part 2: reads (`p2p-bench reads`)
 
 One thread, warm page cache, default config (`chunk_threshold` 1 MiB, so 4 MiB and 64 MiB objects are chunked

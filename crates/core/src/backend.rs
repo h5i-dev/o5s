@@ -118,6 +118,14 @@ pub trait Backend: Send + Sync {
     fn atomic_create(&self) -> bool {
         true
     }
+
+    /// The local file holding `key`, if this backend stores blobs as plain
+    /// local files (API v1.19). Lets a store hard-link an immutable blob into
+    /// a local cache instead of copying it. Default: `None`.
+    fn local_path(&self, key: &str) -> Option<std::path::PathBuf> {
+        let _ = key;
+        None
+    }
 }
 
 /// Validates a backend key (see the module docs).
@@ -480,6 +488,10 @@ impl Backend for LocalDisk {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    fn local_path(&self, key: &str) -> Option<std::path::PathBuf> {
+        self.path(key).ok()
     }
 
     fn describe(&self) -> String {
