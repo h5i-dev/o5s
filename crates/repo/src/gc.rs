@@ -257,27 +257,35 @@ impl LocalRepo {
     /// Live set: ref targets, manifest chunks, and tracer children.
     fn mark(&self, tracer: &dyn Tracer, report: &mut GcReport) -> Result<HashSet<Hash>> {
         let mut live = HashSet::new();
-        let mut queue: VecDeque<Hash> = VecDeque::new();
+        // Live hashes reached as objects (ref targets, front children) and traced. A hash reached
+        // only as a chunk of a stored object is live but is not a front object, so the tracer is
+        // not run on it (that would read every chunk again). A hash that is both is traced when its
+        // object edge arrives, whichever edge came first: the live set never shrinks.
+        let mut traced = HashSet::new();
+        // (hash, reached as an object)
+        let mut queue: VecDeque<(Hash, bool)> = VecDeque::new();
         report.dangling_refs.clear();
         for (name, v) in self.list_refs("")? {
             if !self.packs.contains(&v.hash)? {
                 report.dangling_refs.push(name.to_string());
                 continue;
             }
-            queue.push_back(v.hash);
+            queue.push_back((v.hash, true));
         }
-        while let Some(h) = queue.pop_front() {
-            if !live.insert(h) {
-                continue;
+        while let Some((h, object)) = queue.pop_front() {
+            if live.insert(h)
+                && let Some(chunks) = self.packs.chunks(&h)?
+            {
+                queue.extend(chunks.into_iter().map(|c| (c, false)));
             }
-            if let Some(chunks) = self.packs.chunks(&h)? {
-                queue.extend(chunks);
+            if !object || !traced.insert(h) {
+                continue;
             }
             for c in tracer.children(&h, self)? {
                 if !self.packs.contains(&c)? {
                     return Err(Error::Corrupt(format!("{h} references missing object {c}")));
                 }
-                queue.push_back(c);
+                queue.push_back((c, true));
             }
         }
         report.live_hashes = live.len();

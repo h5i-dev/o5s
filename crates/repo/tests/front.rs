@@ -279,3 +279,59 @@ fn read_verify_policy() {
 fn toml_like(repo: &std::path::Path) -> String {
     std::fs::read_to_string(repo.join("config.toml")).unwrap()
 }
+
+/// A hash that is both a chunk of a stored object and a front object: the walks
+/// (GC's mark and the reach index) skip the tracer on chunk edges, but must still
+/// trace the hash when its object edge arrives, even if the chunk edge came first.
+#[test]
+fn chunk_that_is_also_a_front_object_is_traced() {
+    struct Links(Vec<(Hash, Hash)>);
+    impl Front for Links {
+        fn id(&self) -> &str {
+            "links"
+        }
+        fn prefixes(&self) -> Vec<String> {
+            vec!["links/".into()]
+        }
+        fn children(&self, h: &Hash, _: &dyn ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+            Ok(self.0.iter().filter(|(p, _)| p == h).map(|(_, c)| *c).collect())
+        }
+    }
+    let d = tempfile::tempdir().unwrap();
+    let r0 = LocalRepo::init(d.path(), &PackConfig::default()).unwrap();
+    // A: large enough to be stored as chunks; X: its first chunk.
+    let mut x = 0x9e37_79b9_7f4a_7c15u64;
+    let a_bytes: Vec<u8> = (0..(3usize << 20))
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 32) as u8
+        })
+        .collect();
+    let a = r0.put(&a_bytes).unwrap();
+    let xh = r0.packs().chunks(&a).unwrap().expect("chunked")[0];
+    let root = r0.put(b"front root").unwrap();
+    let c = r0.put(b"reachable only through X as a front object").unwrap();
+    let orphan = r0.put(b"referenced by nothing").unwrap();
+    // root -> X (object edge), X -> C.
+    let fronts = FrontRegistry::new().with(Arc::new(Links(vec![(root, xh), (xh, c)]))).unwrap();
+    let r = r0.with_fronts(fronts).unwrap();
+    let idx = pico2peta_repo::reach::ReachIndex::open(&r, vec![String::new()]).unwrap();
+    let handle: Arc<dyn Repository> = Arc::new(r.front("links").unwrap());
+    // Both walks meet X first as a chunk of A (wave 1), then as root's child.
+    assert!(matches!(set(handle.as_ref(), "links/a", a).unwrap(), ReplaceOutcome::Ok { .. }));
+    assert!(matches!(set(handle.as_ref(), "links/root", root).unwrap(), ReplaceOutcome::Ok { .. }));
+    assert_eq!(idx.readable_many(&[a, xh, root, c], &[0]).unwrap(), vec![true; 4], "reach: C via X");
+    r.flush().unwrap();
+    let opts = GcOptions { grace: Duration::ZERO, allow_short_grace: true, repack_all: true, ..GcOptions::default() };
+    for _ in 0..4 {
+        r.gc_with_fronts(&opts, None, false).unwrap();
+    }
+    let reopened = LocalRepo::open(d.path()).unwrap();
+    assert!(!reopened.contains(&orphan).unwrap(), "gc deletes the unreferenced (the test is sensitive)");
+    assert!(reopened.contains(&c).unwrap(), "gc: C survives (X traced as an object)");
+    // A fresh index (a full mark, not the incremental path) agrees.
+    let idx2 = pico2peta_repo::reach::ReachIndex::open(&r, vec![String::new()]).unwrap();
+    assert_eq!(idx2.readable_many(&[c], &[0]).unwrap(), vec![true]);
+}

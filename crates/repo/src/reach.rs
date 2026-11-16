@@ -85,6 +85,9 @@ struct Cell {
 #[derive(Default)]
 struct Members {
     set: HashSet<Hash>,
+    /// Members reached as objects (a ref target or a front child) whose front children were
+    /// traced. Hashes reached only as chunks of a stored object are members but not traced.
+    traced: HashSet<Hash>,
     /// Recompute from the cell's names before the next answer.
     dirty: bool,
 }
@@ -124,7 +127,10 @@ impl ReachIndex {
     fn fresh(cells: Vec<String>) -> Cells {
         let states = (0..cells.len())
             .map(|_| {
-                Arc::new(Cell { members: Mutex::new(Members { set: HashSet::new(), dirty: true }), ..Cell::default() })
+                Arc::new(Cell {
+                    members: Mutex::new(Members { set: HashSet::new(), traced: HashSet::new(), dirty: true }),
+                    ..Cell::default()
+                })
             })
             .collect();
         (Arc::new(cells), states)
@@ -194,13 +200,14 @@ impl ReachIndex {
             };
             m.dirty |= dirty;
             if m.dirty {
-                m.set = self.mark_cell(cells, c)?;
+                (m.set, m.traced) = self.mark_cell(cells, c)?;
                 m.dirty = false;
             } else if !roots.is_empty() {
                 let repo = &self.inner.repo;
                 let tracer = repo.fronts().tracer(repo)?;
+                let Members { set, traced, .. } = &mut *m;
                 for h in roots {
-                    if let Err(e) = closure(repo, &tracer, h, &mut m.set) {
+                    if let Err(e) = closure(repo, &tracer, h, set, traced) {
                         // Never guess: recompute exactly on the next answer.
                         m.dirty = true;
                         return Err(e);
@@ -213,17 +220,18 @@ impl ReachIndex {
     }
 
     /// Everything reachable from the names whose cell is `c`.
-    fn mark_cell(&self, cells: &[String], c: usize) -> Result<HashSet<Hash>> {
+    fn mark_cell(&self, cells: &[String], c: usize) -> Result<(HashSet<Hash>, HashSet<Hash>)> {
         let repo = &self.inner.repo;
         let mut members = HashSet::new();
+        let mut traced = HashSet::new();
         let tracer = repo.fronts().tracer(repo)?;
         let prefix = &cells[c];
         for (name, v) in repo.list_refs(prefix.trim_end_matches('/'))? {
             if Self::cell_of(cells, name.as_str()) == Some(c as CellId) {
-                closure(repo, &tracer, v.hash, &mut members)?;
+                closure(repo, &tracer, v.hash, &mut members, &mut traced)?;
             }
         }
-        Ok(members)
+        Ok((members, traced))
     }
 
     /// The commit path: O(changes), no traversal, never waits for a traversal.
@@ -315,28 +323,45 @@ impl RefObserver for Observer {
     }
 }
 
-/// Adds everything reachable from `root` to `seen` (stopping at members), one
-/// breadth-first wave at a time so fronts can resolve a wave's children in one
-/// batch. Objects that are missing (a dangling ref) contribute nothing.
-fn closure(repo: &LocalRepo, tracer: &dyn Tracer, root: Hash, seen: &mut HashSet<Hash>) -> Result<()> {
-    let mut wave = vec![root];
+/// Adds everything reachable from `root` to `members`, one breadth-first wave
+/// at a time so fronts can resolve a wave's children in one batch. Objects that
+/// are missing (a dangling ref) contribute nothing.
+///
+/// Two kinds of edges, two sets. A *chunk* edge (`PackStore::chunks`) reaches
+/// a raw part of a stored object: a member, but not a front object, so the
+/// tracer is not run on it (that would read and decompress every chunk of a
+/// large file again). An *object* edge (a root or a front child) also traces
+/// the object, once (`traced`). A hash that is both a chunk and an object is
+/// traced when its object edge arrives, even if it became a member as a chunk
+/// first, so nothing a front references is ever missed.
+fn closure(
+    repo: &LocalRepo,
+    tracer: &dyn Tracer,
+    root: Hash,
+    members: &mut HashSet<Hash>,
+    traced: &mut HashSet<Hash>,
+) -> Result<()> {
+    // (hash, reached as an object)
+    let mut wave = vec![(root, true)];
     while !wave.is_empty() {
-        let mut live = Vec::with_capacity(wave.len());
-        for h in wave.drain(..) {
-            if seen.contains(&h) || !repo.packs().contains(&h)? {
-                continue;
-            }
-            seen.insert(h);
-            live.push(h);
-        }
+        let mut objects = Vec::new();
         let mut next = Vec::new();
-        for h in &live {
-            if let Some(kids) = repo.packs().chunks(h)? {
-                next.extend(kids.into_iter().filter(|k| !seen.contains(k)));
+        for (h, object) in wave.drain(..) {
+            if !members.contains(&h) {
+                if !repo.packs().contains(&h)? {
+                    continue;
+                }
+                members.insert(h);
+                if let Some(kids) = repo.packs().chunks(&h)? {
+                    next.extend(kids.into_iter().filter(|k| !members.contains(k)).map(|k| (k, false)));
+                }
+            }
+            if object && traced.insert(h) {
+                objects.push(h);
             }
         }
-        for kids in children_of_wave(tracer, &live, repo)? {
-            next.extend(kids.into_iter().filter(|k| !seen.contains(k)));
+        for kids in children_of_wave(tracer, &objects, repo)? {
+            next.extend(kids.into_iter().filter(|k| !traced.contains(k)).map(|k| (k, true)));
         }
         wave = next;
     }
