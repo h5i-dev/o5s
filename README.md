@@ -4,8 +4,8 @@ Why do we need a separate GitHub for source code, JFrog for build outputs, Docke
 PyPI and npm for packages, Hugging Face for LLM weights, and so on? They are all just data, just sequences of
 0s and 1s. Why not treat them all the same way?
 
-o5s treats every kind of data the same way, using only push, pull, and overwrite. As a bonus, existing CLIs
-such as `git`, `docker`, `pip`, `npm`, `mvn` and `huggingface_hub` work with it unmodified.
+o5s treats every kind of data the same way, using only push, pull, and overwrite. It also ships adapters
+for Git, OCI, Hugging Face, PyPI, npm and Maven, so it fits into existing workflows as they are.
 
 ## Potential pushback
 
