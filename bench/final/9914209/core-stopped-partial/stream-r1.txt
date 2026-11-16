@@ -1,0 +1,8 @@
+# stream rep 1 commit 9914209 dirty 0 load_start 2.29 2026-11-16T17:35:39+00:00
+| input | put_stream 512 MiB | re-put (dedup) | open+read (verified) |
+|---|---|---|---|
+| incompressible | 240 MB/s | 655 MB/s | 861 MB/s |
+| code-like text | 166 MB/s | 623 MB/s | 547 MB/s |
+
+peak RSS: 21 MB
+# load_end 2.99
