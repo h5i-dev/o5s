@@ -393,6 +393,12 @@ The contended run checks that no update is lost: the final version equals the nu
     - huggingface_hub hashes the file (SHA-256) before an LFS upload;
     - hf_xet chunks and hashes locally (~0.8 s per 270 MB);
     - downloads write through Python into the HF cache, and dirty-page writeback alone moves a plain curl GET from 0.31 s to 0.93 s once other downloads have written to disk.
+  - **Wired in core API v1.20** (edd8c8b):
+    - xorb uploads use `put_chunked` with the client's chunk boundaries: no server CDC, no concat copy. A 64 MiB xorb POST takes ~0.31–0.47 s, was 0.55–0.72 s.
+    - Shard registration uses `put_concat` over the file's xorb ranges, which reuses their chunks, with SHA-256 from `observe` on its own thread. A shard-only (dedup) upload takes 0.58–0.69 s, was 0.94–1.17 s. Its profile has no chunker, memset or CRC left: BLAKE3 32% (source-chunk verification on read, plus the new object's hash) and SHA-256 14%.
+    - Suggested to the core: for this caller, an option to skip source-chunk verification in `put_concat`, since the SHA-256 checked against the shard's claim verifies the bytes end to end.
+    - Note: `put_chunked` bypasses the namespace's encoding profile for Xet-uploaded content. Chunk boundaries are Xet's anyway (that is the Xet storage model).
+  - `stream_reader` (shared by `/v1`, OCI, HF and the package fronts) now runs one blocking task per stream with a reused buffer and 64 KiB pieces. It used to allocate a zeroed 256 KiB buffer per chunk (mmap, page faults) and hop the thread pool per chunk. OCI pull median went from 0.395 to ≈0.36 s in an A/B.
   - Remaining server-side items, both with the core:
     - XetChunker speed (16.5% of a shard-only upload; the core is speeding up the gear loop, byte-exact);
     - `put_concat` (core API v1.20, agreed). Xet shard registration rebuilds the file object: read-back + SHA-256 + re-chunk + hash + dedup put, ~1.1 s for 270 MB even when every chunk exists. With `put_concat` it becomes one BLAKE3+SHA-256 pass reusing the xorbs' chunk records. Net wires it in when it lands.

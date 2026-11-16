@@ -304,8 +304,11 @@ pub(crate) fn put_xorb(hf: &HfState, repo: &RepoId, url_hash: &MerkleHash, body:
             .chunks(per)
             .map(|part| sc.spawn(move || part.iter().map(|c| (chunk_hash(c), c.len() as u64)).collect::<Vec<_>>()))
             .collect();
-        let mut cat = std::io::Cursor::new(chunks.concat());
-        let content = hf.put_content(repo, &mut cat);
+        // Stored with the client's chunk boundaries (they are Xet CDC boundaries already), so the
+        // file assembled from these chunks at shard time reuses them (see `put_shard`).
+        let _ = repo;
+        let refs: Vec<&[u8]> = chunks.iter().map(Vec::as_slice).collect();
+        let content = hf.git_repo().put_chunked(&refs);
         let mut hs = Vec::with_capacity(chunks.len());
         for p in parts {
             hs.extend(p.join().map_err(|_| Error::Corrupt("xorb hash worker panicked".into()))?);
@@ -459,22 +462,26 @@ pub(crate) fn put_shard(hf: &HfState, repo: &RepoId, body: &[u8]) -> Result<usiz
             return Err(bad("file hash does not match its chunks"));
         }
         // Rebuild the file into a core object while hashing it.
-        // SHA-256 runs on its own thread, overlapping the store's chunking and hashing.
+        // The file is the concatenation of xorb ranges the store already holds, chunk-aligned:
+        // put_concat reuses their chunks, reading the bytes once for the object hash and, via
+        // `observe`, for SHA-256.
+        // SHA-256 on its own thread, overlapping the store's read and BLAKE3.
         let (content, got, n) = std::thread::scope(|sc| -> Result<(Hash, String, u64)> {
             let (stx, srx) = std::sync::mpsc::sync_channel::<Vec<u8>>(32);
-            let hasher = sc.spawn(move || {
-                let mut sha = Sha256::new();
+            let worker = sc.spawn(move || {
+                let mut hasher = Sha256::new();
                 let mut n = 0u64;
                 for b in srx {
-                    sha.update(&b);
+                    hasher.update(&b);
                     n += b.len() as u64;
                 }
-                (crate::git::hex(&sha.finalize()), n)
+                (crate::git::hex(&hasher.finalize()), n)
             });
-            let mut src = Concat { store: hf.git_repo(), plan: plan.into_iter(), cur: None, sha: stx };
-            let content = hf.put_content(repo, &mut src);
-            drop(src);
-            let (got, n) = hasher.join().map_err(|_| Error::Corrupt("sha256 thread panicked".into()))?;
+            let content = hf.git_repo().put_concat(&plan, &mut |b: &[u8]| {
+                let _ = stx.send(b.to_vec());
+            });
+            drop(stx);
+            let (got, n) = worker.join().map_err(|_| Error::Corrupt("sha256 thread panicked".into()))?;
             Ok((content?, got, n))
         })?;
         // The shard stores sha256 as a DataHash built with `from_be_bytes`: its word-wise hex
@@ -666,33 +673,6 @@ impl FileRecord {
             ser_pos = pe;
         }
         Ok(out)
-    }
-}
-
-/// Reads byte ranges of core objects back to back, hashing them with sha256.
-struct Concat<'a, I> {
-    store: &'a dyn pico2peta_core::Repository,
-    plan: I,
-    cur: Option<Box<dyn Read + Send>>,
-    /// Copies of what was read, for the SHA-256 thread.
-    sha: std::sync::mpsc::SyncSender<Vec<u8>>,
-}
-
-impl<I: Iterator<Item = (Hash, std::ops::Range<u64>)>> Read for Concat<'_, I> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        loop {
-            if self.cur.is_none() {
-                let Some((h, r)) = self.plan.next() else { return Ok(0) };
-                self.cur = Some(self.store.open(&h, Some(r)).map_err(|e| std::io::Error::other(e.to_string()))?);
-            }
-            let k = self.cur.as_mut().map_or(Ok(0), |r| r.read(buf))?;
-            if k == 0 {
-                self.cur = None;
-                continue;
-            }
-            self.sha.send(buf[..k].to_vec()).map_err(|_| std::io::Error::other("sha256 thread stopped"))?;
-            return Ok(k);
-        }
     }
 }
 
