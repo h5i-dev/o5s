@@ -1,0 +1,5 @@
+# reads rep 3 commit 9914209 dirty 0 load_start 4.06 2026-11-16T17:39:38+00:00
+{"mode":"reads","input":"text","size_kib":4,"n":20000,"get_mb_s":286,"open_strict_mb_s":228,"open_eof_mb_s":276,"load":"3.13"}
+{"mode":"reads","input":"text","size_kib":64,"n":2000,"get_mb_s":384,"open_strict_mb_s":348,"open_eof_mb_s":490,"load":"3.04"}
+{"mode":"reads","input":"text","size_kib":512,"n":256,"get_mb_s":646,"open_strict_mb_s":477,"open_eof_mb_s":623,"load":"3.12"}
+{"mode":"reads","input":"text","size_kib":4096,"n":32,"get_mb_s":673,"open_strict_mb_s":754,"open_eof_mb_s":840,"load":"3.12"}

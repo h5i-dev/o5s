@@ -1,0 +1,2261 @@
+## 2026-11-16T16:21:25+00:00 load 3.78 3.94 3.91
+%CPU USER     COMMAND
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.7 root     codex
+## 2026-11-16T16:21:35+00:00 load 3.34 3.84 3.88
+%CPU USER     COMMAND
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.7 root     codex
+## 2026-11-16T16:21:45+00:00 load 2.83 3.72 3.84
+%CPU USER     COMMAND
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.7 root     codex
+## 2026-11-16T16:21:55+00:00 load 2.39 3.59 3.79
+%CPU USER     COMMAND
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.7 root     codex
+## 2026-11-16T16:22:05+00:00 load 2.10 3.49 3.76
+%CPU USER     COMMAND
+90.8 ec2-user p2p-bench-base
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:22:15+00:00 load 2.01 3.43 3.73
+%CPU USER     COMMAND
+97.0 ec2-user p2p-bench-base
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:22:25+00:00 load 1.85 3.35 3.70
+%CPU USER     COMMAND
+ 117 ec2-user p2p-bench-base
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:22:35+00:00 load 1.72 3.27 3.67
+%CPU USER     COMMAND
+ 103 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:22:45+00:00 load 1.61 3.19 3.64
+%CPU USER     COMMAND
+ 102 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:22:55+00:00 load 1.59 3.14 3.62
+%CPU USER     COMMAND
+95.7 ec2-user p2p-bench-base
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:23:05+00:00 load 1.50 3.07 3.59
+%CPU USER     COMMAND
+98.9 ec2-user p2p-bench-base
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:23:15+00:00 load 1.42 3.00 3.56
+%CPU USER     COMMAND
+ 108 ec2-user p2p-bench-base
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:23:25+00:00 load 1.65 3.00 3.56
+%CPU USER     COMMAND
+ 102 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:23:35+00:00 load 1.55 2.93 3.53
+%CPU USER     COMMAND
+ 101 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:23:45+00:00 load 1.47 2.87 3.50
+%CPU USER     COMMAND
+86.3 ec2-user p2p-bench-base
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:23:55+00:00 load 1.47 2.82 3.48
+%CPU USER     COMMAND
+97.0 ec2-user p2p-bench-base
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:24:05+00:00 load 1.40 2.76 3.45
+%CPU USER     COMMAND
+97.7 ec2-user p2p-bench-base
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.2 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:24:15+00:00 load 1.56 2.75 3.44
+%CPU USER     COMMAND
+97.8 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:24:25+00:00 load 1.47 2.69 3.42
+%CPU USER     COMMAND
+99.1 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:24:35+00:00 load 1.64 2.69 3.41
+%CPU USER     COMMAND
+ 121 ec2-user p2p-bench-base
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:24:45+00:00 load 1.54 2.63 3.38
+%CPU USER     COMMAND
+ 102 ec2-user p2p-bench-base
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:24:55+00:00 load 1.46 2.58 3.35
+%CPU USER     COMMAND
+ 100 ec2-user p2p-bench-base
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:25:05+00:00 load 1.46 2.54 3.33
+%CPU USER     COMMAND
+ 110 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:25:15+00:00 load 1.39 2.49 3.31
+%CPU USER     COMMAND
+ 103 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:25:25+00:00 load 1.33 2.44 3.28
+%CPU USER     COMMAND
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.7 root     codex
+## 2026-11-16T16:25:35+00:00 load 1.28 2.39 3.26
+%CPU USER     COMMAND
+ 100 ec2-user p2p-bench-base
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:25:45+00:00 load 1.24 2.35 3.23
+%CPU USER     COMMAND
+ 100 ec2-user p2p-bench-base
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:25:55+00:00 load 1.20 2.30 3.21
+%CPU USER     COMMAND
+ 109 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:26:05+00:00 load 1.17 2.26 3.19
+%CPU USER     COMMAND
+ 102 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:26:15+00:00 load 1.14 2.22 3.16
+%CPU USER     COMMAND
+ 117 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:26:25+00:00 load 1.12 2.18 3.14
+%CPU USER     COMMAND
+32.8 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:26:35+00:00 load 1.18 2.15 3.12
+%CPU USER     COMMAND
+77.3 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:26:45+00:00 load 1.15 2.11 3.10
+%CPU USER     COMMAND
+ 102 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:26:56+00:00 load 1.20 2.09 3.08
+%CPU USER     COMMAND
+ 125 ec2-user p2p-bench
+ 3.4 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:27:06+00:00 load 1.17 2.06 3.06
+%CPU USER     COMMAND
+ 135 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:27:16+00:00 load 1.54 2.11 3.06
+%CPU USER     COMMAND
+ 143 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:27:26+00:00 load 2.18 2.22 3.09
+%CPU USER     COMMAND
+ 148 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:27:36+00:00 load 2.07 2.19 3.07
+%CPU USER     COMMAND
+ 150 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:27:46+00:00 load 1.99 2.17 3.05
+%CPU USER     COMMAND
+ 148 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:27:56+00:00 load 2.35 2.25 3.07
+%CPU USER     COMMAND
+ 152 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:28:06+00:00 load 2.22 2.22 3.05
+%CPU USER     COMMAND
+ 148 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:28:16+00:00 load 2.04 2.18 3.03
+%CPU USER     COMMAND
+ 145 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:28:26+00:00 load 1.88 2.14 3.01
+%CPU USER     COMMAND
+ 143 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:28:36+00:00 load 2.04 2.17 3.01
+%CPU USER     COMMAND
+ 148 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:28:46+00:00 load 2.69 2.31 3.04
+%CPU USER     COMMAND
+ 155 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:28:56+00:00 load 4.04 2.61 3.14
+%CPU USER     COMMAND
+ 161 ec2-user p2p-bench
+56.9 root     dnf
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+## 2026-11-16T16:29:06+00:00 load 4.62 2.79 3.19
+%CPU USER     COMMAND
+50.2 root     dnf
+48.0 ec2-user p2p-bench
+38.0 ec2-user dd
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:29:16+00:00 load 4.45 2.81 3.19
+%CPU USER     COMMAND
+47.5 ec2-user p2p-bench
+38.5 root     dnf
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+## 2026-11-16T16:29:26+00:00 load 4.60 2.90 3.22
+%CPU USER     COMMAND
+72.5 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:29:36+00:00 load 4.20 2.87 3.20
+%CPU USER     COMMAND
+ 108 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:29:46+00:00 load 4.27 2.93 3.22
+%CPU USER     COMMAND
+ 123 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:29:56+00:00 load 3.77 2.86 3.19
+%CPU USER     COMMAND
+ 132 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:30:06+00:00 load 3.34 2.80 3.17
+%CPU USER     COMMAND
+ 139 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:30:16+00:00 load 3.14 2.78 3.15
+%CPU USER     COMMAND
+ 145 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:30:26+00:00 load 3.37 2.83 3.17
+%CPU USER     COMMAND
+ 150 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:30:36+00:00 load 3.00 2.77 3.15
+%CPU USER     COMMAND
+ 149 ec2-user p2p-bench
+12.0 ec2-user wget
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+## 2026-11-16T16:30:46+00:00 load 2.92 2.76 3.14
+%CPU USER     COMMAND
+ 151 ec2-user p2p-bench
+ 4.8 ec2-user wget
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+## 2026-11-16T16:30:56+00:00 load 2.62 2.71 3.12
+%CPU USER     COMMAND
+ 147 ec2-user p2p-bench
+ 4.1 ec2-user wget
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+## 2026-11-16T16:31:06+00:00 load 2.37 2.65 3.09
+%CPU USER     COMMAND
+ 144 ec2-user p2p-bench
+ 4.0 ec2-user wget
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+## 2026-11-16T16:31:16+00:00 load 2.16 2.59 3.07
+%CPU USER     COMMAND
+ 143 ec2-user p2p-bench
+ 4.0 ec2-user wget
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.1 ec2-user claude
+## 2026-11-16T16:31:26+00:00 load 2.62 2.67 3.09
+%CPU USER     COMMAND
+ 149 ec2-user p2p-bench
+ 9.0 root     systemd-hostnam
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 2.0 ec2-user bash
+## 2026-11-16T16:31:36+00:00 load 2.81 2.72 3.10
+%CPU USER     COMMAND
+ 156 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.0 ec2-user claude
+ 0.8 root     systemd-hostnam
+## 2026-11-16T16:31:46+00:00 load 2.62 2.68 3.08
+%CPU USER     COMMAND
+ 163 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.0 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:31:56+00:00 load 3.26 2.82 3.12
+%CPU USER     COMMAND
+18.6 ec2-user p2p-bench
+10.2 ec2-user dd
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.0 ec2-user claude
+## 2026-11-16T16:32:06+00:00 load 2.91 2.76 3.10
+%CPU USER     COMMAND
+78.7 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.0 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:32:16+00:00 load 2.69 2.72 3.08
+%CPU USER     COMMAND
+93.5 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.0 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:32:26+00:00 load 2.43 2.66 3.06
+%CPU USER     COMMAND
+ 115 ec2-user p2p-bench
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.0 ec2-user claude
+ 0.7 root     nv-hostengine
+## 2026-11-16T16:32:36+00:00 load 2.50 2.67 3.06
+%CPU USER     COMMAND
+ 130 ec2-user p2p-bench
+36.0 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.0 ec2-user claude
+## 2026-11-16T16:32:46+00:00 load 2.79 2.73 3.08
+%CPU USER     COMMAND
+ 139 ec2-user p2p-bench
+17.3 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 1.0 ec2-user claude
+## 2026-11-16T16:32:56+00:00 load 2.82 2.74 3.07
+%CPU USER     COMMAND
+ 142 ec2-user p2p-bench
+15.3 ec2-user claude
+ 8.0 root     systemd-hostnam
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:33:06+00:00 load 3.20 2.83 3.10
+%CPU USER     COMMAND
+ 145 ec2-user p2p-bench
+ 127 root     xz
+14.0 root     tar
+13.7 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:33:16+00:00 load 3.09 2.82 3.09
+%CPU USER     COMMAND
+ 149 ec2-user p2p-bench
+ 103 root     xz
+13.0 ec2-user claude
+10.1 root     tar
+ 3.3 ec2-user claude
+## 2026-11-16T16:33:27+00:00 load 3.32 2.87 3.11
+%CPU USER     COMMAND
+ 145 ec2-user p2p-bench
+95.7 root     xz
+69.0 ec2-user rustc
+58.5 ec2-user rustc
+45.5 ec2-user rustc
+## 2026-11-16T16:33:37+00:00 load 4.41 3.12 3.19
+%CPU USER     COMMAND
+ 143 ec2-user p2p-bench
+97.0 ec2-user rustc
+74.5 ec2-user rustc
+70.3 ec2-user rustc
+63.5 ec2-user rustc
+## 2026-11-16T16:33:47+00:00 load 4.50 3.18 3.21
+%CPU USER     COMMAND
+ 138 ec2-user p2p-bench
+66.6 ec2-user rustc
+27.0 ec2-user rustc
+24.0 ec2-user rustc
+12.0 ec2-user rustc
+## 2026-11-16T16:33:57+00:00 load 5.12 3.36 3.26
+%CPU USER     COMMAND
+ 135 ec2-user p2p-bench
+51.5 ec2-user rustc
+42.5 ec2-user rustc
+23.0 ec2-user rustc
+10.2 ec2-user claude
+## 2026-11-16T16:34:07+00:00 load 5.32 3.46 3.30
+%CPU USER     COMMAND
+ 132 ec2-user p2p-bench
+67.0 ec2-user rustc
+58.0 ec2-user rustc
+ 9.5 ec2-user claude
+ 4.5 ec2-user cargo
+## 2026-11-16T16:34:17+00:00 load 5.27 3.52 3.32
+%CPU USER     COMMAND
+ 130 ec2-user p2p-bench
+68.7 ec2-user rustc
+63.0 ec2-user rustc
+62.0 ec2-user rustc
+41.5 ec2-user rustc
+## 2026-11-16T16:34:27+00:00 load 5.23 3.56 3.34
+%CPU USER     COMMAND
+ 127 ec2-user p2p-bench
+78.0 ec2-user rustc
+74.3 ec2-user rustc
+68.5 ec2-user rustc
+64.0 ec2-user rustc
+## 2026-11-16T16:34:37+00:00 load 5.66 3.71 3.39
+%CPU USER     COMMAND
+ 126 ec2-user p2p-bench
+52.5 ec2-user rustc
+47.0 ec2-user rustc
+38.0 ec2-user rustc
+34.0 ec2-user rustc
+## 2026-11-16T16:34:47+00:00 load 6.18 3.89 3.45
+%CPU USER     COMMAND
+ 125 ec2-user p2p-bench
+75.0 ec2-user rustc
+59.0 ec2-user rustc
+55.6 ec2-user rustc
+52.8 ec2-user rustc
+## 2026-11-16T16:34:57+00:00 load 6.38 4.00 3.49
+%CPU USER     COMMAND
+ 125 ec2-user p2p-bench
+75.0 ec2-user rust-lld
+59.7 ec2-user rustc
+55.4 ec2-user rustc
+40.0 ec2-user rustc
+## 2026-11-16T16:35:07+00:00 load 7.55 4.33 3.60
+%CPU USER     COMMAND
+ 125 ec2-user p2p-bench
+12.2 ec2-user claude
+ 7.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:35:17+00:00 load 8.43 4.62 3.71
+%CPU USER     COMMAND
+ 128 ec2-user p2p-bench
+ 9.1 ec2-user claude
+ 6.7 ec2-user claude
+ 4.1 ec2-user cargo
+ 3.3 ec2-user claude
+## 2026-11-16T16:35:27+00:00 load 8.80 4.82 3.78
+%CPU USER     COMMAND
+ 133 ec2-user p2p-bench
+ 105 ec2-user merge-74f15266d
+ 7.2 ec2-user claude
+ 6.3 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:35:37+00:00 load 8.34 4.85 3.80
+%CPU USER     COMMAND
+19.2 ec2-user p2p-bench
+14.0 ec2-user cargo
+11.5 ec2-user dd
+ 6.3 ec2-user claude
+ 6.1 ec2-user claude
+## 2026-11-16T16:35:47+00:00 load 7.83 4.86 3.82
+%CPU USER     COMMAND
+83.6 ec2-user rustc
+75.5 ec2-user rustc
+59.5 ec2-user p2p-bench
+ 6.1 ec2-user claude
+ 5.3 ec2-user claude
+## 2026-11-16T16:35:57+00:00 load 7.40 4.86 3.83
+%CPU USER     COMMAND
+97.7 ec2-user rustc
+96.0 ec2-user rustc
+67.0 ec2-user p2p-bench
+ 6.1 ec2-user claude
+ 4.7 ec2-user claude
+## 2026-11-16T16:36:07+00:00 load 6.96 4.85 3.84
+%CPU USER     COMMAND
+90.3 ec2-user p2p-bench
+ 6.1 ec2-user claude
+ 4.3 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:36:17+00:00 load 6.64 4.86 3.85
+%CPU USER     COMMAND
+ 107 ec2-user p2p-bench
+81.0 ec2-user rustc
+53.0 ec2-user rustc
+20.0 ec2-user cargo
+ 6.1 ec2-user claude
+## 2026-11-16T16:36:28+00:00 load 7.08 5.01 3.91
+%CPU USER     COMMAND
+ 109 ec2-user p2p-bench
+ 102 ec2-user rustc
+92.6 ec2-user rustc
+91.5 ec2-user rustc
+55.0 ec2-user rustc
+## 2026-11-16T16:36:38+00:00 load 7.43 5.16 3.97
+%CPU USER     COMMAND
+ 112 ec2-user p2p-bench
+89.5 ec2-user rustc
+71.0 ec2-user rustc
+ 6.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:36:48+00:00 load 7.29 5.20 4.00
+%CPU USER     COMMAND
+ 111 ec2-user p2p-bench
+67.6 ec2-user rustc
+63.0 ec2-user rustc
+62.7 ec2-user rustc
+27.0 ec2-user rustc
+## 2026-11-16T16:36:58+00:00 load 7.32 5.28 4.04
+%CPU USER     COMMAND
+ 125 ec2-user rustc
+ 111 ec2-user p2p-bench
+ 5.9 ec2-user claude
+ 4.3 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:37:08+00:00 load 7.20 5.32 4.06
+%CPU USER     COMMAND
+ 118 ec2-user p2p-bench
+ 5.9 ec2-user claude
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:37:18+00:00 load 6.25 5.18 4.03
+%CPU USER     COMMAND
+ 120 ec2-user p2p-bench
+ 5.9 ec2-user claude
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:37:28+00:00 load 6.56 5.28 4.08
+%CPU USER     COMMAND
+ 124 ec2-user p2p-bench
+ 6.0 ec2-user claude
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:37:38+00:00 load 6.67 5.34 4.11
+%CPU USER     COMMAND
+ 129 ec2-user p2p-bench
+ 6.0 ec2-user claude
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:37:48+00:00 load 5.88 5.22 4.08
+%CPU USER     COMMAND
+ 152 ec2-user blender
+ 128 ec2-user p2p-bench
+ 6.0 ec2-user claude
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:37:58+00:00 load 5.74 5.21 4.09
+%CPU USER     COMMAND
+ 205 ec2-user blender
+ 126 ec2-user p2p-bench
+ 5.8 ec2-user claude
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:38:08+00:00 load 5.79 5.23 4.11
+%CPU USER     COMMAND
+ 222 ec2-user blender
+ 125 ec2-user p2p-bench
+35.0 ec2-user 2.1.325
+ 5.8 ec2-user claude
+ 4.8 ec2-user claude
+## 2026-11-16T16:38:18+00:00 load 5.71 5.24 4.13
+%CPU USER     COMMAND
+ 124 ec2-user p2p-bench
+90.5 ec2-user blender
+ 5.7 ec2-user claude
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:38:28+00:00 load 5.38 5.18 4.12
+%CPU USER     COMMAND
+ 126 ec2-user p2p-bench
+85.0 ec2-user 2.1.325
+58.0 ec2-user python3
+ 5.7 ec2-user claude
+ 5.0 ec2-user claude
+## 2026-11-16T16:38:38+00:00 load 6.29 5.39 4.20
+%CPU USER     COMMAND
+ 128 ec2-user p2p-bench
+78.5 ec2-user 2.1.325
+ 5.7 ec2-user claude
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:38:48+00:00 load 6.16 5.39 4.21
+%CPU USER     COMMAND
+ 134 ec2-user p2p-bench
+ 5.7 ec2-user claude
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:38:58+00:00 load 6.73 5.53 4.27
+%CPU USER     COMMAND
+ 141 ec2-user p2p-bench
+ 5.6 ec2-user claude
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:39:08+00:00 load 7.03 5.64 4.32
+%CPU USER     COMMAND
+23.2 ec2-user p2p-bench
+ 5.6 ec2-user claude
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:39:18+00:00 load 6.11 5.49 4.28
+%CPU USER     COMMAND
+75.8 ec2-user p2p-bench
+ 5.5 ec2-user claude
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:39:28+00:00 load 5.47 5.38 4.26
+%CPU USER     COMMAND
+95.6 ec2-user pip
+94.2 ec2-user p2p-bench
+ 5.5 ec2-user claude
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:39:38+00:00 load 5.49 5.38 4.27
+%CPU USER     COMMAND
+ 118 ec2-user charon-driver
+ 113 ec2-user p2p-bench
+97.0 ec2-user charon-driver
+ 5.6 ec2-user claude
+ 4.7 ec2-user claude
+## 2026-11-16T16:39:48+00:00 load 5.10 5.30 4.26
+%CPU USER     COMMAND
+ 212 ec2-user aeneas
+ 120 ec2-user p2p-bench
+ 5.8 ec2-user claude
+ 4.7 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:39:58+00:00 load 5.70 5.42 4.31
+%CPU USER     COMMAND
+ 228 ec2-user aeneas
+ 123 ec2-user p2p-bench
+ 5.7 ec2-user claude
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:40:08+00:00 load 5.75 5.44 4.33
+%CPU USER     COMMAND
+ 229 ec2-user aeneas
+ 126 ec2-user p2p-bench
+ 5.6 ec2-user claude
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:40:18+00:00 load 6.90 5.71 4.43
+%CPU USER     COMMAND
+ 237 ec2-user aeneas
+ 125 ec2-user p2p-bench
+ 5.5 ec2-user claude
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:40:28+00:00 load 7.02 5.77 4.46
+%CPU USER     COMMAND
+ 233 ec2-user aeneas
+ 129 ec2-user p2p-bench
+ 5.7 ec2-user claude
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:40:38+00:00 load 6.94 5.79 4.48
+%CPU USER     COMMAND
+ 248 ec2-user aeneas
+ 128 ec2-user p2p-bench
+ 5.6 ec2-user claude
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:40:49+00:00 load 7.16 5.88 4.53
+%CPU USER     COMMAND
+ 244 ec2-user aeneas
+ 130 ec2-user p2p-bench
+ 5.5 ec2-user claude
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:40:59+00:00 load 6.83 5.85 4.53
+%CPU USER     COMMAND
+ 128 ec2-user p2p-bench
+96.0 ec2-user rustc
+76.6 ec2-user rustc
+ 5.5 ec2-user claude
+ 4.9 ec2-user claude
+## 2026-11-16T16:41:09+00:00 load 7.27 5.98 4.59
+%CPU USER     COMMAND
+ 222 ec2-user rustc
+ 131 ec2-user p2p-bench
+ 5.4 ec2-user claude
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:41:19+00:00 load 6.60 5.89 4.57
+%CPU USER     COMMAND
+ 129 ec2-user p2p-bench
+73.2 ec2-user lake
+42.0 ec2-user lean
+36.0 ec2-user lean
+34.0 ec2-user lean
+## 2026-11-16T16:41:29+00:00 load 6.67 5.92 4.60
+%CPU USER     COMMAND
+ 127 ec2-user p2p-bench
+64.4 ec2-user lean
+54.8 ec2-user lean
+54.3 ec2-user lean
+37.0 ec2-user lean <defunct>
+## 2026-11-16T16:41:39+00:00 load 6.56 5.94 4.63
+%CPU USER     COMMAND
+ 125 ec2-user p2p-bench
+90.6 ec2-user lean
+89.0 ec2-user lean
+21.5 ec2-user lake
+ 5.2 ec2-user claude
+## 2026-11-16T16:41:49+00:00 load 6.47 5.94 4.64
+%CPU USER     COMMAND
+ 124 ec2-user p2p-bench
+84.5 ec2-user lean
+82.2 ec2-user lean
+77.7 ec2-user lean
+16.2 ec2-user lake
+## 2026-11-16T16:41:59+00:00 load 7.02 6.08 4.70
+%CPU USER     COMMAND
+ 124 ec2-user p2p-bench
+95.6 ec2-user lean
+62.7 ec2-user lean
+47.8 ec2-user lean
+47.4 ec2-user lean
+## 2026-11-16T16:42:09+00:00 load 7.26 6.16 4.74
+%CPU USER     COMMAND
+ 123 ec2-user p2p-bench
+69.3 ec2-user lean
+57.4 ec2-user lean
+57.2 ec2-user lean
+56.0 ec2-user lean
+## 2026-11-16T16:42:19+00:00 load 7.66 6.28 4.80
+%CPU USER     COMMAND
+ 123 ec2-user p2p-bench
+87.7 ec2-user lean
+85.0 ec2-user lean
+78.0 ec2-user lean
+75.0 ec2-user lean
+## 2026-11-16T16:42:29+00:00 load 8.78 6.57 4.91
+%CPU USER     COMMAND
+ 123 ec2-user p2p-bench
+76.7 ec2-user lean
+74.7 ec2-user lean
+69.9 ec2-user lean
+27.6 ec2-user lean
+## 2026-11-16T16:42:39+00:00 load 9.13 6.72 4.97
+%CPU USER     COMMAND
+ 123 ec2-user p2p-bench
+92.7 ec2-user lean
+67.1 ec2-user lean
+54.0 ec2-user lean
+35.0 ec2-user lean
+## 2026-11-16T16:42:49+00:00 load 9.03 6.78 5.01
+%CPU USER     COMMAND
+ 124 ec2-user p2p-bench
+ 103 ec2-user lean
+67.8 ec2-user lean
+ 7.1 ec2-user lake
+ 5.3 ec2-user claude
+## 2026-11-16T16:42:59+00:00 load 9.35 6.92 5.08
+%CPU USER     COMMAND
+ 124 ec2-user p2p-bench
+94.1 ec2-user lean
+92.8 ec2-user lean
+79.5 ec2-user lean
+ 6.5 ec2-user lake
+## 2026-11-16T16:43:09+00:00 load 9.41 7.02 5.13
+%CPU USER     COMMAND
+93.2 ec2-user lean
+92.6 ec2-user lean
+ 5.9 ec2-user lake
+ 5.4 ec2-user claude
+ 4.6 ec2-user claude
+## 2026-11-16T16:43:20+00:00 load 8.65 6.93 5.12
+%CPU USER     COMMAND
+ 282 ec2-user exp3-base
+94.1 ec2-user lean
+ 5.4 ec2-user lake
+ 5.3 ec2-user claude
+ 4.5 ec2-user claude
+## 2026-11-16T16:43:30+00:00 load 8.17 6.88 5.13
+%CPU USER     COMMAND
+ 208 ec2-user exp3-base
+ 113 ec2-user lean
+ 5.3 ec2-user claude
+ 5.0 ec2-user lake
+ 4.5 ec2-user claude
+## 2026-11-16T16:43:40+00:00 load 7.37 6.76 5.10
+%CPU USER     COMMAND
+ 166 ec2-user exp3-base
+ 126 ec2-user lean
+ 5.2 ec2-user claude
+ 4.7 ec2-user lake
+ 4.4 ec2-user claude
+## 2026-11-16T16:43:50+00:00 load 6.62 6.62 5.07
+%CPU USER     COMMAND
+ 150 ec2-user exp3-base
+ 129 ec2-user lean
+ 5.2 ec2-user claude
+ 4.4 ec2-user claude
+ 4.4 ec2-user lake
+## 2026-11-16T16:44:00+00:00 load 6.71 6.63 5.10
+%CPU USER     COMMAND
+ 146 ec2-user exp3-base
+45.7 ec2-user lean
+40.2 ec2-user lean
+39.5 ec2-user lean
+38.8 ec2-user lean
+## 2026-11-16T16:44:10+00:00 load 8.60 7.04 5.25
+%CPU USER     COMMAND
+ 152 ec2-user exp3-base
+55.3 ec2-user lean
+50.7 ec2-user lean
+41.6 ec2-user lean
+41.5 ec2-user lean
+## 2026-11-16T16:44:20+00:00 load 9.66 7.32 5.36
+%CPU USER     COMMAND
+ 157 ec2-user exp3-base
+59.5 ec2-user lean
+51.1 ec2-user lean
+43.2 ec2-user lean
+40.3 ec2-user lean
+## 2026-11-16T16:44:30+00:00 load 10.09 7.49 5.43
+%CPU USER     COMMAND
+ 160 ec2-user exp3-base
+56.9 ec2-user lean
+52.9 ec2-user lean
+43.9 ec2-user lean
+43.6 ec2-user lean
+## 2026-11-16T16:44:40+00:00 load 10.69 7.70 5.52
+%CPU USER     COMMAND
+ 163 ec2-user exp3-base
+59.2 ec2-user lean
+55.3 ec2-user lean
+43.6 ec2-user lean
+40.0 ec2-user lean
+## 2026-11-16T16:44:50+00:00 load 11.05 7.88 5.61
+%CPU USER     COMMAND
+ 166 ec2-user exp3-base
+63.7 ec2-user lean
+49.6 ec2-user lean
+42.8 ec2-user lean
+41.6 ec2-user lean
+## 2026-11-16T16:45:00+00:00 load 11.18 8.01 5.67
+%CPU USER     COMMAND
+ 169 ec2-user exp3-base
+ 103 ec2-user lean
+45.9 ec2-user lean
+ 5.0 ec2-user claude
+ 4.0 ec2-user claude
+## 2026-11-16T16:45:10+00:00 load 10.91 8.06 5.72
+%CPU USER     COMMAND
+ 172 ec2-user exp3-base
+ 109 ec2-user lean
+38.4 ec2-user lean
+37.2 ec2-user lean
+ 5.0 ec2-user claude
+## 2026-11-16T16:45:21+00:00 load 10.69 8.11 5.76
+%CPU USER     COMMAND
+ 173 ec2-user exp3-base
+82.4 ec2-user lean
+51.0 ec2-user lean
+43.0 ec2-user lean
+ 5.1 ec2-user claude
+## 2026-11-16T16:45:31+00:00 load 10.35 8.12 5.79
+%CPU USER     COMMAND
+ 174 ec2-user exp3-base
+85.6 ec2-user lean
+ 5.1 ec2-user claude
+ 3.9 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:45:41+00:00 load 9.53 8.02 5.78
+%CPU USER     COMMAND
+ 181 ec2-user exp3-base
+91.9 ec2-user lean
+ 5.1 ec2-user claude
+ 3.8 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:45:51+00:00 load 8.91 7.94 5.77
+%CPU USER     COMMAND
+ 187 ec2-user exp3-base
+72.5 ec2-user lean
+ 5.1 ec2-user claude
+ 3.8 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:46:01+00:00 load 8.31 7.84 5.77
+%CPU USER     COMMAND
+ 192 ec2-user exp3-base
+ 122 ec2-user lean
+ 5.0 ec2-user claude
+ 3.8 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:46:11+00:00 load 7.80 7.75 5.76
+%CPU USER     COMMAND
+ 198 ec2-user exp3-base
+85.0 ec2-user lean
+17.2 ec2-user lake
+ 5.0 ec2-user claude
+ 3.7 ec2-user claude
+## 2026-11-16T16:46:21+00:00 load 7.37 7.65 5.75
+%CPU USER     COMMAND
+ 203 ec2-user exp3-base
+95.0 ec2-user lean
+ 5.0 ec2-user claude
+ 4.9 ec2-user lake
+ 3.7 ec2-user claude
+## 2026-11-16T16:46:31+00:00 load 7.08 7.58 5.75
+%CPU USER     COMMAND
+ 207 ec2-user exp3-base
+96.5 ec2-user lean
+ 5.0 ec2-user claude
+ 3.6 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:46:41+00:00 load 6.76 7.50 5.74
+%CPU USER     COMMAND
+ 211 ec2-user exp3-base
+97.2 ec2-user lean
+ 5.0 ec2-user claude
+ 3.6 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:46:51+00:00 load 6.64 7.45 5.74
+%CPU USER     COMMAND
+ 214 ec2-user exp3-base
+97.7 ec2-user lean
+ 5.0 ec2-user claude
+ 3.6 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:47:01+00:00 load 6.39 7.37 5.73
+%CPU USER     COMMAND
+ 218 ec2-user exp3-base
+98.0 ec2-user lean
+ 5.0 ec2-user claude
+ 3.5 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:47:11+00:00 load 6.18 7.29 5.72
+%CPU USER     COMMAND
+ 221 ec2-user exp3-base
+98.4 ec2-user lean
+ 4.9 ec2-user claude
+ 3.5 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:47:21+00:00 load 5.99 7.21 5.71
+%CPU USER     COMMAND
+ 223 ec2-user exp3-base
+98.7 ec2-user lean
+ 4.9 ec2-user claude
+ 3.5 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:47:31+00:00 load 5.84 7.14 5.71
+%CPU USER     COMMAND
+ 226 ec2-user exp3-base
+98.7 ec2-user lean
+ 4.9 ec2-user claude
+ 3.4 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:47:41+00:00 load 5.71 7.07 5.70
+%CPU USER     COMMAND
+ 228 ec2-user exp3-base
+98.9 ec2-user lean
+ 5.1 ec2-user claude
+ 3.4 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:47:52+00:00 load 5.76 7.03 5.70
+%CPU USER     COMMAND
+ 226 ec2-user exp3-base
+ 101 ec2-user python
+99.0 ec2-user lean
+ 5.2 ec2-user claude
+ 3.4 ec2-user claude
+## 2026-11-16T16:48:02+00:00 load 5.65 6.97 5.70
+%CPU USER     COMMAND
+ 223 ec2-user exp3-base
+98.0 ec2-user lean
+94.5 ec2-user python
+ 5.2 ec2-user claude
+ 3.4 ec2-user claude
+## 2026-11-16T16:48:12+00:00 load 5.71 6.93 5.70
+%CPU USER     COMMAND
+95.9 ec2-user python
+91.0 ec2-user exp3
+ 5.3 ec2-user claude
+ 3.3 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:48:22+00:00 load 5.75 6.90 5.70
+%CPU USER     COMMAND
+ 189 ec2-user exp3
+95.9 ec2-user python
+85.2 ec2-user lean
+53.3 ec2-user lake
+ 5.3 ec2-user claude
+## 2026-11-16T16:48:32+00:00 load 6.01 6.92 5.72
+%CPU USER     COMMAND
+ 176 ec2-user exp3
+ 110 ec2-user lean
+95.9 ec2-user python
+26.6 ec2-user lake
+ 5.3 ec2-user claude
+## 2026-11-16T16:48:42+00:00 load 6.18 6.93 5.74
+%CPU USER     COMMAND
+ 151 ec2-user exp3
+99.3 ec2-user lean
+96.4 ec2-user python
+80.5 ec2-user lean <defunct>
+18.1 ec2-user lake
+## 2026-11-16T16:48:52+00:00 load 6.15 6.89 5.74
+%CPU USER     COMMAND
+ 152 ec2-user lean
+ 138 ec2-user exp3
+96.3 ec2-user python
+13.6 ec2-user lake
+ 5.2 ec2-user claude
+## 2026-11-16T16:49:02+00:00 load 6.13 6.86 5.74
+%CPU USER     COMMAND
+ 166 ec2-user lean
+ 128 ec2-user exp3
+96.4 ec2-user python
+10.9 ec2-user lake
+ 5.2 ec2-user claude
+## 2026-11-16T16:49:12+00:00 load 6.40 6.90 5.77
+%CPU USER     COMMAND
+ 172 ec2-user lean
+ 124 ec2-user exp3
+96.1 ec2-user python
+ 9.1 ec2-user lake
+ 5.2 ec2-user claude
+## 2026-11-16T16:49:22+00:00 load 6.86 6.99 5.81
+%CPU USER     COMMAND
+ 159 ec2-user lean
+ 132 ec2-user exp3
+96.3 ec2-user python
+ 7.8 ec2-user lake
+ 5.2 ec2-user claude
+## 2026-11-16T16:49:32+00:00 load 7.35 7.09 5.85
+%CPU USER     COMMAND
+ 157 ec2-user lean
+ 134 ec2-user exp3
+96.5 ec2-user python
+ 6.8 ec2-user lake
+ 5.2 ec2-user claude
+## 2026-11-16T16:49:43+00:00 load 7.93 7.22 5.91
+%CPU USER     COMMAND
+ 154 ec2-user lean
+ 133 ec2-user exp3
+95.8 ec2-user python
+ 6.0 ec2-user lake
+ 5.1 ec2-user claude
+## 2026-11-16T16:49:53+00:00 load 7.78 7.21 5.92
+%CPU USER     COMMAND
+ 148 ec2-user lean
+ 138 ec2-user exp3
+96.0 ec2-user python
+ 5.4 ec2-user lake
+ 5.1 ec2-user claude
+## 2026-11-16T16:50:03+00:00 load 7.50 7.17 5.92
+%CPU USER     COMMAND
+ 143 ec2-user exp3
+96.1 ec2-user python
+81.3 ec2-user lean
+ 5.1 ec2-user claude
+ 4.9 ec2-user lake
+## 2026-11-16T16:50:13+00:00 load 7.83 7.25 5.96
+%CPU USER     COMMAND
+ 144 ec2-user exp3
+96.3 ec2-user python
+87.5 ec2-user lean
+58.1 ec2-user lean
+ 5.1 ec2-user claude
+## 2026-11-16T16:50:23+00:00 load 8.40 7.39 6.02
+%CPU USER     COMMAND
+ 144 ec2-user exp3
+ 103 ec2-user lean
+96.4 ec2-user python
+45.5 ec2-user lean
+ 5.1 ec2-user claude
+## 2026-11-16T16:50:33+00:00 load 9.04 7.56 6.09
+%CPU USER     COMMAND
+ 145 ec2-user exp3
+ 103 ec2-user lean
+96.4 ec2-user python
+43.6 ec2-user lean
+ 5.1 ec2-user claude
+## 2026-11-16T16:50:43+00:00 load 8.72 7.54 6.10
+%CPU USER     COMMAND
+ 148 ec2-user exp3
+97.8 ec2-user lean
+96.3 ec2-user python
+ 5.1 ec2-user claude
+ 3.7 ec2-user lake
+## 2026-11-16T16:50:53+00:00 load 8.91 7.62 6.14
+%CPU USER     COMMAND
+ 151 ec2-user exp3
+98.4 ec2-user lean
+96.2 ec2-user python
+ 5.2 ec2-user claude
+ 3.5 ec2-user lake
+## 2026-11-16T16:51:04+00:00 load 8.46 7.56 6.14
+%CPU USER     COMMAND
+ 152 ec2-user exp3
+95.9 ec2-user python
+95.6 ec2-user lean
+ 5.1 ec2-user claude
+ 3.3 ec2-user lake
+## 2026-11-16T16:51:14+00:00 load 8.15 7.53 6.14
+%CPU USER     COMMAND
+ 154 ec2-user exp3
+96.6 ec2-user lean
+95.9 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:51:24+00:00 load 7.82 7.48 6.14
+%CPU USER     COMMAND
+ 156 ec2-user exp3
+97.3 ec2-user lean
+96.0 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:51:34+00:00 load 7.62 7.45 6.15
+%CPU USER     COMMAND
+ 158 ec2-user exp3
+96.0 ec2-user python
+81.6 ec2-user lean
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:51:44+00:00 load 7.91 7.51 6.18
+%CPU USER     COMMAND
+ 157 ec2-user exp3
+ 130 ec2-user lean
+96.1 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:51:54+00:00 load 8.00 7.55 6.21
+%CPU USER     COMMAND
+ 157 ec2-user exp3
+96.2 ec2-user python
+73.1 ec2-user lean
+69.1 ec2-user lean
+ 5.2 ec2-user claude
+## 2026-11-16T16:52:04+00:00 load 8.92 7.76 6.29
+%CPU USER     COMMAND
+ 157 ec2-user exp3
+96.3 ec2-user python
+76.3 ec2-user lean
+68.8 ec2-user lean
+ 5.2 ec2-user claude
+## 2026-11-16T16:52:15+00:00 load 8.69 7.75 6.31
+%CPU USER     COMMAND
+ 158 ec2-user exp3
+ 123 ec2-user lean
+96.4 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:52:25+00:00 load 8.36 7.71 6.31
+%CPU USER     COMMAND
+ 158 ec2-user exp3
+ 105 ec2-user lean
+96.1 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:52:35+00:00 load 8.54 7.77 6.34
+%CPU USER     COMMAND
+ 158 ec2-user exp3
+ 123 ec2-user lean
+96.1 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:52:45+00:00 load 8.45 7.78 6.36
+%CPU USER     COMMAND
+ 158 ec2-user exp3
+96.1 ec2-user python
+94.0 ec2-user lean
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:52:55+00:00 load 8.22 7.75 6.37
+%CPU USER     COMMAND
+ 159 ec2-user exp3
+97.6 ec2-user lean
+96.2 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:53:05+00:00 load 7.96 7.71 6.37
+%CPU USER     COMMAND
+ 160 ec2-user exp3
+ 119 ec2-user lean
+96.3 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:53:15+00:00 load 8.12 7.75 6.40
+%CPU USER     COMMAND
+ 160 ec2-user exp3
+ 121 ec2-user lean
+96.2 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:53:25+00:00 load 7.95 7.73 6.40
+%CPU USER     COMMAND
+ 161 ec2-user exp3
+96.3 ec2-user python
+89.7 ec2-user lean
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:53:35+00:00 load 7.59 7.66 6.40
+%CPU USER     COMMAND
+ 161 ec2-user exp3
+ 107 ec2-user lean
+96.2 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:53:46+00:00 load 7.26 7.58 6.39
+%CPU USER     COMMAND
+ 163 ec2-user exp3
+96.3 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:53:56+00:00 load 6.91 7.50 6.38
+%CPU USER     COMMAND
+ 166 ec2-user exp3
+96.3 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:54:06+00:00 load 6.70 7.43 6.37
+%CPU USER     COMMAND
+ 167 ec2-user exp3
+96.1 ec2-user python
+57.0 ec2-user lean
+22.3 ec2-user lake
+ 5.1 ec2-user claude
+## 2026-11-16T16:54:16+00:00 load 6.91 7.45 6.38
+%CPU USER     COMMAND
+ 167 ec2-user exp3
+96.2 ec2-user python
+89.7 ec2-user lean
+ 5.1 ec2-user claude
+ 5.1 ec2-user lake
+## 2026-11-16T16:54:26+00:00 load 6.85 7.42 6.38
+%CPU USER     COMMAND
+ 168 ec2-user exp3
+96.2 ec2-user python
+92.5 ec2-user lean
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:54:36+00:00 load 6.71 7.37 6.38
+%CPU USER     COMMAND
+ 168 ec2-user exp3
+96.3 ec2-user python
+94.6 ec2-user lean
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:54:46+00:00 load 6.92 7.39 6.40
+%CPU USER     COMMAND
+ 168 ec2-user exp3
+96.4 ec2-user python
+95.8 ec2-user lean
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:54:56+00:00 load 6.93 7.38 6.40
+%CPU USER     COMMAND
+ 169 ec2-user exp3
+96.4 ec2-user python
+96.2 ec2-user lean
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:55:06+00:00 load 7.17 7.42 6.43
+%CPU USER     COMMAND
+ 217 ec2-user exp3-base
+96.7 ec2-user lean
+96.5 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:55:16+00:00 load 6.91 7.35 6.42
+%CPU USER     COMMAND
+ 195 ec2-user exp3-base
+97.1 ec2-user lean
+96.5 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:55:26+00:00 load 6.38 7.23 6.38
+%CPU USER     COMMAND
+ 170 ec2-user exp3-base
+97.1 ec2-user lean
+96.6 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:55:36+00:00 load 5.86 7.09 6.35
+%CPU USER     COMMAND
+ 149 ec2-user exp3-base
+97.5 ec2-user lean
+96.6 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:55:47+00:00 load 5.34 6.94 6.31
+%CPU USER     COMMAND
+ 138 ec2-user exp3-base
+96.7 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:55:57+00:00 load 5.15 6.84 6.28
+%CPU USER     COMMAND
+ 137 ec2-user exp3-base
+96.7 ec2-user python
+48.5 ec2-user blender
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:56:07+00:00 load 5.74 6.91 6.31
+%CPU USER     COMMAND
+ 148 ec2-user exp3-base
+96.1 ec2-user python
+80.9 ec2-user blender
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:56:17+00:00 load 6.47 7.03 6.36
+%CPU USER     COMMAND
+ 154 ec2-user exp3-base
+ 110 ec2-user blender
+95.0 ec2-user python
+10.0 root     systemd-hostnam
+ 5.1 ec2-user claude
+## 2026-11-16T16:56:27+00:00 load 6.78 7.08 6.38
+%CPU USER     COMMAND
+ 159 ec2-user exp3-base
+ 122 ec2-user blender
+94.0 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:56:37+00:00 load 6.97 7.11 6.40
+%CPU USER     COMMAND
+ 164 ec2-user exp3-base
+ 119 ec2-user blender
+93.6 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:56:47+00:00 load 7.05 7.12 6.41
+%CPU USER     COMMAND
+ 168 ec2-user exp3-base
+ 117 ec2-user blender
+93.2 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:56:57+00:00 load 7.29 7.17 6.43
+%CPU USER     COMMAND
+ 171 ec2-user exp3-base
+ 113 ec2-user blender
+93.1 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:57:07+00:00 load 7.16 7.14 6.43
+%CPU USER     COMMAND
+ 180 ec2-user exp3-base
+93.2 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:57:17+00:00 load 6.82 7.07 6.42
+%CPU USER     COMMAND
+ 188 ec2-user exp3-base
+93.3 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:57:27+00:00 load 6.54 7.01 6.40
+%CPU USER     COMMAND
+ 194 ec2-user exp3-base
+93.3 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:57:37+00:00 load 6.31 6.94 6.39
+%CPU USER     COMMAND
+ 200 ec2-user exp3-base
+93.4 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:57:48+00:00 load 6.33 6.92 6.39
+%CPU USER     COMMAND
+ 204 ec2-user exp3-base
+93.5 ec2-user python
+90.0 ec2-user blender
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:57:58+00:00 load 6.27 6.89 6.38
+%CPU USER     COMMAND
+ 205 ec2-user exp3-base
+93.1 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:58:08+00:00 load 6.15 6.85 6.37
+%CPU USER     COMMAND
+ 209 ec2-user exp3-base
+93.2 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:58:18+00:00 load 6.21 6.84 6.37
+%CPU USER     COMMAND
+ 210 ec2-user exp3-base
+93.1 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:58:28+00:00 load 6.02 6.77 6.36
+%CPU USER     COMMAND
+ 214 ec2-user exp3-base
+93.2 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:58:38+00:00 load 6.25 6.80 6.37
+%CPU USER     COMMAND
+ 216 ec2-user exp3-base
+93.2 ec2-user python
+90.0 ec2-user blender
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:58:48+00:00 load 6.60 6.86 6.39
+%CPU USER     COMMAND
+ 216 ec2-user exp3-base
+95.3 ec2-user blender
+93.1 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:58:58+00:00 load 6.36 6.79 6.38
+%CPU USER     COMMAND
+ 219 ec2-user exp3-base
+93.2 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:59:08+00:00 load 6.15 6.73 6.36
+%CPU USER     COMMAND
+ 221 ec2-user exp3-base
+93.3 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:59:18+00:00 load 6.36 6.76 6.37
+%CPU USER     COMMAND
+ 222 ec2-user exp3-base
+93.1 ec2-user python
+88.7 ec2-user blender
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T16:59:28+00:00 load 6.23 6.72 6.36
+%CPU USER     COMMAND
+ 222 ec2-user exp3-base
+93.1 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:59:38+00:00 load 6.04 6.66 6.35
+%CPU USER     COMMAND
+ 225 ec2-user exp3-base
+93.2 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:59:48+00:00 load 5.64 6.56 6.32
+%CPU USER     COMMAND
+ 225 ec2-user exp3-base
+93.3 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T16:59:59+00:00 load 5.30 6.45 6.29
+%CPU USER     COMMAND
+ 306 ec2-user exp3
+93.4 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:00:09+00:00 load 5.25 6.41 6.27
+%CPU USER     COMMAND
+ 201 ec2-user exp3
+93.2 ec2-user python
+91.3 ec2-user blender
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:00:19+00:00 load 5.12 6.34 6.25
+%CPU USER     COMMAND
+ 176 ec2-user exp3
+93.3 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:00:29+00:00 load 4.64 6.20 6.21
+%CPU USER     COMMAND
+ 153 ec2-user exp3
+93.4 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:00:39+00:00 load 4.39 6.09 6.17
+%CPU USER     COMMAND
+ 141 ec2-user exp3
+ 100 ec2-user blender
+93.5 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:00:49+00:00 load 4.88 6.14 6.19
+%CPU USER     COMMAND
+ 149 ec2-user exp3
+93.3 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:00:59+00:00 load 4.98 6.12 6.18
+%CPU USER     COMMAND
+ 170 ec2-user exp3
+93.4 ec2-user python
+65.5 ec2-user blender
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:01:09+00:00 load 5.29 6.15 6.19
+%CPU USER     COMMAND
+ 177 ec2-user exp3
+93.1 ec2-user python
+92.2 ec2-user blender
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:01:19+00:00 load 5.54 6.18 6.20
+%CPU USER     COMMAND
+ 187 ec2-user exp3
+93.1 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:01:29+00:00 load 5.45 6.14 6.18
+%CPU USER     COMMAND
+ 198 ec2-user exp3
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 2.7 ec2-user claude
+## 2026-11-16T17:01:39+00:00 load 5.38 6.10 6.17
+%CPU USER     COMMAND
+ 207 ec2-user exp3
+ 103 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:01:49+00:00 load 5.32 6.06 6.16
+%CPU USER     COMMAND
+ 214 ec2-user exp3
+ 101 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:01:59+00:00 load 5.35 6.04 6.15
+%CPU USER     COMMAND
+ 221 ec2-user exp3
+ 101 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:02:09+00:00 load 5.30 6.01 6.14
+%CPU USER     COMMAND
+ 226 ec2-user exp3
+ 101 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:02:19+00:00 load 5.25 5.97 6.12
+%CPU USER     COMMAND
+ 231 ec2-user exp3
+ 100 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:02:29+00:00 load 5.21 5.94 6.11
+%CPU USER     COMMAND
+ 234 ec2-user exp3
+ 100 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:02:39+00:00 load 5.18 5.91 6.10
+%CPU USER     COMMAND
+ 238 ec2-user exp3
+ 100 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:02:50+00:00 load 5.15 5.88 6.09
+%CPU USER     COMMAND
+ 241 ec2-user exp3
+ 100 ec2-user python
+ 5.2 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:03:00+00:00 load 5.13 5.85 6.07
+%CPU USER     COMMAND
+ 244 ec2-user exp3
+ 100 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:03:10+00:00 load 5.11 5.82 6.06
+%CPU USER     COMMAND
+ 245 ec2-user exp3
+99.6 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:03:20+00:00 load 5.09 5.79 6.05
+%CPU USER     COMMAND
+ 247 ec2-user exp3
+99.5 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:03:30+00:00 load 5.08 5.77 6.04
+%CPU USER     COMMAND
+ 249 ec2-user exp3
+99.6 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:03:40+00:00 load 5.06 5.74 6.03
+%CPU USER     COMMAND
+ 251 ec2-user exp3
+99.5 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:03:50+00:00 load 5.05 5.72 6.02
+%CPU USER     COMMAND
+ 253 ec2-user exp3
+99.4 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:04:00+00:00 load 5.05 5.69 6.00
+%CPU USER     COMMAND
+ 254 ec2-user exp3
+99.5 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:04:10+00:00 load 4.80 5.62 5.98
+%CPU USER     COMMAND
+ 253 ec2-user exp3
+99.5 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:04:20+00:00 load 4.74 5.58 5.96
+%CPU USER     COMMAND
+ 269 ec2-user exp3-base
+99.5 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:04:30+00:00 load 4.78 5.56 5.95
+%CPU USER     COMMAND
+ 259 ec2-user exp3-base
+99.5 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:04:40+00:00 load 4.35 5.44 5.91
+%CPU USER     COMMAND
+ 190 ec2-user exp3-base
+99.5 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:04:50+00:00 load 4.07 5.35 5.87
+%CPU USER     COMMAND
+ 163 ec2-user exp3-base
+99.5 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:05:00+00:00 load 3.82 5.25 5.83
+%CPU USER     COMMAND
+ 154 ec2-user exp3-base
+99.6 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:05:10+00:00 load 4.00 5.24 5.82
+%CPU USER     COMMAND
+ 180 ec2-user exp3-base
+99.5 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:05:20+00:00 load 4.16 5.24 5.81
+%CPU USER     COMMAND
+ 197 ec2-user exp3-base
+99.5 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:05:30+00:00 load 4.29 5.23 5.81
+%CPU USER     COMMAND
+ 210 ec2-user exp3-base
+99.5 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:05:41+00:00 load 4.40 5.22 5.80
+%CPU USER     COMMAND
+ 220 ec2-user exp3-base
+99.4 ec2-user python
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:05:51+00:00 load 4.57 5.23 5.79
+%CPU USER     COMMAND
+ 224 ec2-user exp3-base
+ 111 ec2-user blender
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:06:01+00:00 load 4.71 5.24 5.79
+%CPU USER     COMMAND
+ 230 ec2-user exp3-base
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 2.5 ec2-user claude
+## 2026-11-16T17:06:11+00:00 load 4.68 5.21 5.78
+%CPU USER     COMMAND
+ 244 ec2-user exp3-base
+ 5.1 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+ 2.4 ec2-user claude
+## 2026-11-16T17:06:21+00:00 load 4.58 5.17 5.76
+%CPU USER     COMMAND
+ 249 ec2-user exp3-base
+61.7 ec2-user python
+61.5 ec2-user python
+59.0 ec2-user python
+ 5.1 ec2-user claude
+## 2026-11-16T17:06:31+00:00 load 5.02 5.25 5.78
+%CPU USER     COMMAND
+ 246 ec2-user exp3-base
+63.1 ec2-user python
+62.3 ec2-user python
+58.7 ec2-user python
+ 5.1 ec2-user claude
+## 2026-11-16T17:06:41+00:00 load 5.33 5.31 5.79
+%CPU USER     COMMAND
+ 242 ec2-user exp3-base
+65.2 ec2-user python
+64.6 ec2-user python
+63.0 ec2-user python
+ 5.1 ec2-user claude
+## 2026-11-16T17:06:51+00:00 load 5.66 5.38 5.81
+%CPU USER     COMMAND
+ 238 ec2-user exp3-base
+68.5 ec2-user python
+65.7 ec2-user python
+62.3 ec2-user python
+ 5.1 ec2-user claude
+## 2026-11-16T17:07:01+00:00 load 5.87 5.43 5.82
+%CPU USER     COMMAND
+ 236 ec2-user exp3-base
+66.7 ec2-user python
+65.2 ec2-user python
+61.1 ec2-user python
+ 5.1 ec2-user claude
+## 2026-11-16T17:07:11+00:00 load 6.04 5.49 5.84
+%CPU USER     COMMAND
+ 233 ec2-user exp3-base
+65.4 ec2-user python
+65.2 ec2-user python
+62.0 ec2-user python
+ 5.0 ec2-user claude
+## 2026-11-16T17:07:21+00:00 load 6.19 5.54 5.85
+%CPU USER     COMMAND
+ 230 ec2-user exp3-base
+65.2 ec2-user python
+64.5 ec2-user python
+63.5 ec2-user python
+ 5.0 ec2-user claude
+## 2026-11-16T17:07:32+00:00 load 6.53 5.63 5.88
+%CPU USER     COMMAND
+ 226 ec2-user exp3-base
+72.5 ec2-user charon-driver
+62.5 ec2-user python
+62.3 ec2-user python
+61.6 ec2-user python
+## 2026-11-16T17:07:42+00:00 load 7.39 5.85 5.94
+%CPU USER     COMMAND
+ 222 ec2-user exp3-base
+92.7 ec2-user aeneas
+61.1 ec2-user python
+60.3 ec2-user python
+59.8 ec2-user python
+## 2026-11-16T17:07:52+00:00 load 8.10 6.05 6.01
+%CPU USER     COMMAND
+ 218 ec2-user exp3-base
+96.1 ec2-user aeneas
+60.0 ec2-user python
+59.2 ec2-user python
+58.4 ec2-user python
+## 2026-11-16T17:08:02+00:00 load 8.56 6.21 6.06
+%CPU USER     COMMAND
+ 215 ec2-user exp3-base
+97.6 ec2-user aeneas
+59.4 ec2-user python
+57.9 ec2-user python
+57.2 ec2-user python
+## 2026-11-16T17:08:12+00:00 load 8.70 6.32 6.10
+%CPU USER     COMMAND
+ 212 ec2-user exp3-base
+58.4 ec2-user python
+57.2 ec2-user python
+56.2 ec2-user python
+ 5.0 ec2-user claude
+## 2026-11-16T17:08:22+00:00 load 9.08 6.52 6.17
+%CPU USER     COMMAND
+ 209 ec2-user exp3-base
+ 103 ec2-user aeneas
+57.8 ec2-user python
+56.6 ec2-user python
+55.2 ec2-user python
+## 2026-11-16T17:08:32+00:00 load 9.30 6.65 6.22
+%CPU USER     COMMAND
+ 207 ec2-user exp3-base
+99.2 ec2-user aeneas
+57.2 ec2-user python
+55.9 ec2-user python
+54.6 ec2-user python
+## 2026-11-16T17:08:42+00:00 load 9.33 6.74 6.25
+%CPU USER     COMMAND
+ 205 ec2-user exp3-base
+ 100 ec2-user aeneas
+56.5 ec2-user python
+55.2 ec2-user python
+54.1 ec2-user python
+## 2026-11-16T17:08:52+00:00 load 9.26 6.82 6.28
+%CPU USER     COMMAND
+ 203 ec2-user exp3-base
+56.5 ec2-user python
+55.3 ec2-user python
+54.5 ec2-user python
+ 5.0 ec2-user claude
+## 2026-11-16T17:09:03+00:00 load 9.00 6.84 6.29
+%CPU USER     COMMAND
+ 202 ec2-user exp3-base
+56.4 ec2-user python
+55.8 ec2-user python
+54.9 ec2-user python
+ 5.0 ec2-user claude
+## 2026-11-16T17:09:13+00:00 load 8.92 6.90 6.32
+%CPU USER     COMMAND
+ 201 ec2-user exp3-base
+57.0 ec2-user python
+56.7 ec2-user python
+55.5 ec2-user python
+ 5.0 ec2-user claude
+## 2026-11-16T17:09:23+00:00 load 8.62 6.90 6.33
+%CPU USER     COMMAND
+ 200 ec2-user exp3-base
+57.8 ec2-user python
+57.4 ec2-user python
+55.9 ec2-user python
+ 5.0 ec2-user claude
+## 2026-11-16T17:09:33+00:00 load 8.44 6.92 6.34
+%CPU USER     COMMAND
+ 199 ec2-user exp3-base
+58.2 ec2-user python
+58.0 ec2-user python
+56.7 ec2-user python
+ 5.0 ec2-user claude
+## 2026-11-16T17:09:43+00:00 load 8.08 6.89 6.34
+%CPU USER     COMMAND
+ 199 ec2-user exp3-base
+58.8 ec2-user python
+58.8 ec2-user python
+57.5 ec2-user python
+ 5.0 ec2-user claude
+## 2026-11-16T17:09:53+00:00 load 7.91 6.89 6.34
+%CPU USER     COMMAND
+59.5 ec2-user python
+59.2 ec2-user python
+57.7 ec2-user python
+ 5.0 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:10:03+00:00 load 7.77 6.90 6.35
+%CPU USER     COMMAND
+ 172 ec2-user exp3
+60.2 ec2-user python
+59.8 ec2-user python
+58.3 ec2-user python
+ 5.0 ec2-user claude
+## 2026-11-16T17:10:13+00:00 load 7.65 6.90 6.36
+%CPU USER     COMMAND
+ 167 ec2-user exp3
+60.9 ec2-user python
+60.6 ec2-user python
+58.8 ec2-user python
+ 5.0 ec2-user claude
+## 2026-11-16T17:10:23+00:00 load 7.09 6.81 6.33
+%CPU USER     COMMAND
+ 147 ec2-user exp3
+62.0 ec2-user python
+61.9 ec2-user python
+60.0 ec2-user python
+ 4.9 ec2-user claude
+## 2026-11-16T17:10:33+00:00 load 6.69 6.73 6.31
+%CPU USER     COMMAND
+ 135 ec2-user exp3
+63.3 ec2-user python
+63.2 ec2-user python
+61.4 ec2-user python
+ 4.9 ec2-user claude
+## 2026-11-16T17:10:43+00:00 load 6.35 6.66 6.29
+%CPU USER     COMMAND
+ 128 ec2-user exp3
+64.5 ec2-user python
+64.3 ec2-user python
+62.6 ec2-user python
+ 4.9 ec2-user claude
+## 2026-11-16T17:10:53+00:00 load 6.14 6.60 6.28
+%CPU USER     COMMAND
+ 123 ec2-user exp3
+65.7 ec2-user python
+65.5 ec2-user python
+63.8 ec2-user python
+ 4.9 ec2-user claude
+## 2026-11-16T17:11:04+00:00 load 6.35 6.63 6.29
+%CPU USER     COMMAND
+ 132 ec2-user exp3
+65.6 ec2-user python
+65.4 ec2-user python
+64.0 ec2-user python
+ 4.9 ec2-user claude
+## 2026-11-16T17:11:14+00:00 load 6.45 6.64 6.30
+%CPU USER     COMMAND
+ 139 ec2-user exp3
+65.1 ec2-user python
+65.1 ec2-user python
+64.0 ec2-user python
+ 4.9 ec2-user claude
+## 2026-11-16T17:11:24+00:00 load 6.62 6.67 6.31
+%CPU USER     COMMAND
+ 145 ec2-user exp3
+65.1 ec2-user python
+65.1 ec2-user python
+64.0 ec2-user python
+ 4.9 ec2-user claude
+## 2026-11-16T17:11:34+00:00 load 6.76 6.70 6.33
+%CPU USER     COMMAND
+ 151 ec2-user exp3
+65.1 ec2-user python
+64.9 ec2-user python
+64.0 ec2-user python
+ 4.9 ec2-user claude
+## 2026-11-16T17:11:44+00:00 load 6.79 6.71 6.33
+%CPU USER     COMMAND
+ 155 ec2-user exp3
+65.2 ec2-user python
+65.1 ec2-user python
+63.8 ec2-user python
+ 4.9 ec2-user claude
+## 2026-11-16T17:11:54+00:00 load 6.75 6.70 6.34
+%CPU USER     COMMAND
+ 160 ec2-user exp3
+65.9 ec2-user python
+64.3 ec2-user python
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:12:04+00:00 load 6.64 6.68 6.33
+%CPU USER     COMMAND
+ 163 ec2-user exp3
+66.6 ec2-user python
+65.0 ec2-user python
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:12:14+00:00 load 6.70 6.69 6.34
+%CPU USER     COMMAND
+ 166 ec2-user exp3
+67.4 ec2-user python
+65.8 ec2-user python
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:12:24+00:00 load 6.66 6.68 6.34
+%CPU USER     COMMAND
+ 169 ec2-user exp3
+68.1 ec2-user python
+66.5 ec2-user python
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:12:34+00:00 load 6.56 6.66 6.34
+%CPU USER     COMMAND
+ 171 ec2-user exp3
+68.7 ec2-user python
+67.3 ec2-user python
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:12:44+00:00 load 6.47 6.64 6.33
+%CPU USER     COMMAND
+ 173 ec2-user exp3
+69.5 ec2-user python
+68.0 ec2-user python
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:12:55+00:00 load 6.40 6.62 6.33
+%CPU USER     COMMAND
+ 174 ec2-user exp3
+70.1 ec2-user python
+68.7 ec2-user python
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:13:05+00:00 load 6.26 6.58 6.32
+%CPU USER     COMMAND
+ 179 ec2-user exp3
+69.3 ec2-user python
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:13:15+00:00 load 6.14 6.54 6.31
+%CPU USER     COMMAND
+ 184 ec2-user exp3
+70.0 ec2-user python
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:13:25+00:00 load 5.96 6.49 6.30
+%CPU USER     COMMAND
+ 190 ec2-user exp3
+70.7 ec2-user python
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:13:35+00:00 load 5.90 6.46 6.29
+%CPU USER     COMMAND
+ 194 ec2-user exp3
+71.4 ec2-user python
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:13:45+00:00 load 5.76 6.41 6.27
+%CPU USER     COMMAND
+ 199 ec2-user exp3
+66.0 ec2-user blender
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:13:55+00:00 load 6.10 6.46 6.29
+%CPU USER     COMMAND
+ 202 ec2-user exp3
+ 104 ec2-user blender
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:14:05+00:00 load 6.16 6.47 6.29
+%CPU USER     COMMAND
+ 206 ec2-user exp3
+63.5 ec2-user blender
+58.0 ec2-user blender
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:14:15+00:00 load 7.29 6.70 6.37
+%CPU USER     COMMAND
+ 206 ec2-user exp3
+84.8 ec2-user blender
+81.8 ec2-user blender
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:14:25+00:00 load 7.71 6.81 6.41
+%CPU USER     COMMAND
+ 205 ec2-user exp3
+ 100 ec2-user blender
+66.9 ec2-user blender
+43.8 ec2-user blender
+ 4.8 ec2-user claude
+## 2026-11-16T17:14:35+00:00 load 8.30 6.96 6.47
+%CPU USER     COMMAND
+ 205 ec2-user exp3
+98.1 ec2-user blender
+61.8 ec2-user blender
+45.0 ec2-user blender
+ 4.8 ec2-user claude
+## 2026-11-16T17:14:45+00:00 load 8.63 7.08 6.51
+%CPU USER     COMMAND
+ 204 ec2-user exp3
+ 102 ec2-user blender
+57.6 ec2-user blender
+36.5 ec2-user pip
+ 4.8 ec2-user claude
+## 2026-11-16T17:14:56+00:00 load 8.91 7.19 6.55
+%CPU USER     COMMAND
+ 204 ec2-user exp3
+ 107 ec2-user blender
+53.8 ec2-user blender
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:15:06+00:00 load 9.09 7.29 6.59
+%CPU USER     COMMAND
+ 203 ec2-user exp3
+ 111 ec2-user blender
+52.1 ec2-user blender
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:15:16+00:00 load 8.77 7.28 6.59
+%CPU USER     COMMAND
+ 202 ec2-user exp3
+ 111 ec2-user blender
+56.5 ec2-user blender
+ 4.8 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:15:26+00:00 load 8.73 7.32 6.62
+%CPU USER     COMMAND
+ 202 ec2-user exp3
+ 109 ec2-user blender
+58.8 ec2-user blender
+ 4.9 ec2-user claude
+ 3.3 ec2-user claude

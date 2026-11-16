@@ -1,0 +1,3 @@
+# scale-objects-1e6 rep 1 commit 9914209 dirty 0 load_start 6.65 2026-11-16T17:23:54+00:00
+{"anon_mb":32,"file_mb":105,"anon_bytes_per_object":33.9,"part":"objects","n":1000000,"put_rate_first_1e6":157666,"put_rate":157666,"open_s":0.25,"get_p50_ms":0.0038,"get_p99_ms":0.0046,"rss_mb":138,"rss_open_mb":138,"rss_bytes_per_object":144.4,"disk_bytes":226001722,"load":"6.44"}
+# load_end 6.44

@@ -1733,6 +1733,7 @@ dependencies = [
  "blake3",
  "crc32fast",
  "fastcdc",
+ "libc",
  "memmap2",
  "o5s-chunk",
  "o5s-core",

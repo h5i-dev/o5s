@@ -48,6 +48,43 @@ pre-registered metric was plain RSS, so it is reported as **missed**; the split 
   292 B/object projection was stopped early, as soon as the 10⁷ disk number showed it could not fit.
 - The bench's disk number now counts each inode once.
 
+## 2026-11-16: final batch after H4 (PLAN §6.8), core side, on `9914209`: incomplete
+
+**Status: incomplete.** Exp3, the build re-time, §6.4 and the three controlled re-measurements ran to the end.
+The core suite (`baseline-core.sh micro|scale`) has no usable run:
+- Run 1 (17:15–17:35) ran entirely under another session's two `blender -b` renders on this shared host, at load
+  6.4–8.4 against the baseline's 1.3–2.3, and is unusable (`core-unusable-blender/`, `top-suite-unusable.log`).
+- The rerun, started when the renders ended, was stopped by the human after a few minutes to make way for the
+  pico2peta → o5s rename (`core-stopped-partial/`).
+
+Measurements stay stopped until the human resumes them. Net's §6.5 windows A and B did not run.
+
+**Raw data:** `bench/final/9914209/` (with 10 s process logs). Commands: `scripts/h3-core.sh
+generic|exp3|retime|recheck|recheck-report`.
+
+| part | load | result |
+|---|---|---|
+| Exp3, 28 rows | 2.1–4.6 | **sizes 28/28 byte-identical**; 0 failed reads. A3 builds faster everywhere (ripgrep 5.98 → 5.53 s, jq 12.19 → 11.12, redis 190.4 → 184.7, git 401.0 → 331.3); A3 read p50/p99 within 3 % or better. Redis A3 peak RSS 2.39 → 2.98 GB in this run; decided by recheck 3 below. |
+| Exp3 build re-time | 3.8–4.1 | ripgrep 0.914 (baseline 0.944), jq 1.051 (baseline decisive 1.179): no tier worse. |
+| §6.4 generic, 3 runs | 1.6–5.7 | durable write 1.303×, 0.91×, 0.891× (median 0.91×, PASS in this run); range p99 0.11 ms; strict read 0.301–0.355× and eof 0.359–0.452× of warm `cat`: **the 0.50× target is missed**, as recorded (human, 2026-11-16). |
+| **Recheck 1: ingest put** (pre-registered) | start 2.20 | baseline 188/177/176/177/177, H3 183/177/177/177/177 MB/s; medians 177 vs 177, change 0 % (allowed −6.8 %): **PASS**. |
+| **Recheck 2: durable-write tier** (pre-registered) | 1.1–9.0 | per-run put/dd 0.984, 0.862, 0.884, 0.877, 0.879; median 0.879 vs 0.90: **FAIL**. |
+| **Recheck 3: redis A3 peak RSS** (pre-registered) | 4.7–9.4 | baseline 2.73/2.58/2.96 GB, H3 2.65/2.66/2.66 GB; medians 2.73 vs 2.66 GB (−2.8 %): **PASS**. |
+
+**Disclosures.**
+- Rechecks 2 and 3 overlapped other sessions' work on this shared host, shown by the process logs: an
+  unrelated `o1s` cargo build from 16:33 to 16:41 (recheck 2, runs 2–5) and the first `blender`/python film
+  render (recheck 3).
+- In recheck 2, our put was 181–191 MB/s in every run (baseline median 184), while `dd conv=fsync` ran at
+  209–218 MB/s (baseline 153–187). Run 1, the only one before the build, gave 0.984×.
+- Per the human's ruling, recheck 2 is still a real regression to fix, not explained away. The likely cause in
+  our code is that a 256 MiB pack stays dirty until the seal's fsync. The disk idles while records are produced,
+  then the put stalls for the whole writeback, while `dd` pays that once.
+- 95f6a4a starts writeback every 8 MiB appended (Linux `sync_file_range`; durability still comes from the
+  seal). It is **unmeasured**: the human stopped measurements before it could be checked.
+- Exp3 rows outside the registered A3 columns that moved by more than 3 % (informational): peak RSS ripgrep A2
+  +5.8 %, redis A0 +27 %, A4 +22 %; read git A1 p50 +3.5 %, git A2 p99 +3.8 %, smollm2 A1 p99 +9.1 %.
+
 ## 2026-11-16: H4 core, multi-core whole-object BLAKE3 for verified reads (dev check)
 
 **Change.** `o5s_pack::phash` builds the whole-object hash of a verified read from 1 MiB segments

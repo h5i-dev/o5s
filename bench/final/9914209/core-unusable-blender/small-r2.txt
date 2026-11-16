@@ -1,0 +1,8 @@
+# small rep 2 commit 9914209 dirty 0 load_start 7.04 2026-11-16T17:15:45+00:00
+| re-put (all dedup) | 589.8k/s | |
+| ensure_live | 2599.1k/s | |
+| 1 KiB objects (n = 100000) | 1 thread | 4 threads |
+|---|---|---|
+| put (+ flush) | 116.2k/s | 117.6k/s |
+| get (warm, random) | 213.0k/s | 337.0k/s |
+# load_end 7.04

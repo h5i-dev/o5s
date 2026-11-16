@@ -1,0 +1,245 @@
+## 2026-11-16T17:35:13+00:00 load 2.00 3.79 5.42
+%CPU USER     COMMAND
+97.8 ec2-user python
+69.9 ec2-user ffmpeg-linux-x8
+ 4.4 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:35:23+00:00 load 2.00 3.74 5.38
+%CPU USER     COMMAND
+97.9 ec2-user python
+65.6 ec2-user ffmpeg-linux-x8
+43.0 ec2-user p2p-bench
+ 4.4 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:35:33+00:00 load 2.23 3.73 5.36
+%CPU USER     COMMAND
+97.9 ec2-user python
+64.6 ec2-user p2p-bench
+61.9 ec2-user ffmpeg-linux-x8
+ 4.4 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:35:43+00:00 load 2.51 3.74 5.35
+%CPU USER     COMMAND
+ 110 ec2-user p2p-bench
+97.8 ec2-user python
+63.4 ec2-user ffmpeg-linux-x8
+ 4.4 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:35:53+00:00 load 2.99 3.79 5.35
+%CPU USER     COMMAND
+ 138 ec2-user p2p-bench
+97.4 ec2-user python
+66.8 ec2-user ffmpeg-linux-x8
+ 4.4 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:36:03+00:00 load 3.53 3.88 5.36
+%CPU USER     COMMAND
+97.1 ec2-user python
+69.9 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+ 3.3 ec2-user claude
+ 3.1 ec2-user claude
+## 2026-11-16T17:36:13+00:00 load 3.75 3.92 5.36
+%CPU USER     COMMAND
+ 134 ec2-user p2p-bench
+96.9 ec2-user python
+72.5 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:36:23+00:00 load 4.24 4.02 5.38
+%CPU USER     COMMAND
+99.2 ec2-user p2p-bench
+96.7 ec2-user python
+75.6 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:36:33+00:00 load 4.21 4.02 5.36
+%CPU USER     COMMAND
+99.7 ec2-user p2p-bench
+96.7 ec2-user python
+79.5 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:36:44+00:00 load 4.09 4.00 5.34
+%CPU USER     COMMAND
+99.8 ec2-user p2p-bench
+96.6 ec2-user python
+81.7 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:36:54+00:00 load 4.24 4.04 5.34
+%CPU USER     COMMAND
+99.8 ec2-user p2p-bench
+96.5 ec2-user python
+83.4 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:37:04+00:00 load 4.22 4.04 5.32
+%CPU USER     COMMAND
+97.7 ec2-user p2p-bench
+84.8 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+ 3.3 ec2-user claude
+ 3.0 ec2-user claude
+## 2026-11-16T17:37:14+00:00 load 4.64 4.13 5.34
+%CPU USER     COMMAND
+98.1 ec2-user p2p-bench
+90.4 ec2-user ffmpeg-linux-x8
+59.6 ec2-user python
+ 4.7 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+## 2026-11-16T17:37:24+00:00 load 5.01 4.23 5.36
+%CPU USER     COMMAND
+98.3 ec2-user p2p-bench
+95.0 ec2-user ffmpeg-linux-x8
+65.9 ec2-user python
+ 4.3 ec2-user claude
+ 3.5 ec2-user ffmpeg-linux-x8
+## 2026-11-16T17:37:34+00:00 load 6.00 4.47 5.43
+%CPU USER     COMMAND
+99.8 ec2-user ffmpeg-linux-x8
+98.5 ec2-user p2p-bench
+62.0 ec2-user python
+ 4.4 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:37:44+00:00 load 6.24 4.57 5.45
+%CPU USER     COMMAND
+ 103 ec2-user ffmpeg-linux-x8
+98.5 ec2-user p2p-bench
+60.5 ec2-user python
+ 6.3 ec2-user ffmpeg-linux-x8
+ 4.4 ec2-user claude
+## 2026-11-16T17:37:54+00:00 load 6.51 4.68 5.48
+%CPU USER     COMMAND
+ 107 ec2-user ffmpeg-linux-x8
+99.9 ec2-user p2p-bench
+58.5 ec2-user python
+ 8.9 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+## 2026-11-16T17:38:04+00:00 load 7.13 4.87 5.53
+%CPU USER     COMMAND
+ 110 ec2-user ffmpeg-linux-x8
+58.1 ec2-user python
+41.0 ec2-user p2p-bench
+11.7 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+## 2026-11-16T17:38:14+00:00 load 7.19 4.96 5.55
+%CPU USER     COMMAND
+93.7 ec2-user p2p-bench
+59.7 ec2-user python
+14.5 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:38:24+00:00 load 6.54 4.90 5.53
+%CPU USER     COMMAND
+96.8 ec2-user p2p-bench
+64.6 ec2-user python
+19.5 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:38:34+00:00 load 5.84 4.80 5.49
+%CPU USER     COMMAND
+97.9 ec2-user p2p-bench
+68.5 ec2-user python
+22.9 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:38:44+00:00 load 5.25 4.71 5.45
+%CPU USER     COMMAND
+98.4 ec2-user p2p-bench
+71.5 ec2-user python
+25.4 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+ 3.3 ec2-user claude
+## 2026-11-16T17:38:54+00:00 load 4.83 4.63 5.42
+%CPU USER     COMMAND
+98.7 ec2-user p2p-bench
+74.0 ec2-user python
+62.5 ec2-user claude
+27.3 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+## 2026-11-16T17:39:04+00:00 load 4.47 4.56 5.39
+%CPU USER     COMMAND
+99.0 ec2-user p2p-bench
+76.1 ec2-user python
+29.5 ec2-user claude
+29.0 ec2-user ffmpeg-linux-x8
+ 4.3 ec2-user claude
+## 2026-11-16T17:39:14+00:00 load 4.09 4.48 5.35
+%CPU USER     COMMAND
+98.7 ec2-user p2p-bench
+77.7 ec2-user python
+30.6 ec2-user ffmpeg-linux-x8
+21.1 ec2-user claude
+ 4.3 ec2-user claude
+## 2026-11-16T17:39:24+00:00 load 3.77 4.40 5.31
+%CPU USER     COMMAND
+98.9 ec2-user p2p-bench
+79.3 ec2-user python
+30.3 ec2-user ffmpeg-linux-x8
+17.3 ec2-user claude
+ 4.3 ec2-user claude
+## 2026-11-16T17:39:34+00:00 load 3.97 4.42 5.31
+%CPU USER     COMMAND
+ 105 ec2-user p2p-bench
+80.5 ec2-user python
+28.5 ec2-user ffmpeg-linux-x8
+13.5 ec2-user claude
+ 4.3 ec2-user claude
+## 2026-11-16T17:39:44+00:00 load 3.97 4.40 5.30
+%CPU USER     COMMAND
+ 102 ec2-user p2p-bench
+81.7 ec2-user python
+27.0 ec2-user ffmpeg-linux-x8
+11.1 ec2-user claude
+ 4.3 ec2-user claude
+## 2026-11-16T17:39:54+00:00 load 3.67 4.32 5.26
+%CPU USER     COMMAND
+ 101 ec2-user p2p-bench
+82.7 ec2-user python
+25.7 ec2-user ffmpeg-linux-x8
+10.3 ec2-user claude
+ 4.3 ec2-user claude
+## 2026-11-16T17:40:04+00:00 load 3.41 4.25 5.22
+%CPU USER     COMMAND
+ 100 ec2-user p2p-bench
+83.6 ec2-user python
+24.5 ec2-user ffmpeg-linux-x8
+ 9.0 ec2-user claude
+ 4.3 ec2-user claude
+## 2026-11-16T17:40:14+00:00 load 3.19 4.17 5.19
+%CPU USER     COMMAND
+ 100 ec2-user p2p-bench
+84.4 ec2-user python
+23.5 ec2-user ffmpeg-linux-x8
+ 8.1 ec2-user claude
+ 4.2 ec2-user claude
+## 2026-11-16T17:40:24+00:00 load 2.93 4.08 5.15
+%CPU USER     COMMAND
+ 100 ec2-user p2p-bench
+85.1 ec2-user python
+22.5 ec2-user ffmpeg-linux-x8
+ 7.5 ec2-user claude
+ 4.2 ec2-user claude
+## 2026-11-16T17:40:34+00:00 load 2.79 4.01 5.11
+%CPU USER     COMMAND
+ 100 ec2-user p2p-bench
+85.7 ec2-user python
+21.7 ec2-user ffmpeg-linux-x8
+ 7.3 ec2-user claude
+ 4.2 ec2-user claude
+## 2026-11-16T17:40:44+00:00 load 3.05 4.03 5.11
+%CPU USER     COMMAND
+ 100 ec2-user p2p-bench
+86.2 ec2-user python
+23.3 ec2-user ffmpeg-linux-x8
+ 7.5 ec2-user claude
+ 4.2 ec2-user claude
+## 2026-11-16T17:40:54+00:00 load 3.04 4.00 5.08
+%CPU USER     COMMAND
+ 100 ec2-user p2p-bench
+86.7 ec2-user python
+24.8 ec2-user ffmpeg-linux-x8
+ 7.5 ec2-user claude
+ 4.2 ec2-user claude
