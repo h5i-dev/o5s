@@ -410,6 +410,13 @@ The contended run checks that no update is lost: the final version equals the nu
     - The server now logs `response body done` with the time since the request came in, so streamed bodies count. `hf_split.py` and `hf_bench.py` record `*_server_s` (busy) and `*_server_cpu_s` (server process CPU) per operation, `/v1` included.
     - Server busy, run 2: Xet upload 0.10 s; Xet download 0.30 s; LFS upload 0.38 s; LFS download 0.67 s.
     - **Open question to the human:** a download's busy interval lasts until the client has read the body, so it measures the reader. `huggingface_hub`'s LFS download is CPU-bound at 0.69 s, while curl on the same URL takes 0.258 s (`/v1` 0.251 s, 1.03×). Options: keep the busy interval; judge downloads on server CPU; or replay the requests with a fast reader.
+  - **H4 dev result on b485c2c (demo c155ab3 + net; hf_bench, 3 runs; server busy vs `/v1`):**
+    - Xet upload 0.35× and Xet download 1.11× meet ≤ 1.2×.
+    - LFS upload 1.34× (0.331 vs 0.246 s; serial Xet chunker on the put path; core's parallel-window version was slower, 0.49 s, and is reverted).
+    - LFS download 2.28× busy but 1.04× server CPU: its busy interval is `huggingface_hub`'s read speed.
+    - Client wall/CPU (informational): Xet up 1.35 s / 1.64 s, Xet down 0.47 / 0.51, LFS up 0.55 / 0.37, LFS down 0.70 / 0.69; `/v1` 0.256 up / 0.294 down.
+    - **Decisions asked of the human:** (1) LFS PUT with FastCDC (measured 1.04×: 0.290 vs 0.278 s on one server; patch ready, losing LFS↔Xet chunk dedup) or keep 1.34× until a double-buffered parallel chunker after RC; (2) judge downloads on busy time or server CPU.
+    - Fixed meanwhile: `/v1` GET +25 % from d6bfd5f (core's d00980b; A/B back to 0.25 s). Parallel Xet chunking `xet_lengths_parallel`/`xet_cuts_parallel[_seg]` is in `crates/chunk` (exact, proptested) for the after-RC rework.
   - **Open before the final batch (2026-11-16, dev A/B on one host):**
     - **`/v1` GET +25 %:** a733d8e 0.248–0.258 s and 9aba438 0.248–0.253 s, against 0.310–0.321 s after core's d6bfd5f (parallel whole-object BLAKE3 for verified reads). PUT is unchanged. Sent to the core with the binaries and script.
     - **LFS upload, server busy:** 0.372 s against `/v1` PUT 0.242 s (1.54×). Without the `hf/` Xet-chunker profile it is ~0.27 s. The Xet chunker runs at 1.42 GB/s (FastCDC 1.98), on the store's serial put thread with the whole-object BLAKE3; a 4-way unrolled gear loop gave no gain and was reverted. Proposed to the core: speculative parallel Xet chunking in `put_stream` (byte-identical cuts, proptested), or the whole-object hash off the chunker's thread.

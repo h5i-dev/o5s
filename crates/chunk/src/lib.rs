@@ -45,7 +45,24 @@ pub fn chunk_lengths(c: &mut dyn Chunker, data: &[u8]) -> Vec<usize> {
 /// after a cut is always the fresh state: from a common cut on, both runs make the same cuts.
 /// Without a common cut (e.g. data with no natural boundaries), it just continues serially.
 pub fn xet_lengths_parallel(data: &[u8], threads: usize) -> Vec<usize> {
-    xet_lengths_parallel_seg(data, threads, 8 << 20)
+    xet_lengths_parallel_seg(data, threads, 8 << 20, true)
+}
+
+/// Streaming form of [`xet_lengths_parallel`], for a window of a stream that **starts at a chunk
+/// boundary** (the stream's start, or right after the previous window's last complete chunk).
+/// Returns the lengths of the window's complete chunks, exactly as a fresh [`XetChunker`] fed
+/// `window` would emit them from `update`. With `last` (the window ends the stream) the final
+/// partial chunk is included too (`finish`). Otherwise the bytes after the returned chunks are
+/// the next window's first bytes: carry them over (fewer than [`XET_MAX`] of them).
+pub fn xet_cuts_parallel(window: &[u8], threads: usize, last: bool) -> Vec<usize> {
+    xet_lengths_parallel_seg(window, threads, 8 << 20, last)
+}
+
+/// [`xet_cuts_parallel`] with an explicit segment size (the unit of speculative work per
+/// thread; smaller segments suit small windows, at the cost of more seam reconciliation). Any
+/// `seg` gives the same cuts.
+pub fn xet_cuts_parallel_seg(window: &[u8], threads: usize, seg: usize, last: bool) -> Vec<usize> {
+    xet_lengths_parallel_seg(window, threads, seg, last)
 }
 
 fn feed(c: &mut XetChunker, data: &[u8], from: usize, to: usize, base: &mut usize, cuts: &mut Vec<usize>) {
@@ -57,10 +74,16 @@ fn feed(c: &mut XetChunker, data: &[u8], from: usize, to: usize, base: &mut usiz
     }
 }
 
-fn xet_lengths_parallel_seg(data: &[u8], threads: usize, seg: usize) -> Vec<usize> {
+fn xet_lengths_parallel_seg(data: &[u8], threads: usize, seg: usize, last: bool) -> Vec<usize> {
     let n = data.len();
     if threads <= 1 || seg == 0 || n < 2 * seg {
-        return chunk_lengths(&mut XetChunker::new(), data);
+        let mut out = Vec::new();
+        let mut c = XetChunker::new();
+        c.update(data, &mut out);
+        if last {
+            c.finish(&mut out);
+        }
+        return out;
     }
     let nseg = n.div_ceil(seg);
     // Speculative cut positions (absolute) of segments 1.., each run over its segment plus
@@ -138,11 +161,13 @@ fn xet_lengths_parallel_seg(data: &[u8], threads: usize, seg: usize) -> Vec<usiz
     if fed < n {
         feed(&mut c, data, fed, n, &mut base, &mut cuts);
     }
-    let mut tail = Vec::new();
-    c.finish(&mut tail);
-    for l in tail {
-        base += l;
-        cuts.push(base);
+    if last {
+        let mut tail = Vec::new();
+        c.finish(&mut tail);
+        for l in tail {
+            base += l;
+            cuts.push(base);
+        }
     }
     let mut prev = 0;
     cuts.into_iter()
@@ -378,26 +403,107 @@ mod tests {
             let want = chunk_lengths(&mut XetChunker::new(), &d);
             for seg in [131_072usize, 200_000, 333_333, 1 << 20] {
                 for threads in [2usize, 3, 4] {
-                    assert_eq!(xet_lengths_parallel_seg(&d, threads, seg), want, "n={n} seg={seg} t={threads}");
+                    assert_eq!(xet_lengths_parallel_seg(&d, threads, seg, true), want, "n={n} seg={seg} t={threads}");
                 }
             }
         }
         let zeros = vec![0u8; 2_000_000];
         let want = chunk_lengths(&mut XetChunker::new(), &zeros);
-        assert_eq!(xet_lengths_parallel_seg(&zeros, 4, 150_000), want);
+        assert_eq!(xet_lengths_parallel_seg(&zeros, 4, 150_000, true), want);
         let mut mixed = data(2_500_000, 9);
         mixed[400_000..900_000].fill(7);
         let want = chunk_lengths(&mut XetChunker::new(), &mixed);
-        assert_eq!(xet_lengths_parallel_seg(&mixed, 3, 250_000), want);
+        assert_eq!(xet_lengths_parallel_seg(&mixed, 3, 250_000, true), want);
+    }
+
+    fn serial(d: &[u8], last: bool) -> Vec<usize> {
+        let (mut c, mut out) = (XetChunker::new(), Vec::new());
+        c.update(d, &mut out);
+        if last {
+            c.finish(&mut out);
+        }
+        out
+    }
+
+    fn ends(ls: &[usize]) -> Vec<usize> {
+        ls.iter()
+            .scan(0, |p, l| {
+                *p += l;
+                Some(*p)
+            })
+            .collect()
+    }
+
+    /// The edge cases at a seam (segment boundary), each placed exactly.
+    #[test]
+    fn xet_parallel_seam_edges() {
+        let d = data(1_500_000, 11);
+        let c = ends(&serial(&d, true))[2]; // a natural cut well inside the data
+        for (what, seg) in [
+            ("seam right at a cut", c),
+            ("seam inside the min-size region after a cut", c + 100),
+            ("seam just before a cut", c - 1),
+            ("seam one byte after a cut", c + 1),
+        ] {
+            for last in [true, false] {
+                assert_eq!(xet_lengths_parallel_seg(&d, 3, seg, last), serial(&d, last), "{what} (last={last})");
+            }
+        }
+        // No natural cut between two seams, and forced cuts at max size: a constant run has no
+        // natural boundaries, so the serial chunking there is all XET_MAX chunks.
+        let z = vec![0u8; 1_000_000];
+        assert!(serial(&z, true).iter().filter(|&&l| l == XET_MAX).count() >= 7, "forced max-size cuts");
+        for seg in [50_000usize, XET_MAX, XET_MAX + 1, 200_000] {
+            for last in [true, false] {
+                assert_eq!(xet_lengths_parallel_seg(&z, 4, seg, last), serial(&z, last), "constant run, seg={seg}");
+            }
+        }
+        // A seam right at, and inside, a forced cut in a constant run that follows random data.
+        let mut m = data(600_000, 12);
+        m.extend(std::iter::repeat_n(5u8, 700_000));
+        let forced = *ends(&serial(&m, true)).iter().find(|&&x| x > 700_000).unwrap();
+        for seg in [forced, forced - XET_MAX / 2] {
+            assert_eq!(xet_lengths_parallel_seg(&m, 2, seg, true), serial(&m, true), "seam at/inside a forced chunk");
+        }
+        // Windowed use: windows that start where the previous one's complete chunks end.
+        let d = data(3_100_000, 13);
+        let (mut got, mut at) = (Vec::new(), 0usize);
+        for w in [700_000usize, 1_000_000, 900_000, usize::MAX] {
+            let end = at.saturating_add(w).min(d.len());
+            let last = end == d.len();
+            let ls = xet_lengths_parallel_seg(&d[at..end], 3, 150_000, last);
+            at += ls.iter().sum::<usize>();
+            got.extend(ls);
+            if last {
+                break;
+            }
+        }
+        assert_eq!(got, serial(&d, true), "windowed");
     }
 
     proptest::proptest! {
         #![proptest_config(proptest::prelude::ProptestConfig::with_cases(48))]
         #[test]
-        fn xet_parallel_equals_serial_prop(n in 0usize..1_500_000, seed in 0u64..1000, seg in 1usize..400_000, threads in 1usize..5, run in 0usize..300_000) {
+        fn xet_parallel_equals_serial_prop(n in 0usize..1_500_000, seed in 0u64..1000, seg in 1usize..400_000, threads in 1usize..5, run in 0usize..300_000, last in proptest::bool::ANY) {
             let mut d = data(n, seed);
             if n > 0 { let a = (seed as usize * 7919) % n; let b = (a + run).min(n); d[a..b].fill((seed & 0xff) as u8); }
-            proptest::prop_assert_eq!(xet_lengths_parallel_seg(&d, threads, seg), chunk_lengths(&mut XetChunker::new(), &d));
+            proptest::prop_assert_eq!(xet_lengths_parallel_seg(&d, threads, seg, last), serial(&d, last));
+        }
+
+        /// Random window boundaries: each window starts at the previous one's last complete cut.
+        #[test]
+        fn xet_parallel_windowed_prop(n in 0usize..1_200_000, seed in 0u64..1000, seg in 1usize..300_000, w in 1usize..500_000, threads in 2usize..5) {
+            let d = data(n, seed);
+            let (mut got, mut at) = (Vec::new(), 0usize);
+            loop {
+                let end = (at + w + XET_MAX).min(d.len());
+                let last = end == d.len();
+                let ls = xet_lengths_parallel_seg(&d[at..end], threads, seg, last);
+                at += ls.iter().sum::<usize>();
+                got.extend(ls);
+                if last { break; }
+            }
+            proptest::prop_assert_eq!(got, serial(&d, true));
         }
     }
 
