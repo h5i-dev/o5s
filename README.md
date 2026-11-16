@@ -1,11 +1,15 @@
 # o5s
 
-Why do we need a separate GitHub for source code, JFrog for build outputs, Docker Hub for container images,
-PyPI and npm for packages, Hugging Face for LLM weights, and so on? They are all just data, just sequences of
-0s and 1s. Why not treat them all the same way?
+**Question**
 
-o5s treats every kind of data the same way, using only push, pull, and overwrite. It also ships adapters
-for Git, OCI, Hugging Face, PyPI, npm and Maven, so it fits into existing workflows as they are.
+- Why do we need a separate GitHub for source code, JFrog for build outputs, Docker Hub for container images,
+PyPI and npm for packages, Hugging Face for LLM weights, and so on?
+- Why not treat them all the same way? They are all just data, just sequences of 0s and 1s. 
+
+**Our Answer**
+
+- `o5s` treats every kind of data the same way, using only push, pull, and overwrite.
+- It also ships adapters for Git, OCI, Hugging Face, PyPI, npm and Maven, so it fits into existing workflows as they are.
 
 ## Potential pushback
 
