@@ -236,6 +236,18 @@ pub fn decode_record(b: &[u8]) -> Result<(RecHeader, &[u8])> {
     Ok((h, &body[REC_HEADER..]))
 }
 
+/// [`decode_record`] without the CRC check, for callers that verify the
+/// content by its BLAKE3 hash anyway (a hash-verified blob read), or that
+/// already checked this record's CRC. Lengths are still checked.
+pub fn decode_record_unchecked(b: &[u8]) -> Result<(RecHeader, &[u8])> {
+    let h = parse_header(b)?;
+    let total = h.total_len() as usize;
+    if b.len() < total {
+        return Err(Error::Corrupt("short record".into()));
+    }
+    Ok((h, &b[REC_HEADER..total - REC_TRAILER]))
+}
+
 thread_local! {
     /// A reused decompression context per thread (creating one per read showed
     /// up as ~3 % of a small-object read profile).

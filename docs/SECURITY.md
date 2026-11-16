@@ -72,6 +72,16 @@ Remaining by design:
   move of either one makes the promote a no-op, never a wrong move (Lean P7,
   `updateMany_stale_noop`).
 
+- **Concurrent `put_many` / `put` of the same object:** the dedup check and the append are not atomic
+  together, so two writers may both append a record for the same hash. That is harmless. Both records hold
+  the same content, and the index keeps one location (`insert_loc` ranks them). GC copies only one.
+- **Hard-linked index cache vs GC:**
+  - On local disk, `idx-cache/<pack>.idx3` is a hard link to `packs/<pack>.idx`.
+  - When GC deletes the pack, the link keeps the inode until the next refresh, which removes cache entries
+    of vanished packs. Mapped views stay valid meanwhile; the cost is only that the disk space is freed late.
+  - Pack indexes are content-named and create-only, so a re-created pack has identical index bytes.
+  - Every mapping is checksum-verified.
+
 ## Findings fixed in this review
 
 1. Zstd-compressed manifest and delta records were decompressed without a
