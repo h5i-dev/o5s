@@ -1666,8 +1666,57 @@ def parse.parse_lfs_pointer
 @[global_simps, irreducible]
 def parse.XET_MAX_CHUNK : Result Std.U32 := 128#u32 * 1024#u32
 
+/-- [pico2peta_net_kernel::parse::u24]:
+    Source: 'crates/net-kernel/src/parse.rs', lines 227:0-229:1
+    Visibility: public -/
+def parse.u24 (a : Std.U8) (b : Std.U8) (c : Std.U8) : Result Std.U32 := do
+  let i ← lift (UScalar.cast .U32 a)
+  let i1 ← lift (UScalar.cast .U32 b)
+  let i2 ← i1 * 256#u32
+  let i3 ← i + i2
+  let i4 ← lift (UScalar.cast .U32 c)
+  let i5 ← i4 * 65536#u32
+  i3 + i5
+
+/-- [pico2peta_net_kernel::parse::xet_chunk_check]:
+    Source: 'crates/net-kernel/src/parse.rs', lines 232:0-246:1
+    Visibility: public -/
+def parse.xet_chunk_check
+  (version : Std.U8) (clen : Std.U32) (scheme : Std.U8) (ulen : Std.U32)
+  (avail : Std.Usize) :
+  Result (Option (Std.U32 × Std.U8 × Std.U32))
+  := do
+  if version != 0#u8
+  then ok none
+  else
+    if scheme > 2#u8
+    then ok none
+    else
+      let i ← parse.XET_MAX_CHUNK
+      if ulen > i
+      then ok none
+      else
+        let i1 ← 2#u32 * i
+        if clen > i1
+        then ok none
+        else
+          if scheme = 0#u8
+          then
+            if clen != ulen
+            then ok none
+            else
+              let i2 ← lift (UScalar.cast .Usize clen)
+              if avail < i2
+              then ok none
+              else ok (some (clen, scheme, ulen))
+          else
+            let i2 ← lift (UScalar.cast .Usize clen)
+            if avail < i2
+            then ok none
+            else ok (some (clen, scheme, ulen))
+
 /-- [pico2peta_net_kernel::parse::xet_chunk_header]:
-    Source: 'crates/net-kernel/src/parse.rs', lines 230:0-253:1
+    Source: 'crates/net-kernel/src/parse.rs', lines 252:0-259:1
     Visibility: public -/
 def parse.xet_chunk_header
   (b : Slice Std.U8) (i : Std.Usize) :
@@ -1682,68 +1731,26 @@ def parse.xet_chunk_header
     if i3 < 8#usize
     then ok none
     else
-      let i4 ← Slice.index_usize b i
-      if i4 != 0#u8
-      then ok none
-      else
-        let i5 ← i + 1#usize
-        let i6 ← Slice.index_usize b i5
-        let i7 ← lift (UScalar.cast .U32 i6)
-        let i8 ← i + 2#usize
-        let i9 ← Slice.index_usize b i8
-        let i10 ← lift (UScalar.cast .U32 i9)
-        let i11 ← i10 <<< 8#i32
-        let i12 ← lift (i7 ||| i11)
-        let i13 ← i + 3#usize
-        let i14 ← Slice.index_usize b i13
-        let i15 ← lift (UScalar.cast .U32 i14)
-        let i16 ← i15 <<< 16#i32
-        let clen ← lift (i12 ||| i16)
-        let i17 ← i + 4#usize
-        let scheme ← Slice.index_usize b i17
-        let i18 ← i + 5#usize
-        let i19 ← Slice.index_usize b i18
-        let i20 ← lift (UScalar.cast .U32 i19)
-        let i21 ← i + 6#usize
-        let i22 ← Slice.index_usize b i21
-        let i23 ← lift (UScalar.cast .U32 i22)
-        let i24 ← i23 <<< 8#i32
-        let i25 ← lift (i20 ||| i24)
-        let i26 ← i + 7#usize
-        let i27 ← Slice.index_usize b i26
-        let i28 ← lift (UScalar.cast .U32 i27)
-        let i29 ← i28 <<< 16#i32
-        let ulen ← lift (i25 ||| i29)
-        if scheme > 2#u8
-        then ok none
-        else
-          let i30 ← parse.XET_MAX_CHUNK
-          if ulen > i30
-          then ok none
-          else
-            let i31 ← 2#u32 * i30
-            if clen > i31
-            then ok none
-            else
-              if scheme = 0#u8
-              then
-                if clen != ulen
-                then ok none
-                else
-                  let i32 := Slice.len b
-                  let i33 ← i32 - i
-                  let i34 ← i33 - 8#usize
-                  let i35 ← lift (UScalar.cast .Usize clen)
-                  if i34 < i35
-                  then ok none
-                  else ok (some (clen, scheme, ulen))
-              else
-                let i32 := Slice.len b
-                let i33 ← i32 - i
-                let i34 ← i33 - 8#usize
-                let i35 ← lift (UScalar.cast .Usize clen)
-                if i34 < i35
-                then ok none
-                else ok (some (clen, scheme, ulen))
+      let i4 ← i + 1#usize
+      let i5 ← Slice.index_usize b i4
+      let i6 ← i + 2#usize
+      let i7 ← Slice.index_usize b i6
+      let i8 ← i + 3#usize
+      let i9 ← Slice.index_usize b i8
+      let clen ← parse.u24 i5 i7 i9
+      let i10 ← i + 5#usize
+      let i11 ← Slice.index_usize b i10
+      let i12 ← i + 6#usize
+      let i13 ← Slice.index_usize b i12
+      let i14 ← i + 7#usize
+      let i15 ← Slice.index_usize b i14
+      let ulen ← parse.u24 i11 i13 i15
+      let i16 ← Slice.index_usize b i
+      let i17 ← i + 4#usize
+      let i18 ← Slice.index_usize b i17
+      let i19 := Slice.len b
+      let i20 ← i19 - i
+      let i21 ← i20 - 8#usize
+      parse.xet_chunk_check i16 clen i18 ulen i21
 
 end pico2peta_net_kernel

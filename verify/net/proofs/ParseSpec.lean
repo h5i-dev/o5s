@@ -291,4 +291,60 @@ theorem parse_dec_u64_spec (s : Slice U8) :
       | (unfold decSpec; rw [if_neg hne, if_pos (by rw [← b_post]; assumption)]; rfl)
       | (unfold decSpec; rw [if_neg hne, if_neg (by rw [← b_post]; assumption)]; assumption)
 
+/-! ## Xet xorb chunk header -/
+
+/-- Byte `k` of `L`, or 0 past the end. -/
+def g (L : List Nat) (k : Nat) : Nat := L.getD k 0
+
+/-- The checks on a decoded header: version 0, scheme ≤ 2, lengths bounded (128 KiB raw,
+256 KiB compressed), a stored (scheme 0) chunk's lengths equal, the data within `avail`. -/
+def checkSpec (v c sch u avail : Nat) : Option (Nat × Nat × Nat) :=
+  if v ≠ 0 ∨ 2 < sch then none
+  else if 131072 < u ∨ 262144 < c then none
+  else if sch = 0 ∧ c ≠ u then none
+  else if avail < c then none
+  else some (c, sch, u)
+
+/-- The 8-byte chunk header at `i` of `L`, checked. -/
+def xetHdr (L : List Nat) (i : Nat) : Option (Nat × Nat × Nat) :=
+  if L.length < i + 8 then none
+  else checkSpec (g L i) (g L (i + 1) + g L (i + 2) * 256 + g L (i + 3) * 65536) (g L (i + 4))
+    (g L (i + 5) + g L (i + 6) * 256 + g L (i + 7) * 65536) (L.length - i - 8)
+
+theorem g_B (l : List U8) (k : Nat) (h : k < l.length) : g (B l) k = (l[k]'h).val := by
+  simp [g, B, List.getD_eq_getElem?_getD, h]
+
+@[step]
+theorem u24_spec (a b c : U8) :
+    parse.u24 a b c ⦃ v => v.val = a.val + b.val * 256 + c.val * 65536 ⦄ := by
+  unfold parse.u24
+  step* <;> simp only [UScalar.cast_val_eq] at * <;> scalar_tac
+
+@[step]
+theorem xet_chunk_check_spec (v : U8) (c : U32) (sch : U8) (u : U32) (avail : Usize) :
+    parse.xet_chunk_check v c sch u avail ⦃ r => r.map (fun x => (x.1.val, x.2.1.val, x.2.2.val)) =
+      checkSpec v.val c.val sch.val u.val avail.val ⦄ := by
+  unfold parse.xet_chunk_check parse.XET_MAX_CHUNK
+  step*
+  all_goals (unfold checkSpec; (try simp only [UScalar.cast_val_eq] at *); split_ifs <;> simp_all <;> scalar_tac)
+
+@[step]
+theorem xet_chunk_header_spec (b : Slice U8) (i : Usize) :
+    parse.xet_chunk_header b i ⦃ r => r.map (fun x => (x.1.val, x.2.1.val, x.2.2.val)) = xetHdr (B b.val) i.val ⦄ := by
+  unfold parse.xet_chunk_header
+  have hl : (B b.val).length = b.length := by simp
+  step*
+  · unfold xetHdr; rw [if_pos (by rw [hl]; scalar_tac)]; rfl
+  · unfold xetHdr; rw [if_pos (by rw [hl]; scalar_tac)]; rfl
+  · unfold xetHdr
+    rw [if_neg (by rw [hl]; scalar_tac), r_post]
+    have hb : b.val.length = b.length := by simp
+    rw [g_B _ i.val (by scalar_tac), g_B _ (i.val + 1) (by scalar_tac), g_B _ (i.val + 2) (by scalar_tac),
+      g_B _ (i.val + 3) (by scalar_tac), g_B _ (i.val + 4) (by scalar_tac), g_B _ (i.val + 5) (by scalar_tac),
+      g_B _ (i.val + 6) (by scalar_tac), g_B _ (i.val + 7) (by scalar_tac)]
+    simp only [i16_post, i18_post, clen_post, ulen_post, i5_post, i7_post, i9_post, i11_post, i13_post,
+      i15_post, i4_post, i6_post, i8_post, i10_post, i12_post, i14_post, i17_post, hl]
+    congr 1
+    scalar_tac
+
 end pico2peta_net_kernel.Spec

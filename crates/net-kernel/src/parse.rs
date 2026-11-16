@@ -223,21 +223,14 @@ pub fn parse_lfs_pointer(body: &[u8]) -> Option<(Vec<u8>, u64)> {
 /// Largest uncompressed Xet chunk.
 pub const XET_MAX_CHUNK: u32 = 128 * 1024;
 
-/// A Xet xorb chunk header (8 bytes at `b[i..]`): version 0, compressed length (u24 LE),
-/// scheme (0 none, 1 LZ4, 2 byte-grouped LZ4), uncompressed length (u24 LE). Returns
-/// `(compressed_len, scheme, uncompressed_len)` if the header is present and acceptable: the
-/// lengths are bounded and the compressed data fits in `b`.
-pub fn xet_chunk_header(b: &[u8], i: usize) -> Option<(u32, u8, u32)> {
-    if i > b.len() || b.len() - i < 8 {
-        return None;
-    }
-    if b[i] != 0 {
-        return None;
-    }
-    let clen = (b[i + 1] as u32) | ((b[i + 2] as u32) << 8) | ((b[i + 3] as u32) << 16);
-    let scheme = b[i + 4];
-    let ulen = (b[i + 5] as u32) | ((b[i + 6] as u32) << 8) | ((b[i + 7] as u32) << 16);
-    if scheme > 2 {
+/// A little-endian u24 from three bytes.
+pub fn u24(a: u8, b: u8, c: u8) -> u32 {
+    (a as u32) + (b as u32) * 256 + (c as u32) * 65536
+}
+
+/// The checks on a decoded chunk header; `avail` is the number of bytes after the header.
+pub fn xet_chunk_check(version: u8, clen: u32, scheme: u8, ulen: u32, avail: usize) -> Option<(u32, u8, u32)> {
+    if version != 0 || scheme > 2 {
         return None;
     }
     if ulen > XET_MAX_CHUNK || clen > 2 * XET_MAX_CHUNK {
@@ -246,10 +239,23 @@ pub fn xet_chunk_header(b: &[u8], i: usize) -> Option<(u32, u8, u32)> {
     if scheme == 0 && clen != ulen {
         return None;
     }
-    if (b.len() - i - 8) < (clen as usize) {
+    if avail < (clen as usize) {
         return None;
     }
     Some((clen, scheme, ulen))
+}
+
+/// A Xet xorb chunk header (8 bytes at `b[i..]`): version 0, compressed length (u24 LE),
+/// scheme (0 none, 1 LZ4, 2 byte-grouped LZ4), uncompressed length (u24 LE). Returns
+/// `(compressed_len, scheme, uncompressed_len)` if the header is present and acceptable: the
+/// lengths are bounded and the compressed data fits in `b`.
+pub fn xet_chunk_header(b: &[u8], i: usize) -> Option<(u32, u8, u32)> {
+    if i > b.len() || b.len() - i < 8 {
+        return None;
+    }
+    let clen = u24(b[i + 1], b[i + 2], b[i + 3]);
+    let ulen = u24(b[i + 5], b[i + 6], b[i + 7]);
+    xet_chunk_check(b[i], clen, b[i + 4], ulen, b.len() - i - 8)
 }
 
 #[cfg(test)]

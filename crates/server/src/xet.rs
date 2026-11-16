@@ -48,7 +48,8 @@ const SHARD_HEADER_TAG: [u8; 32] = [
     189, 217, 92, 205, 209, 74, 169,
 ];
 /// Largest chunk (2 × 64 KiB target).
-const MAX_CHUNK: usize = 128 * 1024;
+#[cfg(test)]
+const MAX_CHUNK: usize = pico2peta_net_kernel::parse::XET_MAX_CHUNK as usize;
 pub const MAX_XORB_BODY: usize = 80 << 20;
 /// Uncompressed chunk data per xorb (xet-core's `MAX_XORB_BYTES`).
 const MAX_XORB_DATA: usize = 64 << 20;
@@ -189,21 +190,17 @@ pub fn parse_xorb(b: &[u8]) -> Result<Vec<Vec<u8>>> {
         if b[i..].starts_with(b"XETBLOB") {
             break; // footer
         }
-        let h = b.get(i..i + 8).ok_or_else(|| bad("truncated chunk header"))?;
-        if h[0] != 0 {
-            return Err(bad(format!("chunk header version {}", h[0])));
-        }
-        let clen = u32::from_le_bytes([h[1], h[2], h[3], 0]) as usize;
-        let ulen = u32::from_le_bytes([h[5], h[6], h[7], 0]) as usize;
-        if ulen > MAX_CHUNK || clen > 2 * MAX_CHUNK {
-            return Err(bad("chunk too large"));
-        }
+        // The header decision is the extracted, proven kernel (`xet_chunk_header_spec`): version 0,
+        // scheme ≤ 2, bounded lengths, a stored chunk's lengths equal, and the data inside `b`.
+        let (clen, scheme, ulen) =
+            pico2peta_net_kernel::parse::xet_chunk_header(b, i).ok_or_else(|| bad("bad or truncated chunk header"))?;
+        let (clen, ulen) = (clen as usize, ulen as usize);
         total += ulen;
         if total > MAX_XORB_DATA {
             return Err(bad("xorb holds more than 64 MiB of chunk data"));
         }
         let data = b.get(i + 8..i + 8 + clen).ok_or_else(|| bad("truncated chunk"))?;
-        let raw = match h[4] {
+        let raw = match scheme {
             0 => data.to_vec(),
             1 => lz4_decompress(data, ulen)?,
             2 => bg4_regroup(&lz4_decompress(data, ulen)?),

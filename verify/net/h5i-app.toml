@@ -20,6 +20,7 @@ theorems = [
   "pico2peta_net_kernel.Spec.decode_hex_spec",
   "pico2peta_net_kernel.Spec.pkt_len_spec",
   "pico2peta_net_kernel.Spec.parse_dec_u64_spec",
+  "pico2peta_net_kernel.Spec.xet_chunk_header_spec",
   "pico2peta_net_kernel.guarded_transition.authorized",
   "pico2peta_net_kernel.guarded_transition.read_only_sound",
 ]
