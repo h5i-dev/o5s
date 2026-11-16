@@ -14,7 +14,6 @@ such as `git`, `docker`, `pip`, `npm`, `mvn` and `huggingface_hub` work with it 
 - *"Hugging Face's Xet makes large weights fast"* → Then use it for every domain.
 - *"Registries need their own rules"* → They're just per-namespace rules (`mutable`, `immutable`, `head-release`).
 - *"One store means one bug breaks everything"* → Every decision is formally verified in Lean 4.
-- *"Separate systems are fine"* → Then which commit built this image, and which data trained this model?
 
 ## CLI example
 
