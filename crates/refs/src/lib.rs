@@ -22,9 +22,9 @@
 
 use pico2peta_core::fault::{FaultHandle, Faults};
 use pico2peta_core::{
-    Error, Hash, Mobility, Name, Observed, RefValue, ReplaceManyOutcome, ReplaceOutcome, Result, Rule, governing,
-    is_under, mobility, validate_path,
+    Error, Hash, Name, Observed, RefValue, ReplaceManyOutcome, ReplaceOutcome, Result, Rule, is_under, validate_path,
 };
+use pico2peta_kernel as kernel;
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::FileExt;
@@ -74,104 +74,67 @@ impl RefState {
 
     /// Decides a `replace` against this state (pure). Order: input
     /// validation → read-set validation (`Conflict`) → rule (`Forbidden`).
-    /// Object existence is checked by the caller beforehand.
+    /// Object existence is checked by the caller beforehand. The decision is
+    /// the extracted kernel's (`pico2peta_kernel::refs::decide`).
     pub fn decide_replace(
         &self,
         name: &Name,
         read_set: &[(Name, Observed)],
         new: Hash,
     ) -> Result<std::result::Result<Mutation, ReplaceOutcome>> {
-        if !read_set.iter().any(|(n, _)| n == name) {
-            return Err(Error::TargetNotInReadSet(name.clone()));
-        }
-        let mut stale: Vec<(Name, Observed)> =
-            read_set.iter().filter(|(n, o)| self.observe(n) != *o).map(|(n, _)| (n.clone(), self.observe(n))).collect();
-        if !stale.is_empty() {
-            stale.sort();
-            stale.dedup();
-            return Ok(Err(ReplaceOutcome::Conflict { stale }));
-        }
-        let (rule, prefix) = governing(self.rules.iter(), Rule::Mutable, name);
-        let current = self.refs.get(name);
-        match mobility(rule, &prefix, name) {
-            Mobility::Mutable => {}
-            Mobility::CreateOnce if current.is_none() => {}
-            Mobility::CreateOnce => {
-                return Err(Error::Forbidden { name: name.clone(), rule, why: "name is immutable once published" });
-            }
-            Mobility::Forbidden(why) => return Err(Error::Forbidden { name: name.clone(), rule, why }),
-        }
-        let version = match current {
-            Some(v) => v.version + 1,
-            None => self.tombstones.get(name).map_or(1, |t| t + 1),
-        };
-        Ok(Ok(Mutation::Set(name.clone(), RefValue { hash: new, version })))
+        let k = self.decide_kernel(&[(name.clone(), Some(new))], read_set, "replace")?;
+        Ok(match k {
+            KernelDecision::Commit(mut es) => match es.pop() {
+                Some((n, kernel::refs::Effect::Set(v))) => Ok(Mutation::Set(n, ref_value(v))),
+                _ => return Err(Error::Corrupt("kernel: unexpected effect for replace".into())),
+            },
+            KernelDecision::Conflict(stale) => Err(ReplaceOutcome::Conflict { stale }),
+        })
     }
 
     /// Decides an atomic multi-name update (pure), where `None` deletes.
-    /// Validation is as in [`RefState::decide_replace_many`]; each entry then follows
-    /// the single-name rules (`decide_replace` / `decide_delete`) against the
-    /// pre-state. Returns the mutation and the per-entry versions (deletes:
-    /// the deleted version, 0 if absent).
+    /// Each entry follows the single-name rules against the pre-state.
+    /// Returns the mutation and the per-entry versions (deletes: the deleted
+    /// version, 0 if absent), in the caller's order.
     pub fn decide_update_many(
         &self,
         updates: &[(Name, Option<Hash>)],
         read_set: &[(Name, Observed)],
     ) -> Result<std::result::Result<(Mutation, Vec<u64>), ReplaceManyOutcome>> {
-        if updates.is_empty() || updates.len() > MAX_BATCH {
-            return Err(Error::Parse(format!("update_many takes 1..={MAX_BATCH} updates")));
-        }
-        // Linear in the batch (an index of the read set, built once).
-        let in_read_set: std::collections::HashSet<&Name> = read_set.iter().map(|(r, _)| r).collect();
-        let mut seen = std::collections::HashSet::with_capacity(updates.len());
-        for (n, _) in updates {
-            if !seen.insert(n) {
-                return Err(Error::Parse(format!("duplicate target {n} in update_many")));
-            }
-            if !in_read_set.contains(n) {
-                return Err(Error::TargetNotInReadSet(n.clone()));
-            }
-        }
-        let mut stale: Vec<(Name, Observed)> =
-            read_set.iter().filter(|(n, o)| self.observe(n) != *o).map(|(n, _)| (n.clone(), self.observe(n))).collect();
-        if !stale.is_empty() {
-            stale.sort();
-            stale.dedup();
-            return Ok(Err(ReplaceManyOutcome::Conflict { stale }));
-        }
-        let mut ms = Vec::with_capacity(updates.len());
-        let mut versions = Vec::with_capacity(updates.len());
-        for (name, new) in updates {
-            // The whole read set was validated above; decide this target alone.
-            let own = [(name.clone(), self.observe(name))];
-            match new {
-                Some(h) => match self.decide_replace(name, &own, *h)? {
-                    Ok(Mutation::Set(n, v)) => {
-                        versions.push(v.version);
-                        ms.push(Mutation::Set(n, v));
+        Ok(match self.decide_kernel(updates, read_set, "update_many")? {
+            KernelDecision::Commit(es) => {
+                let mut ms = Vec::with_capacity(es.len());
+                let mut versions = Vec::with_capacity(es.len());
+                for (n, e) in es {
+                    match e {
+                        kernel::refs::Effect::Set(v) => {
+                            versions.push(v.version);
+                            ms.push(Mutation::Set(n, ref_value(v)));
+                        }
+                        kernel::refs::Effect::Delete(v) => {
+                            versions.push(v);
+                            ms.push(Mutation::Delete(n, v));
+                        }
+                        kernel::refs::Effect::Noop => versions.push(0),
                     }
-                    _ => return Err(Error::Corrupt("unexpected decision in update_many".into())),
-                },
-                None => match self.decide_delete(name, &own)? {
-                    Ok(Some(Mutation::Delete(n, v))) => {
-                        versions.push(v);
-                        ms.push(Mutation::Delete(n, v));
-                    }
-                    Ok(None) => versions.push(0),
-                    _ => return Err(Error::Corrupt("unexpected decision in update_many".into())),
-                },
+                }
+                Ok((Mutation::Txn(ms), versions))
             }
-        }
-        Ok(Ok((Mutation::Txn(ms), versions)))
+            KernelDecision::Conflict(stale) => Err(ReplaceManyOutcome::Conflict { stale }),
+        })
     }
 
     /// Whether name rules allow deleting `name` at all (ignoring OCC), using
     /// the same decision as [`RefState::decide_delete`]. For tools that plan
     /// deletions (retention dry runs).
     pub fn rules_allow_delete(rules: &[(String, Rule)], name: &Name) -> bool {
-        let rules: BTreeMap<String, Rule> = rules.iter().cloned().collect();
-        let (rule, prefix) = governing(rules.iter(), Rule::Mutable, name);
-        matches!(mobility(rule, &prefix, name), Mobility::Mutable)
+        let covering: Vec<(Vec<u8>, kernel::Rule)> = rules
+            .iter()
+            .filter(|(p, _)| name.is_under(p))
+            .map(|(p, r)| (p.as_bytes().to_vec(), kernel_rule(*r)))
+            .collect();
+        let (_, m) = kernel::names::mobility_of(&covering, &name.as_str().as_bytes().to_vec());
+        m == kernel::Mobility::Mutable
     }
 
     /// Decides an OCC delete (pure). Deleting an absent name is a no-op
@@ -181,37 +144,129 @@ impl RefState {
         name: &Name,
         read_set: &[(Name, Observed)],
     ) -> Result<std::result::Result<Option<Mutation>, ReplaceOutcome>> {
-        if !read_set.iter().any(|(n, _)| n == name) {
-            return Err(Error::TargetNotInReadSet(name.clone()));
-        }
-        let mut stale: Vec<(Name, Observed)> =
-            read_set.iter().filter(|(n, o)| self.observe(n) != *o).map(|(n, _)| (n.clone(), self.observe(n))).collect();
-        if !stale.is_empty() {
-            stale.sort();
-            stale.dedup();
-            return Ok(Err(ReplaceOutcome::Conflict { stale }));
-        }
-        let Some(cur) = self.refs.get(name) else { return Ok(Ok(None)) };
-        let (rule, prefix) = governing(self.rules.iter(), Rule::Mutable, name);
-        match mobility(rule, &prefix, name) {
-            Mobility::Mutable => Ok(Ok(Some(Mutation::Delete(name.clone(), cur.version)))),
-            Mobility::CreateOnce => {
-                Err(Error::Forbidden { name: name.clone(), rule, why: "immutable names can't be deleted" })
-            }
-            Mobility::Forbidden(why) => Err(Error::Forbidden { name: name.clone(), rule, why }),
-        }
+        Ok(match self.decide_kernel(&[(name.clone(), None)], read_set, "delete")? {
+            KernelDecision::Commit(mut es) => match es.pop() {
+                Some((n, kernel::refs::Effect::Delete(v))) => Ok(Some(Mutation::Delete(n, v))),
+                Some((_, kernel::refs::Effect::Noop)) => Ok(None),
+                _ => return Err(Error::Corrupt("kernel: unexpected effect for delete".into())),
+            },
+            KernelDecision::Conflict(stale) => Err(ReplaceOutcome::Conflict { stale }),
+        })
     }
 
     /// Decides a `set_rule` (pure). Returns `None` when it's a no-op.
     pub fn decide_set_rule(&self, prefix: &str, rule: Rule) -> Result<Option<Mutation>> {
         validate_path(prefix)?;
-        if self.rules.get(prefix) == Some(&rule) {
-            return Ok(None);
+        let any_under = self.refs.keys().any(|n| is_under(n.as_str(), prefix));
+        match kernel::refs::decide_set_rule(
+            self.rules.get(prefix).map(|r| kernel_rule(*r)),
+            kernel_rule(rule),
+            any_under,
+        ) {
+            Ok(false) => Ok(None),
+            Ok(true) => Ok(Some(Mutation::Rule(prefix.to_string(), rule))),
+            Err(kernel::refs::SetRuleRefusal::NonEmpty) => Err(Error::RuleChangeOnNonEmpty(prefix.to_string())),
         }
-        if self.refs.keys().any(|n| is_under(n.as_str(), prefix)) {
-            return Err(Error::RuleChangeOnNonEmpty(prefix.to_string()));
+    }
+
+    /// The rules whose prefixes cover `name`: the empty prefix and every
+    /// segment-aligned prefix of it (a lookup per segment, not a scan).
+    fn covering_rules(&self, name: &Name) -> Vec<(Vec<u8>, kernel::Rule)> {
+        let s = name.as_str();
+        let mut out = Vec::new();
+        if self.rules.is_empty() {
+            return out;
         }
-        Ok(Some(Mutation::Rule(prefix.to_string(), rule)))
+        if let Some(r) = self.rules.get("") {
+            out.push((Vec::new(), kernel_rule(*r)));
+        }
+        for (i, c) in s.char_indices() {
+            if c == '/'
+                && let Some(r) = self.rules.get(&s[..i])
+            {
+                out.push((s.as_bytes()[..i].to_vec(), kernel_rule(*r)));
+            }
+        }
+        if let Some(r) = self.rules.get(s) {
+            out.push((s.as_bytes().to_vec(), kernel_rule(*r)));
+        }
+        out
+    }
+
+    /// Builds the kernel's view of a batch, runs the kernel, and maps the
+    /// result back: effects in the caller's order, refusals to errors.
+    fn decide_kernel(
+        &self,
+        updates: &[(Name, Option<Hash>)],
+        read_set: &[(Name, Observed)],
+        what: &str,
+    ) -> Result<KernelDecision> {
+        let mut reads: Vec<kernel::refs::Read> = read_set
+            .iter()
+            .map(|(n, o)| kernel::refs::Read {
+                name: n.as_str().as_bytes().to_vec(),
+                observed: kernel_observed(*o),
+                current: kernel_observed(self.observe(n)),
+            })
+            .collect();
+        reads.sort_by(|a, b| a.name.cmp(&b.name));
+        // Targets sorted by name; perm[k] is the caller's index of sorted target k.
+        let mut perm: Vec<usize> = (0..updates.len()).collect();
+        perm.sort_by(|&a, &b| updates[a].0.cmp(&updates[b].0));
+        let targets: Vec<kernel::refs::Target> = perm
+            .iter()
+            .map(|&i| {
+                let (n, new) = &updates[i];
+                kernel::refs::Target {
+                    name: n.as_str().as_bytes().to_vec(),
+                    new: new.map(|h| *h.as_bytes()),
+                    current: self.refs.get(n).map(|v| kernel::RefVal { hash: *v.hash.as_bytes(), version: v.version }),
+                    tombstone: self.tombstones.get(n).copied(),
+                    rules: self.covering_rules(n),
+                }
+            })
+            .collect();
+        let view = kernel::refs::View { reads, targets };
+        let target_name = |k: usize| updates[perm[k]].0.clone();
+        match kernel::refs::decide(&view) {
+            Ok(kernel::refs::Decision::Commit(effects)) => {
+                let mut out: Vec<Option<(Name, kernel::refs::Effect)>> = vec![None; updates.len()];
+                for (k, e) in effects.into_iter().enumerate() {
+                    out[perm[k]] = Some((target_name(k), e));
+                }
+                Ok(KernelDecision::Commit(out.into_iter().flatten().collect()))
+            }
+            Ok(kernel::refs::Decision::Conflict(stale)) => {
+                let mut v = Vec::with_capacity(stale.len());
+                for (n, o) in stale {
+                    let n = String::from_utf8(n).map_err(|_| Error::Corrupt("kernel: non-UTF-8 name".into()))?;
+                    v.push((Name::new(n)?, core_observed(o)));
+                }
+                Ok(KernelDecision::Conflict(v))
+            }
+            Err(kernel::refs::Refusal::BatchSize) => {
+                Err(Error::Parse(format!("{what} takes 1..={} updates", kernel::refs::MAX_BATCH)))
+            }
+            Err(kernel::refs::Refusal::Duplicate(k)) => {
+                Err(Error::Parse(format!("duplicate target {} in {what}", target_name(k))))
+            }
+            Err(kernel::refs::Refusal::NotInReadSet(k)) => Err(Error::TargetNotInReadSet(target_name(k))),
+            Err(kernel::refs::Refusal::Forbidden(k, rule, why)) => Err(Error::Forbidden {
+                name: target_name(k),
+                rule: core_rule(rule),
+                why: match why {
+                    kernel::Why::Published => "name is immutable once published",
+                    kernel::Why::ImmutableDelete => "immutable names can't be deleted",
+                    kernel::Why::HeadReleaseOnly => {
+                        "only heads/* and releases/* may be written in a head-release namespace"
+                    }
+                },
+            }),
+            Err(kernel::refs::Refusal::Unsorted) => Err(Error::Corrupt("kernel: unsorted view".into())),
+            Err(kernel::refs::Refusal::VersionExhausted(k)) => {
+                Err(Error::Parse(format!("{} has reached the last version", target_name(k))))
+            }
+        }
     }
 
     /// Applies a mutation.
@@ -250,44 +305,66 @@ impl RefState {
         updates: &[(Name, Hash)],
         read_set: &[(Name, Observed)],
     ) -> Result<std::result::Result<Mutation, ReplaceManyOutcome>> {
-        if updates.is_empty() || updates.len() > MAX_BATCH {
-            return Err(Error::Parse(format!("replace_many takes 1..={MAX_BATCH} updates")));
-        }
-        // Linear in the batch (an index of the read set, built once).
-        let in_read_set: std::collections::HashSet<&Name> = read_set.iter().map(|(r, _)| r).collect();
-        let mut seen = std::collections::HashSet::with_capacity(updates.len());
-        for (n, _) in updates {
-            if !seen.insert(n) {
-                return Err(Error::Parse(format!("duplicate target {n} in replace_many")));
+        let ups: Vec<(Name, Option<Hash>)> = updates.iter().map(|(n, h)| (n.clone(), Some(*h))).collect();
+        Ok(match self.decide_kernel(&ups, read_set, "replace_many")? {
+            KernelDecision::Commit(es) => {
+                let mut sets = Vec::with_capacity(es.len());
+                for (n, e) in es {
+                    match e {
+                        kernel::refs::Effect::Set(v) => sets.push((n, ref_value(v))),
+                        _ => return Err(Error::Corrupt("kernel: unexpected effect for replace_many".into())),
+                    }
+                }
+                Ok(Mutation::Batch(sets))
             }
-            if !in_read_set.contains(n) {
-                return Err(Error::TargetNotInReadSet(n.clone()));
-            }
-        }
-        let mut stale: Vec<(Name, Observed)> =
-            read_set.iter().filter(|(n, o)| self.observe(n) != *o).map(|(n, _)| (n.clone(), self.observe(n))).collect();
-        if !stale.is_empty() {
-            stale.sort();
-            stale.dedup();
-            return Ok(Err(ReplaceManyOutcome::Conflict { stale }));
-        }
-        let mut sets = Vec::with_capacity(updates.len());
-        for (name, new) in updates {
-            // The whole read set was validated above; decide this target alone.
-            let own = [(name.clone(), self.observe(name))];
-            match self.decide_replace(name, &own, *new)? {
-                Ok(Mutation::Set(n, v)) => sets.push((n, v)),
-                Ok(_) => return Err(Error::Corrupt("unexpected mutation".into())),
-                Err(_) => return Err(Error::Corrupt("read set changed during decision".into())),
-            }
-        }
-        Ok(Ok(Mutation::Batch(sets)))
+            KernelDecision::Conflict(stale) => Err(ReplaceManyOutcome::Conflict { stale }),
+        })
     }
 
     /// Refs under `prefix` ("" = all), sorted.
     pub fn list(&self, prefix: &str) -> Vec<(Name, RefValue)> {
         self.refs.iter().filter(|(n, _)| is_under(n.as_str(), prefix)).map(|(n, v)| (n.clone(), *v)).collect()
     }
+}
+
+/// A kernel decision mapped back to core types (effects in the caller's order).
+enum KernelDecision {
+    Commit(Vec<(Name, kernel::refs::Effect)>),
+    Conflict(Vec<(Name, Observed)>),
+}
+
+fn kernel_rule(r: Rule) -> kernel::Rule {
+    match r {
+        Rule::Mutable => kernel::Rule::Mutable,
+        Rule::ImmutableAfterPublish => kernel::Rule::Immutable,
+        Rule::HeadMutableReleaseImmutable => kernel::Rule::HeadRelease,
+    }
+}
+
+fn core_rule(r: kernel::Rule) -> Rule {
+    match r {
+        kernel::Rule::Mutable => Rule::Mutable,
+        kernel::Rule::Immutable => Rule::ImmutableAfterPublish,
+        kernel::Rule::HeadRelease => Rule::HeadMutableReleaseImmutable,
+    }
+}
+
+fn kernel_observed(o: Observed) -> kernel::Observed {
+    match o {
+        Observed::Absent => kernel::Observed::Absent,
+        Observed::Version(v) => kernel::Observed::Version(v),
+    }
+}
+
+fn core_observed(o: kernel::Observed) -> Observed {
+    match o {
+        kernel::Observed::Absent => Observed::Absent,
+        kernel::Observed::Version(v) => Observed::Version(v),
+    }
+}
+
+fn ref_value(v: kernel::RefVal) -> RefValue {
+    RefValue { hash: Hash(v.hash), version: v.version }
 }
 
 fn encode(m: &Mutation) -> Vec<u8> {

@@ -1,0 +1,71 @@
+# pico2peta core kernels (crates/kernel), extracted with Charon + Aeneas and
+# proved in proofs/ (docs/H5I_PLAN.md, Phase H2). Read by `h5i app`.
+
+[extract]
+crate = "../../crates/kernel"
+# Charon starts here and extracts what it reaches.
+start-from = ["refs::decide", "refs::decide_set_rule", "names::validate"]
+
+[check]
+# Must exist and use only Lean's standard axioms (every theorem in a
+# hand-written module is gated anyway; this list catches a rename).
+theorems = [
+    "pico2peta_kernel.Proofs.decide_spec",
+    "pico2peta_kernel.Proofs.commit_validated",
+    "pico2peta_kernel.Proofs.commit_respects_rules",
+    "pico2peta_kernel.Proofs.commit_versions",
+    "pico2peta_kernel.Proofs.mobility_of_spec",
+    "pico2peta_kernel.Proofs.governing_spec",
+    "pico2peta_kernel.Proofs.is_under_spec",
+    "pico2peta_kernel.Proofs.cmp_spec",
+]
+
+# Bugs the proofs must reject (`h5i app mutate`).
+
+[[mutant]]
+name = "stale_read_accepted"
+file = "../../crates/kernel/src/refs.rs"
+old = "if e.observed != e.current && !same_as_last(&out, &e.name, e.current) {"
+new = "if e.observed != e.current && e.observed != Observed::Absent && !same_as_last(&out, &e.name, e.current) {"
+
+[[mutant]]
+name = "conflict_needs_two_stale"
+file = "../../crates/kernel/src/refs.rs"
+old = "if stale.len() > 0 {"
+new = "if stale.len() > 1 {"
+
+[[mutant]]
+name = "published_name_moves"
+file = "../../crates/kernel/src/refs.rs"
+old = "if t.current.is_some() {"
+new = "if t.current.is_none() {"
+
+[[mutant]]
+name = "immutable_delete_allowed"
+file = "../../crates/kernel/src/refs.rs"
+old = "Mobility::CreateOnce => Err(Refusal::Forbidden(i, rule, Why::ImmutableDelete)),"
+new = "Mobility::CreateOnce => Ok(Effect::Delete(cur.version)),"
+
+[[mutant]]
+name = "version_skips"
+file = "../../crates/kernel/src/refs.rs"
+old = "let version = last + 1;"
+new = "let version = last + 2;"
+
+[[mutant]]
+name = "releases_mutable"
+file = "../../crates/kernel/src/names.rs"
+old = "return Mobility::CreateOnce;"
+new = "return Mobility::Mutable;"
+
+[[mutant]]
+name = "governing_last_of_ties"
+file = "../../crates/kernel/src/names.rs"
+old = "if plen > best_len {"
+new = "if plen >= best_len {"
+
+[[mutant]]
+name = "prefix_not_segment_aligned"
+file = "../../crates/kernel/src/names.rs"
+old = "s.len() == prefix.len() || s[prefix.len()] == b'/'"
+new = "s.len() >= prefix.len()"
