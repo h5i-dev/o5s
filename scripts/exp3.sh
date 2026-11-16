@@ -11,7 +11,7 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 MIRRORS=$BENCH_DATA/mirrors
 W=$BENCH_DATA/exp3
-OUT=$W/results.jsonl
+OUT=${EXP3_OUT:-$W/results.jsonl}
 EXP1=$CARGO_TARGET_DIR/release/exp1
 EXP3=$CARGO_TARGET_DIR/release/exp3
 mkdir -p "$W"

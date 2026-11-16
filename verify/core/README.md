@@ -44,7 +44,7 @@ P4, authorization, is net's kernel (`verify/net`, `h5i_app_std::authz::guard`).
 
 ## Proof sensitivity (`h5i app mutate`, 2026-11-16)
 
-15/15 mutants caught, 0 survived (the two decoder mutants were added afterwards and run with the next `mutate`):
+17/17 mutants caught, 0 survived:
 
 | mutant | caught by |
 |---|---|
@@ -63,6 +63,8 @@ P4, authorization, is net's kernel (`verify/net`, `h5i_app_std::authz::guard`).
 | `unsigned_attestation_counts` | counts_spec, signed_by_spec |
 | `retention_deletes_newest` | action_spec |
 | `read_checks_31_bytes` | accept_read_spec |
+| `header_skips_kind_check` | parse_header_spec |
+| `journal_truncates_history` | journal_step_spec |
 
 ## Running
 

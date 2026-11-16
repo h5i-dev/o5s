@@ -82,10 +82,10 @@ impl RefState {
         read_set: &[(Name, Observed)],
         new: Hash,
     ) -> Result<std::result::Result<Mutation, ReplaceOutcome>> {
-        let k = self.decide_kernel(&[(name.clone(), Some(new))], read_set, "replace")?;
+        let k = self.decide_kernel(&[(name, Some(new))], read_set, "replace")?;
         Ok(match k {
-            KernelDecision::Commit(mut es) => match es.pop() {
-                Some((n, kernel::refs::Effect::Set(v))) => Ok(Mutation::Set(n, ref_value(v))),
+            KernelDecision::Commit(es) => match es.first() {
+                Some(kernel::refs::Effect::Set(v)) => Ok(Mutation::Set(name.clone(), ref_value(*v))),
                 _ => return Err(Error::Corrupt("kernel: unexpected effect for replace".into())),
             },
             KernelDecision::Conflict(stale) => Err(ReplaceOutcome::Conflict { stale }),
@@ -105,15 +105,15 @@ impl RefState {
             KernelDecision::Commit(es) => {
                 let mut ms = Vec::with_capacity(es.len());
                 let mut versions = Vec::with_capacity(es.len());
-                for (n, e) in es {
+                for ((n, _), e) in updates.iter().zip(es) {
                     match e {
                         kernel::refs::Effect::Set(v) => {
                             versions.push(v.version);
-                            ms.push(Mutation::Set(n, ref_value(v)));
+                            ms.push(Mutation::Set(n.clone(), ref_value(v)));
                         }
                         kernel::refs::Effect::Delete(v) => {
                             versions.push(v);
-                            ms.push(Mutation::Delete(n, v));
+                            ms.push(Mutation::Delete(n.clone(), v));
                         }
                         kernel::refs::Effect::Noop => versions.push(0),
                     }
@@ -144,10 +144,10 @@ impl RefState {
         name: &Name,
         read_set: &[(Name, Observed)],
     ) -> Result<std::result::Result<Option<Mutation>, ReplaceOutcome>> {
-        Ok(match self.decide_kernel(&[(name.clone(), None)], read_set, "delete")? {
-            KernelDecision::Commit(mut es) => match es.pop() {
-                Some((n, kernel::refs::Effect::Delete(v))) => Ok(Some(Mutation::Delete(n, v))),
-                Some((_, kernel::refs::Effect::Noop)) => Ok(None),
+        Ok(match self.decide_kernel(&[(name, None)], read_set, "delete")? {
+            KernelDecision::Commit(es) => match es.first() {
+                Some(kernel::refs::Effect::Delete(v)) => Ok(Some(Mutation::Delete(name.clone(), *v))),
+                Some(kernel::refs::Effect::Noop) => Ok(None),
                 _ => return Err(Error::Corrupt("kernel: unexpected effect for delete".into())),
             },
             KernelDecision::Conflict(stale) => Err(ReplaceOutcome::Conflict { stale }),
@@ -195,9 +195,9 @@ impl RefState {
 
     /// Builds the kernel's view of a batch, runs the kernel, and maps the
     /// result back: effects in the caller's order, refusals to errors.
-    fn decide_kernel(
+    fn decide_kernel<N: std::borrow::Borrow<Name>>(
         &self,
-        updates: &[(Name, Option<Hash>)],
+        updates: &[(N, Option<Hash>)],
         read_set: &[(Name, Observed)],
         what: &str,
     ) -> Result<KernelDecision> {
@@ -212,11 +212,14 @@ impl RefState {
         reads.sort_by(|a, b| a.name.cmp(&b.name));
         // Targets sorted by name; perm[k] is the caller's index of sorted target k.
         let mut perm: Vec<usize> = (0..updates.len()).collect();
-        perm.sort_by(|&a, &b| updates[a].0.cmp(&updates[b].0));
+        if updates.len() > 1 {
+            perm.sort_by(|&a, &b| updates[a].0.borrow().cmp(updates[b].0.borrow()));
+        }
         let targets: Vec<kernel::refs::Target> = perm
             .iter()
             .map(|&i| {
                 let (n, new) = &updates[i];
+                let n: &Name = n.borrow();
                 kernel::refs::Target {
                     name: n.as_str().as_bytes().to_vec(),
                     new: new.map(|h| *h.as_bytes()),
@@ -227,14 +230,20 @@ impl RefState {
             })
             .collect();
         let view = kernel::refs::View { reads, targets };
-        let target_name = |k: usize| updates[perm[k]].0.clone();
+        let target_name = |k: usize| updates[perm[k]].0.borrow().clone();
         match kernel::refs::decide(&view) {
             Ok(kernel::refs::Decision::Commit(effects)) => {
-                let mut out: Vec<Option<(Name, kernel::refs::Effect)>> = vec![None; updates.len()];
-                for (k, e) in effects.into_iter().enumerate() {
-                    out[perm[k]] = Some((target_name(k), e));
+                if effects.len() != updates.len() {
+                    return Err(Error::Corrupt("kernel: effect count differs from target count".into()));
                 }
-                Ok(KernelDecision::Commit(out.into_iter().flatten().collect()))
+                if updates.len() == 1 {
+                    return Ok(KernelDecision::Commit(effects));
+                }
+                let mut out = vec![kernel::refs::Effect::Noop; updates.len()];
+                for (k, e) in effects.into_iter().enumerate() {
+                    out[perm[k]] = e;
+                }
+                Ok(KernelDecision::Commit(out))
             }
             Ok(kernel::refs::Decision::Conflict(stale)) => {
                 let mut v = Vec::with_capacity(stale.len());
@@ -305,13 +314,13 @@ impl RefState {
         updates: &[(Name, Hash)],
         read_set: &[(Name, Observed)],
     ) -> Result<std::result::Result<Mutation, ReplaceManyOutcome>> {
-        let ups: Vec<(Name, Option<Hash>)> = updates.iter().map(|(n, h)| (n.clone(), Some(*h))).collect();
+        let ups: Vec<(&Name, Option<Hash>)> = updates.iter().map(|(n, h)| (n, Some(*h))).collect();
         Ok(match self.decide_kernel(&ups, read_set, "replace_many")? {
             KernelDecision::Commit(es) => {
                 let mut sets = Vec::with_capacity(es.len());
-                for (n, e) in es {
+                for ((n, _), e) in updates.iter().zip(es) {
                     match e {
-                        kernel::refs::Effect::Set(v) => sets.push((n, ref_value(v))),
+                        kernel::refs::Effect::Set(v) => sets.push((n.clone(), ref_value(v))),
                         _ => return Err(Error::Corrupt("kernel: unexpected effect for replace_many".into())),
                     }
                 }
@@ -329,7 +338,8 @@ impl RefState {
 
 /// A kernel decision mapped back to core types (effects in the caller's order).
 enum KernelDecision {
-    Commit(Vec<(Name, kernel::refs::Effect)>),
+    /// One effect per target, in the caller's order.
+    Commit(Vec<kernel::refs::Effect>),
     Conflict(Vec<(Name, Observed)>),
 }
 

@@ -11,7 +11,7 @@ source "$(dirname "$0")/env.sh"
 r=$1; shift
 W=$BENCH_DATA/exp3
 EXP3=$CARGO_TARGET_DIR/release/exp3
-OUT=$W/retime.jsonl
+OUT=${EXP3_RETIME_OUT:-$W/retime.jsonl}
 [ "$(git --version)" = "git version 2.50.1" ] || { echo "baseline needs git 2.50.1" >&2; exit 1; }
 for v in "$@"; do
   flock "$SCRATCH/bench.lock" bash -c '

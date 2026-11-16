@@ -38,7 +38,7 @@ pub fn segment_byte(c: u8) -> bool {
 
 /// Checks the grammar. The first problem found (scanning left to right,
 /// segment by segment) is reported.
-pub fn validate(s: &Vec<u8>) -> Result<(), Invalid> {
+pub fn validate(s: &[u8]) -> Result<(), Invalid> {
     if s.len() == 0 {
         return Err(Invalid::Empty);
     }

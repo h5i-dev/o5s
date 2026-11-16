@@ -874,14 +874,14 @@ def names.segment_byte (c : Std.U8) : Result Bool := do
     Visibility: public -/
 @[rust_loop_body]
 def names.validate_loop.body
-  (s : alloc.vec.Vec Std.U8) (start : Std.Usize) (i : Std.Usize) :
+  (s : Slice Std.U8) (start : Std.Usize) (i : Std.Usize) :
   Result (ControlFlow (Std.Usize × Std.Usize) (core.result.Result Unit
     names.Invalid))
   := do
-  let i1 := alloc.vec.Vec.len s
+  let i1 := Slice.len s
   if i <= i1
   then
-    let i2 := alloc.vec.Vec.len s
+    let i2 := Slice.len s
     if i = i2
     then
       let n ← i - start
@@ -890,9 +890,7 @@ def names.validate_loop.body
       else
         if n = 1#usize
         then
-          let i3 ←
-            alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8)
-              s start
+          let i3 ← Slice.index_usize s start
           if i3 = 46#u8
           then ok (done (core.result.Result.Err names.Invalid.DotSegment))
           else
@@ -901,9 +899,7 @@ def names.validate_loop.body
               if i3 = 46#u8
               then
                 let i4 ← start + 1#usize
-                let i5 ←
-                  alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
-                    Std.U8) s i4
+                let i5 ← Slice.index_usize s i4
                 if i5 = 46#u8
                 then
                   ok (done (core.result.Result.Err names.Invalid.DotSegment))
@@ -916,15 +912,11 @@ def names.validate_loop.body
         else
           if n = 2#usize
           then
-            let i3 ←
-              alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
-                Std.U8) s start
+            let i3 ← Slice.index_usize s start
             if i3 = 46#u8
             then
               let i4 ← start + 1#usize
-              let i5 ←
-                alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
-                  Std.U8) s i4
+              let i5 ← Slice.index_usize s i4
               if i5 = 46#u8
               then ok (done (core.result.Result.Err names.Invalid.DotSegment))
               else let start1 ← i + 1#usize
@@ -934,8 +926,7 @@ def names.validate_loop.body
           else let start1 ← i + 1#usize
                ok (cont (start1, start1))
     else
-      let i3 ←
-        alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) s i
+      let i3 ← Slice.index_usize s i
       if i3 = 47#u8
       then
         let n ← i - start
@@ -944,9 +935,7 @@ def names.validate_loop.body
         else
           if n = 1#usize
           then
-            let i4 ←
-              alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
-                Std.U8) s start
+            let i4 ← Slice.index_usize s start
             if i4 = 46#u8
             then ok (done (core.result.Result.Err names.Invalid.DotSegment))
             else
@@ -955,9 +944,7 @@ def names.validate_loop.body
                 if i4 = 46#u8
                 then
                   let i5 ← start + 1#usize
-                  let i6 ←
-                    alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
-                      Std.U8) s i5
+                  let i6 ← Slice.index_usize s i5
                   if i6 = 46#u8
                   then
                     ok (done (core.result.Result.Err names.Invalid.DotSegment))
@@ -970,15 +957,11 @@ def names.validate_loop.body
           else
             if n = 2#usize
             then
-              let i4 ←
-                alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
-                  Std.U8) s start
+              let i4 ← Slice.index_usize s start
               if i4 = 46#u8
               then
                 let i5 ← start + 1#usize
-                let i6 ←
-                  alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
-                    Std.U8) s i5
+                let i6 ← Slice.index_usize s i5
                 if i6 = 46#u8
                 then
                   ok (done (core.result.Result.Err names.Invalid.DotSegment))
@@ -1001,7 +984,7 @@ def names.validate_loop.body
     Visibility: public -/
 @[rust_loop]
 def names.validate_loop
-  (s : alloc.vec.Vec Std.U8) (start : Std.Usize) (i : Std.Usize) :
+  (s : Slice Std.U8) (start : Std.Usize) (i : Std.Usize) :
   Result (core.result.Result Unit names.Invalid)
   := do
   loop
@@ -1012,14 +995,12 @@ def names.validate_loop
     Source: 'crates/kernel/src/names.rs', lines 41:0-67:1
     Visibility: public -/
 def names.validate
-  (s : alloc.vec.Vec Std.U8) :
-  Result (core.result.Result Unit names.Invalid)
-  := do
-  let i := alloc.vec.Vec.len s
+  (s : Slice Std.U8) : Result (core.result.Result Unit names.Invalid) := do
+  let i := Slice.len s
   if i = 0#usize
   then ok (core.result.Result.Err names.Invalid.Empty)
   else
-    let i1 := alloc.vec.Vec.len s
+    let i1 := Slice.len s
     if i1 > names.MAX_NAME
     then ok (core.result.Result.Err names.Invalid.TooLong)
     else names.validate_loop s 0#usize 0#usize
@@ -1463,7 +1444,7 @@ def promote.signed_by
   promote.signed_by_loop policy atts k 0#usize
 
 /-- [pico2peta_kernel::promote::key_missing]:
-    Source: 'crates/kernel/src/promote.rs', lines 106:0-115:1
+    Source: 'crates/kernel/src/promote.rs', lines 106:0-111:1
     Visibility: public -/
 def promote.key_missing
   (policy : promote.Policy) (atts : alloc.vec.Vec promote.Attestation)
@@ -1531,7 +1512,7 @@ def promote.keys_missing
     Std.U8)) 0#usize
 
 /-- [pico2peta_kernel::promote::prov_missing]:
-    Source: 'crates/kernel/src/promote.rs', lines 118:0-120:1
+    Source: 'crates/kernel/src/promote.rs', lines 114:0-116:1
     Visibility: public -/
 def promote.prov_missing
   (required : Bool) (has_producer : Bool) : Result Bool := do
@@ -1540,7 +1521,7 @@ def promote.prov_missing
   else ok false
 
 /-- [pico2peta_kernel::promote::observed]:
-    Source: 'crates/kernel/src/promote.rs', lines 123:0-128:1
+    Source: 'crates/kernel/src/promote.rs', lines 119:0-124:1
     Visibility: public -/
 def promote.observed (v : Option RefVal) : Result Observed := do
   match v with
@@ -1548,7 +1529,7 @@ def promote.observed (v : Option RefVal) : Result Observed := do
   | some d => ok (Observed.Version d.version)
 
 /-- [pico2peta_kernel::promote::decide_promote]:
-    Source: 'crates/kernel/src/promote.rs', lines 132:0-150:1
+    Source: 'crates/kernel/src/promote.rs', lines 128:0-146:1
     Visibility: public -/
 def promote.decide_promote
   (policy : promote.Policy) (src : Option RefVal) (dst : Option RefVal)
@@ -2061,7 +2042,7 @@ def refs.decide_set_rule
       else ok (core.result.Result.Ok true)
 
 /-- [pico2peta_kernel::retention::cmp_from]: loop body 0:
-    Source: 'crates/kernel/src/retention.rs', lines 110:4-120:1 -/
+    Source: 'crates/kernel/src/retention.rs', lines 105:4-115:1 -/
 @[rust_loop_body]
 def retention.cmp_from_loop.body
   (a : alloc.vec.Vec Std.U8) (ai : Std.Usize) (b : alloc.vec.Vec Std.U8)
@@ -2102,7 +2083,7 @@ def retention.cmp_from_loop.body
   else ok (done 0#i8)
 
 /-- [pico2peta_kernel::retention::cmp_from]: loop 0:
-    Source: 'crates/kernel/src/retention.rs', lines 110:4-120:1 -/
+    Source: 'crates/kernel/src/retention.rs', lines 105:4-115:1 -/
 @[rust_loop]
 def retention.cmp_from_loop
   (a : alloc.vec.Vec Std.U8) (ai : Std.Usize) (b : alloc.vec.Vec Std.U8)
@@ -2114,7 +2095,7 @@ def retention.cmp_from_loop
     k
 
 /-- [pico2peta_kernel::retention::cmp_from]:
-    Source: 'crates/kernel/src/retention.rs', lines 108:0-120:1 -/
+    Source: 'crates/kernel/src/retention.rs', lines 103:0-115:1 -/
 @[reducible]
 def retention.cmp_from
   (a : alloc.vec.Vec Std.U8) (ai : Std.Usize) (b : alloc.vec.Vec Std.U8)
@@ -2124,7 +2105,7 @@ def retention.cmp_from
   retention.cmp_from_loop a ai b bi n 0#usize
 
 /-- [pico2peta_kernel::retention::skip_zeros]: loop body 0:
-    Source: 'crates/kernel/src/retention.rs', lines 101:4-103:5 -/
+    Source: 'crates/kernel/src/retention.rs', lines 96:4-98:5 -/
 @[rust_loop_body]
 def retention.skip_zeros_loop.body
   (s : alloc.vec.Vec Std.U8) (i : Std.Usize) :
@@ -2142,7 +2123,7 @@ def retention.skip_zeros_loop.body
   else ok (done i)
 
 /-- [pico2peta_kernel::retention::skip_zeros]: loop 0:
-    Source: 'crates/kernel/src/retention.rs', lines 101:4-103:5 -/
+    Source: 'crates/kernel/src/retention.rs', lines 96:4-98:5 -/
 @[rust_loop]
 def retention.skip_zeros_loop
   (s : alloc.vec.Vec Std.U8) (i : Std.Usize) : Result Std.Usize := do
@@ -2151,13 +2132,13 @@ def retention.skip_zeros_loop
     i
 
 /-- [pico2peta_kernel::retention::skip_zeros]:
-    Source: 'crates/kernel/src/retention.rs', lines 99:0-105:1 -/
+    Source: 'crates/kernel/src/retention.rs', lines 94:0-100:1 -/
 @[reducible]
 def retention.skip_zeros (s : alloc.vec.Vec Std.U8) : Result Std.Usize := do
   retention.skip_zeros_loop s 0#usize
 
 /-- [pico2peta_kernel::retention::run_cmp]:
-    Source: 'crates/kernel/src/retention.rs', lines 81:0-96:1 -/
+    Source: 'crates/kernel/src/retention.rs', lines 76:0-91:1 -/
 def retention.run_cmp
   (p : (Bool × (alloc.vec.Vec Std.U8))) (q : (Bool × (alloc.vec.Vec Std.U8)))
   :
@@ -2185,7 +2166,7 @@ def retention.run_cmp
        names.cmp v v1
 
 /-- [pico2peta_kernel::retention::flush_run]:
-    Source: 'crates/kernel/src/retention.rs', lines 65:0-78:1
+    Source: 'crates/kernel/src/retention.rs', lines 65:0-73:1
     Visibility: public -/
 def retention.flush_run
   (out : alloc.vec.Vec (Bool × (alloc.vec.Vec Std.U8)))
@@ -2334,7 +2315,7 @@ def retention.version_cmp
   retention.version_cmp_loop a b ra rb n 0#usize
 
 /-- [pico2peta_kernel::retention::Entry]
-    Source: 'crates/kernel/src/retention.rs', lines 124:0-133:1
+    Source: 'crates/kernel/src/retention.rs', lines 119:0-128:1
     Visibility: public -/
 structure retention.Entry where
   «name» : alloc.vec.Vec Std.U8
@@ -2343,7 +2324,7 @@ structure retention.Entry where
   rules : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × Rule)
 
 /-- [pico2peta_kernel::retention::Action]
-    Source: 'crates/kernel/src/retention.rs', lines 137:0-146:1
+    Source: 'crates/kernel/src/retention.rs', lines 132:0-141:1
     Visibility: public -/
 @[discriminant isize]
 inductive retention.Action where
@@ -2353,7 +2334,7 @@ inductive retention.Action where
 | Delete : retention.Action
 
 /-- [pico2peta_kernel::retention::action]:
-    Source: 'crates/kernel/src/retention.rs', lines 169:0-181:1
+    Source: 'crates/kernel/src/retention.rs', lines 164:0-176:1
     Visibility: public -/
 def retention.action
   (k : Std.Usize) (old : Std.Usize) (only_if_regenerable : Bool)
@@ -2381,7 +2362,7 @@ def retention.action
       | Mobility.Forbidden => ok retention.Action.KeepByRule
 
 /-- [pico2peta_kernel::retention::plan]: loop body 1:
-    Source: 'crates/kernel/src/retention.rs', lines 161:4-164:5
+    Source: 'crates/kernel/src/retention.rs', lines 156:4-159:5
     Visibility: public -/
 @[rust_loop_body]
 def retention.plan_loop0_loop0.body
@@ -2403,7 +2384,7 @@ def retention.plan_loop0_loop0.body
   else ok (done out)
 
 /-- [pico2peta_kernel::retention::plan]: loop 1:
-    Source: 'crates/kernel/src/retention.rs', lines 161:4-164:5
+    Source: 'crates/kernel/src/retention.rs', lines 156:4-159:5
     Visibility: public -/
 @[rust_loop]
 def retention.plan_loop0_loop0
@@ -2417,7 +2398,7 @@ def retention.plan_loop0_loop0
     (out, k)
 
 /-- [pico2peta_kernel::retention::plan]: loop body 0:
-    Source: 'crates/kernel/src/retention.rs', lines 152:4-166:1
+    Source: 'crates/kernel/src/retention.rs', lines 147:4-161:1
     Visibility: public -/
 @[rust_loop_body]
 def retention.plan_loop0.body
@@ -2454,7 +2435,7 @@ def retention.plan_loop0.body
     ok (done (core.result.Result.Ok out))
 
 /-- [pico2peta_kernel::retention::plan]: loop 0:
-    Source: 'crates/kernel/src/retention.rs', lines 152:4-166:1
+    Source: 'crates/kernel/src/retention.rs', lines 147:4-161:1
     Visibility: public -/
 @[rust_loop]
 def retention.plan_loop0
@@ -2467,7 +2448,7 @@ def retention.plan_loop0
     i
 
 /-- [pico2peta_kernel::retention::plan]:
-    Source: 'crates/kernel/src/retention.rs', lines 150:0-166:1
+    Source: 'crates/kernel/src/retention.rs', lines 145:0-161:1
     Visibility: public -/
 @[reducible]
 def retention.plan
