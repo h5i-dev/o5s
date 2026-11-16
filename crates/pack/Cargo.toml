@@ -15,6 +15,9 @@ zstd.workspace = true
 crc32fast.workspace = true
 memmap2.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 crc32fast.workspace = true
 tempfile.workspace = true

@@ -339,6 +339,34 @@ struct OpenPack {
     /// BLAKE3 of bytes `[0, len)`, updated on every append (appends are serialized
     /// and contiguous), so sealing needn't read the pack back.
     hasher: blake3::Hasher,
+    /// Bytes `[0, flushed)` have had writeback started ([`start_writeback`]).
+    flushed: u64,
+}
+
+/// Writeback of a staging file is started every this many appended bytes.
+const WRITEBACK_STEP: u64 = 8 << 20;
+
+/// Starts asynchronous writeback of `len` bytes at `off` (Linux `sync_file_range` with
+/// `SYNC_FILE_RANGE_WRITE`). It guarantees nothing; durability still comes from the seal's
+/// `sync_all`. Without it the kernel leaves a pack's pages dirty until that fsync, so the disk
+/// idles while records are produced and the pipeline then stalls for the whole writeback;
+/// with it, writing overlaps producing. A no-op elsewhere, and errors are ignored.
+fn start_writeback(f: &File, off: u64, len: u64) {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        // SAFETY: a plain syscall on a file descriptor we own, with no pointers.
+        let _ = unsafe {
+            libc::sync_file_range(
+                f.as_raw_fd(),
+                off as libc::off64_t,
+                len as libc::off64_t,
+                libc::SYNC_FILE_RANGE_WRITE,
+            )
+        };
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (f, off, len);
 }
 
 struct Inner {
@@ -1143,6 +1171,7 @@ impl PackStore {
             generation: self.inner.generation.fetch_add(1, Ordering::Relaxed),
             len: PACK_HEADER_V2 as u64,
             entries: Vec::new(),
+            flushed: 0,
         })
     }
 
@@ -1194,6 +1223,10 @@ impl PackStore {
         op.file.write_all_at(rec, offset)?;
         op.hasher.update(rec);
         op.len += rec.len() as u64;
+        if op.len - op.flushed >= WRITEBACK_STEP {
+            start_writeback(&op.file, op.flushed, op.len - op.flushed);
+            op.flushed = op.len;
+        }
         let stored_len = (rec.len() - REC_HEADER - REC_TRAILER) as u32;
         op.entries.push(IdxEntry { hash, offset, stored_len, raw_len, kind, codec, frame: None });
         let loc = Loc { pack: PackRef::Open(op.generation), offset, stored_len, raw_len, kind, frame: None };
@@ -1213,12 +1246,12 @@ impl PackStore {
     }
 
     fn seal_one(&self, op: OpenPack, w: &mut Option<OpenPack>, was_pending: bool) -> Result<()> {
-        let OpenPack { file, path, generation, len, entries, hasher } = op;
+        let OpenPack { file, path, generation, len, entries, hasher, flushed } = op;
         let known = hasher.finalize().to_hex().to_string();
         let name = match self.inner.seal_file_named(&path, &file, len, entries.clone(), Some(known)) {
             Ok(n) => n,
             Err(e) => {
-                let op = OpenPack { file, path, generation, len, entries, hasher };
+                let op = OpenPack { file, path, generation, len, entries, hasher, flushed };
                 // If the pack is already published (on local disk it's a hard link to this
                 // very file), the file must never be appended to again: freeze it in the
                 // pending list (still readable, retried on the next flush) and let new
