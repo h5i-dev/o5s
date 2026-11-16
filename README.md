@@ -2,16 +2,10 @@
 
 Why do we need a separate GitHub for source code, JFrog for build outputs, Docker Hub for container images,
 PyPI and npm for packages, Hugging Face for LLM weights, and so on? They are all just data, just sequences of
-0s and 1s. Why not treat them all the same way? All the operations we really have are push, pull, and overwrite.
+0s and 1s. Why not treat them all the same way?
 
-o5s treats every kind of data the same way. Each file is stored once, as an immutable object named by the hash
-of its content, and a name such as `team/app/main` or `models/acme/main` points to one of these objects. A push
-stores new objects, a pull reads them back and checks them against their hash, and an overwrite moves a name to
-another object only if nobody else moved it first. Chunking, deduplication, compression, access control,
-provenance and garbage collection work the same for source code, packages, container images and model weights.
-
-As a bonus, existing CLIs such as `git`, `docker`, `pip`, `npm`, `mvn` and `huggingface_hub` work with it
-unmodified.
+o5s treats every kind of data the same way, using only push, pull, and overwrite. As a bonus, existing CLIs
+such as `git`, `docker`, `pip`, `npm`, `mvn` and `huggingface_hub` work with it unmodified.
 
 ## Potential pushback
 
