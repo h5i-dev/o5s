@@ -49,21 +49,42 @@ Exit codes: 0 ok, 1 error, 2 not found, 3 conflict, 4 forbidden, 5 unauthorized.
 
 ## Supported fronts
 
+Each front speaks its domain's protocol, so the real client works unmodified.
+
 ```sh
 o5s-server gen-token admin                    # prints the token once, plus its tokens.toml entry
 o5s-server serve --config deploy/server.toml  # local disk or any S3-compatible bucket
 export S=o5s.example.com TOKEN=o5s_...
-```
 
-| front | the real client, unmodified |
-|---|---|
-| **Git** | `git clone https://any:$TOKEN@$S/git/team/proj.git`, then `git push` (SHA-1 and SHA-256, shallow and partial clone) |
-| **OCI** | `docker login $S -u any -p "$TOKEN"`; `docker push $S/team/app:1.0`; `oras push $S/team/app:sbom ./sbom.json` |
-| **Hugging Face** | `export HF_ENDPOINT=https://$S HF_TOKEN=$TOKEN`; `hf upload team/tiny ./model`; `snapshot_download` (LFS and Xet) |
-| **PyPI** | `twine upload --repository-url https://$S/pypi/team/ -u token -p "$TOKEN" dist/*`; `pip install --index-url https://token:$TOKEN@$S/pypi/team/simple/ mypkg` |
-| **npm** | `.npmrc`: `registry=https://$S/npm/team/` and `//$S/npm/team/:_authToken=${TOKEN}`; `npm publish`, `npm install` |
-| **Maven** | `settings.xml` server `o5s` (user `token`, password = token); `mvn deploy -DaltDeploymentRepository=o5s::https://$S/maven/releases` |
-| **native** | `PUT /v1/objects`, `POST /v1/refs/...` (compare-and-swap), and provenance, attestations, promotion and search under `/v1` |
+# Git (SHA-1 and SHA-256, shallow and partial clone)
+git clone https://any:$TOKEN@$S/git/team/proj.git
+git push
+
+# OCI
+docker login $S -u any -p "$TOKEN"
+docker push $S/team/app:1.0
+oras push $S/team/app:sbom ./sbom.json
+
+# Hugging Face (LFS and Xet)
+export HF_ENDPOINT=https://$S HF_TOKEN=$TOKEN
+hf upload team/tiny ./model
+hf download team/tiny
+
+# PyPI
+twine upload --repository-url https://$S/pypi/team/ -u token -p "$TOKEN" dist/*
+pip install --index-url https://token:$TOKEN@$S/pypi/team/simple/ mypkg
+
+# npm (.npmrc: registry=https://$S/npm/team/ and //$S/npm/team/:_authToken=${TOKEN})
+npm publish
+npm install mypkg
+
+# Maven (settings.xml: server "o5s", user "token", password = the token)
+mvn deploy -DaltDeploymentRepository=o5s::https://$S/maven/releases
+
+# Native API
+curl -T big.bin -H "Authorization: Bearer $TOKEN" https://$S/v1/objects   # {"hash","size"}
+curl -H "Authorization: Bearer $TOKEN" -r 0-1023 https://$S/v1/objects/<hash>
+```
 
 PyPI, npm and Maven can also proxy-cache their public upstreams. Every front shares one store, so the same bytes
 pushed through Git, PyPI and OCI are stored once, under one provenance log, audit log and policy.
