@@ -12,7 +12,7 @@ unmodified.
 
 - "Merge in Git is necessary" → Merge is just a special case of overwrite.
 - "Xet makes large weights fast" → Then use it for every domain.
-- "Git packs source code better" → Similarity repack stores 0.79–0.95× of `git gc --aggressive`, for any data.
+- "Git packs source code better" → Then use it for every domain.
 - "Registries need their own rules" → They're per-namespace rules: `mutable`, `immutable`, `head-release`.
 - "One store means one bug breaks everything" → Every decision is proved in Lean on the extracted code.
 - "Separate systems are fine" → Not for lineage: one store links commit → build → package → image → model.
