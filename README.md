@@ -13,7 +13,7 @@ PyPI and npm for packages, Hugging Face for LLM weights, and so on?
 
 ## Potential pushback
 
-- *"Merge in Git is necessary"* → Merge is just a special case of overwrite.
+- *"Merge in Git is necessary"* → Merge is just a special case of `replace`.
 - *"Git packs source code better"* → Then use it for every domain.
 - *"Hugging Face's Xet makes large weights fast"* → Then use it for every domain.
 - *"Registries need their own rules"* → They're just per-namespace rules (`mutable`, `immutable`, `head-release`).
