@@ -14,7 +14,7 @@ unmodified.
 - "Hugging Face's Xet makes large weights fast" → Then use it for every domain.
 - "Git packs source code better" → Then use it for every domain.
 - "Registries need their own rules" → They're per-namespace rules: `mutable`, `immutable`, `head-release`.
-- "One store means one bug breaks everything" → Every decision is proved in Lean on the extracted code.
+- "One store means one bug breaks everything" → Every decision is formally verified in Lean 4.
 - "Separate systems are fine" → Not for lineage: one store links commit → build → package → image → model.
 
 ## CLI example
