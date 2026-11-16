@@ -137,8 +137,9 @@ class Proc:
 
 
 @contextlib.contextmanager
-def pico_server(d, server_bin, extra_toml="", repo_toml="", principal="bench"):
-    """A pico2peta-server in d with one admin token. Yields (base_url, repo_path)."""
+def pico_server(d, server_bin, extra_toml="", repo_toml="", principal="bench", log_format="text", log_filter="warn"):
+    """A pico2peta-server in d with one admin token. Yields (base_url, repo_path). Its log is
+    d/server.log (`log_filter = "info"` adds one line per response, with its latency)."""
     port = free_port()
     repo = os.path.join(d, "repo")
     tok_sha = hashlib.sha256(TOKEN.encode()).hexdigest()
@@ -168,8 +169,8 @@ path = "{d}/audit.jsonl"
 log_reads = false
 
 [log]
-format = "text"
-filter = "warn"
+format = "{log_format}"
+filter = "{log_filter}"
 {extra_toml}
 """
     path = os.path.join(d, "server.toml")
