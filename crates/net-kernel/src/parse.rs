@@ -53,12 +53,14 @@ pub fn pkt_len(b: &[u8]) -> Option<u16> {
     Some(v)
 }
 
+/// A leading `0` in a number of more than one digit.
+pub fn leading_zero(s: &[u8]) -> bool {
+    if s.len() > 1 { s[0] == 48 } else { false }
+}
+
 /// Strict decimal `u64`: nonempty, digits only, no leading zero (except "0"), no overflow.
 pub fn parse_dec_u64(s: &[u8]) -> Option<u64> {
-    if s.len() == 0 {
-        return None;
-    }
-    if s.len() > 1 && s[0] == 48 {
+    if s.len() == 0 || leading_zero(s) {
         return None;
     }
     let mut v: u64 = 0;

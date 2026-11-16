@@ -181,4 +181,114 @@ theorem pkt_len_spec (b : Slice U8) :
        have : (B b.val).length = 4 := by simp; scalar_tac
        by_cases h : allHex (B b.val) = true <;> simp [h, this])
 
+/-! ## Strict decimal -/
+
+def u64max : Nat := 2 ^ 64 - 1
+
+/-- Big-endian decimal value. -/
+def decNum (l : List Nat) : Nat := l.foldl (fun a c => a * 10 + (c - 48)) 0
+
+def allDig (l : List Nat) : Bool := l.all (fun c => decide (48 ≤ c ∧ c ≤ 57))
+
+/-- Strict decimal `u64`: nonempty, digits only, no leading zero unless it is `0`, fits. -/
+def decSpec (l : List Nat) : Option Nat :=
+  if l = [] then none
+  else if 1 < l.length ∧ l.head? = some 48 then none
+  else if allDig l = true ∧ decNum l ≤ u64max then some (decNum l) else none
+
+theorem decNum_snoc (l : List Nat) (c : Nat) : decNum (l ++ [c]) = decNum l * 10 + (c - 48) := by
+  simp [decNum, List.foldl_append]
+
+theorem foldl_ge (l : List Nat) (a : Nat) : a ≤ l.foldl (fun a c => a * 10 + (c - 48)) a := by
+  induction l generalizing a with
+  | nil => simp
+  | cons c r ih => simp only [List.foldl_cons]; exact le_trans (by omega) (ih _)
+
+theorem decNum_append_ge (l r : List Nat) : decNum l ≤ decNum (l ++ r) := by
+  unfold decNum; rw [List.foldl_append]; exact foldl_ge _ _
+
+@[step]
+theorem leading_zero_spec (s : Slice U8) :
+    parse.leading_zero s ⦃ b => b = (1 < (B s.val).length ∧ (B s.val).head? = some 48) ⦄ := by
+  unfold parse.leading_zero
+  step*
+  · have hne : s.val ≠ [] := by intro h; simp [h] at *; scalar_tac
+    obtain ⟨x, r, hx⟩ := List.exists_cons_of_ne_nil hne
+    simp_all
+    constructor
+    · intro h; constructor; · scalar_tac
+      rw [h]; rfl
+    · rintro ⟨_, h⟩; exact UScalar.eq_of_val_eq (by simpa using h)
+
+@[step]
+theorem parse_dec_u64_loop_spec (s : Slice U8) (v : U64) (i : Usize)
+    (hi : i.val ≤ s.length)
+    (hv : v.val = decNum ((B s.val).take i.val)) (ha : allDig ((B s.val).take i.val) = true) :
+    parse.parse_dec_u64_loop s v i ⦃ r => r.map (·.val) =
+      if allDig (B s.val) = true ∧ decNum (B s.val) ≤ u64max then some (decNum (B s.val)) else none ⦄ := by
+  unfold parse.parse_dec_u64_loop
+  apply loop.spec_decr_nat (measure := fun (x : U64 × Usize) => s.length - x.2.val)
+    (inv := fun x => x.2.val ≤ s.length ∧ x.1.val = decNum ((B s.val).take x.2.val) ∧
+      allDig ((B s.val).take x.2.val) = true)
+  · rintro ⟨w, j⟩ ⟨h1, h2, h3⟩
+    simp only at h1 h2 h3 ⊢
+    have hlen : (B s.val).length = s.length := by simp
+    unfold parse.parse_dec_u64_loop.body
+    by_cases hj : j.val < s.length
+    · have hjl : j.val < (B s.val).length := by rw [hlen]; exact hj
+      have tk : (B s.val).take (j.val + 1) = (B s.val).take j.val ++ [(B s.val)[j.val]'hjl] :=
+        List.take_succ_eq_append_getElem hjl
+      have nondig : ¬ (48 ≤ (B s.val)[j.val]'hjl ∧ (B s.val)[j.val]'hjl ≤ 57) →
+          ¬ (allDig (B s.val) = true ∧ decNum (B s.val) ≤ u64max) := by
+        intro hn ⟨hall, _⟩
+        simp only [allDig, List.all_eq_true, decide_eq_true_eq] at hall
+        exact hn (hall _ (List.getElem_mem _))
+      step*
+      · rw [if_neg (nondig (by simp only [B, List.getElem_map]; scalar_tac))]; rfl
+      · rw [if_neg (nondig (by simp only [B, List.getElem_map]; scalar_tac))]; rfl
+      · have hd : d.val = c.val - 48 := by rw [d_post, UScalar.cast_val_eq]; scalar_tac
+        simp only [core.num.U64.MAX, U64.rMax]; scalar_tac
+      · -- overflow: the prefix already exceeds u64
+        rw [if_neg]; · rfl
+        rintro ⟨_, hle⟩
+        have hge := decNum_append_ge ((B s.val).take (j.val + 1)) ((B s.val).drop (j.val + 1))
+        rw [List.take_append_drop, tk, decNum_snoc] at hge
+        have hd : d.val = c.val - 48 := by rw [d_post, UScalar.cast_val_eq]; scalar_tac
+        simp only [B, List.getElem_map] at hge h2 hle
+        simp only [u64max, U64.rMax] at hle i3_post
+        rw [← c_post] at hge
+        scalar_tac
+      · have hd : d.val = c.val - 48 := by rw [d_post, UScalar.cast_val_eq]; scalar_tac
+        simp only [U64.rMax] at i3_post; scalar_tac
+      · refine ⟨by scalar_tac, ?_, ?_, by scalar_tac⟩
+        · rw [i6_post, tk, decNum_snoc]; simp only [B, List.getElem_map]; scalar_tac
+        · rw [i6_post, tk]
+          simp only [allDig, List.all_append, List.all_cons, List.all_nil, Bool.and_true,
+            Bool.and_eq_true, decide_eq_true_eq]
+          refine ⟨by simpa [allDig] using h3, ?_⟩
+          simp only [B, List.getElem_map]; scalar_tac
+    · have hj' : j.val = s.length := by omega
+      step*
+      have hb : (B s.val).take j.val = B s.val := List.take_of_length_le (by rw [hlen]; omega)
+      rw [hb] at h2 h3
+      rw [if_pos ⟨h3, by rw [← h2]; simp only [u64max]; scalar_tac⟩]; simp [h2]
+  · exact ⟨hi, hv, ha⟩
+
+@[step]
+theorem parse_dec_u64_spec (s : Slice U8) :
+    parse.parse_dec_u64 s ⦃ r => r.map (·.val) = decSpec (B s.val) ⦄ := by
+  unfold parse.parse_dec_u64
+  have hlenB : (B s.val).length = s.length := by simp
+  by_cases h0 : s.length = 0
+  · have hB : B s.val = [] := List.eq_nil_of_length_eq_zero (by rw [hlenB]; exact h0)
+    step*
+    rw [hB]; rfl
+  · have hne : B s.val ≠ [] := fun h => h0 (by rw [← hlenB, h]; rfl)
+    step*
+    all_goals first
+      | (simp [decNum]; done)
+      | (simp [allDig]; done)
+      | (unfold decSpec; rw [if_neg hne, if_pos (by rw [← b_post]; assumption)]; rfl)
+      | (unfold decSpec; rw [if_neg hne, if_neg (by rw [← b_post]; assumption)]; assumption)
+
 end pico2peta_net_kernel.Spec

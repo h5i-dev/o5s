@@ -111,7 +111,7 @@ def h5i_app_std.authz.prefix
     0#usize
 
 /-- [h5i_app_std::authz::check_writes]: loop body 0:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 75:4-83:1
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 85:4-93:1
     Name pattern: [h5i_app_std::authz::check_writes]
     Visibility: public -/
 @[rust_loop_body, rust_fun "h5i_app_std::authz::check_writes"]
@@ -138,7 +138,7 @@ def h5i_app_std.authz.check_writes_loop.body
   else ok (done true)
 
 /-- [h5i_app_std::authz::check_writes]: loop 0:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 75:4-83:1
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 85:4-93:1
     Name pattern: [h5i_app_std::authz::check_writes]
     Visibility: public -/
 @[rust_loop, rust_fun "h5i_app_std::authz::check_writes"]
@@ -156,7 +156,7 @@ def h5i_app_std.authz.check_writes_loop
     i
 
 /-- [h5i_app_std::authz::check_writes]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 69:0-73:9
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 69:0-83:9
     Name pattern: [h5i_app_std::authz::check_writes]
     Visibility: public -/
 @[reducible, rust_fun "h5i_app_std::authz::check_writes"]
@@ -172,7 +172,7 @@ def h5i_app_std.authz.check_writes
     PolicyInst actor s ws 0#usize
 
 /-- [h5i_app_std::authz::shown]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 86:0-86:80
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 96:0-96:80
     Name pattern: [h5i_app_std::authz::shown]
     Visibility: public -/
 @[rust_fun "h5i_app_std::authz::shown"]
@@ -187,7 +187,7 @@ def h5i_app_std.authz.shown
   else ok false
 
 /-- [h5i_app_std::authz::check_reads]: loop body 0:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 96:4-103:1
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 111:4-120:1
     Name pattern: [h5i_app_std::authz::check_reads]
     Visibility: public -/
 @[rust_loop_body, rust_fun "h5i_app_std::authz::check_reads"]
@@ -215,7 +215,7 @@ def h5i_app_std.authz.check_reads_loop.body
   else ok (done true)
 
 /-- [h5i_app_std::authz::check_reads]: loop 0:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 96:4-103:1
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 111:4-120:1
     Name pattern: [h5i_app_std::authz::check_reads]
     Visibility: public -/
 @[rust_loop, rust_fun "h5i_app_std::authz::check_reads"]
@@ -231,7 +231,7 @@ def h5i_app_std.authz.check_reads_loop
     i
 
 /-- [h5i_app_std::authz::check_reads]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 94:0-94:108
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 104:0-109:9
     Name pattern: [h5i_app_std::authz::check_reads]
     Visibility: public -/
 @[reducible, rust_fun "h5i_app_std::authz::check_reads"]
@@ -244,7 +244,7 @@ def h5i_app_std.authz.check_reads
   h5i_app_std.authz.check_reads_loop PolicyInst actor before after ds 0#usize
 
 /-- [h5i_app_std::authz::guard]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 107:0-111:36
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 124:0-138:36
     Name pattern: [h5i_app_std::authz::guard]
     Visibility: public -/
 @[rust_fun "h5i_app_std::authz::guard"]
@@ -277,7 +277,7 @@ def h5i_app_std.authz.guard
     ok (core.result.Result.Err (h5i_app_std.authz.Guarded.App e))
 
 /-- Trait declaration: [h5i_app_std::authz::View]
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 131:0-131:23
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 158:0-158:23
     Name pattern: [h5i_app_std::authz::View]
     Visibility: public -/
 @[rust_trait "h5i_app_std::authz::View"]
@@ -287,7 +287,7 @@ structure h5i_app_std.authz.View (Self : Type) (A : Type) (S : Type) (C : Type)
   view : A → S → Result S
 
 /-- [h5i_app_std::authz::guard_viewed]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 141:0-156:36
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 168:0-183:36
     Name pattern: [h5i_app_std::authz::guard_viewed]
     Visibility: public -/
 @[rust_fun "h5i_app_std::authz::guard_viewed"]
@@ -1065,7 +1065,7 @@ def access.Write.Insts.CoreCloneClone : core.clone.Clone access.Write := {
 }
 
 /-- [pico2peta_net_kernel::guarded_transition]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 212:8-218:9
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 239:8-245:9
     Visibility: public -/
 def guarded_transition
   (actor : access.Principal) (s : access.Snapshot) (cmd : access.Command) :
@@ -1080,7 +1080,7 @@ def guarded_transition
     cmd
 
 /-- [pico2peta_net_kernel::read_only]:
-    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 221:8-223:9
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 248:8-250:9
     Visibility: public -/
 def read_only (cmd : access.Command) : Result Bool := do
   access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.read_only
@@ -1246,11 +1246,21 @@ def parse.pkt_len (b : Slice Std.U8) : Result (Option Std.U16) := do
   then ok none
   else parse.pkt_len_loop b 0#u16 0#usize
 
+/-- [pico2peta_net_kernel::parse::leading_zero]:
+    Source: 'crates/net-kernel/src/parse.rs', lines 57:0-59:1
+    Visibility: public -/
+def parse.leading_zero (s : Slice Std.U8) : Result Bool := do
+  let i := Slice.len s
+  if i > 1#usize
+  then let i1 ← Slice.index_usize s 0#usize
+       ok (i1 = 48#u8)
+  else ok false
+
 /-- [pico2peta_net_kernel::parse::parse_dec_u64]: loop body 0:
-    Source: 'crates/net-kernel/src/parse.rs', lines 66:4-79:1
+    Source: 'crates/net-kernel/src/parse.rs', lines 68:4-81:1
     Visibility: public -/
 @[rust_loop_body]
-def parse.parse_dec_u64_loop0.body
+def parse.parse_dec_u64_loop.body
   (s : Slice Std.U8) (v : Std.U64) (i : Std.Usize) :
   Result (ControlFlow (Std.U64 × Std.Usize) (Option Std.U64))
   := do
@@ -1278,79 +1288,32 @@ def parse.parse_dec_u64_loop0.body
   else ok (done (some v))
 
 /-- [pico2peta_net_kernel::parse::parse_dec_u64]: loop 0:
-    Source: 'crates/net-kernel/src/parse.rs', lines 66:4-79:1
+    Source: 'crates/net-kernel/src/parse.rs', lines 68:4-81:1
     Visibility: public -/
 @[rust_loop]
-def parse.parse_dec_u64_loop0
+def parse.parse_dec_u64_loop
   (s : Slice Std.U8) (v : Std.U64) (i : Std.Usize) :
   Result (Option Std.U64)
   := do
   loop
-    (fun (v1, i1) => parse.parse_dec_u64_loop0.body s v1 i1)
-    (v, i)
-
-/-- [pico2peta_net_kernel::parse::parse_dec_u64]: loop body 1:
-    Source: 'crates/net-kernel/src/parse.rs', lines 66:4-79:1
-    Visibility: public -/
-@[rust_loop_body]
-def parse.parse_dec_u64_loop1.body
-  (s : Slice Std.U8) (v : Std.U64) (i : Std.Usize) :
-  Result (ControlFlow (Std.U64 × Std.Usize) (Option Std.U64))
-  := do
-  let i1 := Slice.len s
-  if i < i1
-  then
-    let c ← Slice.index_usize s i
-    if c < 48#u8
-    then ok (done none)
-    else
-      if c > 57#u8
-      then ok (done none)
-      else
-        let i2 ← c - 48#u8
-        let d ← lift (UScalar.cast .U64 i2)
-        let i3 ← core.num.U64.MAX - d
-        let i4 ← i3 / 10#u64
-        if v > i4
-        then ok (done none)
-        else
-          let i5 ← v * 10#u64
-          let v1 ← i5 + d
-          let i6 ← i + 1#usize
-          ok (cont (v1, i6))
-  else ok (done (some v))
-
-/-- [pico2peta_net_kernel::parse::parse_dec_u64]: loop 1:
-    Source: 'crates/net-kernel/src/parse.rs', lines 66:4-79:1
-    Visibility: public -/
-@[rust_loop]
-def parse.parse_dec_u64_loop1
-  (s : Slice Std.U8) (v : Std.U64) (i : Std.Usize) :
-  Result (Option Std.U64)
-  := do
-  loop
-    (fun (v1, i1) => parse.parse_dec_u64_loop1.body s v1 i1)
+    (fun (v1, i1) => parse.parse_dec_u64_loop.body s v1 i1)
     (v, i)
 
 /-- [pico2peta_net_kernel::parse::parse_dec_u64]:
-    Source: 'crates/net-kernel/src/parse.rs', lines 57:0-79:1
+    Source: 'crates/net-kernel/src/parse.rs', lines 62:0-81:1
     Visibility: public -/
 def parse.parse_dec_u64 (s : Slice Std.U8) : Result (Option Std.U64) := do
   let i := Slice.len s
   if i = 0#usize
   then ok none
   else
-    let i1 := Slice.len s
-    if i1 > 1#usize
-    then
-      let i2 ← Slice.index_usize s 0#usize
-      if i2 = 48#u8
-      then ok none
-      else parse.parse_dec_u64_loop0 s 0#u64 0#usize
-    else parse.parse_dec_u64_loop1 s 0#u64 0#usize
+    let b ← parse.leading_zero s
+    if b
+    then ok none
+    else parse.parse_dec_u64_loop s 0#u64 0#usize
 
 /-- [pico2peta_net_kernel::parse::LFS_VERSION_LINE]
-    Source: 'crates/net-kernel/src/parse.rs', lines 82:0-82:82
+    Source: 'crates/net-kernel/src/parse.rs', lines 84:0-84:82
     Visibility: public -/
 @[global_simps, irreducible]
 def parse.LFS_VERSION_LINE : Slice Std.U8 :=
@@ -1364,17 +1327,17 @@ def parse.LFS_VERSION_LINE : Slice Std.U8 :=
       ])
 
 /-- [pico2peta_net_kernel::parse::LFS_VERSION_LEN]
-    Source: 'crates/net-kernel/src/parse.rs', lines 84:0-84:38
+    Source: 'crates/net-kernel/src/parse.rs', lines 86:0-86:38
     Visibility: public -/
 @[global_simps, irreducible] def parse.LFS_VERSION_LEN : Std.Usize := 42#usize
 
 /-- [pico2peta_net_kernel::parse::LFS_MAX_POINTER]
-    Source: 'crates/net-kernel/src/parse.rs', lines 86:0-86:39
+    Source: 'crates/net-kernel/src/parse.rs', lines 88:0-88:39
     Visibility: public -/
 @[global_simps, irreducible] def parse.LFS_MAX_POINTER : Std.Usize := 512#usize
 
 /-- [pico2peta_net_kernel::parse::trim_cr]:
-    Source: 'crates/net-kernel/src/parse.rs', lines 89:0-91:1 -/
+    Source: 'crates/net-kernel/src/parse.rs', lines 91:0-93:1 -/
 def parse.trim_cr
   (body : Slice Std.U8) (start : Std.Usize) (i : Std.Usize) :
   Result Std.Usize
@@ -1389,7 +1352,7 @@ def parse.trim_cr
   else ok i
 
 /-- [pico2peta_net_kernel::parse::LfsScan]
-    Source: 'crates/net-kernel/src/parse.rs', lines 96:0-106:1
+    Source: 'crates/net-kernel/src/parse.rs', lines 98:0-108:1
     Visibility: public -/
 structure parse.LfsScan where
   start : Std.Usize
@@ -1400,7 +1363,7 @@ structure parse.LfsScan where
   size : Std.U64
 
 /-- [pico2peta_net_kernel::parse::slice_of]: loop body 0:
-    Source: 'crates/net-kernel/src/parse.rs', lines 180:4-183:5 -/
+    Source: 'crates/net-kernel/src/parse.rs', lines 182:4-185:5 -/
 @[rust_loop_body]
 def parse.slice_of_loop.body
   (body : Slice Std.U8) («end» : Std.Usize) (out : alloc.vec.Vec Std.U8)
@@ -1421,7 +1384,7 @@ def parse.slice_of_loop.body
   else ok (done out)
 
 /-- [pico2peta_net_kernel::parse::slice_of]: loop 0:
-    Source: 'crates/net-kernel/src/parse.rs', lines 180:4-183:5 -/
+    Source: 'crates/net-kernel/src/parse.rs', lines 182:4-185:5 -/
 @[rust_loop]
 def parse.slice_of_loop
   (body : Slice Std.U8) («end» : Std.Usize) (out : alloc.vec.Vec Std.U8)
@@ -1433,7 +1396,7 @@ def parse.slice_of_loop
     (out, i)
 
 /-- [pico2peta_net_kernel::parse::slice_of]:
-    Source: 'crates/net-kernel/src/parse.rs', lines 177:0-185:1 -/
+    Source: 'crates/net-kernel/src/parse.rs', lines 179:0-187:1 -/
 @[reducible]
 def parse.slice_of
   (body : Slice Std.U8) (start : Std.Usize) («end» : Std.Usize) :
@@ -1442,7 +1405,7 @@ def parse.slice_of
   parse.slice_of_loop body «end» (alloc.vec.Vec.new Std.U8) start
 
 /-- [pico2peta_net_kernel::parse::starts_at]: loop body 0:
-    Source: 'crates/net-kernel/src/parse.rs', lines 167:4-174:1 -/
+    Source: 'crates/net-kernel/src/parse.rs', lines 169:4-176:1 -/
 @[rust_loop_body]
 def parse.starts_at_loop.body
   (body : Slice Std.U8) (start : Std.Usize) (p : Slice Std.U8) (i : Std.Usize)
@@ -1462,7 +1425,7 @@ def parse.starts_at_loop.body
   else ok (done true)
 
 /-- [pico2peta_net_kernel::parse::starts_at]: loop 0:
-    Source: 'crates/net-kernel/src/parse.rs', lines 167:4-174:1 -/
+    Source: 'crates/net-kernel/src/parse.rs', lines 169:4-176:1 -/
 @[rust_loop]
 def parse.starts_at_loop
   (body : Slice Std.U8) (start : Std.Usize) (p : Slice Std.U8) (i : Std.Usize)
@@ -1474,7 +1437,7 @@ def parse.starts_at_loop
     i
 
 /-- [pico2peta_net_kernel::parse::starts_at]:
-    Source: 'crates/net-kernel/src/parse.rs', lines 162:0-174:1 -/
+    Source: 'crates/net-kernel/src/parse.rs', lines 164:0-176:1 -/
 def parse.starts_at
   (body : Slice Std.U8) (start : Std.Usize) («end» : Std.Usize)
   (p : Slice Std.U8) :
@@ -1490,7 +1453,7 @@ def parse.starts_at
     else parse.starts_at_loop body start p 0#usize
 
 /-- [pico2peta_net_kernel::parse::all_hex]: loop body 0:
-    Source: 'crates/net-kernel/src/parse.rs', lines 141:4-148:1 -/
+    Source: 'crates/net-kernel/src/parse.rs', lines 143:4-150:1 -/
 @[rust_loop_body]
 def parse.all_hex_loop.body
   (body : Slice Std.U8) (e : Std.Usize) (i : Std.Usize) :
@@ -1507,7 +1470,7 @@ def parse.all_hex_loop.body
   else ok (done true)
 
 /-- [pico2peta_net_kernel::parse::all_hex]: loop 0:
-    Source: 'crates/net-kernel/src/parse.rs', lines 141:4-148:1 -/
+    Source: 'crates/net-kernel/src/parse.rs', lines 143:4-150:1 -/
 @[rust_loop]
 def parse.all_hex_loop
   (body : Slice Std.U8) (e : Std.Usize) (i : Std.Usize) : Result Bool := do
@@ -1516,14 +1479,14 @@ def parse.all_hex_loop
     i
 
 /-- [pico2peta_net_kernel::parse::all_hex]:
-    Source: 'crates/net-kernel/src/parse.rs', lines 139:0-148:1 -/
+    Source: 'crates/net-kernel/src/parse.rs', lines 141:0-150:1 -/
 @[reducible]
 def parse.all_hex
   (body : Slice Std.U8) (s : Std.Usize) (e : Std.Usize) : Result Bool := do
   parse.all_hex_loop body e s
 
 /-- [pico2peta_net_kernel::parse::lfs_line]:
-    Source: 'crates/net-kernel/src/parse.rs', lines 110:0-136:1
+    Source: 'crates/net-kernel/src/parse.rs', lines 112:0-138:1
     Visibility: public -/
 def parse.lfs_line
   (sc : parse.LfsScan) (body : Slice Std.U8) (start : Std.Usize)
@@ -1567,7 +1530,7 @@ def parse.lfs_line
     else ok sc
 
 /-- [pico2peta_net_kernel::parse::lfs_scan]:
-    Source: 'crates/net-kernel/src/parse.rs', lines 151:0-159:1
+    Source: 'crates/net-kernel/src/parse.rs', lines 153:0-161:1
     Visibility: public -/
 def parse.lfs_scan
   (sc : parse.LfsScan) (body : Slice Std.U8) (i : Std.Usize) :
@@ -1615,7 +1578,7 @@ def parse.lfs_scan
     else ok sc
 
 /-- [pico2peta_net_kernel::parse::lfs_version_ok]:
-    Source: 'crates/net-kernel/src/parse.rs', lines 188:0-190:1
+    Source: 'crates/net-kernel/src/parse.rs', lines 190:0-192:1
     Visibility: public -/
 def parse.lfs_version_ok (body : Slice Std.U8) : Result Bool := do
   let i := Slice.len body
@@ -1631,7 +1594,7 @@ def parse.lfs_version_ok (body : Slice Std.U8) : Result Bool := do
   else ok false
 
 /-- [pico2peta_net_kernel::parse::parse_lfs_pointer]: loop body 0:
-    Source: 'crates/net-kernel/src/parse.rs', lines 207:4-210:5
+    Source: 'crates/net-kernel/src/parse.rs', lines 209:4-212:5
     Visibility: public -/
 @[rust_loop_body]
 def parse.parse_lfs_pointer_loop.body
@@ -1647,7 +1610,7 @@ def parse.parse_lfs_pointer_loop.body
   else ok (done sc)
 
 /-- [pico2peta_net_kernel::parse::parse_lfs_pointer]: loop 0:
-    Source: 'crates/net-kernel/src/parse.rs', lines 207:4-210:5
+    Source: 'crates/net-kernel/src/parse.rs', lines 209:4-212:5
     Visibility: public -/
 @[rust_loop]
 def parse.parse_lfs_pointer_loop
@@ -1659,7 +1622,7 @@ def parse.parse_lfs_pointer_loop
     (sc, i)
 
 /-- [pico2peta_net_kernel::parse::parse_lfs_pointer]:
-    Source: 'crates/net-kernel/src/parse.rs', lines 195:0-219:1
+    Source: 'crates/net-kernel/src/parse.rs', lines 197:0-221:1
     Visibility: public -/
 def parse.parse_lfs_pointer
   (body : Slice Std.U8) :
@@ -1698,13 +1661,13 @@ def parse.parse_lfs_pointer
     else ok none
 
 /-- [pico2peta_net_kernel::parse::XET_MAX_CHUNK]
-    Source: 'crates/net-kernel/src/parse.rs', lines 222:0-222:42
+    Source: 'crates/net-kernel/src/parse.rs', lines 224:0-224:42
     Visibility: public -/
 @[global_simps, irreducible]
 def parse.XET_MAX_CHUNK : Result Std.U32 := 128#u32 * 1024#u32
 
 /-- [pico2peta_net_kernel::parse::xet_chunk_header]:
-    Source: 'crates/net-kernel/src/parse.rs', lines 228:0-251:1
+    Source: 'crates/net-kernel/src/parse.rs', lines 230:0-253:1
     Visibility: public -/
 def parse.xet_chunk_header
   (b : Slice Std.U8) (i : Std.Usize) :
