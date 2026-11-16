@@ -376,7 +376,11 @@ impl SegMap {
             return Ok(());
         }
         let span = (hi - lo) * ENTRY;
-        if span <= SCAN_WINDOW || (keys.len() as u64).saturating_mul(PAGE) >= span {
+        // Scan the span when the keys are dense in it (about a page per key or more), or it is
+        // a single page; otherwise split. (Scanning every span up to `SCAN_WINDOW` made a lookup
+        // of a few keys, such as one tree's children in a reachability closure, decode up to
+        // ~58k entries.)
+        if span <= PAGE || (keys.len() as u64).saturating_mul(PAGE) >= span {
             let (first, pages) = self.span_pages(seg, count, lo, hi)?;
             let entries = (lo..hi).map(|i| span_entry(&pages, first, i).map(|b| decode_entry(&b)));
             return merge_join(entries, keys, found);

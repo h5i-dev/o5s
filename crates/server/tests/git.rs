@@ -186,6 +186,16 @@ fn gc_tracer_follows_git_objects() {
     assert_eq!(canon("HEAD"), tip, "internal id = BLAKE3 of canonical git bytes");
     // A blob is a leaf.
     assert_eq!(tracer.children_of(&canon("HEAD:f"), &repo).unwrap(), Some(vec![]));
+    // The batched form (one oid-map lookup per wave) agrees with the per-object one, in order.
+    let wave = vec![tip, canon("HEAD^{tree}"), canon("HEAD~1"), canon("HEAD:f")];
+    let many = tracer.children_of_many(&wave, &repo).unwrap();
+    for (h, kids) in wave.iter().zip(&many) {
+        let mut one = tracer.children_of(h, &repo).unwrap().unwrap_or_default();
+        let mut kids = kids.clone();
+        one.sort();
+        kids.sort();
+        assert_eq!(kids, one, "{h}");
+    }
 }
 
 fn dir_bytes(p: &Path) -> u64 {

@@ -3360,6 +3360,14 @@ pub struct GitTracer {
     xetsha_root: Root,
 }
 
+/// [`GitTracer::plan`]: an object's children, or the oid-map keys that give them.
+enum Plan {
+    /// Not a canonical git object.
+    NotGit,
+    Done(Vec<Hash>),
+    Keys(Vec<Key>),
+}
+
 impl GitTracer {
     /// Snapshots the oid map; objects pushed later are protected by the GC lease.
     pub fn new(repo: Arc<dyn Repository>) -> Result<GitTracer> {
@@ -3375,16 +3383,51 @@ impl GitTracer {
         Ok(GitTracer { oidmap, root, lfs, lfs_root, xetsha, xetsha_root })
     }
 
+    /// [`Self::children_of`] of many objects: commits' and trees' oids are resolved with one
+    /// batched oid-map lookup for all of them (a reachability closure's BFS wave).
+    pub fn children_of_many(&self, hs: &[Hash], store: &dyn ObjectStore) -> Result<Vec<Vec<Hash>>> {
+        let mut out: Vec<Vec<Hash>> = vec![Vec::new(); hs.len()];
+        // (object index, key) for every oid reference of the wave's commits and trees.
+        let mut want: Vec<(usize, Key)> = Vec::new();
+        for (i, h) in hs.iter().enumerate() {
+            match self.plan(h, store)? {
+                Plan::NotGit => {}
+                Plan::Done(kids) => out[i] = kids,
+                Plan::Keys(keys) => want.extend(keys.into_iter().map(|k| (i, k))),
+            }
+        }
+        if !want.is_empty() {
+            let keys: Vec<Key> = want.iter().map(|(_, k)| *k).collect();
+            for ((i, _), v) in want.iter().zip(self.oidmap.get_many(&self.root, &keys)?) {
+                if let Some(v) = v {
+                    out[*i].push(v.hash);
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// Children of a canonical git object, or `None` if `h` is not one.
     pub fn children_of(&self, h: &Hash, store: &dyn ObjectStore) -> Result<Option<Vec<Hash>>> {
+        Ok(match self.plan(h, store)? {
+            Plan::NotGit => None,
+            Plan::Done(kids) => Some(kids),
+            Plan::Keys(keys) => {
+                Some(self.oidmap.get_many(&self.root, &keys)?.into_iter().flatten().map(|v| v.hash).collect())
+            }
+        })
+    }
+
+    /// What `h` references: its children directly, or the oid-map keys to resolve.
+    fn plan(&self, h: &Hash, store: &dyn ObjectStore) -> Result<Plan> {
         let size = store.size(h)?;
         let head = store.get(h, Some(0..size.min(32)))?;
         if let Some(c) = crate::xet::record_child(h, &head, size, store)? {
-            return Ok(Some(vec![c])); // Xet xorb record -> its content
+            return Ok(Plan::Done(vec![c])); // Xet xorb record -> its content
         }
-        let Some((kind, body_len, hl)) = parse_header(&head) else { return Ok(None) };
+        let Some((kind, body_len, hl)) = parse_header(&head) else { return Ok(Plan::NotGit) };
         if hl as u64 + body_len as u64 != size {
-            return Ok(None);
+            return Ok(Plan::NotGit);
         }
         if kind == Kind::Blob {
             // A Git LFS pointer keeps its content alive (LFS objects have no other referrer).
@@ -3404,15 +3447,15 @@ impl GitTracer {
                     if let Some(v) = self.xetsha.get_in(&self.xetsha_root, &k)? {
                         kids.push(v.hash);
                     }
-                    return Ok(Some(kids));
+                    return Ok(Plan::Done(kids));
                 }
             }
-            return Ok(Some(Vec::new()));
+            return Ok(Plan::Done(Vec::new()));
         }
         let bytes = store.get(h, None)?;
         // The tracer sees core objects, not repositories: accept either object format.
         let keys: Vec<Key> = refs_any(kind, &bytes[hl..]).iter().map(key_of).collect();
-        Ok(Some(self.oidmap.get_many(&self.root, &keys)?.into_iter().flatten().map(|v| v.hash).collect()))
+        Ok(Plan::Keys(keys))
     }
 }
 

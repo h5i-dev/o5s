@@ -46,6 +46,9 @@ impl Tracer for GitSnapshot {
     fn children(&self, h: &Hash, store: &dyn ObjectStore) -> Result<Vec<Hash>> {
         Ok(self.0.children_of(h, store)?.unwrap_or_default())
     }
+    fn children_many(&self, hs: &[Hash], store: &dyn ObjectStore) -> Result<Vec<Vec<Hash>>> {
+        self.0.children_of_many(hs, store)
+    }
 }
 
 impl Front for GitFront {
