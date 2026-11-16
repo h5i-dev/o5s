@@ -1886,7 +1886,9 @@ impl PackStore {
                 });
                 self.put_chunks(chunks, group)
             }
-            ChunkerKind::Xet => self.put_chunks(ParXetChunks::new(reader, hash_threads()), group),
+            ChunkerKind::Xet => {
+                self.put_chunks(LengthChunks::new(reader, Box::new(pico2peta_chunk::XetChunker::new())), group)
+            }
         }
     }
 
@@ -2539,53 +2541,28 @@ struct Level {
     len: u64,
 }
 
-/// Xet chunks of a stream, cut on several threads ([`pico2peta_chunk::xet_lengths_parallel`])
-/// one window at a time. Every cut but the last of a window depends only on the bytes before it,
-/// and the chunker starts fresh after a cut, so the window's last chunk is carried into the next
-/// window and re-chunked there: the cuts are exactly the serial `XetChunker`'s.
-struct ParXetChunks<R> {
+/// Turns a length-reporting streaming [`pico2peta_chunk::Chunker`] over a
+/// reader into an iterator of owned chunks.
+struct LengthChunks<R> {
     r: R,
-    threads: usize,
+    c: Box<dyn pico2peta_chunk::Chunker>,
     buf: Vec<u8>,
     start: usize,
     lens: std::collections::VecDeque<usize>,
+    scratch: Vec<usize>,
     done: bool,
 }
 
-/// Bytes read per window for [`ParXetChunks`] (plus the carried tail, at most one chunk).
-const XET_WINDOW: usize = 32 << 20;
+/// Read size for [`LengthChunks`].
+const LENGTH_CHUNKS_BLOCK: usize = 1 << 20;
 
-impl<R: Read> ParXetChunks<R> {
-    fn new(r: R, threads: usize) -> Self {
-        ParXetChunks { r, threads, buf: Vec::new(), start: 0, lens: Default::default(), done: false }
-    }
-
-    /// Appends up to [`XET_WINDOW`] bytes; false at EOF.
-    fn fill(&mut self) -> std::io::Result<bool> {
-        let want = self.buf.len() + XET_WINDOW;
-        let mut eof = false;
-        while self.buf.len() < want {
-            let old = self.buf.len();
-            self.buf.resize((old + (1 << 20)).min(want), 0);
-            match self.r.read(&mut self.buf[old..]) {
-                Ok(0) => {
-                    self.buf.truncate(old);
-                    eof = true;
-                    break;
-                }
-                Ok(n) => self.buf.truncate(old + n),
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => self.buf.truncate(old),
-                Err(e) => {
-                    self.buf.truncate(old);
-                    return Err(e);
-                }
-            }
-        }
-        Ok(!eof)
+impl<R: Read> LengthChunks<R> {
+    fn new(r: R, c: Box<dyn pico2peta_chunk::Chunker>) -> Self {
+        LengthChunks { r, c, buf: Vec::new(), start: 0, lens: Default::default(), scratch: Vec::new(), done: false }
     }
 }
 
-impl<R: Read> Iterator for ParXetChunks<R> {
+impl<R: Read> Iterator for LengthChunks<R> {
     type Item = Result<Vec<u8>>;
 
     fn next(&mut self) -> Option<Result<Vec<u8>>> {
@@ -2602,24 +2579,32 @@ impl<R: Read> Iterator for ParXetChunks<R> {
             if self.done {
                 return None;
             }
-            // Keep only the carried tail (it starts at a cut).
+            // Drop emitted bytes (what's left is at most one partial chunk).
             self.buf.drain(..self.start);
             self.start = 0;
-            let more = match self.fill() {
-                Ok(m) => m,
+            let old = self.buf.len();
+            self.buf.resize(old + LENGTH_CHUNKS_BLOCK, 0);
+            let n = match self.r.read(&mut self.buf[old..]) {
+                Ok(n) => n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                    self.buf.truncate(old);
+                    continue;
+                }
                 Err(e) => {
+                    self.buf.truncate(old);
                     self.done = true;
                     return Some(Err(Error::Io(e)));
                 }
             };
-            let mut lens = pico2peta_chunk::xet_lengths_parallel(&self.buf, self.threads);
-            if more {
-                // The last length ends where the window ends, not at a cut: carry it.
-                lens.pop();
-            } else {
+            self.buf.truncate(old + n);
+            self.scratch.clear();
+            if n == 0 {
+                self.c.finish(&mut self.scratch);
                 self.done = true;
+            } else {
+                self.c.update(&self.buf[old..], &mut self.scratch);
             }
-            self.lens.extend(lens);
+            self.lens.extend(self.scratch.iter().copied());
         }
     }
 }
