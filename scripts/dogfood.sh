@@ -133,6 +133,10 @@ case "${1:-status}" in
     kill $pid; sleep 1
     "$BIN" serve --config "$U/server.toml" >> "$U/new.log" 2>&1 & pid=$!; sleep 2
     h=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["hash"])' "$U/put.json")
+    # Objects are readable by hash only from a name that reaches them (object-read authorization).
+    curl -sf -o /dev/null -H "Authorization: Bearer $t" -H "Content-Type: application/json" \
+      -d "{\"name\":\"dogfood/upgrade/readme\",\"read_set\":[{\"name\":\"dogfood/upgrade/readme\",\"observed\":null}],\"new\":\"$h\"}" \
+      "http://127.0.0.1:$((PORT + 2))/v1/replace"
     curl -sf -H "Authorization: Bearer $t" "http://127.0.0.1:$((PORT + 2))/v1/objects/$h" | cmp - README.md && echo "object written by the old binary: readable"
     git clone -q --bare "$url" "$U/clone.git" && git -C "$U/clone.git" fsck --full --no-progress && echo "git repo written by the old binary: clone + fsck clean"
     git push -q "$url" 'refs/remotes/origin/net:refs/heads/net' 2>&1 | grep -v "^$" || true

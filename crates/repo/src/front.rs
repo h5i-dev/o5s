@@ -185,6 +185,24 @@ impl Tracer for FrontsTracer {
         }
         Ok(out)
     }
+
+    fn children_many(&self, hashes: &[Hash], store: &dyn ObjectStore) -> Result<Vec<Vec<Hash>>> {
+        let mut out: Vec<Vec<Hash>> = vec![Vec::new(); hashes.len()];
+        for p in &self.parts {
+            let many = match p {
+                Part::Front(f) => hashes.iter().map(|h| f.children(h, store)).collect::<Result<Vec<_>>>()?,
+                Part::Snapshot(t) => t.children_many(hashes, store)?,
+            };
+            for (o, cs) in out.iter_mut().zip(many) {
+                for c in cs {
+                    if !o.contains(&c) {
+                        o.push(c);
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
 }
 
 /// [`Grouper`] that merges every front's keys.

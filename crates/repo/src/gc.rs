@@ -51,6 +51,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub trait Tracer: Send + Sync {
     /// Hashes directly referenced by `hash`.
     fn children(&self, hash: &Hash, store: &dyn ObjectStore) -> Result<Vec<Hash>>;
+
+    /// [`Self::children`] of many objects (one BFS wave), in order. Tracers whose lookups
+    /// batch (e.g. an oid map's `get_many`) override it.
+    fn children_many(&self, hashes: &[Hash], store: &dyn ObjectStore) -> Result<Vec<Vec<Hash>>> {
+        hashes.iter().map(|h| self.children(h, store)).collect()
+    }
 }
 
 /// A grouper with no hints: similarity repack then orders by content alone.
