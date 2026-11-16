@@ -19,6 +19,7 @@ pub mod front;
 pub mod fsck;
 pub mod gc;
 pub mod idmap;
+pub mod reach;
 
 pub use front::{DerivePolicy, Front, FrontRegistry, PlanCtx, Profile};
 
@@ -329,6 +330,8 @@ pub struct LocalRepo {
     refs: Arc<RefStore>,
     backend: Arc<dyn Backend>,
     faults: pico2peta_core::fault::FaultHandle,
+    /// Notified of every committed name change on this handle and its clones (`reach`).
+    observers: Arc<std::sync::RwLock<Vec<Arc<dyn reach::RefObserver>>>>,
 }
 
 impl LocalRepo {
@@ -425,6 +428,7 @@ impl LocalRepo {
             refs,
             backend,
             faults,
+            observers: Arc::default(),
         })
     }
 
@@ -644,7 +648,11 @@ impl LocalRepo {
         // see or that GC is about to delete.
         let live = self.packs.ensure_live(&new)?;
         self.packs.flush()?;
-        self.refs.replace(name, read_set, new, &|_| Ok(live))
+        let out = self.refs.replace(name, read_set, new, &|_| Ok(live))?;
+        if let ReplaceOutcome::Ok { version } = out {
+            self.notify(&[(name.clone(), Some(new), version)]);
+        }
+        Ok(out)
     }
 
     fn replace_many_as(
@@ -663,7 +671,12 @@ impl LocalRepo {
             }
         }
         self.packs.flush()?;
-        self.refs.replace_many(updates, read_set, &|h| Ok(missing != Some(*h)))
+        let out = self.refs.replace_many(updates, read_set, &|h| Ok(missing != Some(*h)))?;
+        if let pico2peta_core::ReplaceManyOutcome::Ok { versions } = &out {
+            let ch: Vec<_> = updates.iter().zip(versions).map(|((n, h), v)| (n.clone(), Some(*h), *v)).collect();
+            self.notify(&ch);
+        }
+        Ok(out)
     }
 
     fn update_many_as(
@@ -682,12 +695,38 @@ impl LocalRepo {
             }
         }
         self.packs.flush()?;
-        self.refs.update_many(updates, read_set, &|h| Ok(!missing.contains(h)))
+        let out = self.refs.update_many(updates, read_set, &|h| Ok(!missing.contains(h)))?;
+        if let pico2peta_core::ReplaceManyOutcome::Ok { versions } = &out {
+            let ch: Vec<_> = updates.iter().zip(versions).map(|((n, h), v)| (n.clone(), *h, *v)).collect();
+            self.notify(&ch);
+        }
+        Ok(out)
     }
 
     fn delete_ref_as(&self, who: Option<&str>, name: &Name, read_set: &[(Name, Observed)]) -> Result<ReplaceOutcome> {
         self.guard(name.as_str(), who)?;
-        self.refs.delete(name, read_set)
+        let out = self.refs.delete(name, read_set)?;
+        if let ReplaceOutcome::Ok { version } = out {
+            self.notify(&[(name.clone(), None, version)]);
+        }
+        Ok(out)
+    }
+
+    /// Registers an observer of committed name changes (shared by every clone of this handle).
+    pub fn add_ref_observer(&self, o: Arc<dyn reach::RefObserver>) {
+        if let Ok(mut v) = self.observers.write() {
+            v.push(o);
+        }
+    }
+
+    fn notify(&self, changes: &[(Name, Option<Hash>, u64)]) {
+        let obs: Vec<Arc<dyn reach::RefObserver>> = match self.observers.read() {
+            Ok(v) => v.clone(),
+            Err(_) => return,
+        };
+        for o in obs {
+            o.changed(self, changes);
+        }
     }
 
     fn set_rule_as(&self, who: Option<&str>, prefix: &str, rule: Rule) -> Result<()> {
