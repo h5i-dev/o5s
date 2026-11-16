@@ -10,16 +10,12 @@ unmodified.
 
 ## Potential pushback
 
-- **Git's three-way merge is specific to source code** → Why merge at all? It suited humans composing
-  changes by hand. AI agents can just overwrite: every version is kept, and names move only by compare-and-swap.
-- **Hugging Face's Xet makes large weights fast** → If it's good, use it everywhere: chunking and dedup are in
-  the core, for every domain.
-- **Git packs source better** → Similarity repack works for every domain and stores 0.79–0.95× of
-  `git gc --aggressive`.
-- **Registries need their own rules** → They are per-namespace rules: `mutable`, `immutable`, `head-release`.
-- **One store means one bug breaks everything** → Every decision is an h5i-app kernel, proved in Lean on the
-  extracted code.
-- **Separate systems lose lineage** → One store has one provenance log: commit → build → package → image → model.
+- "Merge is necessary to resolve conflicts" → Overwrite is enough. If you assign jobs well, conflicts don't happen.
+- "Xet makes large weights fast" → Then use it for every domain.
+- "Git packs source code better" → Similarity repack stores 0.79–0.95× of `git gc --aggressive`, for any data.
+- "Registries need their own rules" → They're per-namespace rules: `mutable`, `immutable`, `head-release`.
+- "One store means one bug breaks everything" → Every decision is proved in Lean on the extracted code.
+- "Separate systems are fine" → Not for lineage: one store links commit → build → package → image → model.
 
 ## CLI example
 
