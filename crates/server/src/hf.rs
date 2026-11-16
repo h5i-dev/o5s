@@ -1927,7 +1927,9 @@ async fn commit(
     if !st.audit.is_healthy() {
         return hf_err(StatusCode::SERVICE_UNAVAILABLE, None, "audit log unavailable; refusing commits");
     }
-    let Ok(raw) = axum::body::to_bytes(body, MAX_COMMIT_BODY).await else {
+    // Held in memory: also bounded by `[server] max_upload_bytes`, so an operator can lower it.
+    let limit = usize::try_from(st.max_upload_bytes).unwrap_or(usize::MAX).min(MAX_COMMIT_BODY);
+    let Ok(raw) = axum::body::to_bytes(body, limit).await else {
         return hf_err(StatusCode::PAYLOAD_TOO_LARGE, None, "commit payload too large");
     };
     let mut summary = String::new();

@@ -27,6 +27,10 @@ h5i-app-core = { workspace = true }
 h5i-app-std = { workspace = true }
 h5i-app-json = "=0.5.5"
 h5i-app-pg = "=0.5.5"
+# Not used directly: pinned so a fresh resolve keeps h5i-app-pg's own h5i dependencies at the
+# released 0.5.5 too (they drifted to 0.5.6 once).
+h5i-app-pgsql = "=0.5.5"
+h5i-app-sql = "=0.5.5"
 libcrux-hmac = "0.0.8"
 o5s-backend-s3 = { path = "../backend-s3" }
 serde.workspace = true

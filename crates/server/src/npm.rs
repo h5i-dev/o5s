@@ -546,7 +546,9 @@ async fn publish(
     if !st.audit.is_healthy() {
         return npm_err(StatusCode::SERVICE_UNAVAILABLE, "audit log unavailable; refusing publishes");
     }
-    let Ok(raw) = axum::body::to_bytes(body, MAX_PUBLISH_BODY).await else {
+    // Held in memory: also bounded by `[server] max_upload_bytes`, so an operator can lower it.
+    let limit = usize::try_from(st.max_upload_bytes).unwrap_or(usize::MAX).min(MAX_PUBLISH_BODY);
+    let Ok(raw) = axum::body::to_bytes(body, limit).await else {
         return npm_err(StatusCode::PAYLOAD_TOO_LARGE, "publish body too large");
     };
     let Ok(doc) = serde_json::from_slice::<Value>(&raw) else { return npm_err(StatusCode::BAD_REQUEST, "bad JSON") };

@@ -397,3 +397,37 @@ fn xet_rejects_bad_xorbs_and_tokens() {
         http.get(format!("{}/api/models/alice/x/xet-write-token/main", srv.url())).bearer_auth(READER).send().unwrap();
     assert!(r.status() == 403 || r.status() == 404, "{}", r.status());
 }
+
+/// A commit body is held in memory: `[server] max_upload_bytes` bounds it too.
+#[test]
+fn commit_body_is_bounded_by_max_upload_bytes() {
+    let srv = TestServer::start(|cfg| {
+        cfg.server.max_upload_bytes = 4096;
+        cfg.policy.push(grant("alice", "git/hf/models/alice", o5s_server::config::Access::Write));
+    });
+    let http = reqwest::blocking::Client::new();
+    let r = http
+        .post(format!("{}/api/repos/create", srv.url()))
+        .bearer_auth(ALICE)
+        .json(&serde_json::json!({"name": "small", "type": "model"}))
+        .send()
+        .unwrap();
+    assert!(r.status().is_success(), "{}", r.status());
+    let commit = |content: &str| {
+        let body = [
+            serde_json::json!({"key": "header", "value": {"summary": "s"}}).to_string(),
+            serde_json::json!({"key": "file", "value": {"path": "a.txt", "content": content, "encoding": "base64"}})
+                .to_string(),
+        ]
+        .join("\n");
+        http.post(format!("{}/api/models/alice/small/commit/main", srv.url()))
+            .bearer_auth(ALICE)
+            .header("content-type", "application/x-ndjson")
+            .body(body)
+            .send()
+            .unwrap()
+            .status()
+    };
+    assert_eq!(commit(&"QUFB".repeat(2500)), 413, "a 10 KB body over a 4 KB limit");
+    assert!(commit("QUFB").is_success(), "a small commit still goes through");
+}

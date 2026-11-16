@@ -367,7 +367,7 @@ The contended run checks that no update is lost: the final version equals the nu
     - token storage: sha256 only, looked up by hash;
     - `/metrics`: unauthenticated on the main listener by design (`metrics_listen` separates it), with route labels as templates, so no repo names leak;
     - `GET /v1/objects/<hash>` lets any reader fetch by BLAKE3 (content address as capability). Hashes of non-readable names aren't exposed by search or provenance.
-  - Open: in-memory request bodies are bounded but large for authenticated writers (HF commit NDJSON 256 MiB, npm publish JSON 512 MiB). They could be streamed later.
+  - In-memory request bodies (HF commit NDJSON, npm publish JSON) are bounded by min(their cap of 256/512 MiB, `[server] max_upload_bytes`) since 2026-11-16, so an operator can lower them (test `commit_body_is_bounded_by_max_upload_bytes`). Streaming them stays open, pending the human's call on scope.
 - ROADMAP Net 7 (ops), part 1: DONE.
   - `deploy/grafana-dashboard.json`: 12 panels over every exported metric.
   - `deploy/prometheus-alerts.yml`: 9 rules, validated YAML.
