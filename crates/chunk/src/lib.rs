@@ -58,6 +58,13 @@ pub fn xet_cuts_parallel(window: &[u8], threads: usize, last: bool) -> Vec<usize
     xet_lengths_parallel_seg(window, threads, 8 << 20, last)
 }
 
+/// [`xet_cuts_parallel`] with an explicit segment size (the unit of speculative work per
+/// thread; smaller segments suit small windows, at the cost of more seam reconciliation). Any
+/// `seg` gives the same cuts.
+pub fn xet_cuts_parallel_seg(window: &[u8], threads: usize, seg: usize, last: bool) -> Vec<usize> {
+    xet_lengths_parallel_seg(window, threads, seg, last)
+}
+
 fn feed(c: &mut XetChunker, data: &[u8], from: usize, to: usize, base: &mut usize, cuts: &mut Vec<usize>) {
     let mut out = Vec::new();
     c.update(&data[from..to], &mut out);
