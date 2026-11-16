@@ -390,7 +390,7 @@ The contended run checks that no update is lost: the final version equals the nu
 - **read_verify, server side: DONE** (as agreed with the core: one policy source, the repo's `[read]` config, and no server setting).
   - `GET /v1/objects/<h>?verify=strict|eof` calls `open_verified`. `eof` gets 403 unless the repo allows it, and a bad value gets 400. With no parameter, the plain `open` follows `[read] verify`, so strict is the default by construction.
   - `RemoteRepo::open_verified` sends the parameter. Test `read_verify_parameter_follows_repo_policy`.
-- **H2 (h5i rebuild), net side, in progress.** `crates/net-kernel` is extracted by Charon/Aeneas into `verify/net/proofs/generated/` and proven there (`h5i app check`: no sorry or axioms; 153 theorems gated).
+- **H2 (h5i rebuild), net side, in progress.** `crates/net-kernel` is extracted by Charon/Aeneas into `verify/net/proofs/generated/` and proven there (`h5i app check`: no sorry or axioms; 167 theorems gated; both of h5i's obligations, `panic-free` and `read-only`, proven).
   - **Parsers, proven equal to their specs on every input (so total):** `decode_hex` (strict, either-case or lowercase-only), `pkt_len`, `parse_dec_u64`, and the Xet chunk header (`u24`, the checks, the header). The server's hex ids, pkt-lines and xorb headers now run them. `parse_lfs_pointer` (HF's LFS pointers) is proven to compute `ptrS` (`LfsSpec.lean`): ≤ 512 bytes, the version line, and then the last valid `oid sha256:<64 hex>` and the last valid `size <strict u64>` lines (`\r` dropped, unknown lines ignored). `ptr_accepted` adds that an accepted pointer begins with the version line.
   - **Access kernel** (`access.rs` + `authz_kernel!`): every authorization decision runs behind `h5i_app_std::authz::guard_viewed`.
     - `h5i_authz` proves `guarded_transition.authorized`: writes are permitted, disclosed rows are stored and visible, and read-only commands are noninterfering with what the view hides. It also proves `read_only_sound`.
@@ -413,7 +413,8 @@ The contended run checks that no update is lost: the final version equals the nu
     - parsers: uppercase in lowercase-only hex, decimal leading zero, unchecked Xet stored lengths, LFS oid length unchecked, first LFS size wins;
     - publish: release file overwritten, manifest digest unchecked, missing blob allowed, stale HF parent, missing LFS, any npm rev.
     - `net-kernel` gets h5i-app paths from workspace dependencies, so the mutation sandbox copy builds.
-  - Open (net): the h5i-app-http shell; the panic-free obligation for `guarded_transition`; static tokens behind a legacy flag, with the bench configs moved to issued tokens.
+  - **h5i obligations proven** (`Obligations.lean`, `[obligations]`): `panic_free` (the access kernel's `transition` returns on every principal, snapshot and command; with `ref_of_spec`) and `read_only_sound` (`ReadObject`/`ReadRef` write nothing).
+  - Open (net): the h5i-app-http shell; static tokens behind a legacy flag, with the bench configs moved to issued tokens.
 - **Security fix (fuzz finding from the core's smoke run, oci_parsers): strict hex decoding everywhere** (`crates/server/src/hexs.rs`).
   - `oci::hex_key` sliced a 64-*byte* `&str` at byte offsets, so a digest containing a multi-byte character panicked (500, and possibly a poisoned lock). It is reachable from a URL (`/v2/<repo>/blobs/sha256:<64 bytes>`).
   - `u8::from_str_radix` also accepts a leading `+`, so non-canonical digest spellings mapped to the same key.

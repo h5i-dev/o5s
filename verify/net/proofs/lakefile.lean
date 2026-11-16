@@ -18,4 +18,4 @@ lean_lib Generated where
 
 -- Hand-written specs and proofs.
 @[default_target] lean_lib Proofs where
-  roots := #[`ParseSpec, `Authz, `GitPush, `Policy, `Publish, `LfsSpec]
+  roots := #[`ParseSpec, `Authz, `GitPush, `Policy, `Publish, `LfsSpec, `Obligations]

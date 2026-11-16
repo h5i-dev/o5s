@@ -20,6 +20,12 @@ start-from = [
 include = ["h5i_app_std"]
 std-specs = true
 
+[obligations]
+# `check` requires exactly `H5iAppLib.Obligation.PanicFree pico2peta_net_kernel.transition` and
+# `ReadOnlySound pico2peta_net_kernel.read_only pico2peta_net_kernel.transition (·.val)`.
+panic-free = "pico2peta_net_kernel.Spec.Obligations.panic_free"
+read-only = "pico2peta_net_kernel.Spec.Obligations.read_only_sound"
+
 [check]
 theorems = [
   "pico2peta_net_kernel.Spec.decode_hex_spec",
@@ -45,6 +51,7 @@ theorems = [
   "pico2peta_net_kernel.Spec.Publish.decide_rev_spec",
   "pico2peta_net_kernel.Spec.Lfs.parse_lfs_pointer_spec",
   "pico2peta_net_kernel.Spec.Lfs.ptr_accepted",
+  "pico2peta_net_kernel.Spec.Obligations.ref_of_spec",
   "pico2peta_net_kernel.guarded_transition.authorized",
   "pico2peta_net_kernel.guarded_transition.read_only_sound",
 ]
