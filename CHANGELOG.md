@@ -4,6 +4,16 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 
 ## [Unreleased]
 
+### Changed (breaking): the project is renamed pico2peta → o5s
+- **Code:** crates `o5s-*`; binaries `o5s`, `o5s-server`, `o5s-bench`; environment variables `O5S_*`;
+  metrics `o5s_*`; Lean modules `O5sKernel` and `O5sNetKernel`.
+- **The repository:** `github.com/h5i-dev/o5s`.
+- **Every on-disk magic:** `P2P*` → `O5S*`, same lengths (pack `O5SPACK2`, index `O5SIDX0x`, record `O5SR`,
+  ref journal `O5SREFJ1`, …; docs/RELEASE.md "Formats written by v0.1"). The kernel's record magic and its Lean
+  spec changed with it. **Stores written before the rename are not readable**, and there is no migration: this
+  is before v0.1.
+- **Unchanged:** recorded raw benchmark results keep their old system label (`pico2peta`).
+
 ### Changed: verified decisions (h5i-app rebuild, docs/H5I_PLAN.md)
 - **Every core decision is an extracted, proved kernel** (`crates/kernel`, proofs in `verify/core`):
   - the name grammar, rule governance and mobility, and the OCC batch decision (`refs::decide`);
