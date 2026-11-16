@@ -94,13 +94,19 @@ twine upload --repository-url https://$S/pypi/team/ -u token -p "$TOKEN" dist/*
 pip install --index-url https://token:$TOKEN@$S/pypi/team/simple/ mypkg
 ```
 
-**npm** (`.npmrc`: `registry=https://$S/npm/team/` and `//$S/npm/team/:_authToken=${TOKEN}`)
+**npm**
 ```sh
+npm config set registry https://$S/npm/team/
+npm config set //$S/npm/team/:_authToken $TOKEN
 npm publish
 npm install mypkg
 ```
 
-**Maven** (`settings.xml`: server `o5s`, user `token`, password = the token)
+**Maven**
+```xml
+<!-- ~/.m2/settings.xml -->
+<servers><server><id>o5s</id><username>token</username><password>${env.TOKEN}</password></server></servers>
+```
 ```sh
 mvn deploy -DaltDeploymentRepository=o5s::https://$S/maven/releases
 ```
