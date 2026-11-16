@@ -14,8 +14,8 @@ package pico2peta_net_proofs
 -- The extracted net kernel (`h5i app extract`). Do not edit.
 lean_lib Generated where
   srcDir := "generated"
-  roots := #[`Pico2petaNetKernel]
+  roots := #[`Pico2petaNetKernel, `StdSpecs, `AuthzSpecs]
 
 -- Hand-written specs and proofs.
 @[default_target] lean_lib Proofs where
-  roots := #[`ParseSpec]
+  roots := #[`ParseSpec, `Authz]

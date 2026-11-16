@@ -9,7 +9,16 @@ start-from = [
   "parse::parse_dec_u64",
   "parse::parse_lfs_pointer",
   "parse::xet_chunk_header",
+  "guarded_transition",
+  "read_only",
 ]
+include = ["h5i_app_std"]
+std-specs = true
 
 [check]
-theorems = ["pico2peta_net_kernel.Spec.decode_hex_spec", "pico2peta_net_kernel.Spec.pkt_len_spec"]
+theorems = [
+  "pico2peta_net_kernel.Spec.decode_hex_spec",
+  "pico2peta_net_kernel.Spec.pkt_len_spec",
+  "pico2peta_net_kernel.guarded_transition.authorized",
+  "pico2peta_net_kernel.guarded_transition.read_only_sound",
+]

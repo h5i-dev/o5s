@@ -678,6 +678,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "h5i-app-core"
+version = "0.5.5"
+dependencies = [
+ "h5i-app-std",
+]
+
+[[package]]
+name = "h5i-app-std"
+version = "0.5.5"
+
+[[package]]
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1338,6 +1349,10 @@ dependencies = [
 [[package]]
 name = "pico2peta-net-kernel"
 version = "0.1.0"
+dependencies = [
+ "h5i-app-core",
+ "h5i-app-std",
+]
 
 [[package]]
 name = "pico2peta-order"

@@ -5,9 +5,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-# No dependencies yet: extracted to Lean by Charon + Aeneas (h5i-app). The shared types
-# will come from pico2peta-kernel (core).
+# Extracted to Lean by Charon + Aeneas (h5i-app) together with these dependencies, which are
+# themselves in the subset. The shared types will come from pico2peta-kernel (core).
 [dependencies]
+h5i-app-std = { path = "/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std" }
+# `App`, the `Kernel` the server runs (`h5i_app_std::authz_kernel!`). Not extracted.
+h5i-app-core = { path = "/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-core" }
 
 # Written in the Rust subset Aeneas translates: no `?`, no iterator adapters or closures,
 # explicit loops and arithmetic. Clippy's idiomatic rewrites leave that subset.
@@ -25,3 +28,5 @@ collapsible_else_if = "allow"
 implicit_saturating_sub = "allow"
 manual_is_multiple_of = "allow"
 single_match = "allow"
+redundant_pattern_matching = "allow"
+vec_init_then_push = "allow"

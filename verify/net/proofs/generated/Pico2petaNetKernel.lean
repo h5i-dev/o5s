@@ -19,6 +19,1073 @@ set_option maxRecDepth 2048
 
 namespace pico2peta_net_kernel
 
+/-- [h5i_app_std::authz::Guarded]
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 21:0-21:19
+    Name pattern: [h5i_app_std::authz::Guarded]
+    Visibility: public -/
+@[discriminant isize, rust_type "h5i_app_std::authz::Guarded"]
+inductive h5i_app_std.authz.Guarded (E : Type) where
+| App : E → h5i_app_std.authz.Guarded E
+| Denied : h5i_app_std.authz.Guarded E
+
+/-- Trait declaration: [h5i_app_std::authz::Transition]
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 31:0-31:38
+    Name pattern: [h5i_app_std::authz::Transition]
+    Visibility: public -/
+@[rust_trait "h5i_app_std::authz::Transition"]
+structure h5i_app_std.authz.Transition (Self : Type) (A : Type) (S : Type) (C :
+  Type) (W : Type) (R : Type) (E : Type) where
+  kernel_transition : A → S → C → Result (core.result.Result
+    ((alloc.vec.Vec W) × R) E)
+  kernel_apply : S → alloc.vec.Vec W → Result S
+
+/-- Trait declaration: [h5i_app_std::authz::Policy]
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 39:0-39:28
+    Name pattern: [h5i_app_std::authz::Policy]
+    Visibility: public -/
+@[rust_trait "h5i_app_std::authz::Policy"]
+structure h5i_app_std.authz.Policy (Self : Type) (A : Type) (S : Type) (W :
+  Type) (D : Type) where
+  permits : A → S → W → Result Bool
+  visible : A → S → D → Result Bool
+  stored : S → D → Result Bool
+
+/-- Trait declaration: [h5i_app_std::authz::Disclose]
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 53:0-53:21
+    Name pattern: [h5i_app_std::authz::Disclose]
+    Visibility: public -/
+@[rust_trait "h5i_app_std::authz::Disclose"]
+structure h5i_app_std.authz.Disclose (Self : Type) (D : Type) where
+  disclosed : Self → Result (alloc.vec.Vec D)
+
+/-- [h5i_app_std::authz::prefix]: loop body 0:
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 61:4-64:5
+    Name pattern: [h5i_app_std::authz::prefix]
+    Visibility: public -/
+@[rust_loop_body, rust_fun "h5i_app_std::authz::prefix"]
+def h5i_app_std.authz.prefix_loop.body
+  {W : Type} (corecloneCloneInst : core.clone.Clone W) (ws : alloc.vec.Vec W)
+  (n : Std.Usize) (out : alloc.vec.Vec W) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec W) × Std.Usize) (alloc.vec.Vec W))
+  := do
+  if i < n
+  then
+    let i1 := alloc.vec.Vec.len ws
+    if i < i1
+    then
+      let t ←
+        alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice W) ws i
+      let t1 ← corecloneCloneInst.clone t
+      let out1 ← alloc.vec.Vec.push out t1
+      let i2 ← i + 1#usize
+      ok (cont (out1, i2))
+    else ok (done out)
+  else ok (done out)
+
+/-- [h5i_app_std::authz::prefix]: loop 0:
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 61:4-64:5
+    Name pattern: [h5i_app_std::authz::prefix]
+    Visibility: public -/
+@[rust_loop, rust_fun "h5i_app_std::authz::prefix"]
+def h5i_app_std.authz.prefix_loop
+  {W : Type} (corecloneCloneInst : core.clone.Clone W) (ws : alloc.vec.Vec W)
+  (n : Std.Usize) (out : alloc.vec.Vec W) (i : Std.Usize) :
+  Result (alloc.vec.Vec W)
+  := do
+  loop
+    (fun (out1, i1) => h5i_app_std.authz.prefix_loop.body corecloneCloneInst ws
+      n out1 i1)
+    (out, i)
+
+/-- [h5i_app_std::authz::prefix]:
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 58:0-58:56
+    Name pattern: [h5i_app_std::authz::prefix]
+    Visibility: public -/
+@[reducible, rust_fun "h5i_app_std::authz::prefix"]
+def h5i_app_std.authz.prefix
+  {W : Type} (corecloneCloneInst : core.clone.Clone W) (ws : alloc.vec.Vec W)
+  (n : Std.Usize) :
+  Result (alloc.vec.Vec W)
+  := do
+  h5i_app_std.authz.prefix_loop corecloneCloneInst ws n (alloc.vec.Vec.new W)
+    0#usize
+
+/-- [h5i_app_std::authz::check_writes]: loop body 0:
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 75:4-83:1
+    Name pattern: [h5i_app_std::authz::check_writes]
+    Visibility: public -/
+@[rust_loop_body, rust_fun "h5i_app_std::authz::check_writes"]
+def h5i_app_std.authz.check_writes_loop.body
+  {A : Type} {S : Type} {C : Type} {W : Type} {R : Type} {E : Type} {D : Type}
+  {T : Type} {P : Type} (corecloneCloneInst : core.clone.Clone W)
+  (TransitionInst : h5i_app_std.authz.Transition T A S C W R E) (PolicyInst :
+  h5i_app_std.authz.Policy P A S W D) (actor : A) (s : S)
+  (ws : alloc.vec.Vec W) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let i1 := alloc.vec.Vec.len ws
+  if i < i1
+  then
+    let v ← h5i_app_std.authz.prefix corecloneCloneInst ws i
+    let cur ← TransitionInst.kernel_apply s v
+    let t ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice W) ws i
+    let b ← PolicyInst.permits actor cur t
+    if b
+    then let i2 ← i + 1#usize
+         ok (cont i2)
+    else ok (done false)
+  else ok (done true)
+
+/-- [h5i_app_std::authz::check_writes]: loop 0:
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 75:4-83:1
+    Name pattern: [h5i_app_std::authz::check_writes]
+    Visibility: public -/
+@[rust_loop, rust_fun "h5i_app_std::authz::check_writes"]
+def h5i_app_std.authz.check_writes_loop
+  {A : Type} {S : Type} {C : Type} {W : Type} {R : Type} {E : Type} {D : Type}
+  {T : Type} {P : Type} (corecloneCloneInst : core.clone.Clone W)
+  (TransitionInst : h5i_app_std.authz.Transition T A S C W R E) (PolicyInst :
+  h5i_app_std.authz.Policy P A S W D) (actor : A) (s : S)
+  (ws : alloc.vec.Vec W) (i : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun i1 => h5i_app_std.authz.check_writes_loop.body corecloneCloneInst
+      TransitionInst PolicyInst actor s ws i1)
+    i
+
+/-- [h5i_app_std::authz::check_writes]:
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 69:0-73:9
+    Name pattern: [h5i_app_std::authz::check_writes]
+    Visibility: public -/
+@[reducible, rust_fun "h5i_app_std::authz::check_writes"]
+def h5i_app_std.authz.check_writes
+  {A : Type} {S : Type} {C : Type} {W : Type} {R : Type} {E : Type} {D : Type}
+  {T : Type} {P : Type} (corecloneCloneInst : core.clone.Clone W)
+  (TransitionInst : h5i_app_std.authz.Transition T A S C W R E) (PolicyInst :
+  h5i_app_std.authz.Policy P A S W D) (actor : A) (s : S)
+  (ws : alloc.vec.Vec W) :
+  Result Bool
+  := do
+  h5i_app_std.authz.check_writes_loop corecloneCloneInst TransitionInst
+    PolicyInst actor s ws 0#usize
+
+/-- [h5i_app_std::authz::shown]:
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 86:0-86:80
+    Name pattern: [h5i_app_std::authz::shown]
+    Visibility: public -/
+@[rust_fun "h5i_app_std::authz::shown"]
+def h5i_app_std.authz.shown
+  {A : Type} {S : Type} {W : Type} {D : Type} {P : Type} (PolicyInst :
+  h5i_app_std.authz.Policy P A S W D) (actor : A) (s : S) (d : D) :
+  Result Bool
+  := do
+  let b ← PolicyInst.stored s d
+  if b
+  then PolicyInst.visible actor s d
+  else ok false
+
+/-- [h5i_app_std::authz::check_reads]: loop body 0:
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 96:4-103:1
+    Name pattern: [h5i_app_std::authz::check_reads]
+    Visibility: public -/
+@[rust_loop_body, rust_fun "h5i_app_std::authz::check_reads"]
+def h5i_app_std.authz.check_reads_loop.body
+  {A : Type} {S : Type} {W : Type} {D : Type} {P : Type} (PolicyInst :
+  h5i_app_std.authz.Policy P A S W D) (actor : A) (before : S) (after : S)
+  (ds : alloc.vec.Vec D) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let i1 := alloc.vec.Vec.len ds
+  if i < i1
+  then
+    let t ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice D) ds i
+    let b ← h5i_app_std.authz.shown PolicyInst actor before t
+    if b
+    then let i2 ← i + 1#usize
+         ok (cont i2)
+    else
+      let b1 ← h5i_app_std.authz.shown PolicyInst actor after t
+      if b1
+      then let i2 ← i + 1#usize
+           ok (cont i2)
+      else ok (done false)
+  else ok (done true)
+
+/-- [h5i_app_std::authz::check_reads]: loop 0:
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 96:4-103:1
+    Name pattern: [h5i_app_std::authz::check_reads]
+    Visibility: public -/
+@[rust_loop, rust_fun "h5i_app_std::authz::check_reads"]
+def h5i_app_std.authz.check_reads_loop
+  {A : Type} {S : Type} {W : Type} {D : Type} {P : Type} (PolicyInst :
+  h5i_app_std.authz.Policy P A S W D) (actor : A) (before : S) (after : S)
+  (ds : alloc.vec.Vec D) (i : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun i1 => h5i_app_std.authz.check_reads_loop.body PolicyInst actor before
+      after ds i1)
+    i
+
+/-- [h5i_app_std::authz::check_reads]:
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 94:0-94:108
+    Name pattern: [h5i_app_std::authz::check_reads]
+    Visibility: public -/
+@[reducible, rust_fun "h5i_app_std::authz::check_reads"]
+def h5i_app_std.authz.check_reads
+  {A : Type} {S : Type} {W : Type} {D : Type} {P : Type} (PolicyInst :
+  h5i_app_std.authz.Policy P A S W D) (actor : A) (before : S) (after : S)
+  (ds : alloc.vec.Vec D) :
+  Result Bool
+  := do
+  h5i_app_std.authz.check_reads_loop PolicyInst actor before after ds 0#usize
+
+/-- [h5i_app_std::authz::guard]:
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 107:0-111:36
+    Name pattern: [h5i_app_std::authz::guard]
+    Visibility: public -/
+@[rust_fun "h5i_app_std::authz::guard"]
+def h5i_app_std.authz.guard
+  {A : Type} {S : Type} {C : Type} {W : Type} {R : Type} {E : Type} {D : Type}
+  {T : Type} {P : Type} (corecloneCloneInst : core.clone.Clone W) (DiscloseInst
+  : h5i_app_std.authz.Disclose R D) (TransitionInst :
+  h5i_app_std.authz.Transition T A S C W R E) (PolicyInst :
+  h5i_app_std.authz.Policy P A S W D) (actor : A) (s : S) (cmd : C) :
+  Result (core.result.Result ((alloc.vec.Vec W) × R)
+    (h5i_app_std.authz.Guarded E))
+  := do
+  let r ← TransitionInst.kernel_transition actor s cmd
+  match r with
+  | core.result.Result.Ok out =>
+    let (v, t) := out
+    let b ←
+      h5i_app_std.authz.check_writes corecloneCloneInst TransitionInst
+        PolicyInst actor s v
+    if b
+    then
+      let after ← TransitionInst.kernel_apply s v
+      let v1 ← DiscloseInst.disclosed t
+      let b1 ← h5i_app_std.authz.check_reads PolicyInst actor s after v1
+      if b1
+      then ok (core.result.Result.Ok out)
+      else ok (core.result.Result.Err h5i_app_std.authz.Guarded.Denied)
+    else ok (core.result.Result.Err h5i_app_std.authz.Guarded.Denied)
+  | core.result.Result.Err e =>
+    ok (core.result.Result.Err (h5i_app_std.authz.Guarded.App e))
+
+/-- Trait declaration: [h5i_app_std::authz::View]
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 131:0-131:23
+    Name pattern: [h5i_app_std::authz::View]
+    Visibility: public -/
+@[rust_trait "h5i_app_std::authz::View"]
+structure h5i_app_std.authz.View (Self : Type) (A : Type) (S : Type) (C : Type)
+  where
+  read_only : C → Result Bool
+  view : A → S → Result S
+
+/-- [h5i_app_std::authz::guard_viewed]:
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 141:0-156:36
+    Name pattern: [h5i_app_std::authz::guard_viewed]
+    Visibility: public -/
+@[rust_fun "h5i_app_std::authz::guard_viewed"]
+def h5i_app_std.authz.guard_viewed
+  {A : Type} {S : Type} {C : Type} {W : Type} {R : Type} {E : Type} {D : Type}
+  {T : Type} {P : Type} {V : Type} (corecloneCloneInst : core.clone.Clone W)
+  (DiscloseInst : h5i_app_std.authz.Disclose R D) (TransitionInst :
+  h5i_app_std.authz.Transition T A S C W R E) (PolicyInst :
+  h5i_app_std.authz.Policy P A S W D) (ViewInst : h5i_app_std.authz.View V A S
+  C) (actor : A) (s : S) (cmd : C) :
+  Result (core.result.Result ((alloc.vec.Vec W) × R)
+    (h5i_app_std.authz.Guarded E))
+  := do
+  let b ← ViewInst.read_only cmd
+  if b
+  then
+    let v ← ViewInst.view actor s
+    let r ← TransitionInst.kernel_transition actor v cmd
+    match r with
+    | core.result.Result.Ok out =>
+      let (v1, t) := out
+      let i := alloc.vec.Vec.len v1
+      if i != 0#usize
+      then ok (core.result.Result.Err h5i_app_std.authz.Guarded.Denied)
+      else
+        let v2 ← DiscloseInst.disclosed t
+        let b1 ← h5i_app_std.authz.check_reads PolicyInst actor v v v2
+        if b1
+        then ok (core.result.Result.Ok out)
+        else ok (core.result.Result.Err h5i_app_std.authz.Guarded.Denied)
+    | core.result.Result.Err e =>
+      ok (core.result.Result.Err (h5i_app_std.authz.Guarded.App e))
+  else
+    h5i_app_std.authz.guard corecloneCloneInst DiscloseInst TransitionInst
+      PolicyInst actor s cmd
+
+/-- [pico2peta_net_kernel::access::is_under]: loop body 0:
+    Source: 'crates/net-kernel/src/access.rs', lines 94:4-101:1
+    Visibility: public -/
+@[rust_loop_body]
+def access.is_under_loop.body
+  (s : Slice Std.U8) («prefix» : Slice Std.U8) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let i1 := Slice.len «prefix»
+  if i < i1
+  then
+    let i2 ← Slice.index_usize s i
+    let i3 ← Slice.index_usize «prefix» i
+    if i2 != i3
+    then ok (done false)
+    else let i4 ← i + 1#usize
+         ok (cont i4)
+  else
+    let i2 := Slice.len s
+    let i3 := Slice.len «prefix»
+    if i2 = i3
+    then ok (done true)
+    else
+      let i4 := Slice.len «prefix»
+      let i5 ← Slice.index_usize s i4
+      ok (done (i5 = 47#u8))
+
+/-- [pico2peta_net_kernel::access::is_under]: loop 0:
+    Source: 'crates/net-kernel/src/access.rs', lines 94:4-101:1
+    Visibility: public -/
+@[rust_loop]
+def access.is_under_loop
+  (s : Slice Std.U8) («prefix» : Slice Std.U8) (i : Std.Usize) :
+  Result Bool
+  := do
+  loop
+    (fun i1 => access.is_under_loop.body s «prefix» i1)
+    i
+
+/-- [pico2peta_net_kernel::access::is_under]:
+    Source: 'crates/net-kernel/src/access.rs', lines 86:0-101:1
+    Visibility: public -/
+def access.is_under
+  (s : Slice Std.U8) («prefix» : Slice Std.U8) : Result Bool := do
+  let i := Slice.len «prefix»
+  if i = 0#usize
+  then ok true
+  else
+    let i1 := Slice.len s
+    let i2 := Slice.len «prefix»
+    if i1 < i2
+    then ok false
+    else access.is_under_loop s «prefix» 0#usize
+
+/-- [pico2peta_net_kernel::access::Grant]
+    Source: 'crates/net-kernel/src/access.rs', lines 27:0-30:1
+    Visibility: public -/
+structure access.Grant where
+  «prefix» : alloc.vec.Vec Std.U8
+  access : Std.U8
+
+/-- [pico2peta_net_kernel::access::Principal]
+    Source: 'crates/net-kernel/src/access.rs', lines 34:0-36:1
+    Visibility: public -/
+structure access.Principal where
+  grants : alloc.vec.Vec access.Grant
+
+/-- [pico2peta_net_kernel::access::allows]: loop body 0:
+    Source: 'crates/net-kernel/src/access.rs', lines 106:4-112:1
+    Visibility: public -/
+@[rust_loop_body]
+def access.allows_loop.body
+  («name» : Slice Std.U8) (need : Std.U8)
+  (iter : core.slice.iter.Iter access.Grant) :
+  Result (ControlFlow (core.slice.iter.Iter access.Grant) Bool)
+  := do
+  let (o, iter1) ← core.slice.iter.IteratorSliceIter.next iter
+  match o with
+  | none => ok (done false)
+  | some g =>
+    if g.access >= need
+    then
+      let s := alloc.vec.Vec.deref g.prefix
+      let b ← access.is_under «name» s
+      if b
+      then ok (done true)
+      else ok (cont iter1)
+    else ok (cont iter1)
+
+/-- [pico2peta_net_kernel::access::allows]: loop 0:
+    Source: 'crates/net-kernel/src/access.rs', lines 106:4-112:1
+    Visibility: public -/
+@[rust_loop]
+def access.allows_loop
+  (iter : core.slice.iter.Iter access.Grant) («name» : Slice Std.U8)
+  (need : Std.U8) :
+  Result Bool
+  := do
+  loop
+    (fun iter1 => access.allows_loop.body «name» need iter1)
+    iter
+
+/-- [pico2peta_net_kernel::access::allows]:
+    Source: 'crates/net-kernel/src/access.rs', lines 105:0-112:1
+    Visibility: public -/
+def access.allows
+  (p : access.Principal) («name» : Slice Std.U8) (need : Std.U8) :
+  Result Bool
+  := do
+  let s := alloc.vec.Vec.deref p.grants
+  let iter ← core.slice.Slice.iter s
+  access.allows_loop iter «name» need
+
+/-- [pico2peta_net_kernel::access::READ]
+    Source: 'crates/net-kernel/src/access.rs', lines 21:0-21:23
+    Visibility: public -/
+@[global_simps, irreducible] def access.READ : Std.U8 := 1#u8
+
+/-- [pico2peta_net_kernel::access::reads_some]: loop body 0:
+    Source: 'crates/net-kernel/src/access.rs', lines 116:4-122:1
+    Visibility: public -/
+@[rust_loop_body]
+def access.reads_some_loop.body
+  (p : access.Principal) (iter : core.slice.iter.Iter (alloc.vec.Vec Std.U8)) :
+  Result (ControlFlow (core.slice.iter.Iter (alloc.vec.Vec Std.U8)) Bool)
+  := do
+  let (o, iter1) ← core.slice.iter.IteratorSliceIter.next iter
+  match o with
+  | none => ok (done false)
+  | some c =>
+    let s := alloc.vec.Vec.deref c
+    let b ← access.allows p s access.READ
+    if b
+    then ok (done true)
+    else ok (cont iter1)
+
+/-- [pico2peta_net_kernel::access::reads_some]: loop 0:
+    Source: 'crates/net-kernel/src/access.rs', lines 116:4-122:1
+    Visibility: public -/
+@[rust_loop]
+def access.reads_some_loop
+  (iter : core.slice.iter.Iter (alloc.vec.Vec Std.U8)) (p : access.Principal) :
+  Result Bool
+  := do
+  loop
+    (fun iter1 => access.reads_some_loop.body p iter1)
+    iter
+
+/-- [pico2peta_net_kernel::access::reads_some]:
+    Source: 'crates/net-kernel/src/access.rs', lines 115:0-122:1
+    Visibility: public -/
+def access.reads_some
+  (p : access.Principal) (cells : alloc.vec.Vec (alloc.vec.Vec Std.U8)) :
+  Result Bool
+  := do
+  let s := alloc.vec.Vec.deref cells
+  let iter ← core.slice.Slice.iter s
+  access.reads_some_loop iter p
+
+/-- [pico2peta_net_kernel::access::Snapshot]
+    Source: 'crates/net-kernel/src/access.rs', lines 45:0-48:1
+    Visibility: public -/
+structure access.Snapshot where
+  refs : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize))
+  objects : alloc.vec.Vec ((Array Std.U8 32#usize) × (alloc.vec.Vec
+    (alloc.vec.Vec Std.U8)))
+
+/-- [pico2peta_net_kernel::access::{impl h5i_app_std::authz::View<pico2peta_net_kernel::access::Principal, pico2peta_net_kernel::access::Snapshot, pico2peta_net_kernel::access::Command> for pico2peta_net_kernel::access::Access}::view]: loop body 0:
+    Source: 'crates/net-kernel/src/access.rs', lines 202:8-206:9
+    Visibility: public -/
+@[rust_loop_body]
+def
+  access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.view_loop0.body
+  (actor : access.Principal)
+  (iter : core.slice.iter.Iter ((alloc.vec.Vec Std.U8) × (Array Std.U8
+  32#usize)))
+  (refs : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize))) :
+  Result (ControlFlow ((core.slice.iter.Iter ((alloc.vec.Vec Std.U8) × (Array
+    Std.U8 32#usize))) × (alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array
+    Std.U8 32#usize)))) (alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8
+    32#usize))))
+  := do
+  let (o, iter1) ← core.slice.iter.IteratorSliceIter.next iter
+  match o with
+  | none => ok (done refs)
+  | some e =>
+    let (v, _) := e
+    let s := alloc.vec.Vec.deref v
+    let b ← access.allows actor s access.READ
+    if b
+    then
+      let p ←
+        (BuiltinClone ((alloc.vec.Vec Std.U8) × (Array Std.U8
+          32#usize))).clone e
+      let refs1 ← alloc.vec.Vec.push refs p
+      ok (cont (iter1, refs1))
+    else ok (cont (iter1, refs))
+
+/-- [pico2peta_net_kernel::access::{impl h5i_app_std::authz::View<pico2peta_net_kernel::access::Principal, pico2peta_net_kernel::access::Snapshot, pico2peta_net_kernel::access::Command> for pico2peta_net_kernel::access::Access}::view]: loop 0:
+    Source: 'crates/net-kernel/src/access.rs', lines 202:8-206:9
+    Visibility: public -/
+@[rust_loop]
+def access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.view_loop0
+  (iter : core.slice.iter.Iter ((alloc.vec.Vec Std.U8) × (Array Std.U8
+  32#usize))) (actor : access.Principal)
+  (refs : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize))) :
+  Result (alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize)))
+  := do
+  loop
+    (fun (iter1, refs1) =>
+      access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.view_loop0.body
+      actor iter1 refs1)
+    (iter, refs)
+
+/-- [pico2peta_net_kernel::access::{impl h5i_app_std::authz::View<pico2peta_net_kernel::access::Principal, pico2peta_net_kernel::access::Snapshot, pico2peta_net_kernel::access::Command> for pico2peta_net_kernel::access::Access}::view]: loop body 1:
+    Source: 'crates/net-kernel/src/access.rs', lines 208:8-212:9
+    Visibility: public -/
+@[rust_loop_body]
+def
+  access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.view_loop1.body
+  (actor : access.Principal)
+  (iter : core.slice.iter.Iter ((Array Std.U8 32#usize) × (alloc.vec.Vec
+  (alloc.vec.Vec Std.U8))))
+  (objects : alloc.vec.Vec ((Array Std.U8 32#usize) × (alloc.vec.Vec
+  (alloc.vec.Vec Std.U8)))) :
+  Result (ControlFlow ((core.slice.iter.Iter ((Array Std.U8 32#usize) ×
+    (alloc.vec.Vec (alloc.vec.Vec Std.U8)))) × (alloc.vec.Vec ((Array Std.U8
+    32#usize) × (alloc.vec.Vec (alloc.vec.Vec Std.U8))))) (alloc.vec.Vec
+    ((Array Std.U8 32#usize) × (alloc.vec.Vec (alloc.vec.Vec Std.U8)))))
+  := do
+  let (o, iter1) ← core.slice.iter.IteratorSliceIter.next iter
+  match o with
+  | none => ok (done objects)
+  | some e =>
+    let (_, v) := e
+    let b ← access.reads_some actor v
+    if b
+    then
+      let p ←
+        (BuiltinClone ((Array Std.U8 32#usize) × (alloc.vec.Vec (alloc.vec.Vec
+          Std.U8)))).clone e
+      let objects1 ← alloc.vec.Vec.push objects p
+      ok (cont (iter1, objects1))
+    else ok (cont (iter1, objects))
+
+/-- [pico2peta_net_kernel::access::{impl h5i_app_std::authz::View<pico2peta_net_kernel::access::Principal, pico2peta_net_kernel::access::Snapshot, pico2peta_net_kernel::access::Command> for pico2peta_net_kernel::access::Access}::view]: loop 1:
+    Source: 'crates/net-kernel/src/access.rs', lines 208:8-212:9
+    Visibility: public -/
+@[rust_loop]
+def access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.view_loop1
+  (iter : core.slice.iter.Iter ((Array Std.U8 32#usize) × (alloc.vec.Vec
+  (alloc.vec.Vec Std.U8)))) (actor : access.Principal)
+  (objects : alloc.vec.Vec ((Array Std.U8 32#usize) × (alloc.vec.Vec
+  (alloc.vec.Vec Std.U8)))) :
+  Result (alloc.vec.Vec ((Array Std.U8 32#usize) × (alloc.vec.Vec
+    (alloc.vec.Vec Std.U8))))
+  := do
+  loop
+    (fun (iter1, objects1) =>
+      access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.view_loop1.body
+      actor iter1 objects1)
+    (iter, objects)
+
+/-- [pico2peta_net_kernel::access::{impl h5i_app_std::authz::View<pico2peta_net_kernel::access::Principal, pico2peta_net_kernel::access::Snapshot, pico2peta_net_kernel::access::Command> for pico2peta_net_kernel::access::Access}::view]:
+    Source: 'crates/net-kernel/src/access.rs', lines 200:4-214:5
+    Visibility: public -/
+def access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.view
+  (actor : access.Principal) (s : access.Snapshot) :
+  Result access.Snapshot
+  := do
+  let s1 := alloc.vec.Vec.deref s.refs
+  let iter ← core.slice.Slice.iter s1
+  let refs ←
+    access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.view_loop0
+      iter actor (alloc.vec.Vec.new ((alloc.vec.Vec Std.U8) × (Array Std.U8
+      32#usize)))
+  let s2 := alloc.vec.Vec.deref s.objects
+  let iter1 ← core.slice.Slice.iter s2
+  let objects ←
+    access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.view_loop1
+      iter1 actor (alloc.vec.Vec.new ((Array Std.U8 32#usize) × (alloc.vec.Vec
+      (alloc.vec.Vec Std.U8))))
+  ok { refs, objects }
+
+/-- [pico2peta_net_kernel::access::Command]
+    Source: 'crates/net-kernel/src/access.rs', lines 51:0-59:1
+    Visibility: public -/
+@[discriminant isize]
+inductive access.Command where
+| ReadObject : Array Std.U8 32#usize → access.Command
+| ReadRef : alloc.vec.Vec Std.U8 → access.Command
+| WriteRef :
+  alloc.vec.Vec Std.U8 →
+  Option (Array Std.U8 32#usize) →
+  access.Command
+
+/-- [pico2peta_net_kernel::access::{impl h5i_app_std::authz::View<pico2peta_net_kernel::access::Principal, pico2peta_net_kernel::access::Snapshot, pico2peta_net_kernel::access::Command> for pico2peta_net_kernel::access::Access}::read_only]:
+    Source: 'crates/net-kernel/src/access.rs', lines 192:4-198:5
+    Visibility: public -/
+def access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.read_only
+  (cmd : access.Command) : Result Bool := do
+  match cmd with
+  | access.Command.ReadObject _ => ok true
+  | access.Command.ReadRef _ => ok true
+  | access.Command.WriteRef _ _ => ok false
+
+/-- [pico2peta_net_kernel::access::Access]
+    Source: 'crates/net-kernel/src/access.rs', lines 145:0-145:18
+    Visibility: public -/
+@[reducible]
+def access.Access := Unit
+
+/-- Trait implementation: [pico2peta_net_kernel::access::{impl h5i_app_std::authz::View<pico2peta_net_kernel::access::Principal, pico2peta_net_kernel::access::Snapshot, pico2peta_net_kernel::access::Command> for pico2peta_net_kernel::access::Access}]
+    Source: 'crates/net-kernel/src/access.rs', lines 191:0-215:1 -/
+@[reducible]
+def access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand :
+  h5i_app_std.authz.View access.Access access.Principal access.Snapshot
+  access.Command := {
+  read_only :=
+    access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.read_only
+  view := access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.view
+}
+
+/-- [pico2peta_net_kernel::access::Row]
+    Source: 'crates/net-kernel/src/access.rs', lines 70:0-73:1
+    Visibility: public -/
+@[discriminant isize]
+inductive access.Row where
+| Object : Array Std.U8 32#usize → access.Row
+| Ref : alloc.vec.Vec Std.U8 → Array Std.U8 32#usize → access.Row
+
+/-- [pico2peta_net_kernel::access::Reply]
+    Source: 'crates/net-kernel/src/access.rs', lines 76:0-78:1
+    Visibility: public -/
+structure access.Reply where
+  rows : alloc.vec.Vec access.Row
+
+/-- [pico2peta_net_kernel::access::{impl core::clone::Clone for pico2peta_net_kernel::access::Row}::clone]:
+    Source: 'crates/net-kernel/src/access.rs', lines 69:9-69:14
+    Visibility: public -/
+def access.Row.Insts.CoreCloneClone.clone
+  (self : access.Row) : Result access.Row := do
+  match self with
+  | access.Row.Object __self_0 =>
+    let a ← core.array.CloneArray.clone core.clone.CloneU8 __self_0
+    ok (access.Row.Object a)
+  | access.Row.Ref __self_0 __self_1 =>
+    let v ← alloc.vec.CloneVec.clone core.clone.CloneU8 __self_0
+    let a ← core.array.CloneArray.clone core.clone.CloneU8 __self_1
+    ok (access.Row.Ref v a)
+
+/-- Trait implementation: [pico2peta_net_kernel::access::{impl core::clone::Clone for pico2peta_net_kernel::access::Row}]
+    Source: 'crates/net-kernel/src/access.rs', lines 69:9-69:14 -/
+@[reducible]
+def access.Row.Insts.CoreCloneClone : core.clone.Clone access.Row := {
+  clone := access.Row.Insts.CoreCloneClone.clone
+}
+
+/-- [pico2peta_net_kernel::access::{impl h5i_app_std::authz::Disclose<pico2peta_net_kernel::access::Row> for pico2peta_net_kernel::access::Reply}::disclosed]:
+    Source: 'crates/net-kernel/src/access.rs', lines 186:4-188:5
+    Visibility: public -/
+def access.Reply.Insts.H5i_app_stdAuthzDiscloseRow.disclosed
+  (self : access.Reply) : Result (alloc.vec.Vec access.Row) := do
+  alloc.vec.CloneVec.clone access.Row.Insts.CoreCloneClone self.rows
+
+/-- Trait implementation: [pico2peta_net_kernel::access::{impl h5i_app_std::authz::Disclose<pico2peta_net_kernel::access::Row> for pico2peta_net_kernel::access::Reply}]
+    Source: 'crates/net-kernel/src/access.rs', lines 185:0-189:1 -/
+@[reducible]
+def access.Reply.Insts.H5i_app_stdAuthzDiscloseRow : h5i_app_std.authz.Disclose
+  access.Reply access.Row := {
+  disclosed := access.Reply.Insts.H5i_app_stdAuthzDiscloseRow.disclosed
+}
+
+/-- [pico2peta_net_kernel::access::ref_of]: loop body 0:
+    Source: 'crates/net-kernel/src/access.rs', lines 136:4-142:1
+    Visibility: public -/
+@[rust_loop_body]
+def access.ref_of_loop.body
+  («name» : alloc.vec.Vec Std.U8)
+  (iter : core.slice.iter.Iter ((alloc.vec.Vec Std.U8) × (Array Std.U8
+  32#usize))) :
+  Result (ControlFlow (core.slice.iter.Iter ((alloc.vec.Vec Std.U8) × (Array
+    Std.U8 32#usize))) (Option (Array Std.U8 32#usize)))
+  := do
+  let (o, iter1) ← core.slice.iter.IteratorSliceIter.next iter
+  match o with
+  | none => ok (done none)
+  | some e =>
+    let (v, a) := e
+    let b ←
+      alloc.vec.partial_eq.PartialEqVec.eq core.cmp.PartialEqU8 v «name»
+    if b
+    then ok (done (some a))
+    else ok (cont iter1)
+
+/-- [pico2peta_net_kernel::access::ref_of]: loop 0:
+    Source: 'crates/net-kernel/src/access.rs', lines 136:4-142:1
+    Visibility: public -/
+@[rust_loop]
+def access.ref_of_loop
+  (iter : core.slice.iter.Iter ((alloc.vec.Vec Std.U8) × (Array Std.U8
+  32#usize))) («name» : alloc.vec.Vec Std.U8) :
+  Result (Option (Array Std.U8 32#usize))
+  := do
+  loop
+    (fun iter1 => access.ref_of_loop.body «name» iter1)
+    iter
+
+/-- [pico2peta_net_kernel::access::ref_of]:
+    Source: 'crates/net-kernel/src/access.rs', lines 135:0-142:1
+    Visibility: public -/
+def access.ref_of
+  (s : access.Snapshot) («name» : alloc.vec.Vec Std.U8) :
+  Result (Option (Array Std.U8 32#usize))
+  := do
+  let s1 := alloc.vec.Vec.deref s.refs
+  let iter ← core.slice.Slice.iter s1
+  access.ref_of_loop iter «name»
+
+/-- [pico2peta_net_kernel::access::cells_of]: loop body 0:
+    Source: 'crates/net-kernel/src/access.rs', lines 126:4-132:1
+    Visibility: public -/
+@[rust_loop_body]
+def access.cells_of_loop.body
+  (h : Array Std.U8 32#usize)
+  (iter : core.slice.iter.Iter ((Array Std.U8 32#usize) × (alloc.vec.Vec
+  (alloc.vec.Vec Std.U8)))) :
+  Result (ControlFlow (core.slice.iter.Iter ((Array Std.U8 32#usize) ×
+    (alloc.vec.Vec (alloc.vec.Vec Std.U8)))) (Option (alloc.vec.Vec
+    (alloc.vec.Vec Std.U8))))
+  := do
+  let (o, iter1) ← core.slice.iter.IteratorSliceIter.next iter
+  match o with
+  | none => ok (done none)
+  | some e =>
+    let (a, v) := e
+    let b ← core.array.equality.PartialEqArray.eq core.cmp.PartialEqU8 a h
+    if b
+    then
+      let v1 ←
+        alloc.vec.CloneVec.clone (core.clone.CloneallocvecVec
+          core.clone.CloneU8) v
+      ok (done (some v1))
+    else ok (cont iter1)
+
+/-- [pico2peta_net_kernel::access::cells_of]: loop 0:
+    Source: 'crates/net-kernel/src/access.rs', lines 126:4-132:1
+    Visibility: public -/
+@[rust_loop]
+def access.cells_of_loop
+  (iter : core.slice.iter.Iter ((Array Std.U8 32#usize) × (alloc.vec.Vec
+  (alloc.vec.Vec Std.U8)))) (h : Array Std.U8 32#usize) :
+  Result (Option (alloc.vec.Vec (alloc.vec.Vec Std.U8)))
+  := do
+  loop
+    (fun iter1 => access.cells_of_loop.body h iter1)
+    iter
+
+/-- [pico2peta_net_kernel::access::cells_of]:
+    Source: 'crates/net-kernel/src/access.rs', lines 125:0-132:1
+    Visibility: public -/
+def access.cells_of
+  (s : access.Snapshot) (h : Array Std.U8 32#usize) :
+  Result (Option (alloc.vec.Vec (alloc.vec.Vec Std.U8)))
+  := do
+  let s1 := alloc.vec.Vec.deref s.objects
+  let iter ← core.slice.Slice.iter s1
+  access.cells_of_loop iter h
+
+/-- [pico2peta_net_kernel::access::{impl h5i_app_std::authz::Policy<pico2peta_net_kernel::access::Principal, pico2peta_net_kernel::access::Snapshot, pico2peta_net_kernel::access::Write, pico2peta_net_kernel::access::Row> for pico2peta_net_kernel::access::Access}::stored]:
+    Source: 'crates/net-kernel/src/access.rs', lines 171:4-182:5
+    Visibility: public -/
+def access.Access.Insts.H5i_app_stdAuthzPolicyPrincipalSnapshotWriteRow.stored
+  (s : access.Snapshot) (d : access.Row) : Result Bool := do
+  match d with
+  | access.Row.Object h =>
+    let o ← access.cells_of s h
+    match o with
+    | none => ok false
+    | some _ => ok true
+  | access.Row.Ref n h =>
+    let o ← access.ref_of s n
+    match o with
+    | none => ok false
+    | some x => core.array.equality.PartialEqArray.eq core.cmp.PartialEqU8 x h
+
+/-- [pico2peta_net_kernel::access::{impl h5i_app_std::authz::Policy<pico2peta_net_kernel::access::Principal, pico2peta_net_kernel::access::Snapshot, pico2peta_net_kernel::access::Write, pico2peta_net_kernel::access::Row> for pico2peta_net_kernel::access::Access}::visible]:
+    Source: 'crates/net-kernel/src/access.rs', lines 162:4-170:5
+    Visibility: public -/
+def access.Access.Insts.H5i_app_stdAuthzPolicyPrincipalSnapshotWriteRow.visible
+  (actor : access.Principal) (s : access.Snapshot) (d : access.Row) :
+  Result Bool
+  := do
+  match d with
+  | access.Row.Object h =>
+    let o ← access.cells_of s h
+    match o with
+    | none => ok false
+    | some cells => access.reads_some actor cells
+  | access.Row.Ref n _ =>
+    let s1 := alloc.vec.Vec.deref n
+    access.allows actor s1 access.READ
+
+/-- [pico2peta_net_kernel::access::Write]
+    Source: 'crates/net-kernel/src/access.rs', lines 64:0-66:1
+    Visibility: public -/
+@[discriminant isize]
+inductive access.Write where
+| Ref : alloc.vec.Vec Std.U8 → access.Write
+
+/-- [pico2peta_net_kernel::access::WRITE]
+    Source: 'crates/net-kernel/src/access.rs', lines 22:0-22:24
+    Visibility: public -/
+@[global_simps, irreducible] def access.WRITE : Std.U8 := 2#u8
+
+/-- [pico2peta_net_kernel::access::{impl h5i_app_std::authz::Policy<pico2peta_net_kernel::access::Principal, pico2peta_net_kernel::access::Snapshot, pico2peta_net_kernel::access::Write, pico2peta_net_kernel::access::Row> for pico2peta_net_kernel::access::Access}::permits]:
+    Source: 'crates/net-kernel/src/access.rs', lines 157:4-161:5
+    Visibility: public -/
+def access.Access.Insts.H5i_app_stdAuthzPolicyPrincipalSnapshotWriteRow.permits
+  (actor : access.Principal) (_s : access.Snapshot) (w : access.Write) :
+  Result Bool
+  := do
+  let ⟨ n ⟩ := w
+  let s := alloc.vec.Vec.deref n
+  access.allows actor s access.WRITE
+
+/-- Trait implementation: [pico2peta_net_kernel::access::{impl h5i_app_std::authz::Policy<pico2peta_net_kernel::access::Principal, pico2peta_net_kernel::access::Snapshot, pico2peta_net_kernel::access::Write, pico2peta_net_kernel::access::Row> for pico2peta_net_kernel::access::Access}]
+    Source: 'crates/net-kernel/src/access.rs', lines 156:0-183:1 -/
+@[reducible]
+def access.Access.Insts.H5i_app_stdAuthzPolicyPrincipalSnapshotWriteRow :
+  h5i_app_std.authz.Policy access.Access access.Principal access.Snapshot
+  access.Write access.Row := {
+  permits :=
+    access.Access.Insts.H5i_app_stdAuthzPolicyPrincipalSnapshotWriteRow.permits
+  visible :=
+    access.Access.Insts.H5i_app_stdAuthzPolicyPrincipalSnapshotWriteRow.visible
+  stored :=
+    access.Access.Insts.H5i_app_stdAuthzPolicyPrincipalSnapshotWriteRow.stored
+}
+
+/-- [pico2peta_net_kernel::drop_ref]: loop body 0:
+    Source: 'crates/net-kernel/src/lib.rs', lines 54:4-58:5
+    Visibility: public -/
+@[rust_loop_body]
+def drop_ref_loop.body
+  (n : alloc.vec.Vec Std.U8)
+  (iter : core.slice.iter.Iter ((alloc.vec.Vec Std.U8) × (Array Std.U8
+  32#usize)))
+  (out : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize))) :
+  Result (ControlFlow ((core.slice.iter.Iter ((alloc.vec.Vec Std.U8) × (Array
+    Std.U8 32#usize))) × (alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array
+    Std.U8 32#usize)))) (alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8
+    32#usize))))
+  := do
+  let (o, iter1) ← core.slice.iter.IteratorSliceIter.next iter
+  match o with
+  | none => ok (done out)
+  | some e =>
+    let (v, _) := e
+    let b ← alloc.vec.partial_eq.PartialEqVec.ne core.cmp.PartialEqU8 v n
+    if b
+    then
+      let p ←
+        (BuiltinClone ((alloc.vec.Vec Std.U8) × (Array Std.U8
+          32#usize))).clone e
+      let out1 ← alloc.vec.Vec.push out p
+      ok (cont (iter1, out1))
+    else ok (cont (iter1, out))
+
+/-- [pico2peta_net_kernel::drop_ref]: loop 0:
+    Source: 'crates/net-kernel/src/lib.rs', lines 54:4-58:5
+    Visibility: public -/
+@[rust_loop]
+def drop_ref_loop
+  (iter : core.slice.iter.Iter ((alloc.vec.Vec Std.U8) × (Array Std.U8
+  32#usize))) (n : alloc.vec.Vec Std.U8)
+  (out : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize))) :
+  Result (alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize)))
+  := do
+  loop
+    (fun (iter1, out1) => drop_ref_loop.body n iter1 out1)
+    (iter, out)
+
+/-- [pico2peta_net_kernel::drop_ref]:
+    Source: 'crates/net-kernel/src/lib.rs', lines 52:0-60:1
+    Visibility: public -/
+def drop_ref
+  (refs : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize)))
+  (n : alloc.vec.Vec Std.U8) :
+  Result (alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize)))
+  := do
+  let s := alloc.vec.Vec.deref refs
+  let iter ← core.slice.Slice.iter s
+  drop_ref_loop iter n (alloc.vec.Vec.new ((alloc.vec.Vec Std.U8) × (Array
+    Std.U8 32#usize)))
+
+/-- [pico2peta_net_kernel::apply]: loop body 0:
+    Source: 'crates/net-kernel/src/lib.rs', lines 42:4-48:5
+    Visibility: public -/
+@[rust_loop_body]
+def apply_loop.body
+  (iter : core.slice.iter.Iter access.Write)
+  (refs : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize))) :
+  Result (ControlFlow ((core.slice.iter.Iter access.Write) × (alloc.vec.Vec
+    ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize)))) (alloc.vec.Vec
+    ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize))))
+  := do
+  let (o, iter1) ← core.slice.iter.IteratorSliceIter.next iter
+  match o with
+  | none => ok (done refs)
+  | some w =>
+    let ⟨ n ⟩ := w
+    let refs1 ← drop_ref refs n
+    ok (cont (iter1, refs1))
+
+/-- [pico2peta_net_kernel::apply]: loop 0:
+    Source: 'crates/net-kernel/src/lib.rs', lines 42:4-48:5
+    Visibility: public -/
+@[rust_loop]
+def apply_loop
+  (iter : core.slice.iter.Iter access.Write)
+  (refs : alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize))) :
+  Result (alloc.vec.Vec ((alloc.vec.Vec Std.U8) × (Array Std.U8 32#usize)))
+  := do
+  loop
+    (fun (iter1, refs1) => apply_loop.body iter1 refs1)
+    (iter, refs)
+
+/-- [pico2peta_net_kernel::apply]:
+    Source: 'crates/net-kernel/src/lib.rs', lines 40:0-50:1
+    Visibility: public -/
+def apply
+  (s : access.Snapshot) (ws : alloc.vec.Vec access.Write) :
+  Result access.Snapshot
+  := do
+  let refs ←
+    alloc.vec.CloneVec.clone (BuiltinClone ((alloc.vec.Vec Std.U8) × (Array
+      Std.U8 32#usize))) s.refs
+  let s1 := alloc.vec.Vec.deref ws
+  let iter ← core.slice.Slice.iter s1
+  let refs1 ← apply_loop iter refs
+  let v ←
+    alloc.vec.CloneVec.clone (BuiltinClone ((Array Std.U8 32#usize) ×
+      (alloc.vec.Vec (alloc.vec.Vec Std.U8)))) s.objects
+  ok { refs := refs1, objects := v }
+
+/-- [pico2peta_net_kernel::access::{impl h5i_app_std::authz::Transition<pico2peta_net_kernel::access::Principal, pico2peta_net_kernel::access::Snapshot, pico2peta_net_kernel::access::Command, pico2peta_net_kernel::access::Write, pico2peta_net_kernel::access::Reply, pico2peta_net_kernel::access::Error> for pico2peta_net_kernel::access::Access}::kernel_apply]:
+    Source: 'crates/net-kernel/src/access.rs', lines 151:4-153:5
+    Visibility: public -/
+def
+  access.Access.Insts.H5i_app_stdAuthzTransitionPrincipalSnapshotCommandWriteReplyError.kernel_apply
+  (s : access.Snapshot) (ws : alloc.vec.Vec access.Write) :
+  Result access.Snapshot
+  := do
+  apply s ws
+
+/-- [pico2peta_net_kernel::one_row]:
+    Source: 'crates/net-kernel/src/lib.rs', lines 12:0-16:1
+    Visibility: public -/
+def one_row (r : access.Row) : Result access.Reply := do
+  let rows ← alloc.vec.Vec.push (alloc.vec.Vec.new access.Row) r
+  ok { rows }
+
+/-- [pico2peta_net_kernel::access::Error]
+    Source: 'crates/net-kernel/src/access.rs', lines 81:0-83:1
+    Visibility: public -/
+@[discriminant isize]
+inductive access.Error where
+| NotFound : access.Error
+
+/-- [pico2peta_net_kernel::transition]:
+    Source: 'crates/net-kernel/src/lib.rs', lines 20:0-36:1
+    Visibility: public -/
+def transition
+  (_p : access.Principal) (s : access.Snapshot) (cmd : access.Command) :
+  Result (core.result.Result ((alloc.vec.Vec access.Write) × access.Reply)
+    access.Error)
+  := do
+  match cmd with
+  | access.Command.ReadObject h =>
+    let o ← access.cells_of s h
+    match o with
+    | none => ok (core.result.Result.Err access.Error.NotFound)
+    | some _ =>
+      let r ← one_row (access.Row.Object h)
+      ok (core.result.Result.Ok (alloc.vec.Vec.new access.Write, r))
+  | access.Command.ReadRef n =>
+    let o ← access.ref_of s n
+    match o with
+    | none => ok (core.result.Result.Err access.Error.NotFound)
+    | some h =>
+      let v ← alloc.vec.CloneVec.clone core.clone.CloneU8 n
+      let r ← one_row (access.Row.Ref v h)
+      ok (core.result.Result.Ok (alloc.vec.Vec.new access.Write, r))
+  | access.Command.WriteRef n _ =>
+    let v ← alloc.vec.CloneVec.clone core.clone.CloneU8 n
+    let ws ←
+      alloc.vec.Vec.push (alloc.vec.Vec.new access.Write) (access.Write.Ref v)
+    ok (core.result.Result.Ok (ws, { rows := (alloc.vec.Vec.new access.Row) }))
+
+/-- [pico2peta_net_kernel::access::{impl h5i_app_std::authz::Transition<pico2peta_net_kernel::access::Principal, pico2peta_net_kernel::access::Snapshot, pico2peta_net_kernel::access::Command, pico2peta_net_kernel::access::Write, pico2peta_net_kernel::access::Reply, pico2peta_net_kernel::access::Error> for pico2peta_net_kernel::access::Access}::kernel_transition]:
+    Source: 'crates/net-kernel/src/access.rs', lines 148:4-150:5
+    Visibility: public -/
+def
+  access.Access.Insts.H5i_app_stdAuthzTransitionPrincipalSnapshotCommandWriteReplyError.kernel_transition
+  (actor : access.Principal) (s : access.Snapshot) (cmd : access.Command) :
+  Result (core.result.Result ((alloc.vec.Vec access.Write) × access.Reply)
+    access.Error)
+  := do
+  transition actor s cmd
+
+/-- Trait implementation: [pico2peta_net_kernel::access::{impl h5i_app_std::authz::Transition<pico2peta_net_kernel::access::Principal, pico2peta_net_kernel::access::Snapshot, pico2peta_net_kernel::access::Command, pico2peta_net_kernel::access::Write, pico2peta_net_kernel::access::Reply, pico2peta_net_kernel::access::Error> for pico2peta_net_kernel::access::Access}]
+    Source: 'crates/net-kernel/src/access.rs', lines 147:0-154:1 -/
+@[reducible]
+def
+  access.Access.Insts.H5i_app_stdAuthzTransitionPrincipalSnapshotCommandWriteReplyError
+  : h5i_app_std.authz.Transition access.Access access.Principal access.Snapshot
+  access.Command access.Write access.Reply access.Error := {
+  kernel_transition :=
+    access.Access.Insts.H5i_app_stdAuthzTransitionPrincipalSnapshotCommandWriteReplyError.kernel_transition
+  kernel_apply :=
+    access.Access.Insts.H5i_app_stdAuthzTransitionPrincipalSnapshotCommandWriteReplyError.kernel_apply
+}
+
+/-- [pico2peta_net_kernel::access::{impl core::clone::Clone for pico2peta_net_kernel::access::Write}::clone]:
+    Source: 'crates/net-kernel/src/access.rs', lines 63:9-63:14
+    Visibility: public -/
+def access.Write.Insts.CoreCloneClone.clone
+  (self : access.Write) : Result access.Write := do
+  let ⟨ __self_0 ⟩ := self
+  let v ← alloc.vec.CloneVec.clone core.clone.CloneU8 __self_0
+  ok (access.Write.Ref v)
+
+/-- Trait implementation: [pico2peta_net_kernel::access::{impl core::clone::Clone for pico2peta_net_kernel::access::Write}]
+    Source: 'crates/net-kernel/src/access.rs', lines 63:9-63:14 -/
+@[reducible]
+def access.Write.Insts.CoreCloneClone : core.clone.Clone access.Write := {
+  clone := access.Write.Insts.CoreCloneClone.clone
+}
+
+/-- [pico2peta_net_kernel::guarded_transition]:
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 212:8-218:9
+    Visibility: public -/
+def guarded_transition
+  (actor : access.Principal) (s : access.Snapshot) (cmd : access.Command) :
+  Result (core.result.Result ((alloc.vec.Vec access.Write) × access.Reply)
+    (h5i_app_std.authz.Guarded access.Error))
+  := do
+  h5i_app_std.authz.guard_viewed access.Write.Insts.CoreCloneClone
+    access.Reply.Insts.H5i_app_stdAuthzDiscloseRow
+    access.Access.Insts.H5i_app_stdAuthzTransitionPrincipalSnapshotCommandWriteReplyError
+    access.Access.Insts.H5i_app_stdAuthzPolicyPrincipalSnapshotWriteRow
+    access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand actor s
+    cmd
+
+/-- [pico2peta_net_kernel::read_only]:
+    Source: '/mnt/scratch/ec2-user/h5i-src/crates/h5i-app-std/src/authz.rs', lines 221:8-223:9
+    Visibility: public -/
+def read_only (cmd : access.Command) : Result Bool := do
+  access.Access.Insts.H5i_app_stdAuthzViewPrincipalSnapshotCommand.read_only
+    cmd
+
 /-- [pico2peta_net_kernel::parse::hex_nibble]:
     Source: 'crates/net-kernel/src/parse.rs', lines 5:0-15:1
     Visibility: public -/
