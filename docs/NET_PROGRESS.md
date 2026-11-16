@@ -410,6 +410,9 @@ The contended run checks that no update is lost: the final version equals the nu
     - The server now logs `response body done` with the time since the request came in, so streamed bodies count. `hf_split.py` and `hf_bench.py` record `*_server_s` (busy) and `*_server_cpu_s` (server process CPU) per operation, `/v1` included.
     - Server busy, run 2: Xet upload 0.10 s; Xet download 0.30 s; LFS upload 0.38 s; LFS download 0.67 s.
     - **Open question to the human:** a download's busy interval lasts until the client has read the body, so it measures the reader. `huggingface_hub`'s LFS download is CPU-bound at 0.69 s, while curl on the same URL takes 0.258 s (`/v1` 0.251 s, 1.03×). Options: keep the busy interval; judge downloads on server CPU; or replay the requests with a fast reader.
+  - **Open before the final batch (2026-11-16, dev A/B on one host):**
+    - **`/v1` GET +25 %:** a733d8e 0.248–0.258 s and 9aba438 0.248–0.253 s, against 0.310–0.321 s after core's d6bfd5f (parallel whole-object BLAKE3 for verified reads). PUT is unchanged. Sent to the core with the binaries and script.
+    - **LFS upload, server busy:** 0.372 s against `/v1` PUT 0.242 s (1.54×). Without the `hf/` Xet-chunker profile it is ~0.27 s. The Xet chunker runs at 1.42 GB/s (FastCDC 1.98), on the store's serial put thread with the whole-object BLAKE3; a 4-way unrolled gear loop gave no gain and was reverted. Proposed to the core: speculative parallel Xet chunking in `put_stream` (byte-identical cuts, proptested), or the whole-object hash off the chunker's thread.
   - **Done:**
     - A Xet xorb POST for an already-stored xorb drains the body unbuffered (0.35 → 0.08–0.13 s on a re-upload).
     - The H3-found background-walk interference is gone (core's eb357b9 scheduling): LFS upload 0.80–0.92 → 0.54–0.62 s.
