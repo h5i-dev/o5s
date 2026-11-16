@@ -11,7 +11,7 @@ unmodified.
 ## Potential pushback
 
 - "Merge in Git is necessary" → Merge is just a special case of overwrite.
-- "Xet makes large weights fast" → Then use it for every domain.
+- "Hugging Face's Xet makes large weights fast" → Then use it for every domain.
 - "Git packs source code better" → Then use it for every domain.
 - "Registries need their own rules" → They're per-namespace rules: `mutable`, `immutable`, `head-release`.
 - "One store means one bug breaks everything" → Every decision is proved in Lean on the extracted code.
