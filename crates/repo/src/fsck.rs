@@ -3,7 +3,7 @@
 //! must point at a readable object.
 
 use crate::LocalRepo;
-use pico2peta_core::{Hash, ObjectStore, Repository, Result};
+use o5s_core::{Hash, ObjectStore, Repository, Result};
 use std::io::Read;
 
 /// Result of [`LocalRepo::fsck`].

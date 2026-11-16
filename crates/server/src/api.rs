@@ -25,8 +25,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Extension, Router};
 use futures_util::StreamExt;
-use pico2peta_client::wire::{self, codes};
-use pico2peta_core::{Hash, Name, Repository, validate_path};
+use o5s_client::wire::{self, codes};
+use o5s_core::{Hash, Name, Repository, validate_path};
 use std::collections::HashMap;
 use std::io::Read;
 use std::ops::Range;
@@ -58,7 +58,7 @@ pub struct AppState {
     /// `/metrics` is served on a separate listener instead of the main one.
     pub metrics_separate: bool,
     /// The concrete repository, for admin operations outside the trait (GC).
-    pub local: Option<pico2peta_repo::LocalRepo>,
+    pub local: Option<o5s_repo::LocalRepo>,
     pub gc: crate::config::GcSection,
     pub gc_running: Arc<AtomicBool>,
     /// Token management over `auth.token_file` (`None` without a token file).
@@ -71,14 +71,14 @@ pub struct AppState {
     pub maven: Option<Arc<crate::maven::MavenState>>,
     /// Search index over names, front metadata and provenance (built on first use, then
     /// refreshed incrementally from the logs).
-    pub search: Arc<std::sync::Mutex<Option<pico2peta_prov::search::SearchIndex>>>,
+    pub search: Arc<std::sync::Mutex<Option<o5s_prov::search::SearchIndex>>>,
     /// `[[promotion]]` rules.
     pub promotion: Vec<crate::config::PromotionRule>,
     /// The domain fronts and their write handles (`None` only in tests that build state by hand).
     pub fronts: Option<Arc<crate::fronts::Fronts>>,
     /// Which policy cells reach each object (`None` only in tests that build state by hand,
     /// where object reads are refused).
-    pub reach: Option<pico2peta_repo::reach::ReachIndex>,
+    pub reach: Option<o5s_repo::reach::ReachIndex>,
     /// The cells: every policy namespace, and `""`.
     pub cells: Arc<std::sync::RwLock<Vec<String>>>,
     /// The access kernel on h5i-app-http (`crate::h5iapp`).
@@ -334,13 +334,13 @@ async fn authenticate(State(st): St, mut req: Request, next: Next) -> Response {
             // Clients that only send credentials after a Basic challenge (git, pip, Maven).
             if ["/git/", "/pypi/", "/maven/"].iter().any(|p| req.uri().path().starts_with(p)) {
                 let mut r = (StatusCode::UNAUTHORIZED, e.to_string()).into_response();
-                r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"pico2peta\""));
+                r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"o5s\""));
                 return r;
             }
             if req.uri().path().starts_with("/v2") {
                 let body = serde_json::json!({"errors": [{"code": "UNAUTHORIZED", "message": e.to_string()}]});
                 let mut r = (StatusCode::UNAUTHORIZED, Json(body)).into_response();
-                r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"pico2peta\""));
+                r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"o5s\""));
                 r.headers_mut().insert("docker-distribution-api-version", HeaderValue::from_static("registry/2.0"));
                 return r;
             }
@@ -385,7 +385,7 @@ impl AppState {
     /// (core's reachability index). Unreferenced objects are readable by no one.
     pub(crate) async fn objects_readable(&self, p: &Principal, hashes: Vec<Hash>) -> ApiResult<Vec<bool>> {
         use h5i_app_core::Kernel as _;
-        use pico2peta_net_kernel::access::Command;
+        use o5s_net_kernel::access::Command;
         // The kernel's snapshots (one batched reachability lookup), then h5i's guarded
         // transition (`guard_viewed`, proven) for each hash.
         let actor = self.authz.grants(p);
@@ -404,10 +404,10 @@ impl AppState {
     /// before any store access), so the two can't be told apart.
     pub(crate) async fn require_object(&self, p: &Principal, h: Hash) -> ApiResult<()> {
         let actor = h5i_app_http::Actor::<crate::h5iapp::NetKernel>::assume_authenticated(self.authz.grants(p));
-        let cmd = pico2peta_net_kernel::access::Command::ReadObject(h.0.to_vec());
+        let cmd = o5s_net_kernel::access::Command::ReadObject(h.0.to_vec());
         match self.kernel.run(&actor, cmd, &HeaderMap::new()).await {
             Ok(_) => Ok(()),
-            Err(r) if r.status() == StatusCode::NOT_FOUND => Err(ApiError::from(pico2peta_core::Error::NotFound(h))),
+            Err(r) if r.status() == StatusCode::NOT_FOUND => Err(ApiError::from(o5s_core::Error::NotFound(h))),
             Err(r) => Err(ApiError::internal(format!("object read check failed ({})", r.status()))),
         }
     }
@@ -518,11 +518,11 @@ impl RateLimiter {
 
 /// Namespaces owned by protocol adapters (OCI, Git) and the provenance log.
 pub fn is_reserved(name: &str) -> bool {
-    ["oci", "git", "pypi", "npm", "maven", "_prov"].iter().any(|p| pico2peta_core::is_under(name, p))
+    ["oci", "git", "pypi", "npm", "maven", "_prov"].iter().any(|p| o5s_core::is_under(name, p))
 }
 
 /// Runs a repository call on the blocking pool.
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> pico2peta_core::Result<T> + Send + 'static) -> ApiResult<T> {
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> o5s_core::Result<T> + Send + 'static) -> ApiResult<T> {
     match tokio::task::spawn_blocking(f).await {
         Ok(r) => r.map_err(ApiError::from),
         Err(e) => Err(ApiError::internal(format!("worker panicked: {e}"))),
@@ -791,7 +791,7 @@ async fn get_object(
     let verify = match q.verify.as_deref() {
         None => None,
         Some(v) => Some(
-            pico2peta_core::ReadVerify::parse(v)
+            o5s_core::ReadVerify::parse(v)
                 .ok_or_else(|| ApiError::bad_request(format!("verify must be strict or eof, not {v:?}")))?,
         ),
     };
@@ -818,7 +818,7 @@ async fn get_object(
     {
         Ok(Ok(r)) => r,
         // The repository's `[read]` policy refuses eof reads.
-        Ok(Err(pico2peta_core::Error::Unsupported(m))) if verify == Some(pico2peta_core::ReadVerify::Eof) => {
+        Ok(Err(o5s_core::Error::Unsupported(m))) if verify == Some(o5s_core::ReadVerify::Eof) => {
             return Err(ApiError::new(
                 StatusCode::FORBIDDEN,
                 "forbidden",
@@ -986,10 +986,8 @@ async fn replace(
     let (n, rs) = (name.clone(), read_set.clone());
     let res = blocking(move || repo.replace(&n, &rs, new)).await;
     let (outcome, detail) = match &res {
-        Ok(pico2peta_core::ReplaceOutcome::Ok { version }) => ("ok", format!("new={new} version={version}")),
-        Ok(pico2peta_core::ReplaceOutcome::Conflict { stale }) => {
-            ("conflict", format!("new={new} stale={}", stale.len()))
-        }
+        Ok(o5s_core::ReplaceOutcome::Ok { version }) => ("ok", format!("new={new} version={version}")),
+        Ok(o5s_core::ReplaceOutcome::Conflict { stale }) => ("conflict", format!("new={new} stale={}", stale.len())),
         Err(e) => ("rejected", format!("new={new} code={}", e.code)),
     };
     st.metrics.replace.get_or_create(&OutcomeLabels { outcome: outcome.into() }).inc();
@@ -1004,8 +1002,7 @@ async fn replace(
     })
     .await?;
     let out = res?;
-    let status =
-        if matches!(out, pico2peta_core::ReplaceOutcome::Ok { .. }) { StatusCode::OK } else { StatusCode::CONFLICT };
+    let status = if matches!(out, o5s_core::ReplaceOutcome::Ok { .. }) { StatusCode::OK } else { StatusCode::CONFLICT };
     Ok((status, Json(wire::ReplaceResponse::from_core(&out))).into_response())
 }
 
@@ -1035,8 +1032,8 @@ async fn delete_ref(
     let (n, rs) = (name.clone(), read_set.clone());
     let res = blocking(move || repo.delete_ref(&n, &rs)).await;
     let outcome = match &res {
-        Ok(pico2peta_core::ReplaceOutcome::Ok { .. }) => "ok",
-        Ok(pico2peta_core::ReplaceOutcome::Conflict { .. }) => "conflict",
+        Ok(o5s_core::ReplaceOutcome::Ok { .. }) => "ok",
+        Ok(o5s_core::ReplaceOutcome::Conflict { .. }) => "conflict",
         Err(_) => "rejected",
     };
     st.audit_mutation(Event {
@@ -1050,8 +1047,7 @@ async fn delete_ref(
     })
     .await?;
     let out = res?;
-    let status =
-        if matches!(out, pico2peta_core::ReplaceOutcome::Ok { .. }) { StatusCode::OK } else { StatusCode::CONFLICT };
+    let status = if matches!(out, o5s_core::ReplaceOutcome::Ok { .. }) { StatusCode::OK } else { StatusCode::CONFLICT };
     Ok((status, Json(wire::ReplaceResponse::from_core(&out))).into_response())
 }
 
@@ -1086,7 +1082,7 @@ async fn multi_update(
     p: &Principal,
     c: &Caller,
     updates: Vec<(Name, Option<Hash>)>,
-    read_set: Vec<(Name, pico2peta_core::Observed)>,
+    read_set: Vec<(Name, o5s_core::Observed)>,
     allow_delete: bool,
 ) -> ApiResult<Response> {
     if updates.is_empty() {
@@ -1115,8 +1111,8 @@ async fn multi_update(
     })
     .await;
     let outcome = match &res {
-        Ok(pico2peta_core::ReplaceManyOutcome::Ok { .. }) => "ok",
-        Ok(pico2peta_core::ReplaceManyOutcome::Conflict { .. }) => "conflict",
+        Ok(o5s_core::ReplaceManyOutcome::Ok { .. }) => "ok",
+        Ok(o5s_core::ReplaceManyOutcome::Conflict { .. }) => "conflict",
         Err(_) => "rejected",
     };
     st.metrics.replace.get_or_create(&OutcomeLabels { outcome: outcome.into() }).inc();
@@ -1138,11 +1134,8 @@ async fn multi_update(
     })
     .await?;
     let out = res?;
-    let status = if matches!(out, pico2peta_core::ReplaceManyOutcome::Ok { .. }) {
-        StatusCode::OK
-    } else {
-        StatusCode::CONFLICT
-    };
+    let status =
+        if matches!(out, o5s_core::ReplaceManyOutcome::Ok { .. }) { StatusCode::OK } else { StatusCode::CONFLICT };
     Ok((status, Json(wire::ReplaceManyResponse::from_core(&out))).into_response())
 }
 
@@ -1279,7 +1272,7 @@ async fn create_token(
         None => {
             let mut raw = [0u8; 32];
             getrandom::fill(&mut raw).map_err(|e| ApiError::internal(format!("no system randomness: {e}")))?;
-            format!("p2p_{}", raw.iter().map(|b| format!("{b:02x}")).collect::<String>())
+            format!("o5s_{}", raw.iter().map(|b| format!("{b:02x}")).collect::<String>())
         }
     };
     let sha: String = crate::auth::sha256(token.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
@@ -1369,8 +1362,8 @@ pub struct AdapterTracer {
     pub oci: crate::oci::OciTracer,
 }
 
-impl pico2peta_repo::Tracer for AdapterTracer {
-    fn children(&self, h: &Hash, store: &dyn pico2peta_core::ObjectStore) -> pico2peta_core::Result<Vec<Hash>> {
+impl o5s_repo::Tracer for AdapterTracer {
+    fn children(&self, h: &Hash, store: &dyn o5s_core::ObjectStore) -> o5s_core::Result<Vec<Hash>> {
         if let Some(c) = self.git.children_of(h, store)? {
             return Ok(c);
         }
@@ -1402,7 +1395,7 @@ pub async fn run_gc(st: &AppState, dry_run: bool, repack_all: bool) -> ApiResult
     let res = blocking(move || {
         // Provenance records here; git objects, OCI manifests and segment maps come from
         // the fronts' per-run snapshot tracers (crate::fronts).
-        let prov = pico2peta_prov::ProvTracer { inner: crate::fronts::Leaves };
+        let prov = o5s_prov::ProvTracer { inner: crate::fronts::Leaves };
         let r = local.gc_with_fronts(&opts, Some(&prov), grouped);
         running.store(false, Ordering::Release);
         r

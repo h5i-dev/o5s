@@ -270,7 +270,7 @@ pub async fn default_chain(region: &str, rt: &tokio::runtime::Handle) -> S3Resul
     if let (Some(token_file), Some(role_arn)) = (env("AWS_WEB_IDENTITY_TOKEN_FILE"), env("AWS_ROLE_ARN")) {
         let sts_endpoint =
             env("AWS_ENDPOINT_URL_STS").unwrap_or_else(|| format!("https://sts.{region}.amazonaws.com/"));
-        let session_name = env("AWS_ROLE_SESSION_NAME").unwrap_or_else(|| "pico2peta".into());
+        let session_name = env("AWS_ROLE_SESSION_NAME").unwrap_or_else(|| "o5s".into());
         let src = Source::WebIdentity { token_file: token_file.into(), role_arn, session_name, sts_endpoint };
         return Ok(RefreshingCredentials::start(src, rt).await?);
     }

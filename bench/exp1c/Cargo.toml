@@ -1,5 +1,5 @@
 [package]
-name = "pico2peta-exp1c"
+name = "o5s-exp1c"
 description = "Experiment 1c: resemblance-selected base + zstd patch-from delta (see docs/PLAN.md §4.9)"
 version.workspace = true
 edition.workspace = true

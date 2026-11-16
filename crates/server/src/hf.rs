@@ -40,7 +40,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
-use pico2peta_core::{Error, Hash, Name, Observed, ReplaceOutcome, Result};
+use o5s_core::{Error, Hash, Name, Observed, ReplaceOutcome, Result};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
@@ -58,7 +58,7 @@ const DEFAULT_GITATTRIBUTES: &str = "*.bin filter=lfs diff=lfs merge=lfs -text\n
 pub struct HfState {
     git: Arc<GitState>,
     /// The concrete repository, for named puts (namespace chunking profiles).
-    local: Option<pico2peta_repo::LocalRepo>,
+    local: Option<o5s_repo::LocalRepo>,
     /// sha256 → content (global; GC follows LFS pointers through it).
     lfs: Arc<SegMap>,
     /// sha256(repo namespace, sha256) → content: the objects a repo may reference. Without it,
@@ -73,7 +73,7 @@ pub struct HfState {
 }
 
 impl HfState {
-    pub fn new(git: Arc<GitState>, local: Option<pico2peta_repo::LocalRepo>) -> std::result::Result<HfState, String> {
+    pub fn new(git: Arc<GitState>, local: Option<o5s_repo::LocalRepo>) -> std::result::Result<HfState, String> {
         let map = |n: &str| -> std::result::Result<Arc<SegMap>, String> {
             let n = Name::new(n).map_err(|e| e.to_string())?;
             Ok(Arc::new(SegMap::new(git.repo.clone(), n, Arc::new(SegCache::default()))))
@@ -85,7 +85,7 @@ impl HfState {
         Ok(HfState { git, local, lfs, acl, xet, xetfile, xetsha, secret })
     }
 
-    pub(crate) fn git_repo(&self) -> &dyn pico2peta_core::Repository {
+    pub(crate) fn git_repo(&self) -> &dyn o5s_core::Repository {
         &*self.git.repo
     }
 
@@ -350,7 +350,7 @@ fn lfs_pointer(sha: &str, size: u64) -> Vec<u8> {
 pub fn parse_lfs_pointer(body: &[u8]) -> Option<(String, u64)> {
     // The extracted net kernel's parser (`net-kernel/src/parse.rs`): the version line, then
     // `oid sha256:<64 hex>` and `size <strict decimal>` lines, the last of each winning.
-    let (oid, size) = pico2peta_net_kernel::parse::parse_lfs_pointer(body)?;
+    let (oid, size) = o5s_net_kernel::parse::parse_lfs_pointer(body)?;
     Some((hex(&oid), size))
 }
 
@@ -367,7 +367,7 @@ struct Resolved {
     commit: Oid,
     tree: Oid,
     /// Branch ref and its value, when the revision is a branch.
-    branch: Option<(Name, pico2peta_core::RefValue)>,
+    branch: Option<(Name, o5s_core::RefValue)>,
 }
 
 fn resolve_rev(st: &GitState, view: &View<'_>, repo: &RepoId, rev: &str) -> Result<Option<Resolved>> {
@@ -511,7 +511,7 @@ fn commit_object(tree: &Oid, parent: Option<&Oid>, who: &str, summary: &str, des
     if let Some(p) = parent {
         s.push_str(&format!("parent {}\n", hex(p)));
     }
-    let ident = format!("{who} <{who}@pico2peta> {ts} +0000");
+    let ident = format!("{who} <{who}@o5s> {ts} +0000");
     s.push_str(&format!("author {ident}\ncommitter {ident}\n\n{summary}\n"));
     if !description.is_empty() {
         s.push_str(&format!("\n{description}\n"));
@@ -628,13 +628,13 @@ fn make_commit(
             _ => None,
         });
         let parent_bytes = parent.map(|p| p.to_vec());
-        match pico2peta_net_kernel::publish::decide_commit(
+        match o5s_net_kernel::publish::decide_commit(
             &parent_bytes,
             &Some(res.commit.to_vec()),
             true,
             missing_lfs.is_none(),
         ) {
-            Err(pico2peta_net_kernel::publish::CommitNg::StaleParent) => {
+            Err(o5s_net_kernel::publish::CommitNg::StaleParent) => {
                 return Ok(Err((
                     StatusCode::PRECONDITION_FAILED,
                     "BadRequest",

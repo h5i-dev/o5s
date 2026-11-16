@@ -1,6 +1,6 @@
 //! Signatures as OCI artifacts, with the real cosign and notation CLIs against the OCI front:
 //! cosign (tag scheme and OCI 1.1 referrers) and notation (referrers). Skipped when the tools
-//! are absent (`PICO2PETA_TOOLS`, default the shared tools dir).
+//! are absent (`O5S_TOOLS`, default the shared tools dir).
 
 mod common;
 
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn tool(name: &str) -> Option<PathBuf> {
-    let dir = std::env::var("PICO2PETA_TOOLS").unwrap_or_else(|_| "/mnt/scratch/pico2peta/tools/bin".into());
+    let dir = std::env::var("O5S_TOOLS").unwrap_or_else(|_| "/mnt/scratch/pico2peta/tools/bin".into());
     let p = Path::new(&dir).join(name);
     p.exists().then_some(p)
 }
@@ -51,8 +51,7 @@ fn cosign_and_notation_signatures() {
         eprintln!("skipping: crane/cosign/notation not installed");
         return;
     };
-    let srv =
-        TestServer::start(|cfg| cfg.policy.push(grant("alice", "oci/team", pico2peta_server::config::Access::Write)));
+    let srv = TestServer::start(|cfg| cfg.policy.push(grant("alice", "oci/team", o5s_server::config::Access::Write)));
     let w = tempfile::tempdir().unwrap();
     let env = Env { home: w.path().to_path_buf() };
     for d in ["config", "cache", "docker", "tuf", "tmp"] {
@@ -101,8 +100,8 @@ fn cosign_and_notation_signatures() {
     assert!(verify(&["--experimental-oci11"], &exp), "cosign verify (referrers)");
 
     // notation: test certificate, trust policy, sign, list, verify (referrers API).
-    assert!(env.run(&notation, &["cert", "generate-test", "--default", "p2p-test"], &[]).status.success());
-    let policy = r#"{"version":"1.0","trustPolicies":[{"name":"p2p","registryScopes":["*"],"signatureVerification":{"level":"strict"},"trustStores":["ca:p2p-test"],"trustedIdentities":["*"]}]}"#;
+    assert!(env.run(&notation, &["cert", "generate-test", "--default", "o5s-test"], &[]).status.success());
+    let policy = r#"{"version":"1.0","trustPolicies":[{"name":"o5s","registryScopes":["*"],"signatureVerification":{"level":"strict"},"trustStores":["ca:o5s-test"],"trustedIdentities":["*"]}]}"#;
     std::fs::write(w.path().join("config/notation/trustpolicy.json"), policy).unwrap();
     let login = ["login", "--insecure-registry", "-u", "u", "-p", ALICE, &host];
     assert!(env.run(&notation, &login, &[]).status.success());

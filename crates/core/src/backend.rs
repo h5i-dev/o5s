@@ -145,7 +145,7 @@ pub fn validate_key(key: &str) -> Result<()> {
 /// implementation's tests with a fresh, empty backend instance:
 ///
 /// ```ignore
-/// pico2peta_core::backend::conformance::run_all(&my_backend);
+/// o5s_core::backend::conformance::run_all(&my_backend);
 /// ```
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 pub mod conformance {
@@ -203,7 +203,7 @@ pub mod conformance {
     /// `PutSource::File` uploads a multi-MiB file intact.
     pub fn file_source(b: &dyn Backend) {
         let dir =
-            std::env::temp_dir().join(format!("p2p-conf-{}-{:?}", std::process::id(), std::thread::current().id()));
+            std::env::temp_dir().join(format!("o5s-conf-{}-{:?}", std::process::id(), std::thread::current().id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("src.bin");
         let data = vec![0xabu8; 3 << 20];
@@ -507,7 +507,7 @@ mod tests {
     /// process's GC): a deleted pack reads as `KeyNotFound`, as without the cache.
     #[test]
     fn cached_pack_handles_see_external_deletes() {
-        let d = std::env::temp_dir().join(format!("p2p-fdc-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("o5s-fdc-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         let b = LocalDisk::new(&d).unwrap();
         b.put_if_absent("packs/a.pack", PutSource::Bytes(b"0123456789")).unwrap();
@@ -523,7 +523,7 @@ mod tests {
 
     #[test]
     fn local_disk_conformance() {
-        let d = std::env::temp_dir().join(format!("p2p-ld-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("o5s-ld-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         let b = LocalDisk::new(&d).unwrap();
         conformance::run_all(&b);

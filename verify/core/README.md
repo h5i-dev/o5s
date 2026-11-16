@@ -1,9 +1,9 @@
-# Proofs about pico2peta's extracted core kernels (docs/H5I_PLAN.md, H2)
+# Proofs about o5s's extracted core kernels (docs/H5I_PLAN.md, H2)
 
 `crates/kernel` holds the core's decisions as pure Rust in the Charon/Aeneas subset.
-`h5i app extract` translates it to `proofs/generated/Pico2petaKernel.lean`, which is generated, never
+`h5i app extract` translates it to `proofs/generated/O5sKernel.lean`, which is generated, never
 edited, and checked in CI with `--check`. `proofs/Proofs.lean` proves theorems about that extracted code. The
-shells (`pico2peta-refs`'s `RefState`, the journal, `pico2peta-repo`) build each decision's view, call the
+shells (`o5s-refs`'s `RefState`, the journal, `o5s-repo`) build each decision's view, call the
 kernel, and apply its result.
 
 ## What is proved (all on the extracted functions; gate: no `sorry`, only `propext`, `Classical.choice`, `Quot.sound`)

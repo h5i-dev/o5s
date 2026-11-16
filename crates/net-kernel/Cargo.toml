@@ -1,13 +1,13 @@
 [package]
-name = "pico2peta-net-kernel"
-description = "pico2peta's front decisions and wire parsers, extracted to Lean by Charon/Aeneas and proven (verify/net)"
+name = "o5s-net-kernel"
+description = "o5s's front decisions and wire parsers, extracted to Lean by Charon/Aeneas and proven (verify/net)"
 # Self-contained (no workspace inheritance) so `h5i app mutate` can build a copy alone.
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 
 # Extracted to Lean by Charon + Aeneas (h5i-app) together with these dependencies, which are
-# themselves in the subset. The shared types will come from pico2peta-kernel (core).
+# themselves in the subset. The shared types will come from o5s-kernel (core).
 [dependencies]
 h5i-app-std.workspace = true
 # `App`, the `Kernel` the server runs (`h5i_app_std::authz_kernel!`). Not extracted.

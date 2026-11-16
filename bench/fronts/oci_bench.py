@@ -1,17 +1,17 @@
-"""PLAN §6.5, OCI: pico2peta's /v2 front vs CNCF Distribution (registry v3) on local disk.
+"""PLAN §6.5, OCI: o5s's /v2 front vs CNCF Distribution (registry v3) on local disk.
 
 Image set: 3 related tags of one image plus 1 unrelated image (linux/amd64), fetched once
 from Docker Hub into OCI layouts with crane. Per system and run (fresh, empty registry):
 push all, pull all; then stored bytes (cross-image dedup) and digest equality (functional).
 
-usage: oci_bench.py <pico2peta-server binary>
+usage: oci_bench.py <o5s-server binary>
 """
 import base64
 import json
 import os
 import sys
 
-from common import Proc, RUNS, TOKEN, TOOLS, check, du, free_port, log, pico_server, record, run, timed, wait_port, workdir
+from common import Proc, RUNS, TOKEN, TOOLS, check, du, free_port, log, o5s_server, record, run, timed, wait_port, workdir
 
 CRANE = f"{TOOLS}/bin/crane"
 REGISTRY = f"{TOOLS}/bin/registry"
@@ -78,16 +78,16 @@ def main():
         finally:
             reg.stop()
         run(["rm", "-rf", root])
-        p2p = os.path.join(d, "p2p")
-        os.makedirs(p2p)
-        with pico_server(p2p, server_bin) as (base, repo):
+        o5s = os.path.join(d, "o5s")
+        os.makedirs(o5s)
+        with o5s_server(o5s, server_bin) as (base, repo):
             host = base.removeprefix("http://")
             conf = os.path.join(d, "docker")
             os.makedirs(conf)
             auth = base64.b64encode(f"bench:{TOKEN}".encode()).decode()
             json.dump({"auths": {host: {"auth": auth}}}, open(os.path.join(conf, "config.json"), "w"))
             env = dict(os.environ, DOCKER_CONFIG=conf)
-            bench_system("pico2peta", host, env, d, images, repo)
+            bench_system("o5s", host, env, d, images, repo)
 
 
 if __name__ == "__main__":

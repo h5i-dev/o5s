@@ -1,4 +1,4 @@
-# verify/net: proofs about pico2peta's net kernel
+# verify/net: proofs about o5s's net kernel
 
 `crates/net-kernel` (front decisions and wire parsers) is extracted by Charon/Aeneas into
 `proofs/generated/` and proven in `proofs/*.lean` (h5i-app; see `docs/H5I_PLAN.md`).

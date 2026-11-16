@@ -1,4 +1,4 @@
-# Releasing pico2peta
+# Releasing o5s
 
 v0.1 is the first release. It is cut from `demo` as release candidates (`v0.1.0-rc.N`). The human merges a
 candidate to `main`; agents never push `main`.
@@ -12,8 +12,8 @@ candidate to `main`; agents never push `main`.
 - Every breaking change is listed under "Changed (breaking)" in CHANGELOG.md.
 
 **On-disk data is never silently rewritten.**
-- **Readers keep reading every format any released version wrote.** Today that includes `P2PPACK1`,
-  `P2PIDX01`/`02` and the v1 `Frame`, next to the current formats.
+- **Readers keep reading every format any released version wrote.** Today that includes `O5SPACK1`,
+  `O5SIDX01`/`02` and the v1 `Frame`, next to the current formats.
 - **New formats are additive:**
   - a new record kind, codec, magic or config key;
   - old writers never produce them;
@@ -36,15 +36,15 @@ candidate to `main`; agents never push `main`.
 
 | object | magic / id | notes |
 |---|---|---|
-| pack | `P2PPACK2` | header nonce; `P2PPACK1` read |
-| pack index | `P2PIDX03` | ~44 B/entry; `P2PIDX01`/`02` read |
-| record | `P2PR` header | kinds: Blob 0, Manifest 1, Frame 2 (read only), Frame2 3, Delta 4, Frame3 5. Codecs: Raw 0, Zstd 1, GroupedZstd 2 |
-| multi-pack index (local cache) | `P2PMIDX1` | derived |
-| ref journal / snapshot | `P2PREFJ1` / `P2PREFS1` | multi-host log entries `P2PLOGE1` |
-| provenance record / log / checkpoint | `P2PPROV1` / `P2PPLOG2` / `P2PPIDX1` | `P2PPLOG1` read |
+| pack | `O5SPACK2` | header nonce; `O5SPACK1` read |
+| pack index | `O5SIDX03` | ~44 B/entry; `O5SIDX01`/`02` read |
+| record | `O5SR` header | kinds: Blob 0, Manifest 1, Frame 2 (read only), Frame2 3, Delta 4, Frame3 5. Codecs: Raw 0, Zstd 1, GroupedZstd 2 |
+| multi-pack index (local cache) | `O5SMIDX1` | derived |
+| ref journal / snapshot | `O5SREFJ1` / `O5SREFS1` | multi-host log entries `O5SLOGE1` |
+| provenance record / log / checkpoint | `O5SPROV1` / `O5SPLOG2` / `O5SPIDX1` | `O5SPLOG1` read |
 | attestation | provenance record, op `attest`, DSSE envelope as params | in-toto Statement v1 |
-| front id maps (segment map) | `P2PSEG01` / `P2PMAP01` | |
-| front records | `P2PPYPI1`, `P2PPYYK1`, `P2PNPMV1`, `P2PNPMT1`, `P2PNPMD1`, `P2PMVN01`, `P2PXORB1`, `P2PXFIL1` | owned by each front |
+| front id maps (segment map) | `O5SSEG01` / `O5SMAP01` | |
+| front records | `O5SPYPI1`, `O5SPYYK1`, `O5SNPMV1`, `O5SNPMT1`, `O5SNPMD1`, `O5SMVN01`, `O5SXORB1`, `O5SXFIL1` | owned by each front |
 
 ## Release-candidate checklist (agents, on `demo`)
 
@@ -64,7 +64,7 @@ candidate to `main`; agents never push `main`.
    - BENCH.md numbers with their dates and loads.
 5. Fuzz smoke: every target in fuzz/ runs ≥ 60 s clean under ASan.
 6. Proofs: `h5i app prove` in `verify/core` (and net's `verify/net`) passes, with no `sorry` (verify/core/README.md).
-7. Tag: `git tag -a v0.1.0-rc.N -m "pico2peta 0.1.0 release candidate N"` on `demo`, then push the tag. Never
+7. Tag: `git tag -a v0.1.0-rc.N -m "o5s 0.1.0 release candidate N"` on `demo`, then push the tag. Never
    move or delete a pushed tag; fix forward with rc.N+1.
 8. Record the candidate, its commit and its gate run in PROGRESS.md.
 

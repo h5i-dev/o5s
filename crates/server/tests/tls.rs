@@ -79,7 +79,7 @@ fn https_and_hot_reload() {
         for (p, t) in tokens {
             s.push_str(&format!(
                 "[[auth.tokens]]\nprincipal = \"{p}\"\nsha256 = \"{}\"\n",
-                hex(&pico2peta_server::auth::sha256(t.as_bytes()))
+                hex(&o5s_server::auth::sha256(t.as_bytes()))
             ));
         }
         for (p, _) in tokens {
@@ -90,18 +90,17 @@ fn https_and_hot_reload() {
     write_cfg(&[("a", "tok-a"), ("b", "tok-b")]);
     let cfg_path = d.path().join("server.toml");
     let cfg = Config::load(&cfg_path).unwrap();
-    let state = pico2peta_server::build_state(&cfg).unwrap();
-    let rc = pico2peta_server::tls::ReloadableCert::load(cert.clone(), key.clone()).unwrap();
+    let state = o5s_server::build_state(&cfg).unwrap();
+    let rc = o5s_server::tls::ReloadableCert::load(cert.clone(), key.clone()).unwrap();
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     let addr = rt.block_on(async {
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = l.local_addr().unwrap();
-        let tl =
-            pico2peta_server::tls::TlsListener::new(l, pico2peta_server::tls::acceptor(rc.clone()).unwrap()).unwrap();
+        let tl = o5s_server::tls::TlsListener::new(l, o5s_server::tls::acceptor(rc.clone()).unwrap()).unwrap();
         let st = state.clone();
         tokio::spawn(async move {
-            pico2peta_server::serve_on(tl, st, Duration::from_secs(30), Duration::from_secs(2), async {
+            o5s_server::serve_on(tl, st, Duration::from_secs(30), Duration::from_secs(2), async {
                 let _ = stop_rx.await;
             })
             .await
@@ -126,7 +125,7 @@ fn https_and_hot_reload() {
     // Copy over the live paths (what an operator's cert renewal does).
     std::fs::copy(&cert2, &cert).unwrap();
     std::fs::copy(&key2, &key).unwrap();
-    rt.block_on(pico2peta_server::reload(&state, &cfg_path, Some(&rc))).unwrap();
+    rt.block_on(o5s_server::reload(&state, &cfg_path, Some(&rc))).unwrap();
     assert_eq!(who("tok-a"), 200);
     assert_eq!(who("tok-b"), 401, "revoked token must stop working");
     // New connections get the new certificate: trusting only the new cert works,
@@ -145,7 +144,7 @@ fn https_and_hot_reload() {
     assert!(only(&old_pem).get(format!("{url}/healthz")).send().is_err());
     // A broken config is rejected and nothing changes.
     std::fs::write(&cfg_path, "not = [valid").unwrap();
-    assert!(rt.block_on(pico2peta_server::reload(&state, &cfg_path, Some(&rc))).is_err());
+    assert!(rt.block_on(o5s_server::reload(&state, &cfg_path, Some(&rc))).is_err());
     assert_eq!(who("tok-a"), 200);
     let _ = stop_tx.send(());
 }

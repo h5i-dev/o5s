@@ -1,7 +1,7 @@
-# pico2peta on one PersistentVolume (packs, refs, staging, audit). 1 replica only.
+# o5s on one PersistentVolume (packs, refs, staging, audit). 1 replica only.
 apiVersion: v1
 kind: ConfigMap
-metadata: { name: pico2peta-config, namespace: pico2peta }
+metadata: { name: o5s-config, namespace: o5s }
 data:
   server.toml: |
     [server]
@@ -11,17 +11,17 @@ data:
     request_timeout_secs = 3600
     shutdown_grace_secs = 30
     [repo]
-    path = "/var/lib/pico2peta/repo"
+    path = "/var/lib/o5s/repo"
     create = true
     [auth]
     allow_anonymous = false
-    token_file = "/etc/pico2peta/secret/tokens.toml"
+    token_file = "/etc/o5s/secret/tokens.toml"
     [[policy]]
     principal = "admin"
     namespace = ""
     access = "admin"
     [audit]
-    path = "/var/lib/pico2peta/audit/audit.jsonl"
+    path = "/var/lib/o5s/audit/audit.jsonl"
     rotate_bytes = 1073741824
     [gc]
     interval_secs = 1800
@@ -32,29 +32,29 @@ data:
 ---
 apiVersion: v1
 kind: Service
-metadata: { name: pico2peta, namespace: pico2peta, labels: { app: pico2peta } }
+metadata: { name: o5s, namespace: o5s, labels: { app: o5s } }
 spec:
-  selector: { app: pico2peta }
+  selector: { app: o5s }
   ports: [{ name: http, port: 8080, targetPort: 8080 }]
 ---
 apiVersion: apps/v1
 kind: StatefulSet
-metadata: { name: pico2peta, namespace: pico2peta }
+metadata: { name: o5s, namespace: o5s }
 spec:
-  serviceName: pico2peta
+  serviceName: o5s
   replicas: 1                       # local refs: exactly one writer
-  selector: { matchLabels: { app: pico2peta } }
+  selector: { matchLabels: { app: o5s } }
   template:
     metadata:
-      labels: { app: pico2peta }
+      labels: { app: o5s }
       annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8080", prometheus.io/path: /metrics }
     spec:
       terminationGracePeriodSeconds: 45
       securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, fsGroup: 65532 }
       containers:
         - name: server
-          image: ghcr.io/h5i-dev/pico2peta:latest     # build from deploy/Dockerfile
-          args: ["serve", "--config", "/etc/pico2peta/server.toml"]
+          image: ghcr.io/h5i-dev/o5s:latest     # build from deploy/Dockerfile
+          args: ["serve", "--config", "/etc/o5s/server.toml"]
           ports: [{ name: http, containerPort: 8080 }]
           readinessProbe: { httpGet: { path: /readyz, port: http }, periodSeconds: 5 }
           livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10, failureThreshold: 6 }
@@ -63,13 +63,13 @@ spec:
             limits: { memory: 4Gi }
           securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
           volumeMounts:
-            - { name: data, mountPath: /var/lib/pico2peta }
-            - { name: config, mountPath: /etc/pico2peta/server.toml, subPath: server.toml }
-            - { name: tokens, mountPath: /etc/pico2peta/secret, readOnly: true }
+            - { name: data, mountPath: /var/lib/o5s }
+            - { name: config, mountPath: /etc/o5s/server.toml, subPath: server.toml }
+            - { name: tokens, mountPath: /etc/o5s/secret, readOnly: true }
             - { name: tmp, mountPath: /tmp }
       volumes:
-        - { name: config, configMap: { name: pico2peta-config } }
-        - { name: tokens, secret: { secretName: pico2peta-tokens, defaultMode: 0400 } }
+        - { name: config, configMap: { name: o5s-config } }
+        - { name: tokens, secret: { secretName: o5s-tokens, defaultMode: 0400 } }
         - { name: tmp, emptyDir: {} }
   volumeClaimTemplates:
     - metadata: { name: data }

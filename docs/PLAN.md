@@ -1,4 +1,4 @@
-# pico2peta — Plan
+# o5s — Plan
 
 Status: **pre-registered 2026-11-15**, before any experiment code exists.
 The Experiment 1 thresholds in §4 are frozen. If they change later, the old values stay in this
@@ -11,16 +11,16 @@ file (struck through, with the date and the reason), and EXP1.md reports results
 AGENT_TASK.md) and split the work across two sessions. Lean and the model/difftest are deferred.
 §4 is unchanged and still frozen.
 
-Ownership: **core** = session `pico2peta` (branch `demo`). **net** = session `pico2peta-net`
+Ownership: **core** = session `o5s` (branch `demo`). **net** = session `o5s-net`
 (branch `net`), which owns the S3 backend, server, client, CI and deploy.
 
 | # | Milestone | Owner | Done when |
 |---|-----------|-------|-----------|
 | M0 | Plan | core | this file; the §4 thresholds are frozen |
-| M1 | Core API v1 | core | `Backend`, `ObjectStore`, `Repository` traits stable in `pico2peta-core`; LocalDisk passes the backend conformance suite |
+| M1 | Core API v1 | core | `Backend`, `ObjectStore`, `Repository` traits stable in `o5s-core`; LocalDisk passes the backend conformance suite |
 | M2 | Pack store | core | multi-process safe (per-writer staging + flock, content-addressed create-only sealed packs, re-list on miss); streaming `put_stream`/`open` with bounded memory; FastCDC chunking + manifests; crash recovery tested by fault injection at every write/fsync point |
 | M3 | Ref store | core | durable journal with checksummed records, an exclusive lock around validate+append+fsync (one commit point), catch-up replay from other processes, namespace rules, multi-process contention test |
-| M4 | Local repo + CLI | core | `pico2peta-repo::LocalRepo: Repository`; CLI over `dyn Repository` (local, or remote via the net client) |
+| M4 | Local repo + CLI | core | `o5s-repo::LocalRepo: Repository`; CLI over `dyn Repository` (local, or remote via the net client) |
 | M5 | Experiment 1 | core | `bench/exp1`, `docs/EXP1.md`, verdict against §4 |
 | M6 | GC / repack | core | mark/sweep with a grace period that is safe against concurrent writers; repack (similarity grouping if Exp1 passes) |
 | N1–N5 | S3 backend, server, client, CI, deploy | net | see AGENT_TASK_NET.md |
@@ -36,15 +36,15 @@ milestone, at least every ~2 hours.
 
 ```
 crates/
-  core/        pico2peta-core        Hash, Error, Name/Rule/Observed, ObjectStore + Repository traits,
+  core/        o5s-core        Hash, Error, Name/Rule/Observed, ObjectStore + Repository traits,
                                      backend::{Backend, LocalDisk, conformance}, fault injection
-  pack/        pico2peta-pack        PackStore: packs, index v3 + mmap + MIDX, bundling, FastCDC + manifest
+  pack/        o5s-pack        PackStore: packs, index v3 + mmap + MIDX, bundling, FastCDC + manifest
                                      trees, frames, XOR deltas, recovery
-  refs/        pico2peta-refs        RefStore: journal + compaction, OCC replace/delete/transactions, rules
-  repo/        pico2peta-repo        LocalRepo = PackStore + RefStore: Repository; GC/repack (grouped); fsck
-  prov/        pico2peta-prov        provenance records, checkpointed log, lineage/impact, GC tracer
-  weights/     pico2peta-weights     model-weights kind: tensor-aligned deltas for safetensors
-  cli/         pico2peta-cli         binary `pico2peta` over dyn Repository (local or --remote)
+  refs/        o5s-refs        RefStore: journal + compaction, OCC replace/delete/transactions, rules
+  repo/        o5s-repo        LocalRepo = PackStore + RefStore: Repository; GC/repack (grouped); fsck
+  prov/        o5s-prov        provenance records, checkpointed log, lineage/impact, GC tracer
+  weights/     o5s-weights     model-weights kind: tensor-aligned deltas for safetensors
+  cli/         o5s-cli         binary `o5s` over dyn Repository (local or --remote)
   backend-s3/  (net)                 S3 Backend
   server/      (net)                 HTTP service (+ Git smart-HTTP, OCI distribution)
   client/      (net)                 remote Repository
@@ -63,7 +63,7 @@ lean/                                Lean 4 model, proofs and executable model (
   ordinary blobs addressed by their own hash.
 - **Backend contract.** Immutable, create-only blobs (`put_if_absent`), ranged reads, listing,
   and delete for GC only. Synchronous, `Send + Sync`. Retries happen inside the backend. The full
-  contract is in the `pico2peta_core::backend` docs.
+  contract is in the `o5s_core::backend` docs.
 - **Packs.** These are records `[magic | kind | codec | hash | raw_len | stored_len | payload | crc32]`
   after an 8-byte versioned pack magic. Each writer handle owns its own staging file
   `staging/<random>.pack` and holds an exclusive flock on it. Sealing hashes the file, then runs
@@ -168,7 +168,7 @@ What follows from each result (also decided in advance):
 - Four repos is a small sample.
 - Our index cost is modeled, not measured from a production index.
 - Git's SHA-1-bearing trees compress poorly for both systems. Because the payloads are identical,
-  this is fair, but it would differ if pico2peta stored its own tree format.
+  this is fair, but it would differ if o5s stored its own tree format.
 - Read latency is measured on the experimental reader, not the M2 pack reader.
 
 ### 4.8 Experiment 1b: pre-registered 2026-11-15, before any 1b code
@@ -261,7 +261,7 @@ does not, the text says so plainly.
 
 ## 5. Lean 4 properties (M8, done; see lean/README.md)
 
-Pure model, structurally mirroring `pico2peta-model`:
+Pure model, structurally mirroring `o5s-model`:
 - **P1 Content immutability:** for any operation sequence, if `get h = some d` at time t, then
   `get h = some d` at every later time, and `hash d = h` for every stored `d` (with an abstract
   injective `hash` as an explicit assumption).
@@ -528,7 +528,7 @@ paths):**
 a pass/fail experiment on the product. The targets below say what counts as "a bottleneck to fix". A miss is
 analysed, fixed if it's a defect, and re-measured, and the before and after are both reported.
 
-**Workload** (`p2p-bench scale`, deterministic seed, local disk, bench lock, windows ≤ 60 min):
+**Workload** (`o5s-bench scale`, deterministic seed, local disk, bench lock, windows ≤ 60 min):
 - **Objects:** N distinct 64-byte objects (random, so incompressible and no dedup), written with `put` in batches,
   `flush` every 10⁵. N = 10⁶, 10⁷, and 10⁸ only if the projected disk use (≈ 160 B per object, packs plus index)
   fits in the space left after keeping 5 GB free. Otherwise that scale is reported as not run, with the reason.
@@ -615,11 +615,11 @@ Every number carries its commit, host load and raw-data file.
 **one** pre-declared, better-controlled re-measurement on the final H3 commit, under the bench lock with the
 other session idle. The start load and a 10 s process log are recorded with each. The result is acted on: if a
 metric still regresses, it is a real regression, found and fixed before H4, not explained away.
-1. **Ingest put.** A quiet window (load < 2.5 at start). The `baseline-pre-h5i` and H3 `p2p-bench` binaries
+1. **Ingest put.** A quiet window (load < 2.5 at start). The `baseline-pre-h5i` and H3 `o5s-bench` binaries
    run interleaved (`ingest <redis dump> <dir> 1024`, the same input as the suite) for **5 rounds**,
    alternating baseline then H3. The verdict compares the two medians of `put` MB/s against the §6.8
    allowance: max(3 %, the baseline binary's range in these 5 rounds).
-2. **Durable-write tier (§6.4).** The H3 `p2p-bench generic <dir> 1024` runs **5 times** in one window. Each
+2. **Durable-write tier (§6.4).** The H3 `o5s-bench generic <dir> 1024` runs **5 times** in one window. Each
    run measures our put and `dd conv=fsync` back to back, giving one ratio per round. The verdict is the median
    of the 5 ratios against the tier threshold of 0.90×.
 3. **Redis A3 peak RSS (Exp3).** The redis A3 build (`exp3 run <redis work dir> a3 4 10000`), **3 reps** each

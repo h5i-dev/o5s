@@ -3,8 +3,8 @@
 use axum::Json;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use pico2peta_client::wire::{ErrorBody, ErrorDetail, codes};
-use pico2peta_core::Error;
+use o5s_client::wire::{ErrorBody, ErrorDetail, codes};
+use o5s_core::Error;
 
 #[derive(Debug)]
 pub struct ApiError {
@@ -101,7 +101,7 @@ impl IntoResponse for ApiError {
             r.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from(s));
         }
         if self.www_authenticate {
-            r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer realm=\"pico2peta\""));
+            r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer realm=\"o5s\""));
         }
         r
     }

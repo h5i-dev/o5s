@@ -1,4 +1,4 @@
-//! Retention decisions (`pico2peta_prov::retention`): which old versions of a
+//! Retention decisions (`o5s_prov::retention`): which old versions of a
 //! series may be deleted.
 //!
 //! A series is the names under one parent (`pypi/team/pkg/1.0`, `.../1.1`,

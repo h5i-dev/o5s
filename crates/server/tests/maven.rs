@@ -1,26 +1,26 @@
 //! The Maven front against the real, unmodified `mvn`: Maven fetches its own plugins through
-//! a pico2peta proxy of Maven Central, deploys (release and snapshot) to a hosted repo, and
+//! a o5s proxy of Maven Central, deploys (release and snapshot) to a hosted repo, and
 //! resolves through a second server that proxies the first, including after the first is
-//! gone and GC ran. Needs `mvn` (`PICO2PETA_MVN`) and network access to Maven Central;
+//! gone and GC ran. Needs `mvn` (`O5S_MVN`) and network access to Maven Central;
 //! skipped otherwise.
 
 mod common;
 
 use common::*;
-use pico2peta_server::config::{Access, Upstream};
+use o5s_server::config::{Access, Upstream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 const CENTRAL: &str = "https://repo.maven.apache.org/maven2";
 
 fn mvn_bin() -> Option<String> {
-    let candidates = match std::env::var("PICO2PETA_MVN") {
+    let candidates = match std::env::var("O5S_MVN") {
         Ok(p) => vec![p],
         Err(_) => vec!["/mnt/scratch/pico2peta/tools/maven/bin/mvn".into(), "mvn".into()],
     };
     let Some(p) = candidates.into_iter().find(|p| Command::new(p).arg("-v").output().is_ok_and(|o| o.status.success()))
     else {
-        eprintln!("skipping: no mvn (set PICO2PETA_MVN)");
+        eprintln!("skipping: no mvn (set O5S_MVN)");
         return None;
     };
     let up = reqwest::blocking::Client::new()
@@ -49,11 +49,11 @@ impl Mvn {
             format!(
                 r#"<settings>
   <servers>
-    <server><id>p2p-central</id><username>token</username><password>{tok}</password></server>
-    <server><id>p2p</id><username>token</username><password>{tok}</password></server>
+    <server><id>o5s-central</id><username>token</username><password>{tok}</password></server>
+    <server><id>o5s</id><username>token</username><password>{tok}</password></server>
   </servers>
   <mirrors>
-    <mirror><id>p2p-central</id><mirrorOf>central</mirrorOf><url>{central_url}</url></mirror>
+    <mirror><id>o5s-central</id><mirrorOf>central</mirrorOf><url>{central_url}</url></mirror>
   </mirrors>
 </settings>"#
             ),
@@ -92,12 +92,12 @@ impl Mvn {
             &[
                 "deploy:deploy-file",
                 &format!("-Dfile={}", f.display()),
-                "-DgroupId=org.example.p2p",
+                "-DgroupId=org.example.o5s",
                 "-DartifactId=demo",
                 &format!("-Dversion={version}"),
                 "-Dpackaging=jar",
                 "-DgeneratePom=true",
-                "-DrepositoryId=p2p",
+                "-DrepositoryId=o5s",
                 &format!("-Durl={url}"),
             ],
         )
@@ -109,15 +109,15 @@ impl Mvn {
             local,
             &[
                 "dependency:get",
-                &format!("-Dartifact=org.example.p2p:demo:{version}"),
+                &format!("-Dartifact=org.example.o5s:demo:{version}"),
                 "-Dtransitive=false",
-                &format!("-DremoteRepositories=p2p::default::{url}"),
+                &format!("-DremoteRepositories=o5s::default::{url}"),
             ],
         );
         if !o.status.success() {
             return None;
         }
-        let dir = self.work.join(local).join("org/example/p2p/demo").join(version);
+        let dir = self.work.join(local).join("org/example/o5s/demo").join(version);
         let jar = std::fs::read_dir(&dir)
             .ok()?
             .flatten()
@@ -179,9 +179,9 @@ fn mvn_deploy_resolve_and_proxy_cache() {
     // and the artifact) from B's caches.
     a.stop.take().map(|s| s.send(()));
     drop(a);
-    let repo = pico2peta_repo::LocalRepo::open(b.dir.path().join("repo")).unwrap();
-    let fronts = pico2peta_server::fronts::Fronts::open(repo).unwrap();
-    let opts = pico2peta_repo::GcOptions {
+    let repo = o5s_repo::LocalRepo::open(b.dir.path().join("repo")).unwrap();
+    let fronts = o5s_server::fronts::Fronts::open(repo).unwrap();
+    let opts = o5s_repo::GcOptions {
         grace: std::time::Duration::ZERO,
         allow_short_grace: true,
         repack_all: true,
@@ -189,7 +189,7 @@ fn mvn_deploy_resolve_and_proxy_cache() {
     };
     for _ in 0..3 {
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        let prov = pico2peta_prov::ProvTracer { inner: pico2peta_server::fronts::Leaves };
+        let prov = o5s_prov::ProvTracer { inner: o5s_server::fronts::Leaves };
         fronts.repo.gc_with_fronts(&opts, Some(&prov), false).unwrap();
     }
     assert_eq!(

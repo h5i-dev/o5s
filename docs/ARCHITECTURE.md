@@ -1,4 +1,4 @@
-# pico2peta architecture and on-disk formats
+# o5s architecture and on-disk formats
 
 This is the reference for operators and implementers. The code is authoritative; each section names
 the module that implements it. All integers are little endian.
@@ -25,13 +25,13 @@ the module that implements it. All integers are little endian.
 `get(id)` always returns bytes that hash to `id` (verified on every whole read; ranged reads verify
 every record they touch).
 
-### Pack file (`P2PPACK2`)
-`"P2PPACK2" | nonce[16] | record*`. The nonce makes every pack's bytes unique, so a pack's
-content-derived name never aliases another pack (GC relies on this). `P2PPACK1` (no nonce) is still read.
+### Pack file (`O5SPACK2`)
+`"O5SPACK2" | nonce[16] | record*`. The nonce makes every pack's bytes unique, so a pack's
+content-derived name never aliases another pack (GC relies on this). `O5SPACK1` (no nonce) is still read.
 
 ### Record
 ```text
-magic u32 "P2PR" | kind u8 | codec u8 | 0u16 | hash[32] | raw_len u64 | stored_len u32 | payload | crc32 u32
+magic u32 "O5SR" | kind u8 | codec u8 | 0u16 | hash[32] | raw_len u64 | stored_len u32 | payload | crc32 u32
 ```
 `codec`: 0 raw, 1 zstd, 2 grouped zstd (blobs only: `width u8 | zstd(group(raw, width))`, where `group` lays out
 byte `k` of every `width`-byte element as plane `k`, then the `len % width` tail; used for bf16/fp32 weights and their
@@ -65,17 +65,17 @@ XOR deltas when the writer passes a width hint). `kind`:
 - **Deltas**: object = (aligned base) XOR `xor`, where `xor` is an ordinary object. With segments, object
   bytes `[dst, dst+len)` align with base bytes `[src, src+len)`. Uncovered bytes are XORed with zero.
 
-### Pack index (`P2PIDX03`)
+### Pack index (`O5SIDX03`)
 ```text
-"P2PIDX03" | n_rec u64 | n_ent u64 | rec[n_rec] | ent[n_ent] | blake3[32]
+"O5SIDX03" | n_rec u64 | n_ent u64 | rec[n_rec] | ent[n_ent] | blake3[32]
 rec = offset u64 | stored_len u32 | raw_len u64 | kind u8 | codec u8           (22 B)
 ent = hash[32] | rec u32 | inner u32 | len u32   (sorted by hash; 44 B)
 ```
-Frame members share their frame's record (`inner`/`len` locate the member). v1 (`P2PIDX01`, 54 B
-entries) and v2 (`P2PIDX02`, 62 B) are still read.
+Frame members share their frame's record (`inner`/`len` locate the member). v1 (`O5SIDX01`, 54 B
+entries) and v2 (`O5SIDX02`, 62 B) are still read.
 
-### Multi-pack index (`P2PMIDX1`, local and derived)
-`"P2PMIDX1" | n_packs u32 | name[64]* | n u64 | (hash[32], pack u32, entry u32)* | blake3[32]`.
+### Multi-pack index (`O5SMIDX1`, local and derived)
+`"O5SMIDX1" | n_packs u32 | name[64]* | n u64 | (hash[32], pack u32, entry u32)* | blake3[32]`.
 
 ## Write path and concurrency (crates/pack)
 1. A writer appends records to its own staging file (`flock`ed). Small objects are bundled one record
@@ -93,7 +93,7 @@ entries) and v2 (`P2PIDX02`, 62 B) are still read.
 
 ## Names (crates/refs)
 
-Journal file: `"P2PREFJ1" | (len u32 | crc32 u32 | payload)*`. Payload tags:
+Journal file: `"O5SREFJ1" | (len u32 | crc32 u32 | payload)*`. Payload tags:
 
 | tag | meaning |
 |---|---|
@@ -106,7 +106,7 @@ Journal file: `"P2PREFJ1" | (len u32 | crc32 u32 | payload)*`. Payload tags:
 
 **Commit point.** Take an exclusive `flock` on the current journal, catch up (truncating a torn tail),
 validate (input → read set → rules), append one record, fsync, unlock. Reads take a shared lock.
-**Compaction.** Write `snapshot.<g+1>` (`P2PREFS1` + records + crc32) and an empty `journal.<g+1>`,
+**Compaction.** Write `snapshot.<g+1>` (`O5SREFS1` + records + crc32) and an empty `journal.<g+1>`,
 append `Rotated(g+1)` to the old journal (the commit point), then update `CURRENT`. Handles that reach
 the tombstone switch generations.
 
@@ -149,9 +149,9 @@ dangling ref.
 
 ## Provenance (crates/prov)
 
-- Records `P2PPROV1`: canonical `op | params? | inputs | outputs | meta`.
-- Log nodes `P2PPLOG2`: `prev? | checkpoint? | total u64 | records`, with the head at ref `_prov/log`.
-- Checkpoint index `P2PPIDX1`: `n_fwd u64 | n_bwd u64 | (key, record)*`, both tables sorted. It's rebuilt
+- Records `O5SPROV1`: canonical `op | params? | inputs | outputs | meta`.
+- Log nodes `O5SPLOG2`: `prev? | checkpoint? | total u64 | records`, with the head at ref `_prov/log`.
+- Checkpoint index `O5SPIDX1`: `n_fwd u64 | n_bwd u64 | (key, record)*`, both tables sorted. It's rebuilt
   when the recent records reach max(1024, total/8).
 
 ## Verification map
@@ -185,7 +185,7 @@ by fault injection at every write/fsync point plus real SIGKILLs.
 
 ## Deployment topology and limits
 
-- **Ref store choice** (`[refs] store` in config.toml, or `pico2peta init --refs-on-backend`):
+- **Ref store choice** (`[refs] store` in config.toml, or `o5s init --refs-on-backend`):
   - `local` (default): a journal with an `flock` commit point. All writers must be on one host, but any
     number of processes on that host may share it.
   - `backend`: a create-only log under `refs/` on the pack backend (`refs/log/<seq>`, plus
@@ -204,8 +204,8 @@ by fault injection at every write/fsync point plus real SIGKILLs.
 - **Consistent backup:** copy `refs/` first, then `objects/`. Objects are immutable and the refs only point at
   flushed objects, so a backup taken in this order is consistent even while writers run. Objects written
   after the refs copy are just unreferenced. Pause GC for the duration, because GC is what deletes packs.
-- **Restore:** put both directories back and run `pico2peta fsck`.
-- **Integrity:** `pico2peta fsck` reads and verifies every object and ref. Every normal read also verifies
+- **Restore:** put both directories back and run `o5s fsck`.
+- **Integrity:** `o5s fsck` reads and verifies every object and ref. Every normal read also verifies
   checksums and content hashes, so corruption is always reported. Whether it can be *returned as data first*
   depends on the read verification mode, described next.
 

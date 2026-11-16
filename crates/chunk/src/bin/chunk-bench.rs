@@ -2,7 +2,7 @@
 //! `flock /mnt/scratch/pico2peta/bench.lock target/release/chunk-bench`).
 //! Reports GB/s for 1 thread and 4 threads (each thread chunks its own buffer).
 
-use pico2peta_chunk::{Chunker, FastCdcChunker, XetChunker, xet_lengths_parallel};
+use o5s_chunk::{Chunker, FastCdcChunker, XetChunker, xet_lengths_parallel};
 use std::time::Instant;
 
 fn data(n: usize, seed: u64) -> Vec<u8> {
@@ -59,7 +59,7 @@ fn main() {
     }
     // One stream chunked on several threads (byte-identical to the serial chunker).
     let one = &bufs[0];
-    let serial = pico2peta_chunk::chunk_lengths(&mut XetChunker::new(), one);
+    let serial = o5s_chunk::chunk_lengths(&mut XetChunker::new(), one);
     for threads in [2usize, 3, 4] {
         let mut best = 0.0f64;
         for _ in 0..3 {

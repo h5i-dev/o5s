@@ -8,7 +8,7 @@
 //!    a footer that is ignored. We decompress it, recompute every chunk hash and the xorb's
 //!    Merkle hash, and refuse any mismatch. The decompressed bytes become one core object,
 //!    stored with the repo namespace's chunker (Xet chunking makes its chunks dedup against
-//!    the files). A small record object (`P2PXORB1`: content hash, then each chunk's hash
+//!    the files). A small record object (`O5SXORB1`: content hash, then each chunk's hash
 //!    and end offset) is indexed by xorb hash in the segment map `git/_xet`. GC follows
 //!    record → content (`GitTracer`).
 //! 3. `POST <casUrl>/v1/shards`: a shard lists files as segments (xorb, chunk range), with a
@@ -24,7 +24,7 @@
 //! so clients download over plain HTTP).
 
 use crate::hf::{HfState, RepoId};
-use pico2peta_core::{Error, Hash, Result};
+use o5s_core::{Error, Hash, Result};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Read;
@@ -49,13 +49,13 @@ const SHARD_HEADER_TAG: [u8; 32] = [
 ];
 /// Largest chunk (2 × 64 KiB target).
 #[cfg(test)]
-const MAX_CHUNK: usize = pico2peta_net_kernel::parse::XET_MAX_CHUNK as usize;
+const MAX_CHUNK: usize = o5s_net_kernel::parse::XET_MAX_CHUNK as usize;
 pub const MAX_XORB_BODY: usize = 80 << 20;
 /// Uncompressed chunk data per xorb (xet-core's `MAX_XORB_BYTES`).
 const MAX_XORB_DATA: usize = 64 << 20;
 pub const MAX_SHARD_BODY: usize = 128 << 20;
-const XORB_RECORD_MAGIC: &[u8; 8] = b"P2PXORB1";
-const FILE_RECORD_MAGIC: &[u8; 8] = b"P2PXFIL1";
+const XORB_RECORD_MAGIC: &[u8; 8] = b"O5SXORB1";
+const FILE_RECORD_MAGIC: &[u8; 8] = b"O5SXFIL1";
 const FILE_RECORD_HEAD: usize = 8 + 32 + 32 + 32 + 4;
 /// Downloads present each file as "virtual xorbs" of at most this many chunks and bytes
 /// (the limits of real xorbs).
@@ -193,7 +193,7 @@ pub fn parse_xorb(b: &[u8]) -> Result<Vec<Vec<u8>>> {
         // The header decision is the extracted, proven kernel (`xet_chunk_header_spec`): version 0,
         // scheme ≤ 2, bounded lengths, a stored chunk's lengths equal, and the data inside `b`.
         let (clen, scheme, ulen) =
-            pico2peta_net_kernel::parse::xet_chunk_header(b, i).ok_or_else(|| bad("bad or truncated chunk header"))?;
+            o5s_net_kernel::parse::xet_chunk_header(b, i).ok_or_else(|| bad("bad or truncated chunk header"))?;
         let (clen, ulen) = (clen as usize, ulen as usize);
         total += ulen;
         if total > MAX_XORB_DATA {
@@ -272,7 +272,7 @@ impl XorbRecord {
 
 /// GC: the content object a xorb record references, if `head` (the object's first bytes) and
 /// `size` describe one.
-pub fn record_child(h: &Hash, head: &[u8], size: u64, store: &dyn pico2peta_core::ObjectStore) -> Result<Option<Hash>> {
+pub fn record_child(h: &Hash, head: &[u8], size: u64, store: &dyn o5s_core::ObjectStore) -> Result<Option<Hash>> {
     let head_size = FILE_RECORD_HEAD as u64;
     if head.starts_with(FILE_RECORD_MAGIC) && size >= head_size && (size - head_size).is_multiple_of(40) {
         let b = store.get(h, Some(0..40))?;
@@ -642,7 +642,7 @@ impl FileRecord {
     /// Bytes `[bs, be)` of virtual xorb `gi`'s serialization (chunk aligned, as we hand out).
     pub(crate) fn serialize_range(
         &self,
-        store: &dyn pico2peta_core::Repository,
+        store: &dyn o5s_core::Repository,
         gi: usize,
         bs: u64,
         be: u64,

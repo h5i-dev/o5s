@@ -1,4 +1,4 @@
-//! Core types shared by every pico2peta layer: content hashes, names, read sets,
+//! Core types shared by every o5s layer: content hashes, names, read sets,
 //! namespace rules, errors, and the `ObjectStore` trait.
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
@@ -88,7 +88,7 @@ impl FromStr for Hash {
 // Errors
 // ---------------------------------------------------------------------------
 
-/// Every error a pico2peta API can return. `Error::code()` gives a stable
+/// Every error a o5s API can return. `Error::code()` gives a stable
 /// machine-readable string (used on the wire).
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -158,7 +158,7 @@ pub enum Error {
     Io(#[from] std::io::Error),
 }
 
-/// Result type of all pico2peta APIs.
+/// Result type of all o5s APIs.
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
@@ -352,7 +352,7 @@ pub trait ObjectStore: Send + Sync {
 }
 
 /// The full repository API (v1): objects plus names. A local repo
-/// (`pico2peta-repo`) and the network client (`pico2peta-client`) both
+/// (`o5s-repo`) and the network client (`o5s-client`) both
 /// implement it, and the CLI and server are written against it.
 pub trait Repository: ObjectStore {
     /// Current value of `name`, or `None`.
@@ -497,9 +497,9 @@ pub fn is_under(s: &str, prefix: &str) -> bool {
 
 /// Validates a name or namespace prefix (same grammar).
 pub fn validate_path(s: &str) -> Result<()> {
-    // The grammar is the extracted kernel's (`pico2peta_kernel::names::validate`).
-    use pico2peta_kernel::names::Invalid;
-    match pico2peta_kernel::names::validate(s.as_bytes()) {
+    // The grammar is the extracted kernel's (`o5s_kernel::names::validate`).
+    use o5s_kernel::names::Invalid;
+    match o5s_kernel::names::validate(s.as_bytes()) {
         Ok(()) => Ok(()),
         Err(e) => Err(Error::InvalidName(
             s.to_string(),

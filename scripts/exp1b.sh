@@ -9,7 +9,7 @@ W=$BENCH_DATA/exp1b
 OUT=$BENCH_DATA/exp1/results-1b.jsonl
 T=$SCRATCH/cargo-target-exp1b
 mkdir -p "$W"
-(cd "$(dirname "$0")/.." && CARGO_TARGET_DIR=$T cargo build -q --release -p pico2peta-exp1)
+(cd "$(dirname "$0")/.." && CARGO_TARGET_DIR=$T cargo build -q --release -p o5s-exp1)
 EXP1=$T/release/exp1
 REPOS=("$@"); [ ${#REPOS[@]} -eq 0 ] && REPOS=(ripgrep jq redis git)
 for r in "${REPOS[@]}"; do

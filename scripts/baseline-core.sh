@@ -7,12 +7,12 @@
 #
 # Every run holds the bench lock. Each raw output goes to $OUT/<name>-r<rep>.txt, headed by the commit, the
 # count of dirty files, the 1-minute load at start and end, and a timestamp. Build first:
-#   cargo build --release -p pico2peta-micro
+#   cargo build --release -p o5s-micro
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 COMMIT=$(git -C "$ROOT" rev-parse --short HEAD)
-B=$CARGO_TARGET_DIR/release/p2p-bench
+B=$CARGO_TARGET_DIR/release/o5s-bench
 OUT=${OUT:-$SCRATCH/baseline/$COMMIT}
 WORK=$SCRATCH/bench-micro/baseline
 LOCK=$SCRATCH/bench.lock

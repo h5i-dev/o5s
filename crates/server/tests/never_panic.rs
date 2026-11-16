@@ -1,7 +1,7 @@
 //! Never-panic property tests for every decoder that sees untrusted input.
 //! The same entry points are cargo-fuzz targets in fuzz/ (nightly).
 
-use pico2peta_server::fuzzing as f;
+use o5s_server::fuzzing as f;
 use proptest::prelude::*;
 
 fn bytes(max: usize) -> impl Strategy<Value = Vec<u8>> {
@@ -106,7 +106,7 @@ fn valid_blob_push_is_accepted() {
     };
     let commit = format!("tree {tree_oid}\nauthor a <a> 0 +0000\ncommitter a <a> 0 +0000\n\nm\n").into_bytes();
     f::git_push(repo.clone(), dir.path(), &f::git_push_request(&[(2, tree), (1, commit)], 1));
-    use pico2peta_core::Repository;
-    let n = pico2peta_core::Name::new("git/fuzz/repo/refs/heads/main").unwrap();
+    use o5s_core::Repository;
+    let n = o5s_core::Name::new("git/fuzz/repo/refs/heads/main").unwrap();
     assert!(repo.resolve(&n).unwrap().is_some(), "valid push must set the ref");
 }

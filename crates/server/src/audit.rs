@@ -106,7 +106,7 @@ impl AuditLog {
         let healthy = Arc::new(AtomicBool::new(true));
         let h = healthy.clone();
         let rot = max_bytes.map(|m| (path.to_path_buf(), m.max(4096)));
-        std::thread::Builder::new().name("p2p-audit".into()).spawn(move || writer(f, rx, seq, prev, h, rot))?;
+        std::thread::Builder::new().name("o5s-audit".into()).spawn(move || writer(f, rx, seq, prev, h, rot))?;
         Ok(AuditLog { tx, path: path.to_path_buf(), healthy })
     }
 

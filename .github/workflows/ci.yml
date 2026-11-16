@@ -53,13 +53,13 @@ jobs:
       - run: |
           python -m venv "$RUNNER_TEMP/hfvenv"
           "$RUNNER_TEMP/hfvenv/bin/pip" install --quiet huggingface_hub==2.4.0 hf_xet==1.8.0
-          echo "PICO2PETA_HF_PYTHON=$RUNNER_TEMP/hfvenv/bin/python" >> "$GITHUB_ENV"
+          echo "O5S_HF_PYTHON=$RUNNER_TEMP/hfvenv/bin/python" >> "$GITHUB_ENV"
           # The PyPI front is tested with real pip, twine and uv (tests/pypi.rs).
           python -m venv "$RUNNER_TEMP/pkgvenv"
           "$RUNNER_TEMP/pkgvenv/bin/pip" install --quiet pip==26.0.1 twine==6.1.0 uv==0.13.8
-          echo "PICO2PETA_PKG_PYTHON=$RUNNER_TEMP/pkgvenv/bin/python" >> "$GITHUB_ENV"
-          echo "PICO2PETA_UV=$RUNNER_TEMP/pkgvenv/bin/uv" >> "$GITHUB_ENV"
-      # S3 integration tests skip themselves here (no P2P_S3_ENDPOINT).
+          echo "O5S_PKG_PYTHON=$RUNNER_TEMP/pkgvenv/bin/python" >> "$GITHUB_ENV"
+          echo "O5S_UV=$RUNNER_TEMP/pkgvenv/bin/uv" >> "$GITHUB_ENV"
+      # S3 integration tests skip themselves here (no O5S_S3_ENDPOINT).
       - run: cargo test --workspace --locked
 
   docs:
@@ -102,7 +102,7 @@ jobs:
       - name: Start MinIO
         run: scripts/minio-test.sh start | sed 's/^export //' >> "$GITHUB_ENV"
       - name: S3 backend + server integration tests
-        run: cargo test --locked -p pico2peta-backend-s3 -p pico2peta-server
+        run: cargo test --locked -p o5s-backend-s3 -p o5s-server
       - name: MinIO log on failure
         if: failure()
         run: cat "$MINIO_TEST_DIR/minio.log" || true
@@ -121,8 +121,8 @@ jobs:
         with:
           go-version: stable
           cache: false
-      - run: cargo build --locked -p pico2peta-server
-      - run: scripts/oci-conformance.sh target/debug/pico2peta-server "$RUNNER_TEMP/oci-conformance"
+      - run: cargo build --locked -p o5s-server
+      - run: scripts/oci-conformance.sh target/debug/o5s-server "$RUNNER_TEMP/oci-conformance"
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4

@@ -1,4 +1,4 @@
-"""PLAN §6.5, Maven: pico2peta's Maven front as a proxy-cache of Maven Central vs reposilite.
+"""PLAN §6.5, Maven: o5s's Maven front as a proxy-cache of Maven Central vs reposilite.
 
 Per system and run (a fresh, empty proxy each run): for each of 50 artifacts,
 `maven-dependency-plugin:get -Dtransitive=false` (the jar, its pom and parent poms) once cold
@@ -7,7 +7,7 @@ Maven's plugins (warmed from Central under the same mirror id), so the timed req
 artifact's own files, all through the proxy (mirrorOf *). Then stored bytes, and the check
 that hot requests caused no upstream fetches (each file fetched once).
 
-usage: maven_bench.py <pico2peta-server binary>
+usage: maven_bench.py <o5s-server binary>
 """
 import json
 import os
@@ -15,7 +15,7 @@ import shutil
 import sys
 import time
 
-from common import Proc, RUNS, TOKEN, TOOLS, check, du, free_port, log, metric_value, pico_server, record, run, wait_port, workdir
+from common import Proc, RUNS, TOKEN, TOOLS, check, du, free_port, log, metric_value, o5s_server, record, run, wait_port, workdir
 
 MVN = f"{TOOLS}/maven/bin/mvn"
 REPOSILITE = f"{TOOLS}/reposilite/reposilite.jar"
@@ -26,9 +26,9 @@ assert len(ARTIFACTS) == 50, len(ARTIFACTS)
 
 
 def settings(path, url, user=None, password=None):
-    creds = f"<servers><server><id>p2p</id><username>{user}</username><password>{password}</password></server></servers>" if user else ""
+    creds = f"<servers><server><id>o5s</id><username>{user}</username><password>{password}</password></server></servers>" if user else ""
     open(path, "w").write(
-        f"<settings>{creds}<mirrors><mirror><id>p2p</id><mirrorOf>*</mirrorOf><url>{url}</url></mirror></mirrors></settings>"
+        f"<settings>{creds}<mirrors><mirror><id>o5s</id><mirrorOf>*</mirrorOf><url>{url}</url></mirror></mirrors></settings>"
     )
 
 
@@ -37,7 +37,7 @@ def mvn(s, local, d, gav):
 
 
 def warm(d):
-    """A local repo with the plugin and its dependencies, recorded under mirror id p2p."""
+    """A local repo with the plugin and its dependencies, recorded under mirror id o5s."""
     s = os.path.join(d, "warm-settings.xml")
     settings(s, CENTRAL)
     l0 = os.path.join(d, "m2-warm")
@@ -101,17 +101,17 @@ def main():
                     record("maven", "stored_bytes", "reposilite", du(os.path.join(rp, "repositories")), "B", run=i)
                 finally:
                     rs.stop()
-                p2p = os.path.join(d, "p2p")
-                os.makedirs(p2p)
+                o5s = os.path.join(d, "o5s")
+                os.makedirs(o5s)
                 extra = f'\n[maven.upstream.central]\nurl = "{CENTRAL}"\n'
-                with pico_server(p2p, server_bin, extra_toml=extra) as (base, repo):
-                    s = os.path.join(d, "p2p-settings.xml")
+                with o5s_server(o5s, server_bin, extra_toml=extra) as (base, repo):
+                    s = os.path.join(d, "o5s-settings.xml")
                     settings(s, f"{base}/maven/central", "bench", TOKEN)
-                    log("maven: pico2peta run", i)
+                    log("maven: o5s run", i)
                     after = {}
-                    for phase in bench_pass("pico2peta", s, l0, d, i):
-                        after[phase] = metric_value(base, "p2p_upstream_fetches", 'front="maven"')
-                    record("maven", "stored_bytes", "pico2peta", du(repo), "B", run=i)
+                    for phase in bench_pass("o5s", s, l0, d, i):
+                        after[phase] = metric_value(base, "o5s_upstream_fetches", 'front="maven"')
+                    record("maven", "stored_bytes", "o5s", du(repo), "B", run=i)
                     check("maven", f"no_refetch_on_hit_run{i}", after["hot"] == after["cold"] and after["cold"] > 0,
                           f"{after['cold']} upstream fetches cold, {after['hot']} after hot")
 

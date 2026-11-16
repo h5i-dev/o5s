@@ -14,7 +14,7 @@ LOCK=$SCRATCH/bench.lock
 GIT256=$SCRATCH/git-2.56
 T=${CARGO_TARGET_DIR:-$SCRATCH/cargo-target-net}
 mkdir -p "$W"
-(cd "$(dirname "$0")/.." && CARGO_TARGET_DIR=$T cargo build -q -j2 --release -p pico2peta-exp1c)
+(cd "$(dirname "$0")/.." && CARGO_TARGET_DIR=$T cargo build -q -j2 --release -p o5s-exp1c)
 EXP1C=$T/release/exp1c
 REPOS=("$@"); [ ${#REPOS[@]} -eq 0 ] && REPOS=(ripgrep jq redis git)
 for r in "${REPOS[@]}"; do

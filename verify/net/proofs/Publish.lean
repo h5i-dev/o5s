@@ -1,4 +1,4 @@
-import Pico2petaNetKernel
+import O5sNetKernel
 import H5iAppLib
 /-!
 # Publish rules of the fronts: the extracted decisions compute these specs
@@ -6,9 +6,9 @@ import H5iAppLib
 `crates/net-kernel/src/publish.rs`, used by PyPI/npm/Maven (create-once files), OCI (manifest
 pushes), HF (commits) and npm (revision-checked writes).
 -/
-open Aeneas Aeneas.Std Result H5iAppLib pico2peta_net_kernel pico2peta_net_kernel.publish
+open Aeneas Aeneas.Std Result H5iAppLib o5s_net_kernel o5s_net_kernel.publish
 
-namespace pico2peta_net_kernel.Spec.Publish
+namespace o5s_net_kernel.Spec.Publish
 
 /-- Create-once: absent → create, identical → unchanged, different → conflict. -/
 theorem decide_create_once_spec (e : Existing) :
@@ -68,4 +68,4 @@ theorem commit_accepted (parent head : Option (alloc.vec.Vec U8)) (p l : Bool)
 theorem decide_rev_spec (g c : alloc.vec.Vec U8) : decide_rev g c ⦃ r => r = decide (g = c) ⦄ := by
   unfold decide_rev; step*
 
-end pico2peta_net_kernel.Spec.Publish
+end o5s_net_kernel.Spec.Publish

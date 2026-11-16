@@ -1126,19 +1126,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
-name = "pico2peta-attest"
+name = "o5s-attest"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
- "pico2peta-core",
- "pico2peta-prov",
+ "o5s-core",
+ "o5s-prov",
  "serde_json",
  "sha2",
 ]
 
 [[package]]
-name = "pico2peta-backend-s3"
+name = "o5s-backend-s3"
 version = "0.1.0"
 dependencies = [
  "bytes",
@@ -1146,7 +1146,7 @@ dependencies = [
  "futures-util",
  "hmac",
  "md-5",
- "pico2peta-core",
+ "o5s-core",
  "quick-xml",
  "reqwest",
  "serde_json",
@@ -1157,22 +1157,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "pico2peta-chunk"
+name = "o5s-chunk"
 version = "0.1.0"
 dependencies = [
  "fastcdc",
 ]
 
 [[package]]
-name = "pico2peta-client"
+name = "o5s-client"
 version = "0.1.0"
 dependencies = [
  "blake3",
  "bytes",
  "fastrand",
  "futures-util",
- "pico2peta-attest",
- "pico2peta-core",
+ "o5s-attest",
+ "o5s-core",
  "reqwest",
  "serde",
  "serde_json",
@@ -1181,7 +1181,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pico2peta-core"
+name = "o5s-core"
 version = "0.1.0"
 dependencies = [
  "blake3",
@@ -1189,70 +1189,70 @@ dependencies = [
 ]
 
 [[package]]
-name = "pico2peta-fuzz"
+name = "o5s-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
- "pico2peta-attest",
- "pico2peta-backend-s3",
- "pico2peta-core",
- "pico2peta-pack",
- "pico2peta-prov",
- "pico2peta-refs",
- "pico2peta-repo",
- "pico2peta-server",
+ "o5s-attest",
+ "o5s-backend-s3",
+ "o5s-core",
+ "o5s-pack",
+ "o5s-prov",
+ "o5s-refs",
+ "o5s-repo",
+ "o5s-server",
  "tempfile",
 ]
 
 [[package]]
-name = "pico2peta-order"
+name = "o5s-order"
 version = "0.1.0"
 
 [[package]]
-name = "pico2peta-pack"
+name = "o5s-pack"
 version = "0.1.0"
 dependencies = [
  "blake3",
  "crc32fast",
  "fastcdc",
  "memmap2",
- "pico2peta-chunk",
- "pico2peta-core",
+ "o5s-chunk",
+ "o5s-core",
  "zstd",
 ]
 
 [[package]]
-name = "pico2peta-prov"
+name = "o5s-prov"
 version = "0.1.0"
 dependencies = [
- "pico2peta-core",
- "pico2peta-refs",
- "pico2peta-repo",
+ "o5s-core",
+ "o5s-refs",
+ "o5s-repo",
 ]
 
 [[package]]
-name = "pico2peta-refs"
+name = "o5s-refs"
 version = "0.1.0"
 dependencies = [
  "blake3",
  "crc32fast",
- "pico2peta-core",
+ "o5s-core",
 ]
 
 [[package]]
-name = "pico2peta-repo"
+name = "o5s-repo"
 version = "0.1.0"
 dependencies = [
- "pico2peta-core",
- "pico2peta-order",
- "pico2peta-pack",
- "pico2peta-refs",
+ "o5s-core",
+ "o5s-order",
+ "o5s-pack",
+ "o5s-refs",
  "serde",
  "toml",
 ]
 
 [[package]]
-name = "pico2peta-server"
+name = "o5s-server"
 version = "0.1.0"
 dependencies = [
  "axum",
@@ -1271,14 +1271,14 @@ dependencies = [
  "jsonwebtoken",
  "lz4_flex",
  "md-5",
- "pico2peta-attest",
- "pico2peta-backend-s3",
- "pico2peta-client",
- "pico2peta-core",
- "pico2peta-pack",
- "pico2peta-prov",
- "pico2peta-repo",
- "pico2peta-weights",
+ "o5s-attest",
+ "o5s-backend-s3",
+ "o5s-client",
+ "o5s-core",
+ "o5s-pack",
+ "o5s-prov",
+ "o5s-repo",
+ "o5s-weights",
  "prometheus-client",
  "reqwest",
  "rustls",
@@ -1299,12 +1299,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "pico2peta-weights"
+name = "o5s-weights"
 version = "0.1.0"
 dependencies = [
- "pico2peta-core",
- "pico2peta-pack",
- "pico2peta-repo",
+ "o5s-core",
+ "o5s-pack",
+ "o5s-repo",
  "serde_json",
 ]
 

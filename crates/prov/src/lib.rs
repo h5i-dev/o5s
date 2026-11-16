@@ -2,12 +2,12 @@
 //!
 //! A [`Record`] says that running `op` (with `params`) on `inputs` produced
 //! `outputs`. Records are ordinary content-addressed objects with a
-//! canonical, versioned encoding (`P2PPROV1`), so the same derivation always
+//! canonical, versioned encoding (`O5SPROV1`), so the same derivation always
 //! has the same hash, and recording it twice is a no-op.
 //!
 //! # Index
 //! Records are indexed by an append-only log of [`LogNode`] objects
-//! (`P2PPLOG1`), each holding a batch of record hashes and its predecessor.
+//! (`O5SPLOG1`), each holding a batch of record hashes and its predecessor.
 //! The head is the ref `_prov/log` (configurable), advanced with OCC
 //! `replace` and retried on conflict, so any number of writers can record
 //! concurrently. [`Provenance::load`] builds forward and backward maps.
@@ -31,14 +31,14 @@
 pub mod retention;
 pub mod search;
 
-use pico2peta_core::{Error, Hash, Name, ObjectStore, RefValue, ReplaceOutcome, Repository, Result};
-use pico2peta_repo::Tracer;
+use o5s_core::{Error, Hash, Name, ObjectStore, RefValue, ReplaceOutcome, Repository, Result};
+use o5s_repo::Tracer;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
-const REC_MAGIC: &[u8; 8] = b"P2PPROV1";
-const LOG_MAGIC: &[u8; 8] = b"P2PPLOG1";
-const LOG_MAGIC_V2: &[u8; 8] = b"P2PPLOG2";
-const IDX_MAGIC: &[u8; 8] = b"P2PPIDX1";
+const REC_MAGIC: &[u8; 8] = b"O5SPROV1";
+const LOG_MAGIC: &[u8; 8] = b"O5SPLOG1";
+const LOG_MAGIC_V2: &[u8; 8] = b"O5SPLOG2";
+const IDX_MAGIC: &[u8; 8] = b"O5SPIDX1";
 const IDX_ENTRY: u64 = 64;
 /// Build a new checkpoint index once the records since the last one reach
 /// max(MIN_CHECKPOINT, total / 8): geometric growth keeps rebuilds amortized.
@@ -208,14 +208,14 @@ pub struct LogNode {
     /// Records appended by this node.
     pub records: Vec<Hash>,
     /// Checkpoint index covering every record in this node and all older
-    /// nodes (`P2PPIDX1`), if this node carries one.
+    /// nodes (`O5SPIDX1`), if this node carries one.
     pub checkpoint: Option<Hash>,
     /// Total number of records in this node and all older nodes.
     pub total: u64,
 }
 
 impl LogNode {
-    /// Canonical encoding (`P2PPLOG2`).
+    /// Canonical encoding (`O5SPLOG2`).
     pub fn encode(&self) -> Vec<u8> {
         let mut v = LOG_MAGIC_V2.to_vec();
         for h in [&self.prev, &self.checkpoint] {
@@ -235,7 +235,7 @@ impl LogNode {
         v
     }
 
-    /// Decodes a log node (`P2PPLOG2`, or the original `P2PPLOG1`).
+    /// Decodes a log node (`O5SPLOG2`, or the original `O5SPLOG1`).
     pub fn decode(b: &[u8]) -> Result<LogNode> {
         let v2 = b.len() >= 8 && &b[..8] == LOG_MAGIC_V2;
         if !v2 && !(b.len() >= 8 && &b[..8] == LOG_MAGIC) {
@@ -271,7 +271,7 @@ impl LogNode {
     }
 }
 
-/// Builds a checkpoint index object: `P2PPIDX1 | n_fwd u64 | n_bwd u64 |
+/// Builds a checkpoint index object: `O5SPIDX1 | n_fwd u64 | n_bwd u64 |
 /// fwd (input, record)* | bwd (output, record)*`, both tables sorted.
 fn encode_index(fwd: &mut Vec<(Hash, Hash)>, bwd: &mut Vec<(Hash, Hash)>) -> Vec<u8> {
     fwd.sort();

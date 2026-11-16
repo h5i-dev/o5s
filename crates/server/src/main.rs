@@ -1,4 +1,4 @@
-//! `pico2peta-server` binary.
+//! `o5s-server` binary.
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -6,7 +6,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 #[derive(Parser)]
-#[command(name = "pico2peta-server", version, about = "pico2peta HTTP server")]
+#[command(name = "o5s-server", version, about = "o5s HTTP server")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -17,7 +17,7 @@ enum Cmd {
     /// Run the server.
     Serve {
         /// Path to the TOML config file.
-        #[arg(short, long, default_value = "/etc/pico2peta/server.toml")]
+        #[arg(short, long, default_value = "/etc/o5s/server.toml")]
         config: PathBuf,
     },
     /// Check a config file and exit.
@@ -44,7 +44,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Serve { config } => serve(config),
-        Cmd::CheckConfig { config } => match pico2peta_server::config::Config::load(&config) {
+        Cmd::CheckConfig { config } => match o5s_server::config::Config::load(&config) {
             Ok(_) => {
                 println!("ok");
                 ExitCode::SUCCESS
@@ -55,7 +55,7 @@ fn main() -> ExitCode {
             }
         },
         Cmd::GenToken { principal } => {
-            if !pico2peta_server::config::valid_principal(&principal) {
+            if !o5s_server::config::valid_principal(&principal) {
                 eprintln!("error: invalid principal name");
                 return ExitCode::from(2);
             }
@@ -64,8 +64,8 @@ fn main() -> ExitCode {
                 eprintln!("error: no system randomness: {e}");
                 return ExitCode::FAILURE;
             }
-            let token = format!("p2p_{}", hex(&raw));
-            let h = pico2peta_server::auth::sha256(token.as_bytes());
+            let token = format!("o5s_{}", hex(&raw));
+            let h = o5s_server::auth::sha256(token.as_bytes());
             println!("token: {token}");
             println!();
             println!("[[auth.tokens]]\nprincipal = \"{principal}\"\nsha256 = \"{}\"", hex(&h));
@@ -76,10 +76,10 @@ fn main() -> ExitCode {
             if std::io::stdin().read_line(&mut s).is_err() {
                 return ExitCode::FAILURE;
             }
-            println!("{}", hex(&pico2peta_server::auth::sha256(s.trim().as_bytes())));
+            println!("{}", hex(&o5s_server::auth::sha256(s.trim().as_bytes())));
             ExitCode::SUCCESS
         }
-        Cmd::VerifyAudit { path } => match pico2peta_server::audit::verify_all(&path) {
+        Cmd::VerifyAudit { path } => match o5s_server::audit::verify_all(&path) {
             Ok((n, first)) => {
                 if first > 1 {
                     println!("ok: {n} records (seq {first}..), chain intact; earlier records were archived");
@@ -98,17 +98,17 @@ fn main() -> ExitCode {
 
 fn serve(config: PathBuf) -> ExitCode {
     let config = std::fs::canonicalize(&config).unwrap_or(config);
-    let cfg = match pico2peta_server::config::Config::load(&config) {
+    let cfg = match o5s_server::config::Config::load(&config) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: {e}");
             return ExitCode::from(2);
         }
     };
-    pico2peta_server::init_logging(&cfg.log);
+    o5s_server::init_logging(&cfg.log);
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .thread_name("p2p-http")
+        .thread_name("o5s-http")
         .max_blocking_threads(cfg.server.max_concurrent_requests.saturating_mul(2).max(64))
         .build()
     {
@@ -121,13 +121,15 @@ fn serve(config: PathBuf) -> ExitCode {
     let res = rt.block_on(async {
         // Opening the repo does blocking I/O; keep it off the async workers.
         let c2 = cfg.clone();
-        let state = tokio::task::spawn_blocking(move || pico2peta_server::build_state(&c2))
+        let state = tokio::task::spawn_blocking(move || o5s_server::build_state(&c2))
             .await
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string())?;
-        let listener = tokio::net::TcpListener::bind(cfg.server.listen).await.map_err(|e| format!("bind {}: {e}", cfg.server.listen))?;
+        let listener = tokio::net::TcpListener::bind(cfg.server.listen)
+            .await
+            .map_err(|e| format!("bind {}: {e}", cfg.server.listen))?;
         let cert = match &cfg.server.tls {
-            Some(t) => Some(pico2peta_server::tls::ReloadableCert::load(t.cert.clone(), t.key.clone())?),
+            Some(t) => Some(o5s_server::tls::ReloadableCert::load(t.cert.clone(), t.key.clone())?),
             None => None,
         };
         // SIGHUP: reload tokens, policies and the certificate.
@@ -137,9 +139,11 @@ fn serve(config: PathBuf) -> ExitCode {
             let cert = cert.clone();
             let path = config.clone();
             tokio::spawn(async move {
-                let Ok(mut hup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) else { return };
+                let Ok(mut hup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) else {
+                    return;
+                };
                 while hup.recv().await.is_some() {
-                    if let Err(e) = pico2peta_server::reload(&st, &path, cert.as_deref()).await {
+                    if let Err(e) = o5s_server::reload(&st, &path, cert.as_deref()).await {
                         tracing::error!(error = %e, "configuration reload failed; keeping the old configuration");
                     }
                 }
@@ -148,7 +152,7 @@ fn serve(config: PathBuf) -> ExitCode {
         // Shutdown fan-out: the API and the ops listener stop together.
         let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
         tokio::spawn(async move {
-            pico2peta_server::shutdown_signal().await;
+            o5s_server::shutdown_signal().await;
             let _ = stop_tx.send(true);
         });
         let stopped = |mut rx: tokio::sync::watch::Receiver<bool>| async move {
@@ -160,7 +164,7 @@ fn serve(config: PathBuf) -> ExitCode {
             let st = state.clone();
             let rx = stop_rx.clone();
             tokio::spawn(async move {
-                if let Err(e) = pico2peta_server::serve_ops(l, st, stopped(rx)).await {
+                if let Err(e) = o5s_server::serve_ops(l, st, stopped(rx)).await {
                     tracing::error!(error = %e, "metrics listener failed");
                 }
             });
@@ -168,14 +172,14 @@ fn serve(config: PathBuf) -> ExitCode {
         let timeout = Duration::from_secs(cfg.server.request_timeout_secs);
         let grace = Duration::from_secs(cfg.server.shutdown_grace_secs);
         let scheme = if cert.is_some() { "https" } else { "http" };
-        tracing::info!(listen = %cfg.server.listen, scheme, repo = %cfg.repo.path.display(), "pico2peta-server listening");
+        tracing::info!(listen = %cfg.server.listen, scheme, repo = %cfg.repo.path.display(), "o5s-server listening");
         match cert {
             Some(c) => {
-                let acceptor = pico2peta_server::tls::acceptor(c)?;
-                let l = pico2peta_server::tls::TlsListener::new(listener, acceptor).map_err(|e| e.to_string())?;
-                pico2peta_server::serve_on(l, state, timeout, grace, stopped(stop_rx)).await
+                let acceptor = o5s_server::tls::acceptor(c)?;
+                let l = o5s_server::tls::TlsListener::new(listener, acceptor).map_err(|e| e.to_string())?;
+                o5s_server::serve_on(l, state, timeout, grace, stopped(stop_rx)).await
             }
-            None => pico2peta_server::serve(listener, state, timeout, grace, stopped(stop_rx)).await,
+            None => o5s_server::serve(listener, state, timeout, grace, stopped(stop_rx)).await,
         }
         .map_err(|e| e.to_string())
     });

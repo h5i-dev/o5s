@@ -1,5 +1,5 @@
 -- Copied from h5i-app-std's proofs/AuthzSpecs.lean by `h5i app extract`. Do not edit.
-import Pico2petaNetKernel
+import O5sNetKernel
 import H5iAppLib
 /-!
 # The authorization guard's theorem
@@ -23,7 +23,7 @@ This file is checked against the crate's own extraction. A kernel that calls
 the guard gets a copy importing its extraction instead (`h5i app extract`,
 with `std-specs = true`), like `StdSpecs`.
 -/
-open Aeneas Aeneas.Std Result H5iAppLib pico2peta_net_kernel
+open Aeneas Aeneas.Std Result H5iAppLib o5s_net_kernel
 
 set_option linter.unusedTactic false
 set_option linter.unreachableTactic false

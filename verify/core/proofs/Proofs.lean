@@ -1,8 +1,8 @@
-import Pico2petaKernel
+import O5sKernel
 import H5iAppLib
-open Aeneas Aeneas.Std Result pico2peta_kernel H5iAppLib
+open Aeneas Aeneas.Std Result o5s_kernel H5iAppLib
 
-namespace pico2peta_kernel.Proofs
+namespace o5s_kernel.Proofs
 
 theorem prefix_iff_get {α} (p s : List α) :
     p <+: s ↔ p.length ≤ s.length ∧ ∀ j (h1 : j < p.length) (h2 : j < s.length), s[j] = p[j] := by
@@ -1572,16 +1572,16 @@ theorem le32L_lt (b : Slice U8) (at_ : Nat) (h : at_ + 4 ≤ b.val.length) : le3
 /-- What `parse_header` returns for the bytes `b`: the first failing check, or the header with every
 field decoded little endian from its offset and every bound checked. -/
 def HeaderOK (b : List U8) : core.result.Result codec.Header codec.HeaderError → Prop
-  | .Ok h => 52 ≤ b.length ∧ le32L b 0 = 1380987472 ∧ h.kind = b[4]! ∧ h.codec = b[5]! ∧
+  | .Ok h => 52 ≤ b.length ∧ le32L b 0 = 1381184847 ∧ h.kind = b[4]! ∧ h.codec = b[5]! ∧
       h.kind.val ≤ 5 ∧ h.codec.val ≤ 2 ∧ h.raw_len.val = le64L b 40 ∧ h.stored_len.val = le32L b 48 ∧
       (∀ j (hj : j < 32), h.hash.val[j]! = b[8 + j]!) ∧
       le32L b 48 ≤ 2148532224 ∧ (h.kind.val = 0 → le64L b 40 ≤ 2147483648) ∧
       ((h.kind.val = 2 ∨ h.kind.val = 3 ∨ h.kind.val = 5) → le64L b 40 ≤ 67108864)
   | .Err .Short => b.length < 52
-  | .Err .BadMagic => 52 ≤ b.length ∧ le32L b 0 ≠ 1380987472
-  | .Err .BadKind => 52 ≤ b.length ∧ le32L b 0 = 1380987472 ∧ 5 < b[4]!.val
-  | .Err .BadCodec => 52 ≤ b.length ∧ le32L b 0 = 1380987472 ∧ b[4]!.val ≤ 5 ∧ 2 < b[5]!.val
-  | .Err .TooLong => 52 ≤ b.length ∧ le32L b 0 = 1380987472 ∧ b[4]!.val ≤ 5 ∧ b[5]!.val ≤ 2 ∧
+  | .Err .BadMagic => 52 ≤ b.length ∧ le32L b 0 ≠ 1381184847
+  | .Err .BadKind => 52 ≤ b.length ∧ le32L b 0 = 1381184847 ∧ 5 < b[4]!.val
+  | .Err .BadCodec => 52 ≤ b.length ∧ le32L b 0 = 1381184847 ∧ b[4]!.val ≤ 5 ∧ 2 < b[5]!.val
+  | .Err .TooLong => 52 ≤ b.length ∧ le32L b 0 = 1381184847 ∧ b[4]!.val ≤ 5 ∧ b[5]!.val ≤ 2 ∧
       (2148532224 < le32L b 48 ∨ (b[4]!.val = 0 ∧ 2147483648 < le64L b 40) ∨
        ((b[4]!.val = 2 ∨ b[4]!.val = 3 ∨ b[4]!.val = 5) ∧ 67108864 < le64L b 40))
 
@@ -1608,8 +1608,8 @@ def HeaderOK (b : List U8) : core.result.Result codec.Header codec.HeaderError �
     | (simp only [HeaderOK]; scalar_tac; done)
     | (simp only [HeaderOK]; simp_all [getElem!_pos]; done)
     | (have hl : 52 ≤ b.val.length := by scalar_tac
-       have hm : le32L b.val 0 = 1380987472 := by
-         have : i1.val = 1380987472 := by simpa using ‹¬(i1 != 1380987472#u32) = true›
+       have hm : le32L b.val 0 = 1381184847 := by
+         have : i1.val = 1381184847 := by simpa using ‹¬(i1 != 1381184847#u32) = true›
          rw [← i1_post, this]
        have h4 : b.val[4]! = kind := by rw [getElem!_pos b.val 4 (by omega), kind_post]
        have h5 : b.val[5]! = codec_code := by rw [getElem!_pos b.val 5 (by omega), codec_code_post]

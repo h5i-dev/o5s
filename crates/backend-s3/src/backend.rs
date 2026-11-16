@@ -1,4 +1,4 @@
-//! [`S3Backend`]: the synchronous `pico2peta_core::backend::Backend` adapter.
+//! [`S3Backend`]: the synchronous `o5s_core::backend::Backend` adapter.
 //!
 //! The backend owns a small dedicated tokio runtime. Every trait call spawns
 //! its future onto that runtime and waits on a channel, so it works from any
@@ -11,8 +11,8 @@ use crate::config::{CredentialsProvider, S3Config};
 use crate::error::S3Error;
 use crate::retry::backoff;
 use bytes::Bytes;
-use pico2peta_core::backend::{Backend, BlobMeta, PutOutcome, PutSource, validate_key};
-use pico2peta_core::{Error, Result};
+use o5s_core::backend::{Backend, BlobMeta, PutOutcome, PutSource, validate_key};
+use o5s_core::{Error, Result};
 use std::future::Future;
 use std::io::Read;
 use std::ops::Range;
@@ -43,7 +43,7 @@ impl S3Backend {
         let client = S3Client::new(cfg, creds).map_err(to_core)?;
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(worker_threads.max(1))
-            .thread_name("p2p-s3")
+            .thread_name("o5s-s3")
             .enable_all()
             .build()?;
         Ok(S3Backend { client, rt: Some(rt) })
@@ -54,7 +54,7 @@ impl S3Backend {
     pub fn with_default_chain(cfg: S3Config, worker_threads: usize) -> Result<S3Backend> {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(worker_threads.max(1))
-            .thread_name("p2p-s3")
+            .thread_name("o5s-s3")
             .enable_all()
             .build()?;
         let handle = rt.handle().clone();

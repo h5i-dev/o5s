@@ -9,7 +9,7 @@
 - Every measurement is pre-registered in `PLAN.md` before its code. Report results honestly against the frozen thresholds.
 - Disk hygiene: target dir < 4 GB, no TMPDIR leaks, nothing under `/home` or `/tmp`, perf build-id cache on scratch. `/mnt/scratch` has about 14 GB free. If space blocks an item, record it and do the next item.
 
-## Core session (`pico2peta`, branch `demo`)
+## Core session (`o5s`, branch `demo`)
 1. **Finish in-flight work:** `read_verify = strict (default) | eof` (see PROGRESS "Answered"), and the idmap fix handoff with net.
 2. **Experiment 3 held-out run:** redis and git.git, once, under the bench lock (protocol in "Batch measurement" below). Write the verdict in `EXP1.md`/`PROGRESS.md`. If it fails on a repo, analyse why and improve the generic orderer or framer. Never add a Git-specific path.
 3. **P5 cross-domain features (core side):**
@@ -29,7 +29,7 @@
    - Tag a release candidate on `demo` (`v0.1.0-rc.N`).
    - Write `docs/RELEASE.md` with the merge-to-main checklist. The human merges to `main`.
 
-## Net session (`pico2peta-net`, branch `net`)
+## Net session (`o5s-net`, branch `net`)
 1. **Finish in-flight work:** the idmap ranged-lookup fix (agreed with core), and the server side of `read_verify`.
 2. **Front completeness, each tested with the real unmodified client:**
    - **OCI:** referrers API, and cosign/notation signatures stored as OCI artifacts (wire them to the core attestations once item 3 lands).
@@ -39,7 +39,7 @@
 3. **P5 cross-domain features (front side):** every front records provenance through the core API (e.g. a wheel built from Git commit X; an image layer containing wheel Y). Promotion endpoints and policy checks in the server. One audit log query across fronts.
 4. **Batch benchmarks vs specialist systems (§6.5),** using the protocol below: git daemon, CNCF Distribution, devpi/pypiserver, verdaccio, a Maven repository (e.g. reposilite) if it runs locally, and HF vs the generic-front reference. Include the redis Git-front numbers that were stopped earlier. Results go in `BENCH.md` and `NET_PROGRESS.md`, against the frozen thresholds.
 5. **Dogfooding:**
-   - Run a pico2peta server on this host and use it for this project's own needs: mirror this repo through the Git front, and route pip and npm used by the tests through the PyPI and npm proxy-caches.
+   - Run a o5s server on this host and use it for this project's own needs: mirror this repo through the Git front, and route pip and npm used by the tests through the PyPI and npm proxy-caches.
    - Keep it running and record every bug found.
    - Do a backup → restore → fsck drill, and an upgrade drill: an old format, then the new binary.
 6. **Security review of the server:** authn/authz bypass, path traversal in every front's URL parsing, request smuggling, body-size and time limits, slowloris, upstream SSRF in the proxy-caches, token handling. Fuzz the HTTP-facing parsers. Fix everything found.

@@ -1,10 +1,10 @@
 [package]
-name = "pico2peta-core"
+name = "o5s-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-pico2peta-kernel.workspace = true
+o5s-kernel.workspace = true
 blake3.workspace = true
 thiserror.workspace = true

@@ -50,12 +50,12 @@ pub struct Metrics {
     pub namespace_limited: Family<OutcomeLabels, Counter>,
     /// Files fetched from an upstream by a proxy-cache front (each should be fetched once).
     pub upstream_fetches: Family<FrontLabels, Counter>,
-    s3: Option<Arc<dyn Fn() -> pico2peta_backend_s3::S3StatsSnapshot + Send + Sync>>,
+    s3: Option<Arc<dyn Fn() -> o5s_backend_s3::S3StatsSnapshot + Send + Sync>>,
 }
 
 impl Metrics {
     pub fn new() -> Metrics {
-        let mut registry = Registry::with_prefix("p2p");
+        let mut registry = Registry::with_prefix("o5s");
         let http_requests = Family::<HttpLabels, Counter>::default();
         registry.register("http_requests", "HTTP requests by method, route and status", http_requests.clone());
         let http_duration = Family::<RouteLabels, Histogram>::new_with_constructor(|| {
@@ -119,7 +119,7 @@ impl Metrics {
     }
 
     /// Exports the S3 client counters as well.
-    pub fn with_s3(mut self, stats: Arc<dyn Fn() -> pico2peta_backend_s3::S3StatsSnapshot + Send + Sync>) -> Self {
+    pub fn with_s3(mut self, stats: Arc<dyn Fn() -> o5s_backend_s3::S3StatsSnapshot + Send + Sync>) -> Self {
         self.s3 = Some(stats);
         self
     }
@@ -135,12 +135,12 @@ impl Metrics {
             let body = out.strip_suffix("# EOF\n").unwrap_or(&out).to_string();
             out = body;
             for (name, help, v) in [
-                ("p2p_s3_requests", "S3 HTTP requests", s.requests),
-                ("p2p_s3_retries", "S3 request retries", s.retries),
-                ("p2p_s3_throttled", "S3 throttling responses", s.throttled),
-                ("p2p_s3_failures", "S3 requests that failed after retries", s.failures),
-                ("p2p_s3_bytes_sent", "S3 bytes sent", s.bytes_sent),
-                ("p2p_s3_bytes_received", "S3 bytes received", s.bytes_received),
+                ("o5s_s3_requests", "S3 HTTP requests", s.requests),
+                ("o5s_s3_retries", "S3 request retries", s.retries),
+                ("o5s_s3_throttled", "S3 throttling responses", s.throttled),
+                ("o5s_s3_failures", "S3 requests that failed after retries", s.failures),
+                ("o5s_s3_bytes_sent", "S3 bytes sent", s.bytes_sent),
+                ("o5s_s3_bytes_received", "S3 bytes received", s.bytes_received),
             ] {
                 let _ = write!(out, "# HELP {name} {help}.\n# TYPE {name} counter\n{name}_total {v}\n");
             }

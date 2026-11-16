@@ -1,14 +1,14 @@
 //! Conformance against Hugging Face's published reference chunk list
 //! (dataset `xet-team/xet-spec-reference-files`). Download to
-//! `$P2P_XET_REF` (default `/mnt/scratch/pico2peta/bench-data/xet-ref`):
+//! `$O5S_XET_REF` (default `/mnt/scratch/pico2peta/bench-data/xet-ref`):
 //!   Electric_Vehicle_Population_Data_20250917.csv and its `.chunks` file.
 //! Skipped (with a notice) if the files are absent.
 
-use pico2peta_chunk::{Chunker, XetChunker, chunk_lengths};
+use o5s_chunk::{Chunker, XetChunker, chunk_lengths};
 
 #[test]
 fn matches_published_xet_chunk_boundaries() {
-    let dir = std::env::var("P2P_XET_REF").unwrap_or_else(|_| "/mnt/scratch/pico2peta/bench-data/xet-ref".into());
+    let dir = std::env::var("O5S_XET_REF").unwrap_or_else(|_| "/mnt/scratch/pico2peta/bench-data/xet-ref".into());
     let base = std::path::Path::new(&dir).join("Electric_Vehicle_Population_Data_20250917.csv");
     let (Ok(data), Ok(list)) = (std::fs::read(&base), std::fs::read_to_string(base.with_extension("csv.chunks")))
     else {

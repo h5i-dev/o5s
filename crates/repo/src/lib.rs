@@ -1,4 +1,4 @@
-//! `LocalRepo`: a pico2peta repository on local disk, optionally with
+//! `LocalRepo`: a o5s repository on local disk, optionally with
 //! sealed packs on any other [`Backend`] (for example S3), implementing
 //! [`Repository`].
 //!
@@ -10,7 +10,7 @@
 //! <root>/refs/journal   ref journal (or `refs/` on the backend with `[refs] store = "backend"`)
 //! ```
 //! Any number of `LocalRepo` handles, in any number of processes, can use one
-//! root at the same time. See `pico2peta-pack` and `pico2peta-refs` for the
+//! root at the same time. See `o5s-pack` and `o5s-refs` for the
 //! concurrency protocols.
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
@@ -25,11 +25,11 @@ pub use front::{DerivePolicy, Front, FrontRegistry, PlanCtx, Profile};
 
 pub use fsck::FsckReport;
 pub use gc::{GcOptions, GcReport, GroupKey, Grouper, NoHints, OpaqueObjects, Tracer};
-use pico2peta_core::backend::{Backend, LocalDisk};
-use pico2peta_core::{Error, Hash, Name, ObjectStore, Observed, RefValue, ReplaceOutcome, Repository, Result, Rule};
-pub use pico2peta_pack::{ChunkerKind, PutOpts};
-use pico2peta_pack::{PackStats, PackStore};
-use pico2peta_refs::RefStore;
+use o5s_core::backend::{Backend, LocalDisk};
+use o5s_core::{Error, Hash, Name, ObjectStore, Observed, RefValue, ReplaceOutcome, Repository, Result, Rule};
+pub use o5s_pack::{ChunkerKind, PutOpts};
+use o5s_pack::{PackStats, PackStore};
+use o5s_refs::RefStore;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use std::ops::Range;
@@ -95,7 +95,7 @@ impl GcSection {
     }
 }
 
-/// `[read]` section: how reads verify content (see [`pico2peta_core::ReadVerify`]).
+/// `[read]` section: how reads verify content (see [`o5s_core::ReadVerify`]).
 ///
 /// ```toml
 /// [read]
@@ -107,7 +107,7 @@ impl GcSection {
 pub struct ReadSection {
     /// The mode of reads that don't choose one.
     #[serde(default, with = "read_verify_serde")]
-    pub verify: pico2peta_core::ReadVerify,
+    pub verify: o5s_core::ReadVerify,
     /// Whether a single request may ask for `eof` (`verify = "eof"` implies it).
     #[serde(default)]
     pub allow_eof: bool,
@@ -120,12 +120,12 @@ impl ReadSection {
 
     /// Whether `eof` reads are permitted at all.
     pub fn eof_allowed(&self) -> bool {
-        self.allow_eof || self.verify == pico2peta_core::ReadVerify::Eof
+        self.allow_eof || self.verify == o5s_core::ReadVerify::Eof
     }
 }
 
 mod read_verify_serde {
-    use pico2peta_core::ReadVerify;
+    use o5s_core::ReadVerify;
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(v: &ReadVerify, s: S) -> Result<S::Ok, S::Error> {
@@ -273,7 +273,7 @@ pub struct PackSection {
 }
 
 fn default_grouped_level() -> i32 {
-    pico2peta_pack::store::DEFAULT_GROUPED_ZSTD_LEVEL
+    o5s_pack::store::DEFAULT_GROUPED_ZSTD_LEVEL
 }
 
 fn default_true() -> bool {
@@ -281,7 +281,7 @@ fn default_true() -> bool {
 }
 
 fn default_fanout() -> usize {
-    pico2peta_pack::store::DEFAULT_MANIFEST_FANOUT
+    o5s_pack::store::DEFAULT_MANIFEST_FANOUT
 }
 
 impl From<&PackConfig> for PackSection {
@@ -329,7 +329,7 @@ pub struct LocalRepo {
     packs: PackStore,
     refs: Arc<RefStore>,
     backend: Arc<dyn Backend>,
-    faults: pico2peta_core::fault::FaultHandle,
+    faults: o5s_core::fault::FaultHandle,
     /// Notified of every committed name change on this handle and its clones (`reach`).
     observers: Arc<std::sync::RwLock<Vec<Arc<dyn reach::RefObserver>>>>,
     /// Whether `observers` is non-empty: commits skip building the change list otherwise.
@@ -386,7 +386,7 @@ impl LocalRepo {
             }
             Err(e) => return Err(e.into()),
         }
-        pico2peta_core::backend::fsync_dir(root)?;
+        o5s_core::backend::fsync_dir(root)?;
         Self::open(root)
     }
 
@@ -400,7 +400,7 @@ impl LocalRepo {
     /// Opens an existing repository whose sealed packs live on `backend`.
     /// Staging and refs stay under `root`.
     pub fn open_with_backend(root: impl AsRef<Path>, backend: Arc<dyn Backend>) -> Result<Self> {
-        Self::open_with_faults(root, backend, pico2peta_core::fault::Faults::disarmed())
+        Self::open_with_faults(root, backend, o5s_core::fault::Faults::disarmed())
     }
 
     /// Like [`LocalRepo::open_with_backend`], with fault injection shared by
@@ -408,7 +408,7 @@ impl LocalRepo {
     pub fn open_with_faults(
         root: impl AsRef<Path>,
         backend: Arc<dyn Backend>,
-        faults: pico2peta_core::fault::FaultHandle,
+        faults: o5s_core::fault::FaultHandle,
     ) -> Result<Self> {
         let root = root.as_ref().to_path_buf();
         let cfg = Self::read_config(&root)?;
@@ -441,7 +441,7 @@ impl LocalRepo {
         let text = match std::fs::read_to_string(&p) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(Error::Parse(format!("{} is not a pico2peta repository (no config.toml)", root.display())));
+                return Err(Error::Parse(format!("{} is not a o5s repository (no config.toml)", root.display())));
             }
             Err(e) => return Err(e.into()),
         };
@@ -463,12 +463,12 @@ impl LocalRepo {
             }
         }
         for (n, p) in &cfg.profiles {
-            let kind = pico2peta_pack::ChunkerKind::from_id(p.chunker.as_deref())
+            let kind = o5s_pack::ChunkerKind::from_id(p.chunker.as_deref())
                 .map_err(|e| Error::Parse(format!("[profiles.{n}]: {e}")))?;
-            if kind == pico2peta_pack::ChunkerKind::Xet && pack.chunk_threshold <= pico2peta_pack::XET_MAX {
+            if kind == o5s_pack::ChunkerKind::Xet && pack.chunk_threshold <= o5s_pack::XET_MAX {
                 return Err(Error::Parse(format!(
                     "[profiles.{n}] uses xet, which needs pack.chunk_threshold > {}",
-                    pico2peta_pack::XET_MAX
+                    o5s_pack::XET_MAX
                 )));
             }
         }
@@ -477,10 +477,10 @@ impl LocalRepo {
 
     fn validate_chunking(c: &ChunkingSection, pack: &PackConfig) -> Result<()> {
         let xet = c.default == ChunkerChoice::Xet || c.prefixes.values().any(|v| *v == ChunkerChoice::Xet);
-        if xet && pack.chunk_threshold <= pico2peta_pack::XET_MAX {
+        if xet && pack.chunk_threshold <= o5s_pack::XET_MAX {
             return Err(Error::Parse(format!(
                 "[chunking] uses xet, which needs pack.chunk_threshold > {} (have {})",
-                pico2peta_pack::XET_MAX,
+                o5s_pack::XET_MAX,
                 pack.chunk_threshold
             )));
         }
@@ -613,7 +613,7 @@ impl LocalRepo {
 
     /// The fronts' claims for the ownership kernel: `(prefix, front index)`,
     /// and the index of `who` (`None` for core callers or an unknown id).
-    fn claims(&self, who: Option<&str>) -> (pico2peta_kernel::fronts::Claims, Option<u32>) {
+    fn claims(&self, who: Option<&str>) -> (o5s_kernel::fronts::Claims, Option<u32>) {
         let mut claims = Vec::new();
         let mut me = None;
         for (i, f) in self.fronts.fronts().iter().enumerate() {
@@ -634,7 +634,7 @@ impl LocalRepo {
             return Ok(());
         }
         let (claims, me) = self.claims(who);
-        if pico2peta_kernel::fronts::may_write(&claims, &name.as_bytes().to_vec(), me) {
+        if o5s_kernel::fronts::may_write(&claims, &name.as_bytes().to_vec(), me) {
             return Ok(());
         }
         let owner = self.fronts.owner(name).unwrap_or("?");
@@ -648,7 +648,7 @@ impl LocalRepo {
             return Ok(());
         }
         let (claims, me) = self.claims(who);
-        if pico2peta_kernel::fronts::may_set_rule(&claims, &prefix.as_bytes().to_vec(), me) {
+        if o5s_kernel::fronts::may_set_rule(&claims, &prefix.as_bytes().to_vec(), me) {
             return Ok(());
         }
         self.guard(prefix, who)?;
@@ -682,7 +682,7 @@ impl LocalRepo {
         who: Option<&str>,
         updates: &[(Name, Hash)],
         read_set: &[(Name, Observed)],
-    ) -> Result<pico2peta_core::ReplaceManyOutcome> {
+    ) -> Result<o5s_core::ReplaceManyOutcome> {
         for (n, _) in updates {
             self.guard(n.as_str(), who)?;
         }
@@ -694,7 +694,7 @@ impl LocalRepo {
         }
         self.packs.flush()?;
         let out = self.refs.replace_many(updates, read_set, &|h| Ok(missing != Some(*h)))?;
-        if let pico2peta_core::ReplaceManyOutcome::Ok { versions } = &out
+        if let o5s_core::ReplaceManyOutcome::Ok { versions } = &out
             && self.observed()
         {
             let ch: Vec<_> = updates.iter().zip(versions).map(|((n, h), v)| (n.clone(), Some(*h), *v)).collect();
@@ -708,7 +708,7 @@ impl LocalRepo {
         who: Option<&str>,
         updates: &[(Name, Option<Hash>)],
         read_set: &[(Name, Observed)],
-    ) -> Result<pico2peta_core::ReplaceManyOutcome> {
+    ) -> Result<o5s_core::ReplaceManyOutcome> {
         for (n, _) in updates {
             self.guard(n.as_str(), who)?;
         }
@@ -720,7 +720,7 @@ impl LocalRepo {
         }
         self.packs.flush()?;
         let out = self.refs.update_many(updates, read_set, &|h| Ok(!missing.contains(h)))?;
-        if let pico2peta_core::ReplaceManyOutcome::Ok { versions } = &out
+        if let o5s_core::ReplaceManyOutcome::Ok { versions } = &out
             && self.observed()
         {
             let ch: Vec<_> = updates.iter().zip(versions).map(|((n, h), v)| (n.clone(), *h, *v)).collect();
@@ -829,7 +829,7 @@ impl ObjectStore for LocalRepo {
     ) -> Result<Hash> {
         self.packs.put_delta_mapped_grouped(base, segments, src, width)
     }
-    fn put_encoded(&self, src: &mut dyn Read, enc: &pico2peta_core::Encoding) -> Result<Hash> {
+    fn put_encoded(&self, src: &mut dyn Read, enc: &o5s_core::Encoding) -> Result<Hash> {
         let mut enc = enc.clone();
         if enc.chunker.is_none() {
             enc.chunker = Some(ChunkerKind::from(self.chunking.default).id().into());
@@ -847,9 +847,9 @@ impl ObjectStore for LocalRepo {
         &self,
         hash: &Hash,
         range: Option<Range<u64>>,
-        verify: pico2peta_core::ReadVerify,
+        verify: o5s_core::ReadVerify,
     ) -> Result<Box<dyn Read + Send>> {
-        if verify == pico2peta_core::ReadVerify::Eof && !self.read.eof_allowed() {
+        if verify == o5s_core::ReadVerify::Eof && !self.read.eof_allowed() {
             return Err(Error::Unsupported(
                 "read_verify = \"eof\" is not enabled for this repository ([read] allow_eof)",
             ));
@@ -883,7 +883,7 @@ impl Repository for LocalRepo {
         &self,
         updates: &[(Name, Hash)],
         read_set: &[(Name, Observed)],
-    ) -> Result<pico2peta_core::ReplaceManyOutcome> {
+    ) -> Result<o5s_core::ReplaceManyOutcome> {
         self.replace_many_as(None, updates, read_set)
     }
 
@@ -891,7 +891,7 @@ impl Repository for LocalRepo {
         &self,
         updates: &[(Name, Option<Hash>)],
         read_set: &[(Name, Observed)],
-    ) -> Result<pico2peta_core::ReplaceManyOutcome> {
+    ) -> Result<o5s_core::ReplaceManyOutcome> {
         self.update_many_as(None, updates, read_set)
     }
 
@@ -967,7 +967,7 @@ impl ObjectStore for FrontHandle {
     ) -> Result<Hash> {
         self.repo.put_delta_mapped_grouped(base, segments, src, width)
     }
-    fn put_encoded(&self, src: &mut dyn Read, enc: &pico2peta_core::Encoding) -> Result<Hash> {
+    fn put_encoded(&self, src: &mut dyn Read, enc: &o5s_core::Encoding) -> Result<Hash> {
         self.repo.put_encoded(src, enc)
     }
     fn get(&self, hash: &Hash, range: Option<std::ops::Range<u64>>) -> Result<Vec<u8>> {
@@ -980,7 +980,7 @@ impl ObjectStore for FrontHandle {
         &self,
         hash: &Hash,
         range: Option<std::ops::Range<u64>>,
-        verify: pico2peta_core::ReadVerify,
+        verify: o5s_core::ReadVerify,
     ) -> Result<Box<dyn Read + Send>> {
         self.repo.open_verified(hash, range, verify)
     }
@@ -1009,14 +1009,14 @@ impl Repository for FrontHandle {
         &self,
         updates: &[(Name, Hash)],
         read_set: &[(Name, Observed)],
-    ) -> Result<pico2peta_core::ReplaceManyOutcome> {
+    ) -> Result<o5s_core::ReplaceManyOutcome> {
         self.repo.replace_many_as(Some(&self.id), updates, read_set)
     }
     fn update_many(
         &self,
         updates: &[(Name, Option<Hash>)],
         read_set: &[(Name, Observed)],
-    ) -> Result<pico2peta_core::ReplaceManyOutcome> {
+    ) -> Result<o5s_core::ReplaceManyOutcome> {
         self.repo.update_many_as(Some(&self.id), updates, read_set)
     }
     fn delete_ref(&self, name: &Name, read_set: &[(Name, Observed)]) -> Result<ReplaceOutcome> {
@@ -1033,7 +1033,7 @@ impl Repository for FrontHandle {
     }
 }
 
-pub use pico2peta_pack::PackConfig;
+pub use o5s_pack::PackConfig;
 
 /// Convenience for applying optional CLI or config overrides to a [`PackConfig`].
 pub trait PackConfigExt {
@@ -1111,9 +1111,9 @@ mod config_compat {
         )
         .unwrap();
         let c = super::LocalRepo::read_config(d.path()).unwrap();
-        assert_eq!(c.pack.manifest_fanout, pico2peta_pack::store::DEFAULT_MANIFEST_FANOUT);
+        assert_eq!(c.pack.manifest_fanout, o5s_pack::store::DEFAULT_MANIFEST_FANOUT);
         assert!(c.pack.compress_probe);
-        assert_eq!(c.pack.grouped_zstd_level, pico2peta_pack::store::DEFAULT_GROUPED_ZSTD_LEVEL);
+        assert_eq!(c.pack.grouped_zstd_level, o5s_pack::store::DEFAULT_GROUPED_ZSTD_LEVEL);
         assert_eq!(c.chunking, super::ChunkingSection::default());
     }
 
@@ -1156,7 +1156,7 @@ mod config_compat {
         let h = r.put_stream_for(&Name::new("models/llama/main").unwrap(), &mut &data[..]).unwrap();
         assert_eq!(h, Hash::of(&data));
         assert_eq!(r.get(&h, None).unwrap(), data);
-        let lens = pico2peta_chunk::chunk_lengths(&mut pico2peta_chunk::XetChunker::new(), &data);
+        let lens = o5s_chunk::chunk_lengths(&mut o5s_chunk::XetChunker::new(), &data);
         let mut off = 0;
         for l in lens {
             assert!(r.contains(&Hash::of(&data[off..off + l])).unwrap());

@@ -1,4 +1,4 @@
-use pico2peta_weights::bytegroup::{GroupError, MAX_WIDTH, group, ungroup};
+use o5s_weights::bytegroup::{GroupError, MAX_WIDTH, group, ungroup};
 use proptest::prelude::*;
 
 proptest! {

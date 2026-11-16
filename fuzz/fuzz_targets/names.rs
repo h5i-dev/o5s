@@ -3,9 +3,9 @@ use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(s) = std::str::from_utf8(data) {
-        let _ = pico2peta_core::Name::new(s);
-        let _ = s.parse::<pico2peta_core::Hash>();
-        let _ = s.parse::<pico2peta_core::Rule>();
-        let _ = pico2peta_core::backend::validate_key(s);
+        let _ = o5s_core::Name::new(s);
+        let _ = s.parse::<o5s_core::Hash>();
+        let _ = s.parse::<o5s_core::Rule>();
+        let _ = o5s_core::backend::validate_key(s);
     }
 });

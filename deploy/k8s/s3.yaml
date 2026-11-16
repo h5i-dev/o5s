@@ -1,15 +1,15 @@
-# pico2peta on S3: packs and refs on the bucket ([repo] refs = "backend"), several replicas.
+# o5s on S3: packs and refs on the bucket ([repo] refs = "backend"), several replicas.
 # Edit: bucket, region, the IRSA role ARN, image.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: pico2peta
-  namespace: pico2peta
-  annotations: { eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/pico2peta" }
+  name: o5s
+  namespace: o5s
+  annotations: { eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/o5s" }
 ---
 apiVersion: v1
 kind: ConfigMap
-metadata: { name: pico2peta-s3-config, namespace: pico2peta }
+metadata: { name: o5s-s3-config, namespace: o5s }
 data:
   server.toml: |
     [server]
@@ -19,26 +19,26 @@ data:
     request_timeout_secs = 3600
     shutdown_grace_secs = 30
     [repo]
-    path = "/var/lib/pico2peta/repo"
+    path = "/var/lib/o5s/repo"
     create = true
     refs = "backend"               # create-only ref log on S3: several servers per repository
     [backend]
     type = "s3"
     endpoint = "https://s3.us-east-1.amazonaws.com"
     region = "us-east-1"
-    bucket = "my-pico2peta-bucket"
+    bucket = "my-o5s-bucket"
     prefix = "prod"
     conditional_writes = true      # required for refs = "backend"
     max_in_flight = 64
     [auth]
     allow_anonymous = false
-    token_file = "/etc/pico2peta/secret/tokens.toml"
+    token_file = "/etc/o5s/secret/tokens.toml"
     [[policy]]
     principal = "admin"
     namespace = ""
     access = "admin"
     [audit]
-    path = "/var/lib/pico2peta/audit/audit.jsonl"
+    path = "/var/lib/o5s/audit/audit.jsonl"
     rotate_bytes = 1073741824
     [gc]
     interval_secs = 0              # replicas don't run GC; the CronJob below does
@@ -49,36 +49,36 @@ data:
 ---
 apiVersion: v1
 kind: Service
-metadata: { name: pico2peta, namespace: pico2peta, labels: { app: pico2peta } }
+metadata: { name: o5s, namespace: o5s, labels: { app: o5s } }
 spec:
-  selector: { app: pico2peta }
+  selector: { app: o5s }
   ports: [{ name: http, port: 8080, targetPort: 8080 }]
 ---
 apiVersion: apps/v1
 kind: StatefulSet
-metadata: { name: pico2peta, namespace: pico2peta }
+metadata: { name: o5s, namespace: o5s }
 spec:
-  serviceName: pico2peta
+  serviceName: o5s
   replicas: 3
   podManagementPolicy: Parallel
-  selector: { matchLabels: { app: pico2peta } }
+  selector: { matchLabels: { app: o5s } }
   template:
     metadata:
-      labels: { app: pico2peta }
+      labels: { app: o5s }
       annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8080", prometheus.io/path: /metrics }
     spec:
-      serviceAccountName: pico2peta
+      serviceAccountName: o5s
       terminationGracePeriodSeconds: 45
       securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, fsGroup: 65532 }
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
-              podAffinityTerm: { topologyKey: kubernetes.io/hostname, labelSelector: { matchLabels: { app: pico2peta } } }
+              podAffinityTerm: { topologyKey: kubernetes.io/hostname, labelSelector: { matchLabels: { app: o5s } } }
       containers:
         - name: server
-          image: ghcr.io/h5i-dev/pico2peta:latest
-          args: ["serve", "--config", "/etc/pico2peta/server.toml"]
+          image: ghcr.io/h5i-dev/o5s:latest
+          args: ["serve", "--config", "/etc/o5s/server.toml"]
           ports: [{ name: http, containerPort: 8080 }]
           readinessProbe: { httpGet: { path: /readyz, port: http }, periodSeconds: 5 }
           livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10, failureThreshold: 6 }
@@ -87,13 +87,13 @@ spec:
             limits: { memory: 8Gi }
           securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
           volumeMounts:
-            - { name: local, mountPath: /var/lib/pico2peta }   # staging pack, index cache, audit
-            - { name: config, mountPath: /etc/pico2peta/server.toml, subPath: server.toml }
-            - { name: tokens, mountPath: /etc/pico2peta/secret, readOnly: true }
+            - { name: local, mountPath: /var/lib/o5s }   # staging pack, index cache, audit
+            - { name: config, mountPath: /etc/o5s/server.toml, subPath: server.toml }
+            - { name: tokens, mountPath: /etc/o5s/secret, readOnly: true }
             - { name: tmp, mountPath: /tmp }
       volumes:
-        - { name: config, configMap: { name: pico2peta-s3-config } }
-        - { name: tokens, secret: { secretName: pico2peta-tokens, defaultMode: 0400 } }
+        - { name: config, configMap: { name: o5s-s3-config } }
+        - { name: tokens, secret: { secretName: o5s-tokens, defaultMode: 0400 } }
         - { name: tmp, emptyDir: {} }
   volumeClaimTemplates:
     - metadata: { name: local }
@@ -104,7 +104,7 @@ spec:
 # GC from one place (the protocol tolerates concurrent writers; one GC runner is enough).
 apiVersion: batch/v1
 kind: CronJob
-metadata: { name: pico2peta-gc, namespace: pico2peta }
+metadata: { name: o5s-gc, namespace: o5s }
 spec:
   schedule: "17 * * * *"
   concurrencyPolicy: Forbid
@@ -116,5 +116,5 @@ spec:
           containers:
             - name: gc
               image: curlimages/curl:8.10.1
-              envFrom: [{ secretRef: { name: pico2peta-admin } }]   # ADMIN_TOKEN
-              args: ["-sf", "-X", "POST", "-H", "Authorization: Bearer $(ADMIN_TOKEN)", "http://pico2peta-0.pico2peta.pico2peta.svc:8080/v1/admin/gc"]
+              envFrom: [{ secretRef: { name: o5s-admin } }]   # ADMIN_TOKEN
+              args: ["-sf", "-X", "POST", "-H", "Authorization: Bearer $(ADMIN_TOKEN)", "http://o5s-0.o5s.o5s.svc:8080/v1/admin/gc"]

@@ -12,7 +12,7 @@
 //! This transform is part of the on-disk format: record codec 2
 //! (`GroupedZstd`) stores `width | zstd(group(raw, width))`. Its exact output
 //! is pinned by golden vectors in `tests/decoders.rs`; changing it is a format
-//! change. (Written by the net session in `pico2peta-weights`; moved here when
+//! change. (Written by the net session in `o5s-weights`; moved here when
 //! it became format, and re-exported there.)
 
 /// Widths supported (bytes per element). 2 = bf16/fp16, 4 = fp32; others are

@@ -1,8 +1,8 @@
 //! Search over names, metadata and provenance, kept current incrementally.
-use pico2peta_core::{Name, ObjectStore, Observed, Repository};
-use pico2peta_prov::Record;
-use pico2peta_prov::search::{SearchIndex, attach_meta, tokens};
-use pico2peta_repo::{LocalRepo, PackConfig};
+use o5s_core::{Name, ObjectStore, Observed, Repository};
+use o5s_prov::Record;
+use o5s_prov::search::{SearchIndex, attach_meta, tokens};
+use o5s_repo::{LocalRepo, PackConfig};
 
 fn n(s: &str) -> Name {
     Name::new(s).unwrap()
@@ -21,7 +21,7 @@ fn names_metadata_and_provenance_are_searchable_and_refresh_incrementally() {
         r.replace(&n(name), &[(n(name), Observed::Absent)], h).unwrap();
     }
     attach_meta(&r, &log, wheel, [("summary".into(), "A tiny tensor library".into())].into_iter().collect()).unwrap();
-    pico2peta_prov::record(
+    o5s_prov::record(
         &r,
         &log,
         &[Record {
@@ -69,7 +69,7 @@ fn names_metadata_and_provenance_are_searchable_and_refresh_incrementally() {
 /// name, through one API.
 #[test]
 fn lineage_and_impact_across_domains_by_name() {
-    use pico2peta_prov::search::{impact_named, lineage_named};
+    use o5s_prov::search::{impact_named, lineage_named};
     let d = tempfile::tempdir().unwrap();
     let r = LocalRepo::init(d.path(), &PackConfig::default()).unwrap();
     let log = n("_prov/log");
@@ -83,13 +83,13 @@ fn lineage_and_impact_across_domains_by_name() {
     let layer = put_named("oci/acme/trainer/blobs/sha256-abc", b"layer");
     let model = put_named("hf/models/acme/m/main", b"checkpoint");
     let unrelated = put_named("npm/other/1.0.0", b"tarball");
-    let step = |op: &str, i: (&str, pico2peta_core::Hash), o: (&str, pico2peta_core::Hash)| Record {
+    let step = |op: &str, i: (&str, o5s_core::Hash), o: (&str, o5s_core::Hash)| Record {
         op: op.into(),
         inputs: [(i.0.to_string(), i.1)].into_iter().collect(),
         outputs: [(o.0.to_string(), o.1)].into_iter().collect(),
         ..Default::default()
     };
-    pico2peta_prov::record(
+    o5s_prov::record(
         &r,
         &log,
         &[

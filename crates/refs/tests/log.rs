@@ -1,9 +1,9 @@
 //! The backend-log ref store: same semantics as the journal store, plus
 //! multi-host safety via create-only commits.
-use pico2peta_core::backend::{Backend, LocalDisk};
-use pico2peta_core::fault::Faults;
-use pico2peta_core::{Hash, Name, Observed, RefValue, ReplaceOutcome, Result, Rule};
-use pico2peta_refs::RefStore;
+use o5s_core::backend::{Backend, LocalDisk};
+use o5s_core::fault::Faults;
+use o5s_core::{Hash, Name, Observed, RefValue, ReplaceOutcome, Result, Rule};
+use o5s_refs::RefStore;
 use std::sync::Arc;
 
 fn n(s: &str) -> Name {
@@ -145,11 +145,7 @@ fn stale_handle_after_trimming_never_loses_acknowledged_commits() {
 fn backend_without_atomic_create_is_refused_for_refs() {
     struct NonAtomic(LocalDisk);
     impl Backend for NonAtomic {
-        fn put_if_absent(
-            &self,
-            k: &str,
-            s: pico2peta_core::backend::PutSource<'_>,
-        ) -> Result<pico2peta_core::backend::PutOutcome> {
+        fn put_if_absent(&self, k: &str, s: o5s_core::backend::PutSource<'_>) -> Result<o5s_core::backend::PutOutcome> {
             self.0.put_if_absent(k, s)
         }
         fn get_range(&self, k: &str, r: std::ops::Range<u64>) -> Result<Vec<u8>> {
@@ -158,10 +154,10 @@ fn backend_without_atomic_create_is_refused_for_refs() {
         fn open(&self, k: &str) -> Result<Box<dyn std::io::Read + Send>> {
             self.0.open(k)
         }
-        fn head(&self, k: &str) -> Result<Option<pico2peta_core::backend::BlobMeta>> {
+        fn head(&self, k: &str) -> Result<Option<o5s_core::backend::BlobMeta>> {
             self.0.head(k)
         }
-        fn list(&self, p: &str) -> Result<Vec<pico2peta_core::backend::BlobMeta>> {
+        fn list(&self, p: &str) -> Result<Vec<o5s_core::backend::BlobMeta>> {
             self.0.list(p)
         }
         fn delete(&self, k: &str) -> Result<()> {
@@ -189,15 +185,11 @@ fn lost_create_response_is_recognized_as_our_commit() {
         lost: std::sync::atomic::AtomicBool,
     }
     impl Backend for LoseFirstLogCreate {
-        fn put_if_absent(
-            &self,
-            k: &str,
-            s: pico2peta_core::backend::PutSource<'_>,
-        ) -> Result<pico2peta_core::backend::PutOutcome> {
+        fn put_if_absent(&self, k: &str, s: o5s_core::backend::PutSource<'_>) -> Result<o5s_core::backend::PutOutcome> {
             let r = self.inner.put_if_absent(k, s)?;
             if k.contains("log/") && !self.lost.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 // The write landed, but the client only learns "AlreadyExists" on retry.
-                return Ok(pico2peta_core::backend::PutOutcome::AlreadyExists);
+                return Ok(o5s_core::backend::PutOutcome::AlreadyExists);
             }
             Ok(r)
         }
@@ -207,10 +199,10 @@ fn lost_create_response_is_recognized_as_our_commit() {
         fn open(&self, k: &str) -> Result<Box<dyn std::io::Read + Send>> {
             self.inner.open(k)
         }
-        fn head(&self, k: &str) -> Result<Option<pico2peta_core::backend::BlobMeta>> {
+        fn head(&self, k: &str) -> Result<Option<o5s_core::backend::BlobMeta>> {
             self.inner.head(k)
         }
-        fn list(&self, p: &str) -> Result<Vec<pico2peta_core::backend::BlobMeta>> {
+        fn list(&self, p: &str) -> Result<Vec<o5s_core::backend::BlobMeta>> {
             self.inner.list(p)
         }
         fn delete(&self, k: &str) -> Result<()> {
@@ -242,21 +234,17 @@ fn identical_concurrent_decisions_yield_exactly_one_ok() {
         done: std::sync::atomic::AtomicBool,
     }
     impl Backend for RivalWins {
-        fn put_if_absent(
-            &self,
-            k: &str,
-            s: pico2peta_core::backend::PutSource<'_>,
-        ) -> Result<pico2peta_core::backend::PutOutcome> {
+        fn put_if_absent(&self, k: &str, s: o5s_core::backend::PutSource<'_>) -> Result<o5s_core::backend::PutOutcome> {
             if k.contains("log/")
                 && !self.done.swap(true, std::sync::atomic::Ordering::SeqCst)
-                && let pico2peta_core::backend::PutSource::Bytes(b) = s
+                && let o5s_core::backend::PutSource::Bytes(b) = s
             {
                 // The rival's entry: same record, different nonce (bytes 8..24).
                 let mut rival = b.to_vec();
                 for x in &mut rival[8..24] {
                     *x ^= 0xa5;
                 }
-                self.inner.put_if_absent(k, pico2peta_core::backend::PutSource::Bytes(&rival))?;
+                self.inner.put_if_absent(k, o5s_core::backend::PutSource::Bytes(&rival))?;
             }
             self.inner.put_if_absent(k, s)
         }
@@ -266,10 +254,10 @@ fn identical_concurrent_decisions_yield_exactly_one_ok() {
         fn open(&self, k: &str) -> Result<Box<dyn std::io::Read + Send>> {
             self.inner.open(k)
         }
-        fn head(&self, k: &str) -> Result<Option<pico2peta_core::backend::BlobMeta>> {
+        fn head(&self, k: &str) -> Result<Option<o5s_core::backend::BlobMeta>> {
             self.inner.head(k)
         }
-        fn list(&self, p: &str) -> Result<Vec<pico2peta_core::backend::BlobMeta>> {
+        fn list(&self, p: &str) -> Result<Vec<o5s_core::backend::BlobMeta>> {
             self.inner.list(p)
         }
         fn delete(&self, k: &str) -> Result<()> {

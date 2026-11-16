@@ -12,7 +12,7 @@
 
 pub mod bytegroup;
 
-use pico2peta_core::{Derive, Encoding, Error, Hash, ObjectStore, PatchFormat, Result};
+use o5s_core::{Derive, Encoding, Error, Hash, ObjectStore, PatchFormat, Result};
 use std::collections::HashMap;
 use std::io::Read;
 
@@ -177,12 +177,12 @@ pub struct SafetensorsFront;
 /// Id of [`SafetensorsFront`] in config (`front = "safetensors"`).
 pub const SAFETENSORS_FRONT: &str = "safetensors";
 
-impl pico2peta_repo::Front for SafetensorsFront {
+impl o5s_repo::Front for SafetensorsFront {
     fn id(&self) -> &str {
         SAFETENSORS_FRONT
     }
 
-    fn plan(&self, ctx: &pico2peta_repo::PlanCtx<'_>, src: &mut dyn Read) -> Result<(Vec<u8>, Encoding)> {
+    fn plan(&self, ctx: &o5s_repo::PlanCtx<'_>, src: &mut dyn Read) -> Result<(Vec<u8>, Encoding)> {
         let head = read_head(src)?;
         let mut enc = plan_weights(ctx.store, &head, ctx.previous.as_ref(), true)?;
         enc.chunker = ctx.default.chunker.clone();
@@ -220,7 +220,7 @@ pub fn not_safetensors() -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pico2peta_repo::{LocalRepo, PackConfig};
+    use o5s_repo::{LocalRepo, PackConfig};
 
     fn safetensors(tensors: &[(&str, Vec<u8>)], meta: &str) -> Vec<u8> {
         let mut hdr = serde_json::Map::new();
@@ -414,8 +414,8 @@ mod tests {
     /// the explicit `put_checkpoint` call: grouped, tensor-aligned delta.
     #[test]
     fn safetensors_front_via_profile_matches_put_checkpoint() {
-        use pico2peta_core::{Name, Repository};
-        use pico2peta_repo::{DerivePolicy, FrontRegistry, Profile};
+        use o5s_core::{Name, Repository};
+        use o5s_repo::{DerivePolicy, FrontRegistry, Profile};
         let bf16 = |seed: u64, n: usize| -> Vec<u8> {
             noise(seed, n).chunks(2).flat_map(|c| [c[0], 0x3c + c.get(1).map_or(0, |b| b % 3)]).collect()
         };
@@ -442,8 +442,8 @@ mod tests {
             derive: DerivePolicy::Previous,
             ..Default::default()
         };
-        let cfg = pico2peta_repo::RepoConfig {
-            format: pico2peta_repo::FORMAT_VERSION,
+        let cfg = o5s_repo::RepoConfig {
+            format: o5s_repo::FORMAT_VERSION,
             pack: (&PackConfig::default()).into(),
             refs: Default::default(),
             chunking: Default::default(),
@@ -459,7 +459,7 @@ mod tests {
         let name = Name::new("models/m").unwrap();
         let h1 = r2.put_named(&name, &mut &base[..]).unwrap();
         assert_eq!(h1, hb);
-        let obs = pico2peta_core::RefValue::observed(r2.resolve(&name).unwrap());
+        let obs = o5s_core::RefValue::observed(r2.resolve(&name).unwrap());
         r2.replace(&name, &[(name.clone(), obs)], h1).unwrap();
         let s1 = dir_size(&d2.path().join("objects"), &r2);
         let h2 = r2.put_named(&name, &mut &next[..]).unwrap();

@@ -10,7 +10,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use futures_util::StreamExt;
 use md5::Md5;
-use pico2peta_core::{Error, Hash, Name, Observed, ReplaceOutcome, Repository, Result};
+use o5s_core::{Error, Hash, Name, Observed, ReplaceOutcome, Repository, Result};
 use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha512};
 use std::io::Read;
@@ -51,7 +51,7 @@ pub(crate) fn http_client(upstreams: &[&crate::config::Upstream]) -> std::result
         }
     });
     reqwest::Client::builder()
-        .user_agent(concat!("pico2peta/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("o5s/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(10))
         .redirect(policy)
         .build()
@@ -88,7 +88,7 @@ pub(crate) async fn bytes_limited(resp: reqwest::Response, limit: usize) -> std:
 #[derive(Clone)]
 pub(crate) struct Store {
     pub repo: Arc<dyn Repository>,
-    pub local: Option<pico2peta_repo::LocalRepo>,
+    pub local: Option<o5s_repo::LocalRepo>,
 }
 
 /// Digests of a stored body.
@@ -223,7 +223,7 @@ pub(crate) fn create_once(
     record: &[u8],
     same: &dyn Fn(&[u8]) -> bool,
 ) -> Result<std::result::Result<bool, String>> {
-    use pico2peta_net_kernel::publish::{CreateOnce, Existing, decide_create_once};
+    use o5s_net_kernel::publish::{CreateOnce, Existing, decide_create_once};
     for _ in 0..4 {
         // The create-once rule is the extracted kernel's (`publish::decide_create_once`).
         if let Some(v) = repo.resolve(name)? {

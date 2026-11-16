@@ -1,5 +1,5 @@
 [package]
-name = "pico2peta-order"
+name = "o5s-order"
 description = "Domain-agnostic similarity features, ordering and framing (docs/ORDERING.md)"
 version.workspace = true
 edition.workspace = true

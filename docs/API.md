@@ -1,10 +1,10 @@
-# pico2peta server: HTTP API and protocol reference
+# o5s server: HTTP API and protocol reference
 
-The server (`pico2peta-server`) exposes three interfaces on one listener:
+The server (`o5s-server`) exposes three interfaces on one listener:
 
 | Prefix | What | Clients |
 |---|---|---|
-| `/v1/...` | the native API: objects, names, namespaces, admin | `pico2peta --remote`, `pico2peta_client::RemoteRepo`, curl |
+| `/v1/...` | the native API: objects, names, namespaces, admin | `o5s --remote`, `o5s_client::RemoteRepo`, curl |
 | `/v2/...` | OCI Distribution v1.1, passing the conformance suite in all four workflows | docker, podman, oras, crane, helm |
 | `/git/<repo>.git/...` | Git smart HTTP (protocol v2 for fetch, v0/v1 for fetch and push) | `git clone` / `fetch` / `push` |
 
@@ -19,11 +19,11 @@ Ops endpoints `/healthz`, `/readyz` and `/metrics` need no credentials. Move `/m
 | none | all | only if `auth.allow_anonymous = true`; the principal is `anonymous` |
 
 Responses:
-- A bad or missing credential gets `401`. `/v2` and `/git` add `WWW-Authenticate: Basic realm="pico2peta"`, so clients prompt or retry with credentials.
+- A bad or missing credential gets `401`. `/v2` and `/git` add `WWW-Authenticate: Basic realm="o5s"`, so clients prompt or retry with credentials.
 - A bad token is never downgraded to anonymous.
 
 Tokens:
-- Create a static token with `pico2peta-server gen-token <principal>`. Revoke it by deleting its entry and sending `SIGHUP`.
+- Create a static token with `o5s-server gen-token <principal>`. Revoke it by deleting its entry and sending `SIGHUP`.
 - OIDC tokens map a claim (default `sub`) to `<principal_prefix><claim>`.
 
 ## Authorization
@@ -68,7 +68,7 @@ All bodies are JSON unless noted. Every error has the form `{"error":{"code","me
 ### Objects
 ```sh
 # put (streamed; returns {"hash","size"}). Optional end-to-end check:
-curl -T big.bin -H "Authorization: Bearer $T" -H "x-p2p-expect-hash: <blake3 hex>" $S/v1/objects
+curl -T big.bin -H "Authorization: Bearer $T" -H "x-o5s-expect-hash: <blake3 hex>" $S/v1/objects
 # get, whole or ranged (206 with Content-Range); HEAD for the size
 curl -H "Authorization: Bearer $T" -r 0-1023 $S/v1/objects/<hash>
 # make earlier puts durable without a replace
@@ -119,9 +119,9 @@ The rules are `mutable`, `immutable` (create-once) and `head-release`, where `<n
 
 ## OCI distribution (`/v2`)
 ```sh
-docker login p2p.example.com -u any -p "$TOKEN"
-docker push p2p.example.com/team/app:1.0      # OCI repo team/app -> namespace oci/team/app
-oras push p2p.example.com/team/app:sbom ./sbom.json --artifact-type application/spdx+json
+docker login o5s.example.com -u any -p "$TOKEN"
+docker push o5s.example.com/team/app:1.0      # OCI repo team/app -> namespace oci/team/app
+oras push o5s.example.com/team/app:sbom ./sbom.json --artifact-type application/spdx+json
 ```
 - Supported: chunked and monolithic uploads, cross-repo mount (needs read on the source repo), tags/list with pagination, the referrers API (`OCI-Subject`, `artifactType` filter), and manifest or tag DELETE.
 - Blob DELETE returns 405; GC reclaims unreferenced blobs.
@@ -129,7 +129,7 @@ oras push p2p.example.com/team/app:sbom ./sbom.json --artifact-type application/
 
 ## Git (`/git`)
 ```sh
-git clone https://any:$TOKEN@p2p.example.com/git/team/proj.git
+git clone https://any:$TOKEN@o5s.example.com/git/team/proj.git
 git push origin main            # branch update = compare-and-swap on git/team/proj/refs/heads/main
 git push --atomic origin main v1.0 :old-branch
 ```
@@ -146,9 +146,9 @@ git push --atomic origin main v1.0 :old-branch
 
 ## Hugging Face Hub (`/api`, `/<repo>/resolve`)
 ```sh
-export HF_ENDPOINT=https://p2p.example.com HF_TOKEN=$TOKEN
+export HF_ENDPOINT=https://o5s.example.com HF_TOKEN=$TOKEN
 hf upload team/tiny ./model     # or HfApi().upload_folder(...); hf_hub_download / snapshot_download work too
-git clone https://any:$TOKEN@p2p.example.com/git/hf/models/team/tiny.git   # the same repo, as Git
+git clone https://any:$TOKEN@o5s.example.com/git/hf/models/team/tiny.git   # the same repo, as Git
 ```
 - The HF repo `team/tiny` of type model/dataset/space is the Git repo `hf/<type>s/team/tiny`. Authorization uses its namespace `git/hf/models/team/tiny`, so one grant covers both the HF API and `git`.
 - Small files are Git blobs. Files of 64 KiB or more, or with NUL bytes, go through Git LFS: the repo holds pointer blobs, and the content is a core object stored with the namespace's chunker (`[chunking]`, e.g. Xet).
@@ -162,9 +162,9 @@ git clone https://any:$TOKEN@p2p.example.com/git/hf/models/team/tiny.git   # the
 
 ## PyPI (`/pypi/<index>`)
 ```sh
-twine upload --repository-url https://p2p.example.com/pypi/team/ -u token -p "$TOKEN" dist/*
-pip install --index-url "https://token:$TOKEN@p2p.example.com/pypi/team/simple/" mypkg
-uv pip install --index-url "https://token:$TOKEN@p2p.example.com/pypi/team/simple/" mypkg
+twine upload --repository-url https://o5s.example.com/pypi/team/ -u token -p "$TOKEN" dist/*
+pip install --index-url "https://token:$TOKEN@o5s.example.com/pypi/team/simple/" mypkg
+uv pip install --index-url "https://token:$TOKEN@o5s.example.com/pypi/team/simple/" mypkg
 ```
 - Simple API (PEP 503 HTML and PEP 691 JSON, with sha256, `requires-python` and PEP 658/714 core metadata: `<wheel>.metadata`). Uploads use the legacy API that twine and `uv publish` speak. Authorization is on `pypi/<index>`.
 - Files are create-once: an identical re-upload is a no-op, while different bytes under the same filename get 409.
@@ -174,8 +174,8 @@ uv pip install --index-url "https://token:$TOKEN@p2p.example.com/pypi/team/simpl
 ## npm (`/npm/<registry>`)
 ```sh
 # ~/.npmrc
-registry=https://p2p.example.com/npm/team/
-//p2p.example.com/npm/team/:_authToken=${TOKEN}
+registry=https://o5s.example.com/npm/team/
+//o5s.example.com/npm/team/:_authToken=${TOKEN}
 npm publish            # plain or scoped (@scope/name)
 npm install left-pad
 ```
@@ -187,12 +187,12 @@ npm install left-pad
 
 ## Maven (`/maven/<repo>`)
 ```xml
-<!-- settings.xml: credentials (Basic, password = token) and Central through pico2peta -->
-<servers><server><id>p2p</id><username>token</username><password>${env.TOKEN}</password></server></servers>
-<mirrors><mirror><id>p2p</id><mirrorOf>central</mirrorOf><url>https://p2p.example.com/maven/central</url></mirror></mirrors>
+<!-- settings.xml: credentials (Basic, password = token) and Central through o5s -->
+<servers><server><id>o5s</id><username>token</username><password>${env.TOKEN}</password></server></servers>
+<mirrors><mirror><id>o5s</id><mirrorOf>central</mirrorOf><url>https://o5s.example.com/maven/central</url></mirror></mirrors>
 ```
 ```sh
-mvn deploy -DaltDeploymentRepository=p2p::https://p2p.example.com/maven/releases
+mvn deploy -DaltDeploymentRepository=o5s::https://o5s.example.com/maven/releases
 ```
 - This is the plain repository layout (GET, HEAD, PUT). Checksums (`.md5`, `.sha1`, `.sha256`, `.sha512`) are computed from the stored file, and a checksum PUT must match it.
 - Release files are create-once: re-deploying with other bytes gets 409. `maven-metadata.xml` and `-SNAPSHOT` versions are mutable. Authorization is on `maven/<repo>`.
@@ -225,4 +225,4 @@ mvn deploy -DaltDeploymentRepository=p2p::https://p2p.example.com/maven/releases
 - **`GET /v1/admin/audit?principal=&action=&target=&outcome=&since=&limit=`** (admin) is one query over the hash-chained audit log of every front, including rotated files.
 
 ## Operations
-See `deploy/README.md` for install, TLS, reload (SIGHUP), S3 credentials and lifecycle rules, metrics, audit verification (`pico2peta-server verify-audit`) and capacity notes.
+See `deploy/README.md` for install, TLS, reload (SIGHUP), S3 credentials and lifecycle rules, metrics, audit verification (`o5s-server verify-audit`) and capacity notes.

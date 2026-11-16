@@ -8,13 +8,13 @@
 //! request_timeout_secs = 3600        # whole request, including body transfer
 //! shutdown_grace_secs = 30
 //! trust_forwarded_for = false      # true only behind a proxy that sets X-Forwarded-For
-//! # tls = { cert = "/etc/pico2peta/tls.crt", key = "/etc/pico2peta/tls.key" }  # native HTTPS
+//! # tls = { cert = "/etc/o5s/tls.crt", key = "/etc/o5s/tls.key" }  # native HTTPS
 //! # metrics_listen = "10.0.0.5:9100"   # /metrics only there
 //! # rate_limit = { per_sec = 50.0, burst = 200.0 }   # per principal
 //! # limits_scan_secs = 3600           # how often [[limits]] quotas are re-measured
 //!
 //! [repo]
-//! path = "/var/lib/pico2peta/repo"
+//! path = "/var/lib/o5s/repo"
 //! create = true                      # init the repo if missing
 //! refs = "local"                     # or "backend": refs on S3, several servers per repo
 //!
@@ -23,7 +23,7 @@
 //! endpoint = "https://s3.us-east-1.amazonaws.com"
 //! region = "us-east-1"
 //! bucket = "my-bucket"
-//! prefix = "pico2peta"
+//! prefix = "o5s"
 //! path_style = false
 //! # credentials: AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY[/AWS_SESSION_TOKEN], else
 //! # AWS_WEB_IDENTITY_TOKEN_FILE + AWS_ROLE_ARN (EKS IRSA), else the EC2 instance profile (IMDSv2)
@@ -32,7 +32,7 @@
 //! allow_anonymous = false
 //! # [auth.oidc]                     # optional: JWT bearer tokens
 //! # issuer = "https://accounts.example.com"
-//! # audience = "pico2peta"
+//! # audience = "o5s"
 //! # principal_claim = "email"
 //! [[auth.tokens]]
 //! principal = "ci"
@@ -44,7 +44,7 @@
 //! access = "write"                   # read | write | admin
 //!
 //! [audit]
-//! path = "/var/log/pico2peta/audit.jsonl"
+//! path = "/var/log/o5s/audit.jsonl"
 //! log_reads = false
 //! rotate_bytes = 1073741824        # optional: rotate at 1 GiB, chain continues
 //!
@@ -290,7 +290,7 @@ impl Default for OciSection {
     }
 }
 
-/// Garbage collection (see `pico2peta_repo::gc` for the protocol).
+/// Garbage collection (see `o5s_repo::gc` for the protocol).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct GcSection {
@@ -311,7 +311,7 @@ pub struct GcSection {
 
 impl Default for GcSection {
     fn default() -> Self {
-        let d = pico2peta_repo::GcOptions::default();
+        let d = o5s_repo::GcOptions::default();
         GcSection {
             interval_secs: 0,
             grace_secs: d.grace.as_secs(),
@@ -326,17 +326,12 @@ impl Default for GcSection {
 impl GcSection {
     /// GC options: the repository's defaults (`LocalRepo::gc_options`, e.g. similarity repack)
     /// with the server's schedule-related settings on top.
-    pub fn options_with(
-        &self,
-        base: pico2peta_repo::GcOptions,
-        dry_run: bool,
-        repack_all: bool,
-    ) -> pico2peta_repo::GcOptions {
-        pico2peta_repo::GcOptions { repack_all: repack_all || self.repack_all, ..self.options(base, dry_run) }
+    pub fn options_with(&self, base: o5s_repo::GcOptions, dry_run: bool, repack_all: bool) -> o5s_repo::GcOptions {
+        o5s_repo::GcOptions { repack_all: repack_all || self.repack_all, ..self.options(base, dry_run) }
     }
 
-    pub fn options(&self, base: pico2peta_repo::GcOptions, dry_run: bool) -> pico2peta_repo::GcOptions {
-        pico2peta_repo::GcOptions {
+    pub fn options(&self, base: o5s_repo::GcOptions, dry_run: bool) -> o5s_repo::GcOptions {
+        o5s_repo::GcOptions {
             grace: std::time::Duration::from_secs(self.grace_secs),
             allow_short_grace: false,
             min_garbage_ratio: self.min_garbage_ratio,
@@ -414,7 +409,7 @@ pub struct RepoSection {
     /// `path`, one host) or `backend` (create-only log on the pack backend, so
     /// several servers sharing one S3 bucket/prefix can serve the repository).
     #[serde(default)]
-    pub refs: pico2peta_repo::RefsStore,
+    pub refs: o5s_repo::RefsStore,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -599,7 +594,7 @@ impl Config {
             return bad("server.rate_limit needs per_sec > 0 and burst >= 1".into());
         }
         for l in &self.limits {
-            if l.prefix.is_empty() || pico2peta_core::Name::new(&l.prefix).is_err() {
+            if l.prefix.is_empty() || o5s_core::Name::new(&l.prefix).is_err() {
                 return bad(format!("limits.prefix {:?} must be a non-empty name prefix", l.prefix));
             }
             if let Some(r) = l.rate
@@ -625,7 +620,7 @@ impl Config {
         }
         if let BackendSection::S3(s3) = &self.backend
             && !s3.conditional_writes
-            && self.repo.refs == pico2peta_repo::RefsStore::Backend
+            && self.repo.refs == o5s_repo::RefsStore::Backend
         {
             return bad("repo.refs = \"backend\" needs backend.conditional_writes = true (the ref log's commit point must be an atomic create)".into());
         }
@@ -657,7 +652,7 @@ impl Config {
                 return bad(format!("policy: invalid principal {:?}", p.principal));
             }
             if !p.namespace.is_empty() {
-                pico2peta_core::validate_path(&p.namespace)
+                o5s_core::validate_path(&p.namespace)
                     .map_err(|e| ConfigError::Invalid(format!("policy namespace {:?}: {e}", p.namespace)))?;
             }
         }

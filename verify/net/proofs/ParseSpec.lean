@@ -1,15 +1,15 @@
-import Pico2petaNetKernel
+import O5sNetKernel
 import H5iAppLib.Basic
 /-!
-# pico2peta's wire parsers: the extracted code computes these specs
+# o5s's wire parsers: the extracted code computes these specs
 
 Each theorem below is about `crates/net-kernel/src/parse.rs` as Charon and Aeneas extract it
-(`generated/Pico2petaNetKernel.lean`). A `⦃ … ⦄` spec holds on every input, so it also says the
+(`generated/O5sNetKernel.lean`). A `⦃ … ⦄` spec holds on every input, so it also says the
 function never panics (no out-of-bounds index, no arithmetic overflow).
 -/
-open Aeneas Aeneas.Std Result pico2peta_net_kernel H5iAppLib
+open Aeneas Aeneas.Std Result o5s_net_kernel H5iAppLib
 
-namespace pico2peta_net_kernel.Spec
+namespace o5s_net_kernel.Spec
 
 /-- Byte values of a slice or vector. -/
 abbrev B (l : List U8) : List Nat := l.map (·.val)
@@ -347,4 +347,4 @@ theorem xet_chunk_header_spec (b : Slice U8) (i : Usize) :
     congr 1
     scalar_tac
 
-end pico2peta_net_kernel.Spec
+end o5s_net_kernel.Spec

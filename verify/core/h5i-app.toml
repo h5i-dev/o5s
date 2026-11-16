@@ -1,4 +1,4 @@
-# pico2peta core kernels (crates/kernel), extracted with Charon + Aeneas and
+# o5s core kernels (crates/kernel), extracted with Charon + Aeneas and
 # proved in proofs/ (docs/H5I_PLAN.md, Phase H2). Read by `h5i app`.
 
 [extract]
@@ -10,25 +10,25 @@ start-from = ["refs::decide", "refs::decide_set_rule", "names::validate", "front
 # Must exist and use only Lean's standard axioms (every theorem in a
 # hand-written module is gated anyway; this list catches a rename).
 theorems = [
-    "pico2peta_kernel.Proofs.decide_spec",
-    "pico2peta_kernel.Proofs.commit_validated",
-    "pico2peta_kernel.Proofs.commit_respects_rules",
-    "pico2peta_kernel.Proofs.commit_versions",
-    "pico2peta_kernel.Proofs.mobility_of_spec",
-    "pico2peta_kernel.Proofs.governing_spec",
-    "pico2peta_kernel.Proofs.is_under_spec",
-    "pico2peta_kernel.Proofs.cmp_spec",
-    "pico2peta_kernel.Proofs.guard_owner",
-    "pico2peta_kernel.Proofs.may_set_rule_spec",
-    "pico2peta_kernel.Proofs.delete_keeps_live",
-    "pico2peta_kernel.Proofs.is_victim_spec",
-    "pico2peta_kernel.Proofs.promote_plan",
-    "pico2peta_kernel.Proofs.promote_src_fresh",
-    "pico2peta_kernel.Proofs.plan_spec",
-    "pico2peta_kernel.Proofs.read_accepts_only_key",
-    "pico2peta_kernel.Proofs.put_never_overwrites",
-    "pico2peta_kernel.Proofs.parse_header_spec",
-    "pico2peta_kernel.Proofs.journal_step_spec",
+    "o5s_kernel.Proofs.decide_spec",
+    "o5s_kernel.Proofs.commit_validated",
+    "o5s_kernel.Proofs.commit_respects_rules",
+    "o5s_kernel.Proofs.commit_versions",
+    "o5s_kernel.Proofs.mobility_of_spec",
+    "o5s_kernel.Proofs.governing_spec",
+    "o5s_kernel.Proofs.is_under_spec",
+    "o5s_kernel.Proofs.cmp_spec",
+    "o5s_kernel.Proofs.guard_owner",
+    "o5s_kernel.Proofs.may_set_rule_spec",
+    "o5s_kernel.Proofs.delete_keeps_live",
+    "o5s_kernel.Proofs.is_victim_spec",
+    "o5s_kernel.Proofs.promote_plan",
+    "o5s_kernel.Proofs.promote_src_fresh",
+    "o5s_kernel.Proofs.plan_spec",
+    "o5s_kernel.Proofs.read_accepts_only_key",
+    "o5s_kernel.Proofs.put_never_overwrites",
+    "o5s_kernel.Proofs.parse_header_spec",
+    "o5s_kernel.Proofs.journal_step_spec",
 ]
 
 # Bugs the proofs must reject (`h5i app mutate`).

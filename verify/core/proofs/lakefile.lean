@@ -10,12 +10,12 @@ require aeneas from git
 require h5i_app_lib from git
   "https://github.com/h5i-dev/h5i" @ "365703f6f4d84841e6829cb5e262780b0600fc47" / "crates/h5i-app-core/proofs"
 
-package pico2peta_core_proofs
+package o5s_core_proofs
 
 -- The extracted kernel (`h5i app extract`). Do not edit.
 lean_lib Generated where
   srcDir := "generated"
-  roots := #[`Pico2petaKernel]
+  roots := #[`O5sKernel]
 
 -- Hand-written specs and proofs.
 @[default_target] lean_lib Proofs where

@@ -1,6 +1,6 @@
 """Dev check (not a §6.5 batch result): git front re-push and clone, cold and warm, vs git daemon.
 
-usage: idmap_check.py <label> <pico2peta-server binary> [corpus]
+usage: idmap_check.py <label> <o5s-server binary> [corpus]
 
 - push: a first push of heads + tags into a fresh server (fills the oid map);
 - re-push: the same refs into a new repo name (every object already stored: pure lookups);
@@ -19,7 +19,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(__file__))
-from common import TOKEN, Proc, free_port, log, pico_server, record, run, timed, wait_port, workdir, TOOLS  # noqa: E402
+from common import TOKEN, Proc, free_port, log, o5s_server, record, run, timed, wait_port, workdir, TOOLS  # noqa: E402
 from git_bench import REFSPECS, prepare  # noqa: E402
 
 
@@ -52,32 +52,32 @@ def main():
             log("clone pack never cached")
         push = lambda url: timed(["git", "-C", src, "push", "-q", url, *REFSPECS])
         clone = lambda url, out: (timed(["git", "-c", "protocol.version=2", "clone", "-q", "--bare", url, out]), run(["rm", "-rf", out]))[0]
-        # pico2peta: first push, then restart for each cold measurement.
-        sys_name = f"pico2peta-{label}"
-        with pico_server(d, server_bin) as (base, _):
+        # o5s: first push, then restart for each cold measurement.
+        sys_name = f"o5s-{label}"
+        with o5s_server(d, server_bin) as (base, _):
             url = lambda r: base.replace("http://", f"http://u:{TOKEN}@") + f"/git/bench/{r}.git"
             rec("push_s", sys_name, push(url("a")))
             # Derived data (commit graph, clone pack) is refreshed in the background after a push.
             t0 = time.perf_counter()
             wait_cache(base)
             rec("derived_after_push_s", sys_name, time.perf_counter() - t0)
-        with pico_server(d, server_bin) as (base, _):
+        with o5s_server(d, server_bin) as (base, _):
             url = lambda r: base.replace("http://", f"http://u:{TOKEN}@") + f"/git/bench/{r}.git"
             drop_caches()
             rec("repush_cold_s", sys_name, push(url("b")))
             rec("repush_warm_s", sys_name, push(url("c")))
-        with pico_server(d, server_bin) as (base, _):
+        with o5s_server(d, server_bin) as (base, _):
             url = lambda r: base.replace("http://", f"http://u:{TOKEN}@") + f"/git/bench/{r}.git"
             drop_caches()
             # The first clone of a refs state encodes the pack (and fills the clone pack cache).
             rec("clone_first_s", sys_name, clone(url("a"), os.path.join(d, "c0")))
             wait_cache(base)
-        with pico_server(d, server_bin) as (base, _):
+        with o5s_server(d, server_bin) as (base, _):
             url = lambda r: base.replace("http://", f"http://u:{TOKEN}@") + f"/git/bench/{r}.git"
             drop_caches()
             rec("clone_cold_s", sys_name, clone(url("a"), os.path.join(d, "c1")))
             rec("clone_warm_s", sys_name, clone(url("a"), os.path.join(d, "c2")))
-        with pico_server(d, server_bin) as (base, _):
+        with o5s_server(d, server_bin) as (base, _):
             url = lambda r: base.replace("http://", f"http://u:{TOKEN}@") + f"/git/bench/{r}.git"
             drop_caches()
             rec("fetch10_cold_s", sys_name, fetch(url("a"), os.path.join(d, "f1")))

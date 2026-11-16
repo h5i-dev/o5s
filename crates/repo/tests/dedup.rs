@@ -9,8 +9,8 @@
 //! containers (deflated wheels, gzipped layers) change the bytes themselves,
 //! and that would need front-side decompression (stored as an uncompressed
 //! payload plus recompression parameters), so this test does not claim it.
-use pico2peta_core::ObjectStore;
-use pico2peta_repo::{LocalRepo, PackConfig};
+use o5s_core::ObjectStore;
+use o5s_repo::{LocalRepo, PackConfig};
 
 fn walk(p: &std::path::Path) -> u64 {
     std::fs::read_dir(p).map_or(0, |rd| {

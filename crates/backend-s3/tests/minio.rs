@@ -1,12 +1,12 @@
 //! Integration tests against a real S3-compatible server (MinIO in CI and dev).
-//! Skipped unless `P2P_S3_ENDPOINT` is set; see `scripts/minio-test.sh`.
+//! Skipped unless `O5S_S3_ENDPOINT` is set; see `scripts/minio-test.sh`.
 
 mod common;
 
 use common::{Fault, FaultProxy, backend, config, data, upstream_hostport};
-use pico2peta_backend_s3::S3Config;
-use pico2peta_core::Error;
-use pico2peta_core::backend::{Backend, PutOutcome, PutSource, conformance};
+use o5s_backend_s3::S3Config;
+use o5s_core::Error;
+use o5s_core::backend::{Backend, PutOutcome, PutSource, conformance};
 use std::io::Read;
 use std::time::{Duration, Instant};
 
@@ -287,9 +287,9 @@ fn wrong_credentials_fail_cleanly() {
     let env = require_s3!();
     common::ensure_bucket(&env);
     let c = config(&env, &env.endpoint, "badcreds");
-    let b = pico2peta_backend_s3::S3Backend::new(
+    let b = o5s_backend_s3::S3Backend::new(
         c,
-        std::sync::Arc::new(pico2peta_backend_s3::Credentials::new("nope", "wrong-secret")),
+        std::sync::Arc::new(o5s_backend_s3::Credentials::new("nope", "wrong-secret")),
         1,
     )
     .unwrap();
@@ -301,12 +301,12 @@ fn wrong_credentials_fail_cleanly() {
 /// no duplicate or skipped version), and other hosts must see it.
 #[test]
 fn ref_log_commit_survives_lost_response() {
-    use pico2peta_core::{Hash, Name, Observed, ReplaceOutcome};
+    use o5s_core::{Hash, Name, Observed, ReplaceOutcome};
     let env = require_s3!();
     let (proxy, c) = proxied(&env, "reflog-lost");
     let b: std::sync::Arc<dyn Backend> = std::sync::Arc::new(backend(&env, c.clone()));
     assert!(b.atomic_create());
-    let rs = pico2peta_refs::RefStore::open_backend(b.clone(), "refs/").unwrap();
+    let rs = o5s_refs::RefStore::open_backend(b.clone(), "refs/").unwrap();
     let n = Name::new("team/main").unwrap();
     let yes = |_: &Hash| Ok(true);
     let (h1, h2, h3) = (Hash::of(b"1"), Hash::of(b"2"), Hash::of(b"3"));
@@ -318,7 +318,7 @@ fn ref_log_commit_survives_lost_response() {
     assert_eq!(r, ReplaceOutcome::Ok { version: 2 }, "a landed commit is reported as committed");
     assert_eq!(rs.resolve(&n).unwrap().map(|v| (v.hash, v.version)), Some((h2, 2)));
     // Another host (fresh handle, direct connection) agrees.
-    let other = pico2peta_refs::RefStore::open_backend(
+    let other = o5s_refs::RefStore::open_backend(
         std::sync::Arc::new(backend(&env, S3Config { endpoint: env.endpoint.clone(), ..c })),
         "refs/",
     )

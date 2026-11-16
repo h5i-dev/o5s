@@ -1,13 +1,13 @@
 //! Xet-style storage of a set of files: what HF's Xet backend would keep (PLAN §6.5 HF row).
 //!
-//!   cargo run --release -p pico2peta-server --example xet_dedup -- <file>...
+//!   cargo run --release -p o5s-server --example xet_dedup -- <file>...
 //!
 //! Chunks every file with the byte-exact Xet chunker, keeps each distinct chunk once (by
 //! Xet chunk hash), and compresses it the way xet-core does per chunk: the smallest of none,
 //! LZ4 and BG4+LZ4. Prints one JSON line. (Xorb framing and shard metadata are ignored:
 //! they are under 0.1% of the payload.)
 
-use pico2peta_chunk::{XetChunker, chunk_lengths};
+use o5s_chunk::{XetChunker, chunk_lengths};
 use std::collections::HashSet;
 use std::io::Write;
 

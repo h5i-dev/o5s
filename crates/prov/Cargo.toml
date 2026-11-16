@@ -1,15 +1,15 @@
 [package]
-name = "pico2peta-prov"
+name = "o5s-prov"
 description = "Provenance layer: what was made from what, lineage/impact queries, regeneration-aware GC tracing"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-pico2peta-kernel.workspace = true
-pico2peta-refs.workspace = true
-pico2peta-core.workspace = true
-pico2peta-repo.workspace = true
+o5s-kernel.workspace = true
+o5s-refs.workspace = true
+o5s-core.workspace = true
+o5s-repo.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

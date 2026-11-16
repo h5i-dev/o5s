@@ -1,11 +1,11 @@
 //! Attestations and promotion end to end on a local repository.
-use pico2peta_attest::{
+use o5s_attest::{
     Ed25519Signer, Envelope, INTOTO_PAYLOAD_TYPE, Policy, PromoteOutcome, Signer, Statement, Subject, Verifier, attest,
     attestations, pae, promote,
 };
-use pico2peta_core::{Hash, Name, ObjectStore, Observed, Repository, Rule};
-use pico2peta_prov::Record;
-use pico2peta_repo::{LocalRepo, PackConfig};
+use o5s_core::{Hash, Name, ObjectStore, Observed, Repository, Rule};
+use o5s_prov::Record;
+use o5s_repo::{LocalRepo, PackConfig};
 use serde_json::json;
 
 fn n(s: &str) -> Name {
@@ -74,7 +74,7 @@ fn promotion_is_policy_gated_occ_and_audited() {
     }
     // Provenance (built from a source commit) and a signature by an untrusted key: still refused.
     let src = r.put(b"source tree").unwrap();
-    pico2peta_prov::record(
+    o5s_prov::record(
         &r,
         &log,
         &[Record {
@@ -100,7 +100,7 @@ fn promotion_is_policy_gated_occ_and_audited() {
     };
     assert_eq!(object, artifact);
     assert_eq!(r.resolve(&prod).unwrap().unwrap().hash, artifact);
-    let p = pico2peta_prov::Provenance::load(&r, &log).unwrap();
+    let p = o5s_prov::Provenance::load(&r, &log).unwrap();
     let audit = p.get(&record).unwrap();
     assert_eq!(audit.op, "promote");
     assert_eq!(audit.meta.get("actor").map(String::as_str), Some("alice"));
@@ -110,7 +110,7 @@ fn promotion_is_policy_gated_occ_and_audited() {
     // prod/ is immutable: a second promotion of a new dev build is refused by the name rule.
     let v2 = r.put(b"wheel bytes v2").unwrap();
     let cur = r.resolve(&dev).unwrap();
-    r.replace(&dev, &[(dev.clone(), pico2peta_core::RefValue::observed(cur))], v2).unwrap();
+    r.replace(&dev, &[(dev.clone(), o5s_core::RefValue::observed(cur))], v2).unwrap();
     attest(&r, &log, &Envelope::sign(&statement("app.whl", v2), &[&ci])).unwrap();
     let relaxed = Policy { require_provenance: false, ..policy.clone() };
     let out = promote(&r, &log, &dev, &prod, &relaxed, &verifiers, "alice");

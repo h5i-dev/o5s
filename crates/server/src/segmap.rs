@@ -1,10 +1,10 @@
-//! Segment maps (external id → core hash): the core's `pico2peta_repo::idmap`, which started
-//! here. The on-disk format (`P2PSEG01` segments, `P2PMAP01` roots) is unchanged. This module
+//! Segment maps (external id → core hash): the core's `o5s_repo::idmap`, which started
+//! here. The on-disk format (`O5SSEG01` segments, `O5SMAP01` roots) is unchanged. This module
 //! re-exports it and adds the async wrappers that the server's handlers use.
 
-pub use pico2peta_repo::idmap::*;
+pub use o5s_repo::idmap::*;
 
-use pico2peta_core::{Error, Result};
+use o5s_core::{Error, Result};
 use std::future::Future;
 use std::sync::Arc;
 

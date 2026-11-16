@@ -1,6 +1,6 @@
 [package]
-name = "pico2peta-kernel"
-description = "pico2peta's decision kernels: pure Rust in the Charon/Aeneas subset, extracted to Lean and proved (docs/H5I_PLAN.md)"
+name = "o5s-kernel"
+description = "o5s's decision kernels: pure Rust in the Charon/Aeneas subset, extracted to Lean and proved (docs/H5I_PLAN.md)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

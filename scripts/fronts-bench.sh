@@ -16,8 +16,8 @@ REPORT=${FRONTS_REPORT:-/mnt/scratch/pico2peta/bench-fronts-report.md}
 FRONTS=("$@")
 [ ${#FRONTS[@]} -eq 0 ] && FRONTS=(git oci hf pypi npm maven)
 
-cargo build -j2 -q --release -p pico2peta-server --bin pico2peta-server --example xet_dedup
-BIN=$CARGO_TARGET_DIR/release/pico2peta-server
+cargo build -j2 -q --release -p o5s-server --bin o5s-server --example xet_dedup
+BIN=$CARGO_TARGET_DIR/release/o5s-server
 DEDUP=$CARGO_TARGET_DIR/release/examples/xet_dedup
 {
   echo "# host: $(uname -n) $(nproc) vCPU; $(date -u +%FT%TZ); commit $(git rev-parse --short HEAD)"

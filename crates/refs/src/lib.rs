@@ -3,7 +3,7 @@
 //! # Storage
 //! A single append-only journal `<dir>/journal`:
 //! ```text
-//! "P2PREFJ1"                                   8-byte versioned magic
+//! "O5SREFJ1"                                   8-byte versioned magic
 //! { len: u32 | crc32(payload): u32 | payload } records
 //! payload = 1 | name_len u16 | name | hash[32] | version u64      (ref set)
 //!         | 2 | prefix_len u16 | prefix | rule u8                  (namespace rule)
@@ -20,18 +20,18 @@
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
-use pico2peta_core::fault::{FaultHandle, Faults};
-use pico2peta_core::{
+use o5s_core::fault::{FaultHandle, Faults};
+use o5s_core::{
     Error, Hash, Name, Observed, RefValue, ReplaceManyOutcome, ReplaceOutcome, Result, Rule, is_under, validate_path,
 };
-use pico2peta_kernel as kernel;
+use o5s_kernel as kernel;
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
 
-const MAGIC: &[u8; 8] = b"P2PREFJ1";
+const MAGIC: &[u8; 8] = b"O5SREFJ1";
 const MAX_RECORD: u32 = 16 << 20;
 /// Maximum number of names in one atomic `replace_many`.
 pub const MAX_BATCH: usize = 10_000;
@@ -75,7 +75,7 @@ impl RefState {
     /// Decides a `replace` against this state (pure). Order: input
     /// validation → read-set validation (`Conflict`) → rule (`Forbidden`).
     /// Object existence is checked by the caller beforehand. The decision is
-    /// the extracted kernel's (`pico2peta_kernel::refs::decide`).
+    /// the extracted kernel's (`o5s_kernel::refs::decide`).
     pub fn decide_replace(
         &self,
         name: &Name,
@@ -537,8 +537,8 @@ pub fn parse_records(buf: &[u8]) -> (Vec<Mutation>, usize, Option<Error>) {
         };
         let complete = rest.len() >= 8 && (len as usize) <= rest.len() - 8;
         let crc_ok = complete && crc32fast::hash(&rest[8..8 + len as usize]) == crc;
-        use pico2peta_kernel::codec::JournalStep;
-        let end = match pico2peta_kernel::codec::journal_step(rest.len(), all_zero, len, MAX_RECORD, crc_ok) {
+        use o5s_kernel::codec::JournalStep;
+        let end = match o5s_kernel::codec::journal_step(rest.len(), all_zero, len, MAX_RECORD, crc_ok) {
             JournalStep::Torn => break,
             JournalStep::TooLong => return (out, off, corrupt(off, "record length out of range")),
             JournalStep::Checksum => return (out, off, corrupt(off, "checksum mismatch")),
@@ -630,7 +630,7 @@ impl Drop for FlockGuard {
     }
 }
 
-const SNAP_MAGIC: &[u8; 8] = b"P2PREFS1";
+const SNAP_MAGIC: &[u8; 8] = b"O5SREFS1";
 /// Default journal size that triggers compaction.
 pub const DEFAULT_COMPACT_THRESHOLD: u64 = 64 << 20;
 
@@ -648,7 +648,7 @@ fn write_atomic(dir: &Path, name: &str, bytes: &[u8]) -> Result<()> {
         f.sync_all()?;
     }
     std::fs::rename(&tmp, dir.join(name))?;
-    pico2peta_core::backend::fsync_dir(dir)
+    o5s_core::backend::fsync_dir(dir)
 }
 
 fn encode_snapshot(st: &RefState) -> Vec<u8> {
@@ -743,12 +743,12 @@ impl Journal {
                 file.set_len(0)?;
                 file.write_all_at(MAGIC, 0)?;
                 file.sync_all()?;
-                pico2peta_core::backend::fsync_dir(dir)?;
+                o5s_core::backend::fsync_dir(dir)?;
             } else {
                 let mut m = [0u8; 8];
                 file.read_exact_at(&mut m, 0)?;
                 if &m != MAGIC {
-                    return Err(Error::Corrupt(format!("{} is not a pico2peta ref journal (v1)", path.display())));
+                    return Err(Error::Corrupt(format!("{} is not a o5s ref journal (v1)", path.display())));
                 }
             }
             // Generation 0 is opened with `create`. If a compaction moved past it and
@@ -1059,13 +1059,13 @@ impl RefStore {
 
     /// Opens (creating if needed) a ref store stored as a create-only log under
     /// `prefix` on `backend` (see [`log`]).
-    pub fn open_backend(backend: std::sync::Arc<dyn pico2peta_core::backend::Backend>, prefix: &str) -> Result<Self> {
+    pub fn open_backend(backend: std::sync::Arc<dyn o5s_core::backend::Backend>, prefix: &str) -> Result<Self> {
         Self::open_backend_with_faults(backend, prefix, Faults::disarmed())
     }
 
     /// Like [`RefStore::open_backend`], with fault injection.
     pub fn open_backend_with_faults(
-        backend: std::sync::Arc<dyn pico2peta_core::backend::Backend>,
+        backend: std::sync::Arc<dyn o5s_core::backend::Backend>,
         prefix: &str,
         faults: FaultHandle,
     ) -> Result<Self> {

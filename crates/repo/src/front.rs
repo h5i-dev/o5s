@@ -16,7 +16,7 @@
 //! the BLAKE3 of the bytes `get` returns, however it was encoded.
 
 use crate::gc::{GroupKey, Grouper, Tracer};
-use pico2peta_core::{Encoding, Error, Hash, Name, ObjectStore, Repository, Result};
+use o5s_core::{Encoding, Error, Hash, Name, ObjectStore, Repository, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -249,7 +249,7 @@ pub struct Profile {
     pub derive: DerivePolicy,
     /// Retention: keep only the newest N versions of each series (names
     /// grouped by their parent, ordered by the last segment, version-aware).
-    /// Applied by `pico2peta_prov::retention::apply`, before GC collects.
+    /// Applied by `o5s_prov::retention::apply`, before GC collects.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keep_versions: Option<usize>,
     /// With `keep_versions`: delete an old version only if provenance can
@@ -271,11 +271,9 @@ impl Profile {
             derive: match (self.derive, previous) {
                 // Chunk-anchored alignment: handles in-place edits and
                 // insertions alike, with no knowledge of the format.
-                (DerivePolicy::Previous, Some(base)) => Some(pico2peta_core::Derive {
-                    base,
-                    patch: pico2peta_core::PatchFormat::XorAnchored,
-                    segments: Vec::new(),
-                }),
+                (DerivePolicy::Previous, Some(base)) => {
+                    Some(o5s_core::Derive { base, patch: o5s_core::PatchFormat::XorAnchored, segments: Vec::new() })
+                }
                 _ => None,
             },
         }

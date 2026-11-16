@@ -1,16 +1,16 @@
 # Benchmarks
 
-`bench/micro` (`p2p-bench <scratch-dir> [large-MiB]`) measures a local repository with deterministic inputs:
+`bench/micro` (`o5s-bench <scratch-dir> [large-MiB]`) measures a local repository with deterministic inputs:
 
 ```sh
 source scripts/env.sh
-cargo build --release -p pico2peta-micro
-$CARGO_TARGET_DIR/release/p2p-bench $SCRATCH/bench-micro 1024
+cargo build --release -p o5s-micro
+$CARGO_TARGET_DIR/release/o5s-bench $SCRATCH/bench-micro 1024
 ```
 
-Other modes: `p2p-bench stream <dir> [MiB]` (put_stream only; `P2P_BENCH_NO_PROBE=1`, `P2P_BENCH_ONLY=random|text`),
-`p2p-bench weights <dir> [MiB]`, `p2p-bench chunkers <A> <B>` (FastCDC vs Xet chunk counts and dedup, sizes only), and
-`p2p-bench bytegroup-gran <safetensors>` (byte-grouping gain per block vs per tensor). Hold `bench.lock` for timing runs.
+Other modes: `o5s-bench stream <dir> [MiB]` (put_stream only; `O5S_BENCH_NO_PROBE=1`, `O5S_BENCH_ONLY=random|text`),
+`o5s-bench weights <dir> [MiB]`, `o5s-bench chunkers <A> <B>` (FastCDC vs Xet chunk counts and dedup, sizes only), and
+`o5s-bench bytegroup-gran <safetensors>` (byte-grouping gain per block vs per tensor). Hold `bench.lock` for timing runs.
 
 Comparisons against Git storage size are in `docs/EXP1.md` (Experiment 1).
 
@@ -50,7 +50,7 @@ pre-registered metric was plain RSS, so it is reported as **missed**; the split 
 
 ## 2026-11-16: H4 core, multi-core whole-object BLAKE3 for verified reads (dev check)
 
-**Change.** `pico2peta_pack::phash` builds the whole-object hash of a verified read from 1 MiB segments
+**Change.** `o5s_pack::phash` builds the whole-object hash of a verified read from 1 MiB segments
 hashed on several threads (`blake3::hazmat`: each segment followed by more input is a complete subtree at
 its offset) and combined in input order by BLAKE3's own stack rule.
 - It is **exactly** `blake3::hash` of the bytes: a proptest at lengths around segment and chunk boundaries,
@@ -64,7 +64,7 @@ its offset) and combined in input order by BLAKE3's own stack rule.
   4-core host, 2 hash threads beat 4, because the read-ahead workers also hash in strict mode.
 - `read_blob` (whole unchunked records over 2 MiB) uses the same function.
 
-**Dev A/B** (`p2p-bench`, before vs after, interleaved under the lock, the other session paused):
+**Dev A/B** (`o5s-bench`, before vs after, interleaved under the lock, the other session paused):
 
 | case (64 MiB random object, `reads`) | before (3 rounds) | after (3 rounds) | change (medians) |
 |---|---|---|---|
@@ -168,7 +168,7 @@ against the baseline binary is reported alongside.
 
 ## 2026-11-16: generic front (PLAN §6.4), pre-registered run
 
-`p2p-bench generic bench-micro 1024`: 1 GiB incompressible input from tmpfs, local NVMe, under the bench lock, three
+`o5s-bench generic bench-micro 1024`: 1 GiB incompressible input from tmpfs, local NVMe, under the bench lock, three
 runs (load 2.6–4.9). The verdicts use the medians.
 
 | metric | runs | median | threshold | verdict |
@@ -205,7 +205,7 @@ Net's server profile of OCI pulls (gzip layers, stored raw), self time: BLAKE3 3
   glibc's default mmap threshold, `open` of 512 KiB blobs ran at 794 MB/s against 2,293 MB/s with
   `MALLOC_MMAP_THRESHOLD_=32M`.
 
-`p2p-bench reads`, incompressible objects, MB/s (`get` / `open` strict / `open` eof):
+`o5s-bench reads`, incompressible objects, MB/s (`get` / `open` strict / `open` eof):
 
 | object | part 2 (load 1.3–1.9) | A/B before, 2 runs (load 3.4–3.8) | after (load 2.2–2.7) |
 |---|---|---|---|
@@ -235,7 +235,7 @@ add/shift chain.
 - Tests: `put_concat_reuses_source_chunks_and_observes_every_byte`, `put_chunked_keeps_the_given_boundaries`.
 - Net wires them into the Xet shard and xorb paths.
 
-## 2026-11-15: put/get pass, part 2: reads (`p2p-bench reads`)
+## 2026-11-15: put/get pass, part 2: reads (`o5s-bench reads`)
 
 One thread, warm page cache, default config (`chunk_threshold` 1 MiB, so 4 MiB and 64 MiB objects are chunked
 and read through the read-ahead pool). MB/s, two runs each after the change; load 1.3–1.9 (2.8–3.0 before, so
@@ -278,7 +278,7 @@ the before/after columns are only indicative).
 ## 2026-11-15: put/get pass for the fronts (human priority), part 1: small-object ingest
 
 **Workload.** The empty-store git push from net's repro: redis heads and tags, 274,683 objects, 9.0 GB of
-canonical object bytes; the real `git push` into a fresh `pico2peta-server`. Under the bench lock, load 2–4 from
+canonical object bytes; the real `git push` into a fresh `o5s-server`. Under the bench lock, load 2–4 from
 other users. git daemon: 11–12 s (net's measurement).
 
 **Profile (before).** 39.1–41.0 s per push (3 runs; `perf record -e cpu-clock:u`, no call graphs at
@@ -294,7 +294,7 @@ other users. git daemon: 11–12 s (net's measurement).
 - They are then appended in order in one writer-lock pass. Duplicates within a batch are stored once.
 - Batches under 256 KiB stay on the calling thread.
 
-| ingest of 1 GiB of real redis objects (44,911 objects, `p2p-bench ingest`) | time | MB/s | objects/s | load |
+| ingest of 1 GiB of real redis objects (44,911 objects, `o5s-bench ingest`) | time | MB/s | objects/s | load |
 |---|---|---|---|---|
 | `put` per object (before) | 8.18 s | 131 | 5,492 | 3.4 |
 | `put_many`, 64 MiB batches | 4.13 s | **260 (2.0×)** | 10,868 | 3.6 |
@@ -339,7 +339,7 @@ repack, `gc` with `repack_all`, zero grace):
 
 ## 2026-11-15: scale tests (PLAN §6.7), window 1
 
-`p2p-bench scale`, local NVMe, under the bench lock, load 1.9–2.5, 64-byte distinct objects, `flush` every 10⁵.
+`o5s-bench scale`, local NVMe, under the bench lock, load 1.9–2.5, 64-byte distinct objects, `flush` every 10⁵.
 
 | test | result | target | |
 |---|---|---|---|
@@ -392,7 +392,7 @@ Short runs under `bench.lock`, on `/dev/shm` unless stated. The host is shared (
 - A new test covers read-ahead specifically: corruption in the middle of a 12 MB object, ranged reads on either
   side of it, an early drop, and odd-sized reads.
 
-**(c) Small objects (`p2p-bench small <dir> 100000`, 1 KiB distinct objects, put + one flush, warm random gets).**
+**(c) Small objects (`o5s-bench small <dir> 100000`, 1 KiB distinct objects, put + one flush, warm random gets).**
 
 | 1 KiB objects | NVMe 1 thread | NVMe 4 threads | tmpfs 1 thread | tmpfs 4 threads |
 |---|---|---|---|---|
@@ -416,7 +416,7 @@ Before, 4-thread puts were *slower* than 1-thread puts. The profile showed three
 The remaining small-put cost is BLAKE3 on 1 KiB inputs (single-block path, ~33 %): once for identity and once
 for the incremental pack hash.
 
-**(d) Group commit for the ref journal (`p2p-bench commits <dir> 20000`: durable `replace` of distinct names, N threads on one handle; one run each, load ~1.5).**
+**(d) Group commit for the ref journal (`o5s-bench commits <dir> 20000`: durable `replace` of distinct names, N threads on one handle; one run each, load ~1.5).**
 
 | threads | before (one fsync per commit) | after (group commit) |
 |---|---|---|
@@ -439,7 +439,7 @@ are fast on a fresh store with 300k × 1 KiB objects: re-put of already-stored o
 
 ## 2026-11-15: streaming put pipeline (RESEARCH_SPEEDUP §1), before/after
 
-`p2p-bench stream <dir> 512` puts 512 MiB twice (the second put is all dedup hits) and reads it back with
+`o5s-bench stream <dir> 512` puts 512 MiB twice (the second put is all dedup hits) and reads it back with
 verification, for incompressible and code-like input. Inputs are generated once into files in `/dev/shm` and
 streamed from the page cache, so the source costs about a memcpy. "Before" is the previous `put_chunks`
 (64-chunk batches with a barrier, serial hashing), built from the parent commit with the same bench source.
@@ -486,7 +486,7 @@ all runs across the A/B series was 791 MB/s, on this loaded host.
   - zstd-3 on this generated text runs at about 170 MB/s per core, slower than RESEARCH_SPEEDUP §0's code-like
     sample (570 MB/s).
 
-**Compressibility probe (§1b): no measurable gain here** (ablation `P2P_BENCH_NO_PROBE=1`, 5 reps):
+**Compressibility probe (§1b): no measurable gain here** (ablation `O5S_BENCH_NO_PROBE=1`, 5 reps):
 
 | tmpfs | probe on | probe off |
 |---|---|---|
@@ -557,14 +557,14 @@ Memory stays bounded: streaming 1 GiB in and out peaks at about 210 MB RSS for t
 | replace, uncontended (durable, fsync) | 6.2k/s |
 | replace, 4 contending handles | 4.6k commits/s, 40% conflict rate (OCC retries) |
 
-## Model-weights versioning (Xet-style workload): `p2p-bench weights <dir> 256`
+## Model-weights versioning (Xet-style workload): `o5s-bench weights <dir> 256`
 
 A synthetic 256 MiB safetensors checkpoint (a real safetensors header) (64 random f16 tensors, so incompressible)
 stored in five successive versions. The baseline is "full copies", which is what plain object storage
 or Git LFS keeps. Xet itself isn't available offline here, so this measures our chunk dedup against the
 no-dedup baseline and identifies where tensor-aware dedup (ZipLLM, Xet) is needed.
 
-| version | change | full copies | pico2peta | ratio |
+| version | change | full copies | o5s | ratio |
 |---|---|---|---|---|
 | 1 | initial | 256 MiB | 257 MiB | 1.00 |
 | 2 | 4 of 64 tensors retrained | 512 MiB | 273 MiB | 0.53 |
@@ -573,13 +573,13 @@ no-dedup baseline and identifies where tensor-aware dedup (ZipLLM, Xet) is neede
 | 5 | full fine-tune (pseudo-random noise in the low 4 mantissa bits of every f16) | 1280 MiB | 530 MiB | 0.41 |
 | 5′ | same v5, stored with `put_delta` against v4 (XOR delta, API v1.7) | n/a | **+90 MiB** (vs +257 MiB) | n/a |
 | 6 | the same tensors re-exported in a different order, with an edited header: offset-aligned `put_delta` | n/a | +256.5 MiB | n/a |
-| 6′ | same, tensor-aligned (`put --delta-*`, pico2peta-weights, API v1.8) | n/a | **+0.0 MiB** | n/a |
+| 6′ | same, tensor-aligned (`put --delta-*`, o5s-weights, API v1.8) | n/a | **+0.0 MiB** | n/a |
 
 - Content-defined chunking stores only what changed for partial retrains (v2 adds 16 MiB = 4 tensors)
   and resynchronizes after insertions that shift offsets (v3 adds ~0).
 - A full fine-tune (v5) defeats byte-level chunk dedup: it adds a whole copy. That's exactly the
   ZipLLM result that motivates per-kind configuration.
-- Stored as an **XOR delta** against the previous version (`put_delta`, or `pico2peta put --delta-base`),
+- Stored as an **XOR delta** against the previous version (`put_delta`, or `o5s put --delta-base`),
   the same fine-tune costs 90 MiB instead of 257 MiB (−65%). The noise floor is 64 MiB (4 random bits per 16),
   so zstd gets within 1.4× of it. ZipLLM reports −54% on real models. The noise model is synthetic, so real
   checkpoints will differ.

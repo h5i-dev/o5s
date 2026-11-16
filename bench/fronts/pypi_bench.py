@@ -1,17 +1,17 @@
-"""PLAN §6.5, PyPI: pico2peta's PyPI front as a proxy-cache of pypi.org vs devpi-server.
+"""PLAN §6.5, PyPI: o5s's PyPI front as a proxy-cache of pypi.org vs devpi-server.
 
 Per system and run (a fresh, empty proxy each run): for each of 50 packages,
 `pip download --no-deps --only-binary :all:` once (cold miss: fetched from pypi.org) and once
 more (hit: served from the cache), with pip's own cache off. Then stored bytes, and the
-functional check that pico2peta fetched each file from upstream exactly once.
+functional check that o5s fetched each file from upstream exactly once.
 
-usage: pypi_bench.py <pico2peta-server binary>
+usage: pypi_bench.py <o5s-server binary>
 """
 import os
 import sys
 import time
 
-from common import Proc, RUNS, TOKEN, TOOLS, check, du, free_port, log, metric_value, pico_server, record, run, wait_port, workdir
+from common import Proc, RUNS, TOKEN, TOOLS, check, du, free_port, log, metric_value, o5s_server, record, run, wait_port, workdir
 
 PIP_PY = f"{TOOLS}/pkgvenv/bin/python"
 DEVPI = f"{TOOLS}/devpivenv/bin"
@@ -69,15 +69,15 @@ def main():
                 record("pypi", "stored_bytes", "devpi", du(sd), "B", run=i)
             finally:
                 dv.stop()
-            p2p = os.path.join(d, "p2p")
-            os.makedirs(p2p)
+            o5s = os.path.join(d, "o5s")
+            os.makedirs(o5s)
             extra = f'\n[pypi.upstream.mirror]\nurl = "{UPSTREAM}"\n'
-            with pico_server(p2p, server_bin, extra_toml=extra) as (base, repo):
-                log("pypi: pico2peta run", i)
+            with o5s_server(o5s, server_bin, extra_toml=extra) as (base, repo):
+                log("pypi: o5s run", i)
                 host = base.removeprefix("http://")
-                files = bench_pass("pico2peta", f"http://bench:{TOKEN}@{host}/pypi/mirror/simple/", d, i)
-                record("pypi", "stored_bytes", "pico2peta", du(repo), "B", run=i)
-                fetched = metric_value(base, "p2p_upstream_fetches", 'front="pypi"')
+                files = bench_pass("o5s", f"http://bench:{TOKEN}@{host}/pypi/mirror/simple/", d, i)
+                record("pypi", "stored_bytes", "o5s", du(repo), "B", run=i)
+                fetched = metric_value(base, "o5s_upstream_fetches", 'front="pypi"')
                 n = sum(len(v) for v in files.values())
                 check("pypi", f"one_fetch_per_file_run{i}", fetched == n, f"{fetched} upstream fetches for {n} files")
                 check("pypi", f"all_files_run{i}", n == len(PACKAGES), f"{n} files")

@@ -141,7 +141,8 @@ fn authorization_per_namespace() {
     admin.replace(&n("shared/c"), &[(n("shared/c"), Observed::Absent)], h).unwrap();
     admin.replace(&n("secret/d"), &[(n("secret/d"), Observed::Absent)], h).unwrap();
 
-    let denied = |r: pico2peta_core::Result<_>| matches!(r, Err(Error::Unauthorized(msg)) if msg.starts_with("permission denied"));
+    let denied =
+        |r: o5s_core::Result<_>| matches!(r, Err(Error::Unauthorized(msg)) if msg.starts_with("permission denied"));
     // Readers cannot write anything, not even objects.
     assert!(denied(reader.put(b"y").map(|_| ())));
     assert!(denied(reader.replace(&n("shared/c"), &[(n("shared/c"), Observed::Version(1))], h).map(|_| ())));
@@ -176,11 +177,10 @@ fn audit_log_records_and_chains() {
     let _ = alice.get(&h, None).unwrap(); // read (log_reads = true)
     let _ = http().get(format!("{}/v1/whoami", s.url())).bearer_auth("forged").send().unwrap();
     s.shutdown();
-    let n_records = pico2peta_server::audit::verify(&s.audit_path()).unwrap();
+    let n_records = o5s_server::audit::verify(&s.audit_path()).unwrap();
     assert!(n_records >= 6, "{n_records}");
     let text = std::fs::read_to_string(s.audit_path()).unwrap();
-    let recs: Vec<pico2peta_server::audit::AuditRecord> =
-        text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let recs: Vec<o5s_server::audit::AuditRecord> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     let has = |action: &str, outcome: &str| recs.iter().any(|r| r.action == action && r.outcome == outcome);
     assert!(has("put", "ok"));
     assert!(has("replace", "ok"));
@@ -267,10 +267,10 @@ fn metrics_endpoint() {
     c.get(&h, None).unwrap();
     let _ = http().get(format!("{}/v1/whoami", s.url())).send().unwrap();
     let text = http().get(format!("{}/metrics", s.url())).send().unwrap().text().unwrap();
-    assert!(text.contains("p2p_http_requests_total{method=\"PUT\",route=\"/v1/objects\",status=\"200\"} 1"), "{text}");
-    assert!(text.contains("p2p_http_request_duration_seconds_bucket"));
-    assert!(text.contains("p2p_object_bytes_uploaded_total 1"));
-    assert!(text.contains("p2p_auth_failures_total{outcome=\"missing\"} 1"));
+    assert!(text.contains("o5s_http_requests_total{method=\"PUT\",route=\"/v1/objects\",status=\"200\"} 1"), "{text}");
+    assert!(text.contains("o5s_http_request_duration_seconds_bucket"));
+    assert!(text.contains("o5s_object_bytes_uploaded_total 1"));
+    assert!(text.contains("o5s_auth_failures_total{outcome=\"missing\"} 1"));
     assert!(text.ends_with("# EOF\n"));
 }
 
@@ -321,22 +321,22 @@ fn graceful_shutdown_drains_and_flushes() {
     assert_eq!(first.len() + rest.len(), d.len());
     s.shutdown();
     // Everything (including the unreferenced object) is durable after exit.
-    let repo = pico2peta_repo::LocalRepo::open(s.dir.path().join("repo")).unwrap();
+    let repo = o5s_repo::LocalRepo::open(s.dir.path().join("repo")).unwrap();
     assert_eq!(repo.resolve(&n("alice/keep")).unwrap().unwrap().hash, h);
     assert!(repo.contains(&small).unwrap());
 }
 
 #[test]
 fn s3_backend_end_to_end() {
-    let Ok(endpoint) = std::env::var("P2P_S3_ENDPOINT") else {
-        eprintln!("skipping: set P2P_S3_ENDPOINT (see scripts/minio-test.sh)");
+    let Ok(endpoint) = std::env::var("O5S_S3_ENDPOINT") else {
+        eprintln!("skipping: set O5S_S3_ENDPOINT (see scripts/minio-test.sh)");
         return;
     };
-    let bucket = std::env::var("P2P_S3_BUCKET").unwrap_or_else(|_| "p2p-test".into());
-    let region = std::env::var("P2P_S3_REGION").unwrap_or_else(|_| "us-east-1".into());
-    let creds = pico2peta_backend_s3::Credentials::from_env().expect("AWS_* credentials");
-    let client = pico2peta_backend_s3::S3Client::new(
-        pico2peta_backend_s3::S3Config::new(&endpoint, &region, &bucket),
+    let bucket = std::env::var("O5S_S3_BUCKET").unwrap_or_else(|_| "o5s-test".into());
+    let region = std::env::var("O5S_S3_REGION").unwrap_or_else(|_| "us-east-1".into());
+    let creds = o5s_backend_s3::Credentials::from_env().expect("AWS_* credentials");
+    let client = o5s_backend_s3::S3Client::new(
+        o5s_backend_s3::S3Config::new(&endpoint, &region, &bucket),
         std::sync::Arc::new(creds),
     )
     .unwrap();
@@ -344,7 +344,7 @@ fn s3_backend_end_to_end() {
     let prefix = format!("server-e2e-{}-{}", std::process::id(), fastrand_u64());
     let p2 = prefix.clone();
     let s = TestServer::start(move |c| {
-        c.backend = pico2peta_server::config::BackendSection::S3(pico2peta_server::config::S3Section {
+        c.backend = o5s_server::config::BackendSection::S3(o5s_server::config::S3Section {
             endpoint: endpoint.clone(),
             region: region.clone(),
             bucket: bucket.clone(),
@@ -363,7 +363,7 @@ fn s3_backend_end_to_end() {
     let listed = tokio::runtime::Runtime::new().unwrap().block_on(client.list(&format!("{prefix}/"))).unwrap();
     assert!(listed.iter().any(|(k, _)| k.ends_with(".pack")), "{listed:?}");
     let text = http().get(format!("{}/metrics", s.url())).send().unwrap().text().unwrap();
-    assert!(text.contains("p2p_s3_requests_total"));
+    assert!(text.contains("o5s_s3_requests_total"));
 }
 
 fn fastrand_u64() -> u64 {
@@ -389,7 +389,7 @@ fn admin_gc_endpoint() {
     assert!(r.dangling_refs.is_empty());
     assert_eq!(alice.get(&h, None).unwrap(), b"live");
     let text = http().get(format!("{}/metrics", s.url())).send().unwrap().text().unwrap();
-    assert!(text.contains("p2p_gc_runs_total{outcome=\"ok\"} 2"), "{text}");
+    assert!(text.contains("o5s_gc_runs_total{outcome=\"ok\"} 2"), "{text}");
     s.shutdown();
     let audit = std::fs::read_to_string(s.audit_path()).unwrap();
     assert!(audit.lines().any(|l| l.contains("\"action\":\"gc\"") && l.contains("\"principal\":\"admin\"")));
@@ -409,7 +409,7 @@ fn replace_many_is_atomic_over_http() {
             &[(a.clone(), Observed::Absent), (b.clone(), Observed::Absent)],
         )
         .unwrap();
-    assert!(matches!(out, pico2peta_core::ReplaceManyOutcome::Ok { ref versions } if versions.len() == 2), "{out:?}");
+    assert!(matches!(out, o5s_core::ReplaceManyOutcome::Ok { ref versions } if versions.len() == 2), "{out:?}");
     // One stale entry: nothing changes.
     let out = c
         .replace_many(
@@ -417,7 +417,7 @@ fn replace_many_is_atomic_over_http() {
             &[(a.clone(), Observed::Version(1)), (b.clone(), Observed::Absent)],
         )
         .unwrap();
-    assert!(matches!(out, pico2peta_core::ReplaceManyOutcome::Conflict { .. }));
+    assert!(matches!(out, o5s_core::ReplaceManyOutcome::Conflict { .. }));
     assert_eq!(c.resolve(&a).unwrap().unwrap().hash, h1);
     assert_eq!(c.resolve(&b).unwrap().unwrap().hash, h2);
     // Authz is per target.
@@ -457,16 +457,15 @@ fn delete_ref_over_http() {
             &[(a.clone(), Observed::Version(va)), (b.clone(), Observed::Absent)],
         )
         .unwrap();
-    assert!(matches!(out, pico2peta_core::ReplaceManyOutcome::Ok { .. }), "{out:?}");
+    assert!(matches!(out, o5s_core::ReplaceManyOutcome::Ok { .. }), "{out:?}");
     assert!(c.resolve(&a).unwrap().is_none());
     assert!(c.resolve(&b).unwrap().is_some());
 }
 
 #[test]
 fn per_principal_rate_limit() {
-    let s = TestServer::start(|c| {
-        c.server.rate_limit = Some(pico2peta_server::config::RateLimit { per_sec: 1.0, burst: 3.0 })
-    });
+    let s =
+        TestServer::start(|c| c.server.rate_limit = Some(o5s_server::config::RateLimit { per_sec: 1.0, burst: 3.0 }));
     let who = |t: &str| http().get(format!("{}/v1/whoami", s.url())).bearer_auth(t).send().unwrap();
     for _ in 0..3 {
         assert_eq!(who(ALICE).status(), 200);
@@ -481,7 +480,7 @@ fn per_principal_rate_limit() {
     std::thread::sleep(Duration::from_millis(1100));
     assert_eq!(who(ALICE).status(), 200, "tokens refill");
     let m = http().get(format!("{}/metrics", s.url())).send().unwrap().text().unwrap();
-    assert!(m.contains("p2p_rate_limited_total 1"), "{m}");
+    assert!(m.contains("o5s_rate_limited_total 1"), "{m}");
 }
 
 #[test]
@@ -494,12 +493,12 @@ fn separate_metrics_listener() {
     let addr = rt.block_on(async {
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let a = l.local_addr().unwrap();
-        tokio::spawn(pico2peta_server::serve_ops(l, st, std::future::pending()));
+        tokio::spawn(o5s_server::serve_ops(l, st, std::future::pending()));
         a
     });
     let r = http().get(format!("http://{addr}/metrics")).send().unwrap();
     assert_eq!(r.status(), 200);
-    assert!(r.text().unwrap().contains("p2p_http_requests_total"));
+    assert!(r.text().unwrap().contains("o5s_http_requests_total"));
 }
 
 fn tree_bytes(p: &std::path::Path) -> u64 {
@@ -577,7 +576,7 @@ fn token_admin_api() {
         .unwrap();
     assert_eq!(r.status(), 403);
     // Inline tokens cannot be revoked through the API.
-    let alice_sha = hex(&pico2peta_server::auth::sha256(ALICE.as_bytes()));
+    let alice_sha = hex(&o5s_server::auth::sha256(ALICE.as_bytes()));
     assert_eq!(admin(reqwest::Method::DELETE, &format!("/v1/admin/tokens/{alice_sha}")).send().unwrap().status(), 409);
     // Revoke.
     assert_eq!(admin(reqwest::Method::DELETE, &format!("/v1/admin/tokens/{sha}")).send().unwrap().status(), 204);
@@ -590,15 +589,15 @@ fn token_admin_api() {
 /// repository with refs on the backend: OCC holds across hosts.
 #[test]
 fn two_servers_share_a_repo_via_s3() {
-    let Ok(endpoint) = std::env::var("P2P_S3_ENDPOINT") else {
-        eprintln!("skipping: set P2P_S3_ENDPOINT (see scripts/minio-test.sh)");
+    let Ok(endpoint) = std::env::var("O5S_S3_ENDPOINT") else {
+        eprintln!("skipping: set O5S_S3_ENDPOINT (see scripts/minio-test.sh)");
         return;
     };
-    let bucket = std::env::var("P2P_S3_BUCKET").unwrap_or_else(|_| "p2p-test".into());
-    let region = std::env::var("P2P_S3_REGION").unwrap_or_else(|_| "us-east-1".into());
-    let creds = pico2peta_backend_s3::Credentials::from_env().expect("AWS_* credentials");
-    let admin = pico2peta_backend_s3::S3Client::new(
-        pico2peta_backend_s3::S3Config::new(&endpoint, &region, &bucket),
+    let bucket = std::env::var("O5S_S3_BUCKET").unwrap_or_else(|_| "o5s-test".into());
+    let region = std::env::var("O5S_S3_REGION").unwrap_or_else(|_| "us-east-1".into());
+    let creds = o5s_backend_s3::Credentials::from_env().expect("AWS_* credentials");
+    let admin = o5s_backend_s3::S3Client::new(
+        o5s_backend_s3::S3Config::new(&endpoint, &region, &bucket),
         std::sync::Arc::new(creds),
     )
     .unwrap();
@@ -607,8 +606,8 @@ fn two_servers_share_a_repo_via_s3() {
     let start = || {
         let (e, b, r, p) = (endpoint.clone(), bucket.clone(), region.clone(), prefix.clone());
         TestServer::start(move |c| {
-            c.repo.refs = pico2peta_repo::RefsStore::Backend;
-            c.backend = pico2peta_server::config::BackendSection::S3(pico2peta_server::config::S3Section {
+            c.repo.refs = o5s_repo::RefsStore::Backend;
+            c.backend = o5s_server::config::BackendSection::S3(o5s_server::config::S3Section {
                 endpoint: e,
                 region: r,
                 bucket: b,
@@ -640,7 +639,7 @@ fn two_servers_share_a_repo_via_s3() {
                 sc.spawn(move || {
                     let (mut ok, mut conflicts) = (0, 0);
                     while ok < per {
-                        let obs = pico2peta_core::RefValue::observed(c.resolve(&hot).unwrap());
+                        let obs = o5s_core::RefValue::observed(c.resolve(&hot).unwrap());
                         match c.replace(&hot, &[(hot.clone(), obs)], h).unwrap() {
                             ReplaceOutcome::Ok { .. } => ok += 1,
                             ReplaceOutcome::Conflict { .. } => conflicts += 1,
@@ -662,21 +661,21 @@ fn two_servers_share_a_repo_via_s3() {
 #[test]
 fn refs_engine_mismatch_is_refused() {
     let d = tempfile::tempdir().unwrap();
-    pico2peta_repo::LocalRepo::init(d.path().join("r"), &Default::default()).unwrap();
-    let mut cfg: pico2peta_server::config::Config = toml::from_str(&format!(
+    o5s_repo::LocalRepo::init(d.path().join("r"), &Default::default()).unwrap();
+    let mut cfg: o5s_server::config::Config = toml::from_str(&format!(
         "[repo]\npath = {:?}\nrefs = \"backend\"\n[audit]\npath = {:?}\n",
         d.path().join("r"),
         d.path().join("a.jsonl")
     ))
     .unwrap();
     cfg.auth.allow_anonymous = true;
-    let e = pico2peta_server::build_state(&cfg).err().expect("must refuse");
+    let e = o5s_server::build_state(&cfg).err().expect("must refuse");
     assert!(e.to_string().contains("created with refs"), "{e}");
 }
 
 #[test]
 fn backend_refs_require_conditional_writes() {
-    let cfg: Result<pico2peta_server::config::Config, _> = toml::from_str(
+    let cfg: Result<o5s_server::config::Config, _> = toml::from_str(
         "[repo]\npath = \"/tmp/x\"\nrefs = \"backend\"\n[backend]\ntype = \"s3\"\nendpoint = \"http://127.0.0.1:9\"\nregion = \"r\"\nbucket = \"b\"\nconditional_writes = false\n[audit]\npath = \"/tmp/a\"\n",
     );
     let e = cfg.unwrap().validate().unwrap_err();
@@ -687,25 +686,25 @@ fn backend_refs_require_conditional_writes() {
 /// FastCDC otherwise. Verified by counting the chunk records the pack store wrote.
 #[test]
 fn put_for_name_uses_namespace_chunker() {
-    use pico2peta_chunk::{FastCdcChunker, XetChunker, chunk_lengths};
+    use o5s_chunk::{FastCdcChunker, XetChunker, chunk_lengths};
     let s = TestServer::start(|c| {
         let mut prefixes = std::collections::BTreeMap::new();
-        prefixes.insert("alice/models/".to_string(), pico2peta_repo::ChunkerChoice::Xet);
-        let rc = pico2peta_repo::RepoConfig {
-            format: pico2peta_repo::FORMAT_VERSION,
-            pack: (&pico2peta_pack::PackConfig::default()).into(),
+        prefixes.insert("alice/models/".to_string(), o5s_repo::ChunkerChoice::Xet);
+        let rc = o5s_repo::RepoConfig {
+            format: o5s_repo::FORMAT_VERSION,
+            pack: (&o5s_pack::PackConfig::default()).into(),
             refs: Default::default(),
-            chunking: pico2peta_repo::ChunkingSection { default: pico2peta_repo::ChunkerChoice::Fastcdc, prefixes },
+            chunking: o5s_repo::ChunkingSection { default: o5s_repo::ChunkerChoice::Fastcdc, prefixes },
             profiles: Default::default(),
             namespaces: Default::default(),
             read: Default::default(),
             gc: Default::default(),
         };
-        pico2peta_repo::LocalRepo::init_config(&c.repo.path, &rc).unwrap();
+        o5s_repo::LocalRepo::init_config(&c.repo.path, &rc).unwrap();
     });
     let c = s.client(ALICE);
     let chunk_records = || {
-        let r = pico2peta_repo::LocalRepo::open(s.dir.path().join("repo")).unwrap();
+        let r = o5s_repo::LocalRepo::open(s.dir.path().join("repo")).unwrap();
         r.pack_stats().unwrap().blobs
     };
     let d1 = data(4 << 20, 21);
@@ -744,7 +743,7 @@ fn grouped_upload_saves_space_on_bf16_like_data() {
     let ha = c.put_stream(&mut &a[..]).unwrap();
     c.flush().unwrap();
     let plain = size() - t0;
-    let hb = pico2peta_core::ObjectStore::put_stream_grouped(&c, &mut &b[..], 2).unwrap();
+    let hb = o5s_core::ObjectStore::put_stream_grouped(&c, &mut &b[..], 2).unwrap();
     c.flush().unwrap();
     let grouped = size() - t0 - plain;
     eprintln!("plain {plain} B, grouped {grouped} B");
@@ -781,7 +780,7 @@ fn early_rejection_closes_the_connection() {
 #[test]
 fn read_verify_parameter_follows_repo_policy() {
     let data: Vec<u8> = (0..3_000_000u32).map(|i| (i * 7 % 251) as u8).collect();
-    let get = |s: &TestServer, h: &pico2peta_core::Hash, q: &str| {
+    let get = |s: &TestServer, h: &o5s_core::Hash, q: &str| {
         reqwest::blocking::Client::new()
             .get(format!("{}/v1/objects/{}{q}", s.url(), h.to_hex()))
             .bearer_auth(ADMIN)
@@ -796,15 +795,15 @@ fn read_verify_parameter_follows_repo_policy() {
     assert_eq!(get(&s, &h, "?verify=eof").status(), 403);
     assert_eq!(get(&s, &h, "?verify=fast").status(), 400);
     let mut out = Vec::new();
-    let r = s.client(ADMIN).open_verified(&h, None, pico2peta_core::ReadVerify::Eof);
+    let r = s.client(ADMIN).open_verified(&h, None, o5s_core::ReadVerify::Eof);
     assert!(r.is_err(), "RemoteRepo surfaces the refusal");
-    s.client(ADMIN).open_verified(&h, None, pico2peta_core::ReadVerify::Strict).unwrap().read_to_end(&mut out).unwrap();
+    s.client(ADMIN).open_verified(&h, None, o5s_core::ReadVerify::Strict).unwrap().read_to_end(&mut out).unwrap();
     assert_eq!(out, data);
     // A repository that allows eof reads.
     let s = TestServer::start(|cfg| {
-        let mut rc = pico2peta_repo::RepoConfig::default();
+        let mut rc = o5s_repo::RepoConfig::default();
         rc.read.allow_eof = true;
-        pico2peta_repo::LocalRepo::init_config(&cfg.repo.path, &rc).unwrap();
+        o5s_repo::LocalRepo::init_config(&cfg.repo.path, &rc).unwrap();
     });
     let h = s.client(ADMIN).put(&data).unwrap();
     keep(&s.client(ADMIN), "admin", &h);
@@ -812,7 +811,7 @@ fn read_verify_parameter_follows_repo_policy() {
     assert_eq!(r.status(), 200);
     assert_eq!(r.bytes().unwrap().as_ref(), data.as_slice());
     let mut out = Vec::new();
-    s.client(ADMIN).open_verified(&h, None, pico2peta_core::ReadVerify::Eof).unwrap().read_to_end(&mut out).unwrap();
+    s.client(ADMIN).open_verified(&h, None, o5s_core::ReadVerify::Eof).unwrap().read_to_end(&mut out).unwrap();
     assert_eq!(out, data);
 }
 
@@ -844,15 +843,15 @@ fn slow_headers_and_idle_connections_are_closed() {
 /// the same contract as `LocalRepo::put_named`; `RemoteRepo::put_named` sends it.
 #[test]
 fn put_named_applies_the_profile_remotely() {
-    use pico2peta_core::{Name, ObjectStore, Observed, Repository};
+    use o5s_core::{Name, ObjectStore, Observed, Repository};
     let s = TestServer::start(|cfg| {
-        let mut rc = pico2peta_repo::RepoConfig::default();
+        let mut rc = o5s_repo::RepoConfig::default();
         rc.profiles.insert(
             "ckpt".into(),
-            pico2peta_repo::Profile { derive: pico2peta_repo::DerivePolicy::Previous, ..Default::default() },
+            o5s_repo::Profile { derive: o5s_repo::DerivePolicy::Previous, ..Default::default() },
         );
         rc.namespaces.insert("alice/ckpt".into(), "ckpt".into());
-        pico2peta_repo::LocalRepo::init_config(&cfg.repo.path, &rc).unwrap();
+        o5s_repo::LocalRepo::init_config(&cfg.repo.path, &rc).unwrap();
     });
     let c = s.client(ALICE);
     let n = Name::new("alice/ckpt/model").unwrap();
@@ -864,7 +863,7 @@ fn put_named_applies_the_profile_remotely() {
     v2[1_000_000] ^= 0xff;
     let h2 = c.put_named(&n, &mut &v2[..]).unwrap();
     keep(&c, "alice", &h2);
-    assert_eq!(h2, pico2peta_core::Hash::of(&v2), "identity is the content hash");
+    assert_eq!(h2, o5s_core::Hash::of(&v2), "identity is the content hash");
     assert_eq!(c.get(&h2, None).unwrap(), v2);
     // No write access on the name: refused.
     assert!(s.client(READER).put_named(&n, &mut &v2[..]).is_err());
@@ -874,7 +873,7 @@ fn put_named_applies_the_profile_remotely() {
 /// background scan (writes refused over it; reads, deletes and admins are not).
 #[test]
 fn namespace_rate_and_quota() {
-    use pico2peta_server::config::{LimitRule, RateLimit};
+    use o5s_server::config::{LimitRule, RateLimit};
     let srv = TestServer::start(|cfg| {
         cfg.limits.push(LimitRule {
             prefix: "alice/hot".into(),

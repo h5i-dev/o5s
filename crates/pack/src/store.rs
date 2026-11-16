@@ -29,9 +29,9 @@
 //! uploading is completed idempotently.
 
 use crate::format::*;
-use pico2peta_core::backend::{Backend, PutOutcome, PutSource, fsync_dir};
-use pico2peta_core::fault::{FaultHandle, Faults};
-use pico2peta_core::{Error, Hash, ObjectStore, ReadVerify, Result, check_range};
+use o5s_core::backend::{Backend, PutOutcome, PutSource, fsync_dir};
+use o5s_core::fault::{FaultHandle, Faults};
+use o5s_core::{Error, Hash, ObjectStore, ReadVerify, Result, check_range};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -324,7 +324,7 @@ fn insert_loc(idx: &mut Index, hash: Hash, loc: Loc) {
 
 /// Interval after which writers re-list before trusting a dedup hit, so that
 /// they learn about GC condemnations promptly. GC grace periods must be much
-/// longer than this (see `pico2peta-repo` GC).
+/// longer than this (see `o5s-repo` GC).
 pub const DEDUP_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Prefix of GC records on the backend.
@@ -490,9 +490,9 @@ impl PackStore {
                 refresh_lock: Mutex::new(()),
                 generation: AtomicU64::new(1),
                 dedup_refresh_ms: AtomicU64::new(DEDUP_REFRESH_INTERVAL.as_millis() as u64),
-                // P2P_MMAP_INDEX_BYTES overrides the default (tests use 0 to map every index).
+                // O5S_MMAP_INDEX_BYTES overrides the default (tests use 0 to map every index).
                 mmap_index_bytes: AtomicU64::new(
-                    std::env::var("P2P_MMAP_INDEX_BYTES").ok().and_then(|v| v.parse().ok()).unwrap_or(4 << 20),
+                    std::env::var("O5S_MMAP_INDEX_BYTES").ok().and_then(|v| v.parse().ok()).unwrap_or(4 << 20),
                 ),
                 frame_cache: Mutex::new(Vec::new()),
                 manifest_cache: Mutex::new(Vec::new()),
@@ -1765,7 +1765,7 @@ impl PackStore {
     }
 
     /// Stores `src` as a derived object of `base` with chunk-anchored XOR
-    /// alignment (see [`pico2peta_core::PatchFormat::XorAnchored`]). Objects
+    /// alignment (see [`o5s_core::PatchFormat::XorAnchored`]). Objects
     /// under the chunk threshold use an offset-aligned delta.
     pub fn put_delta_anchored(&self, base: &Hash, src: &mut dyn Read, opts: PutOpts) -> Result<Hash> {
         if !self.ensure_live_impl(base)? {
@@ -1856,11 +1856,11 @@ impl PackStore {
     /// [`ObjectStore::put_stream`] with explicit options (see [`PutOpts`]).
     pub fn put_stream_opts(&self, opts: PutOpts, src: &mut dyn Read) -> Result<Hash> {
         let thr = self.inner.cfg.chunk_threshold;
-        if opts.chunker == ChunkerKind::Xet && thr <= pico2peta_chunk::XET_MAX {
+        if opts.chunker == ChunkerKind::Xet && thr <= o5s_chunk::XET_MAX {
             // Chunks must stay below the threshold (they're stored as blobs).
             return Err(Error::Parse(format!(
                 "Xet chunking needs pack.chunk_threshold > {} (have {thr})",
-                pico2peta_chunk::XET_MAX
+                o5s_chunk::XET_MAX
             )));
         }
         let group = match opts.group_width {
@@ -1887,7 +1887,7 @@ impl PackStore {
                 self.put_chunks(chunks, group)
             }
             ChunkerKind::Xet => {
-                self.put_chunks(LengthChunks::new(reader, Box::new(pico2peta_chunk::XetChunker::new())), group)
+                self.put_chunks(LengthChunks::new(reader, Box::new(o5s_chunk::XetChunker::new())), group)
             }
         }
     }
@@ -2424,18 +2424,18 @@ impl ObjectStore for PackStore {
         self.put_delta_opts(base, Some(&segs), src, PutOpts { chunker: ChunkerKind::FastCdc, group_width: Some(width) })
     }
 
-    fn put_encoded(&self, src: &mut dyn Read, enc: &pico2peta_core::Encoding) -> Result<Hash> {
+    fn put_encoded(&self, src: &mut dyn Read, enc: &o5s_core::Encoding) -> Result<Hash> {
         let opts = PutOpts { chunker: ChunkerKind::from_id(enc.chunker.as_deref())?, group_width: enc.group_width };
         match &enc.derive {
             None => self.put_stream_opts(opts, src),
             Some(d) => match d.patch {
-                pico2peta_core::PatchFormat::Xor => {
+                o5s_core::PatchFormat::Xor => {
                     let segs: Vec<DeltaSeg> =
                         d.segments.iter().map(|&(dst, src, len)| DeltaSeg { dst, src, len }).collect();
                     let segs = if segs.is_empty() { None } else { Some(&segs[..]) };
                     self.put_delta_opts(&d.base, segs, src, opts)
                 }
-                pico2peta_core::PatchFormat::XorAnchored => self.put_delta_anchored(&d.base, src, opts),
+                o5s_core::PatchFormat::XorAnchored => self.put_delta_anchored(&d.base, src, opts),
                 _ => Err(Error::Unsupported("patch format not supported by this store")),
             },
         }
@@ -2541,11 +2541,11 @@ struct Level {
     len: u64,
 }
 
-/// Turns a length-reporting streaming [`pico2peta_chunk::Chunker`] over a
+/// Turns a length-reporting streaming [`o5s_chunk::Chunker`] over a
 /// reader into an iterator of owned chunks.
 struct LengthChunks<R> {
     r: R,
-    c: Box<dyn pico2peta_chunk::Chunker>,
+    c: Box<dyn o5s_chunk::Chunker>,
     buf: Vec<u8>,
     start: usize,
     lens: std::collections::VecDeque<usize>,
@@ -2557,7 +2557,7 @@ struct LengthChunks<R> {
 const LENGTH_CHUNKS_BLOCK: usize = 1 << 20;
 
 impl<R: Read> LengthChunks<R> {
-    fn new(r: R, c: Box<dyn pico2peta_chunk::Chunker>) -> Self {
+    fn new(r: R, c: Box<dyn o5s_chunk::Chunker>) -> Self {
         LengthChunks { r, c, buf: Vec::new(), start: 0, lens: Default::default(), scratch: Vec::new(), done: false }
     }
 }
@@ -2727,7 +2727,7 @@ fn zstd_compress(raw: &[u8], level: i32) -> Option<Vec<u8>> {
 /// kernel's decision (`objects::accept_read`, P1).
 #[inline]
 fn digest_ok(key: &Hash, digest: &Hash) -> bool {
-    pico2peta_kernel::objects::accept_read(key.as_bytes(), digest.as_bytes())
+    o5s_kernel::objects::accept_read(key.as_bytes(), digest.as_bytes())
 }
 
 /// Below this many bytes a `put_many` batch is hashed and compressed on the
@@ -2980,7 +2980,7 @@ impl ChunkReader {
             let behind = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let b = behind.clone();
             std::thread::Builder::new()
-                .name("p2p-verify".into())
+                .name("o5s-verify".into())
                 .spawn(move || {
                     let offload = || b.swap(false, std::sync::atomic::Ordering::Relaxed);
                     crate::phash::hash_stream_with(rx, span, hash_threads(), offload)
@@ -3043,7 +3043,7 @@ impl ChunkReader {
         for _ in 0..workers {
             let rx = rx.clone();
             let store = self.store.clone();
-            let spawned = std::thread::Builder::new().name("p2p-readahead".into()).spawn(move || {
+            let spawned = std::thread::Builder::new().name("o5s-readahead".into()).spawn(move || {
                 loop {
                     let job = match rx.lock() {
                         Ok(r) => r.recv(),

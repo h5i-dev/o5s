@@ -11,10 +11,10 @@
 //! scale, because the core RefStore keeps every ref in memory.
 //!
 //! # Format (all integers little-endian)
-//! * Segment: `b"P2PSEG01"`, `count: u64`, then `count` entries sorted by key
+//! * Segment: `b"O5SSEG01"`, `count: u64`, then `count` entries sorted by key
 //!   with no duplicates. An entry is 72 bytes: `key: [u8; 32]`, `hash: [u8; 32]`,
 //!   `aux: u64`.
-//! * Root: `b"P2PMAP01"`, `n: u32`, then `n` items of `(segment: [u8; 32], count: u64)`,
+//! * Root: `b"O5SMAP01"`, `n: u32`, then `n` items of `(segment: [u8; 32], count: u64)`,
 //!   oldest first.
 //!
 //! Segments of one map are pairwise disjoint (an insert only writes keys that
@@ -38,7 +38,7 @@
 //! target has been collected is a miss (`get_live`), and re-inserting it heals
 //! the entry, because the value is a pure function of the key's content.
 
-use pico2peta_core::{Error, Hash, Name, ObjectStore, RefValue, ReplaceOutcome, Repository, Result};
+use o5s_core::{Error, Hash, Name, ObjectStore, RefValue, ReplaceOutcome, Repository, Result};
 use std::collections::HashMap;
 use std::io::Read;
 use std::sync::{Arc, Mutex};
@@ -55,9 +55,9 @@ fn jitter(cap: u64) -> u64 {
 pub type IdMap = SegMap;
 
 /// Segment magic.
-pub const SEG_MAGIC: &[u8; 8] = b"P2PSEG01";
+pub const SEG_MAGIC: &[u8; 8] = b"O5SSEG01";
 /// Root magic.
-pub const ROOT_MAGIC: &[u8; 8] = b"P2PMAP01";
+pub const ROOT_MAGIC: &[u8; 8] = b"O5SMAP01";
 const SEG_HEADER: u64 = 16;
 /// Bytes per segment entry.
 pub const ENTRY: u64 = 72;
@@ -768,7 +768,7 @@ mod tests {
         let mut unsorted = e.clone();
         unsorted.swap(0, 1);
         assert!(decode_segment(&encode_segment(&unsorted)).is_err());
-        for bad in [&b""[..], b"P2PSEG01", b"P2PSEG01\x01\0\0\0\0\0\0\0", b"P2PMAP01\x05\0\0\0", b"xxxxxxxxxxxxxxxx"] {
+        for bad in [&b""[..], b"O5SSEG01", b"O5SSEG01\x01\0\0\0\0\0\0\0", b"O5SMAP01\x05\0\0\0", b"xxxxxxxxxxxxxxxx"] {
             assert!(decode_segment(bad).is_err());
             assert!(Root::decode(bad).is_err());
         }

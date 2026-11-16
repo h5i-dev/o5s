@@ -1,4 +1,4 @@
-//! Policy-gated promotion (`pico2peta_attest::promote`): may `src`'s object
+//! Policy-gated promotion (`o5s_attest::promote`): may `src`'s object
 //! become `dst`'s, and with which OCC batch?
 //!
 //! The shell verifies signatures and reads provenance (trusted: crypto and

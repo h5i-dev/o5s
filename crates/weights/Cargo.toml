@@ -1,14 +1,14 @@
 [package]
-name = "pico2peta-weights"
+name = "o5s-weights"
 description = "Model-weights kind: tensor-aligned XOR deltas for safetensors checkpoints"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-pico2peta-core.workspace = true
-pico2peta-pack.workspace = true
-pico2peta-repo.workspace = true
+o5s-core.workspace = true
+o5s-pack.workspace = true
+o5s-repo.workspace = true
 serde_json = "1"
 
 [dev-dependencies]

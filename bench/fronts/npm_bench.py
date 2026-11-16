@@ -1,17 +1,17 @@
-"""PLAN §6.5, npm: pico2peta's npm front as a proxy-cache of registry.npmjs.org vs verdaccio.
+"""PLAN §6.5, npm: o5s's npm front as a proxy-cache of registry.npmjs.org vs verdaccio.
 
 Per system and run (a fresh, empty proxy each run): for each of 50 packages, `npm pack <pkg>`
 (fetches the packument and that one tarball) once cold and once hot, each with a fresh npm
-cache. Then stored bytes, and the check that pico2peta fetched each tarball once.
+cache. Then stored bytes, and the check that o5s fetched each tarball once.
 
-usage: npm_bench.py <pico2peta-server binary>
+usage: npm_bench.py <o5s-server binary>
 """
 import os
 import shutil
 import sys
 import time
 
-from common import Proc, RUNS, TOKEN, TOOLS, check, du, free_port, log, metric_value, pico_server, record, run, wait_port, workdir
+from common import Proc, RUNS, TOKEN, TOOLS, check, du, free_port, log, metric_value, o5s_server, record, run, wait_port, workdir
 
 VERDACCIO = f"{TOOLS}/verdaccio/node_modules/.bin/verdaccio"
 UPSTREAM = "https://registry.npmjs.org"
@@ -70,16 +70,16 @@ def main():
                 record("npm", "stored_bytes", "verdaccio", du(store), "B", run=i)
             finally:
                 v.stop()
-            p2p = os.path.join(d, "p2p")
-            os.makedirs(p2p)
-            with pico_server(p2p, server_bin, extra_toml=f'\n[npm.upstream.mirror]\nurl = "{UPSTREAM}"\n') as (base, repo):
+            o5s = os.path.join(d, "o5s")
+            os.makedirs(o5s)
+            with o5s_server(o5s, server_bin, extra_toml=f'\n[npm.upstream.mirror]\nurl = "{UPSTREAM}"\n') as (base, repo):
                 host = base.removeprefix("http://")
-                rc = os.path.join(d, "p2p.npmrc")
+                rc = os.path.join(d, "o5s.npmrc")
                 open(rc, "w").write(f"registry=http://{host}/npm/mirror/\n//{host}/npm/mirror/:_authToken={TOKEN}\n")
-                log("npm: pico2peta run", i)
-                n = bench_pass("pico2peta", rc, d, i)
-                record("npm", "stored_bytes", "pico2peta", du(repo), "B", run=i)
-                fetched = metric_value(base, "p2p_upstream_fetches", 'front="npm"')
+                log("npm: o5s run", i)
+                n = bench_pass("o5s", rc, d, i)
+                record("npm", "stored_bytes", "o5s", du(repo), "B", run=i)
+                fetched = metric_value(base, "o5s_upstream_fetches", 'front="npm"')
                 check("npm", f"one_fetch_per_file_run{i}", fetched == len(PACKAGES), f"{fetched} upstream fetches for {len(PACKAGES)} packages")
                 check("npm", f"all_files_run{i}", n == len(PACKAGES), f"{n} tarballs")
 

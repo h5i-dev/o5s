@@ -12,7 +12,7 @@
 //! is spread over cores.
 
 use blake3::hazmat::{ChainingValue, HasherExt, Mode, merge_subtrees_non_root, merge_subtrees_root};
-use pico2peta_core::Hash;
+use o5s_core::Hash;
 
 /// Segment size: a power-of-two multiple of BLAKE3's 1 KiB chunk.
 pub const SEGMENT: usize = 1 << 20;
@@ -283,7 +283,7 @@ fn start_workers(n: usize) -> Option<std::sync::mpsc::Sender<Job>> {
     let mut any = false;
     for _ in 0..n {
         let rx = rx.clone();
-        let spawned = std::thread::Builder::new().name("p2p-verify-seg".into()).spawn(move || {
+        let spawned = std::thread::Builder::new().name("o5s-verify-seg".into()).spawn(move || {
             loop {
                 let job = match rx.lock() {
                     Ok(r) => r.recv(),

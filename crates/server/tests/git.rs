@@ -10,9 +10,9 @@ fn have_git() -> bool {
 }
 
 /// Runs git in `dir`; returns (success, combined output). Protocol version from
-/// `P2P_GIT_PROTOCOL` (default 2, git's default; pushes always use v0/v1).
+/// `O5S_GIT_PROTOCOL` (default 2, git's default; pushes always use v0/v1).
 fn git(dir: &Path, args: &[&str]) -> (bool, String) {
-    git_v(dir, args, &std::env::var("P2P_GIT_PROTOCOL").unwrap_or_else(|_| "2".into()))
+    git_v(dir, args, &std::env::var("O5S_GIT_PROTOCOL").unwrap_or_else(|_| "2".into()))
 }
 
 fn git_v(dir: &Path, args: &[&str], version: &str) -> (bool, String) {
@@ -170,8 +170,8 @@ fn gc_tracer_follows_git_objects() {
     commit(&a, "f", "1", "one");
     commit(&a, "f", "2", "two");
     ok(&a, &["push", "-q", &url(&s, ALICE, "team/g"), "main"]);
-    let repo = pico2peta_repo::LocalRepo::open(s.dir.path().join("repo")).unwrap();
-    let tracer = pico2peta_server::git::GitTracer::new(std::sync::Arc::new(repo.clone())).unwrap();
+    let repo = o5s_repo::LocalRepo::open(s.dir.path().join("repo")).unwrap();
+    let tracer = o5s_server::git::GitTracer::new(std::sync::Arc::new(repo.clone())).unwrap();
     let tip = repo.resolve(&n("git/team/g/refs/heads/main")).unwrap().unwrap().hash;
     // commit -> tree + parent
     let kids = tracer.children_of(&tip, &repo).unwrap().unwrap();
@@ -211,17 +211,17 @@ fn dir_bytes(p: &Path) -> u64 {
 
 /// Measurement (opt-in): import a real mirror, run a grouped aggressive repack,
 /// compare with git's pack size, and verify the repo still clones identically.
-///   P2P_GIT_MIRROR=/mnt/scratch/pico2peta/bench-data/mirrors/ripgrep.git \
-///   cargo test --release -p pico2peta-server --test git grouped_repack -- --ignored --nocapture
+///   O5S_GIT_MIRROR=/mnt/scratch/pico2peta/bench-data/mirrors/ripgrep.git \
+///   cargo test --release -p o5s-server --test git grouped_repack -- --ignored --nocapture
 #[test]
 #[ignore]
 fn grouped_repack_vs_git() {
-    let Ok(mirror) = std::env::var("P2P_GIT_MIRROR") else { return };
+    let Ok(mirror) = std::env::var("O5S_GIT_MIRROR") else { return };
     let mirror = std::path::PathBuf::from(mirror);
     let s = git_server();
     let u = url(&s, ALICE, "team/m");
-    // P2P_GIT_ALL_REFS=1: every ref (incl. refs/pull/*), i.e. the Experiment 1 corpus.
-    let all = std::env::var("P2P_GIT_ALL_REFS").is_ok_and(|v| v == "1");
+    // O5S_GIT_ALL_REFS=1: every ref (incl. refs/pull/*), i.e. the Experiment 1 corpus.
+    let all = std::env::var("O5S_GIT_ALL_REFS").is_ok_and(|v| v == "1");
     let specs: Vec<&str> =
         if all { vec!["refs/*:refs/*"] } else { vec!["refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"] };
     let mut args = vec!["push", "-q", &u];
@@ -229,25 +229,21 @@ fn grouped_repack_vs_git() {
     ok(&mirror, &args);
     let objects = s.dir.path().join("repo/objects");
     let before = dir_bytes(&objects);
-    let repo = pico2peta_repo::LocalRepo::open(s.dir.path().join("repo")).unwrap();
+    let repo = o5s_repo::LocalRepo::open(s.dir.path().join("repo")).unwrap();
     repo.flush().unwrap();
-    let shared: std::sync::Arc<dyn pico2peta_core::Repository> = std::sync::Arc::new(repo.clone());
-    let tracer = pico2peta_prov::ProvTracer {
-        inner: pico2peta_server::api::AdapterTracer {
-            git: pico2peta_server::git::GitTracer::new(shared.clone()).unwrap(),
-            oci: pico2peta_server::oci::OciTracer::new(shared),
+    let shared: std::sync::Arc<dyn o5s_core::Repository> = std::sync::Arc::new(repo.clone());
+    let tracer = o5s_prov::ProvTracer {
+        inner: o5s_server::api::AdapterTracer {
+            git: o5s_server::git::GitTracer::new(shared.clone()).unwrap(),
+            oci: o5s_server::oci::OciTracer::new(shared),
         },
     };
-    let opts = pico2peta_repo::GcOptions {
-        grace: Duration::ZERO,
-        allow_short_grace: true,
-        repack_all: true,
-        ..Default::default()
-    };
+    let opts =
+        o5s_repo::GcOptions { grace: Duration::ZERO, allow_short_grace: true, repack_all: true, ..Default::default() };
     let t = std::time::Instant::now();
     for _ in 0..3 {
         std::thread::sleep(Duration::from_millis(1100));
-        let r = repo.gc_with(&opts, &tracer, Some(&pico2peta_server::git::GitGrouper)).unwrap();
+        let r = repo.gc_with(&opts, &tracer, Some(&o5s_server::git::GitGrouper)).unwrap();
         assert!(r.dangling_refs.is_empty(), "{r:?}");
         eprintln!("gc phase: {r:?}");
     }
@@ -556,7 +552,7 @@ fn clone_pack_cache() {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    assert_eq!(&admin.get(&admin.resolve(&graph).unwrap().unwrap().hash, None).unwrap()[..8], b"P2PCGR01");
+    assert_eq!(&admin.get(&admin.resolve(&graph).unwrap().unwrap().hash, None).unwrap()[..8], b"O5SCGR01");
     // From the cache: same refs, same pack object afterwards (nothing re-stored).
     assert_eq!(clone_ok("c2", "2"), r1);
     assert_eq!(clone_ok("c3", "0"), r1);
@@ -564,7 +560,7 @@ fn clone_pack_cache() {
     assert_eq!(admin.resolve(&cache).unwrap().unwrap().hash, p1);
     // The cached object is the pack after a header; the clone got exactly those pack bytes.
     let cached = admin.get(&p1, None).unwrap();
-    assert_eq!(&cached[..8], b"P2PCPK01");
+    assert_eq!(&cached[..8], b"O5SCPK01");
     assert_eq!(&cached[40..44], b"PACK");
     // A push changes the wants: the next clone encodes and re-caches.
     commit(&a, "g", "new\n", "c5");

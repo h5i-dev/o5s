@@ -1,14 +1,14 @@
 [package]
-name = "pico2peta-pack"
+name = "o5s-pack"
 description = "Physical layer: append-only packs, index, bundling, FastCDC chunking, storage backends"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-pico2peta-kernel.workspace = true
-pico2peta-core.workspace = true
-pico2peta-chunk.workspace = true
+o5s-kernel.workspace = true
+o5s-core.workspace = true
+o5s-chunk.workspace = true
 blake3.workspace = true
 fastcdc.workspace = true
 zstd.workspace = true

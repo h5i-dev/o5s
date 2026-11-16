@@ -76,9 +76,9 @@ fn oidc_tokens() {
     });
     let iss = issuer.clone();
     let s = TestServer::start(move |c| {
-        c.auth.oidc = Some(pico2peta_server::config::OidcSection {
+        c.auth.oidc = Some(o5s_server::config::OidcSection {
             issuer: iss.clone(),
-            audience: "pico2peta".into(),
+            audience: "o5s".into(),
             jwks_url: None,
             principal_claim: "email".into(),
             principal_prefix: "oidc:".into(),
@@ -89,10 +89,10 @@ fn oidc_tokens() {
     let claims = |aud: &str, exp: u64| serde_json::json!({"iss": issuer, "aud": aud, "exp": exp, "sub": "123", "email": "dev@example.com"});
     let who = |tok: &str| http().get(format!("{}/v1/whoami", s.url())).bearer_auth(tok).send().unwrap();
 
-    let good = sign(&pem1, "k1", claims("pico2peta", now() + 600));
+    let good = sign(&pem1, "k1", claims("o5s", now() + 600));
     let r = who(&good);
     assert_eq!(r.status(), 200);
-    assert_eq!(r.json::<pico2peta_client::wire::WhoAmI>().unwrap().principal, "oidc:dev@example.com");
+    assert_eq!(r.json::<o5s_client::wire::WhoAmI>().unwrap().principal, "oidc:dev@example.com");
     // Authorization works with the mapped principal.
     let c = RemoteRepo::new(&s.url(), Some(good.clone()), ClientConfig::default()).unwrap();
     let h = c.put(b"from oidc").unwrap();
@@ -100,20 +100,20 @@ fn oidc_tokens() {
     assert!(c.resolve(&n("alice/x")).is_err());
 
     assert_eq!(who(&sign(&pem1, "k1", claims("other-aud", now() + 600))).status(), 401, "wrong audience");
-    assert_eq!(who(&sign(&pem1, "k1", claims("pico2peta", now() - 600))).status(), 401, "expired");
-    assert_eq!(who(&sign(&pem2, "k1", claims("pico2peta", now() + 600))).status(), 401, "bad signature");
+    assert_eq!(who(&sign(&pem1, "k1", claims("o5s", now() - 600))).status(), 401, "expired");
+    assert_eq!(who(&sign(&pem2, "k1", claims("o5s", now() + 600))).status(), 401, "bad signature");
     let mut t = good.clone();
     t.push('x');
     assert_eq!(who(&t).status(), 401, "tampered");
     // Rotation: a token with a new kid is accepted once the JWKS publishes it.
-    let rotated = sign(&pem2, "k2", claims("pico2peta", now() + 600));
+    let rotated = sign(&pem2, "k2", claims("o5s", now() + 600));
     jwks.lock().unwrap()["keys"]
         .as_array_mut()
         .unwrap()
         .push(serde_json::json!({"kty": "RSA", "kid": "k2", "alg": "RS256", "n": n2, "e": "AQAB"}));
     assert_eq!(who(&rotated).status(), 200, "unknown kid triggers a JWKS refetch");
     // A kid the issuer never published stays rejected.
-    assert_eq!(who(&sign(&pem2, "nope", claims("pico2peta", now() + 600))).status(), 401);
+    assert_eq!(who(&sign(&pem2, "nope", claims("o5s", now() + 600))).status(), 401);
     // Static tokens keep working alongside OIDC.
     assert_eq!(who(ALICE).status(), 200);
 }

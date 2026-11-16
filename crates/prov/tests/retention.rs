@@ -1,8 +1,8 @@
 //! Retention per namespace profile, then GC.
-use pico2peta_core::{Name, ObjectStore, Observed, Repository, Rule};
-use pico2peta_prov::Record;
-use pico2peta_prov::retention::{apply, version_cmp};
-use pico2peta_repo::{GcOptions, LocalRepo, PackConfig, Profile, RepoConfig};
+use o5s_core::{Name, ObjectStore, Observed, Repository, Rule};
+use o5s_prov::Record;
+use o5s_prov::retention::{apply, version_cmp};
+use o5s_repo::{GcOptions, LocalRepo, PackConfig, Profile, RepoConfig};
 use std::cmp::Ordering;
 
 fn n(s: &str) -> Name {
@@ -46,7 +46,7 @@ fn keeps_newest_n_respects_rules_and_regenerability_then_gc_collects() {
     // models/: two old checkpoints, only one regenerable from stored inputs.
     let data = r.put(b"training data").unwrap();
     let regen = set("models/m/1", b"checkpoint 1 (regenerable)");
-    pico2peta_prov::record(
+    o5s_prov::record(
         &r,
         &log,
         &[Record {
@@ -77,7 +77,7 @@ fn keeps_newest_n_respects_rules_and_regenerability_then_gc_collects() {
     // GC then collects the deleted versions' objects (nothing else references them).
     r.flush().unwrap();
     let opts = GcOptions { grace: std::time::Duration::ZERO, allow_short_grace: true, ..GcOptions::default() };
-    let tracer = pico2peta_prov::ProvTracer { inner: pico2peta_repo::OpaqueObjects };
+    let tracer = o5s_prov::ProvTracer { inner: o5s_repo::OpaqueObjects };
     for _ in 0..3 {
         r.gc(&opts, &tracer).unwrap();
     }

@@ -102,7 +102,7 @@ sessions, so every number carries the 1-minute load at the time.
 
 - **Measured code:** `edd8c8b` (the core is unchanged from there to `40b6ed6`; only the CLI's hex parser and
   docs changed). 2026-11-16, three runs under the bench lock, load 2.6–4.9.
-- **Raw data:** `bench/baseline/generic/edd8c8b-3runs.txt`. Command: `p2p-bench generic <dir> 1024`.
+- **Raw data:** `bench/baseline/generic/edd8c8b-3runs.txt`. Command: `o5s-bench generic <dir> 1024`.
 
 | metric | runs | median | threshold | tier |
 |---|---|---|---|---|
@@ -149,6 +149,6 @@ sessions, so every number carries the 1-minute load at the time.
 These are in BENCH.md with their own dates, commits and loads; they are not part of the §6.8 comparison unless
 rerun first:
 - scale names at 10⁷ (window 1: replace 7.5k/s, resolve p99 7.6 µs, open 6.4 s, RSS 2.1 GB);
-- model-weights versioning (`p2p-bench weights`), byte-grouping and level sweeps;
+- model-weights versioning (`o5s-bench weights`), byte-grouping and level sweeps;
 - the git push A/B of the put/get pass (39.5 → 23.5 s, measured with a local call-site change; superseded by net's
   index-pack rework, whose result is in §4 as `first_push_s`).

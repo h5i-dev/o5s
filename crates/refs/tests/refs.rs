@@ -1,6 +1,6 @@
-use pico2peta_core::fault::Faults;
-use pico2peta_core::{Error, Hash, Name, Observed, RefValue, ReplaceOutcome, Result, Rule};
-use pico2peta_refs::RefStore;
+use o5s_core::fault::Faults;
+use o5s_core::{Error, Hash, Name, Observed, RefValue, ReplaceOutcome, Result, Rule};
+use o5s_refs::RefStore;
 use proptest::prelude::*;
 use std::collections::BTreeMap;
 
@@ -325,8 +325,8 @@ proptest! {
         // Both engines: the local journal and the create-only log on a Backend.
         let open = |d: &std::path::Path| -> RefStore {
             if use_log {
-                let b: std::sync::Arc<dyn pico2peta_core::backend::Backend> =
-                    std::sync::Arc::new(pico2peta_core::backend::LocalDisk::new(d.join("b")).unwrap());
+                let b: std::sync::Arc<dyn o5s_core::backend::Backend> =
+                    std::sync::Arc::new(o5s_core::backend::LocalDisk::new(d.join("b")).unwrap());
                 let r = RefStore::open_backend(b, "refs/").unwrap();
                 r.set_compact_threshold(4);
                 r
@@ -379,8 +379,8 @@ proptest! {
                     let ups: Vec<(Name, Hash)> = targets.iter().enumerate().map(|(i, (t, _))| (n(NAMES[*t]), h(v as u64 + i as u64))).collect();
                     let rs2: Vec<(Name, Observed)> = rs.iter().map(|(a, o)| (n(a), *o)).collect();
                     match (expect, r.replace_many(&ups, &rs2, &yes)) {
-                        (Ok(true), Ok(pico2peta_core::ReplaceManyOutcome::Ok { .. })) => {}
-                        (Ok(false), Ok(pico2peta_core::ReplaceManyOutcome::Conflict { .. })) => {}
+                        (Ok(true), Ok(o5s_core::ReplaceManyOutcome::Ok { .. })) => {}
+                        (Ok(false), Ok(o5s_core::ReplaceManyOutcome::Conflict { .. })) => {}
                         (Err(code), Err(e)) => prop_assert_eq!(code, e.code()),
                         (e, g) => prop_assert!(false, "many: model {:?} vs impl {:?}", e, g),
                     }
@@ -425,8 +425,8 @@ proptest! {
     #![proptest_config(ProptestConfig { cases: 2000, ..ProptestConfig::default() })]
     #[test]
     fn journal_decoder_total(raw in proptest::collection::vec(any::<u8>(), 0..300)) {
-        let _ = pico2peta_refs::parse_records(&raw);
-        let _ = pico2peta_refs::decode_payload(&raw);
+        let _ = o5s_refs::parse_records(&raw);
+        let _ = o5s_refs::decode_payload(&raw);
     }
 
     /// Opening a journal with arbitrary bytes after a valid prefix never panics.
@@ -565,7 +565,7 @@ fn replace_many_is_atomic() {
             &yes,
         )
         .unwrap();
-    assert_eq!(out, pico2peta_core::ReplaceManyOutcome::Ok { versions: vec![1, 1] });
+    assert_eq!(out, o5s_core::ReplaceManyOutcome::Ok { versions: vec![1, 1] });
     // One stale entry: nothing changes.
     let out = r
         .replace_many(
@@ -574,7 +574,7 @@ fn replace_many_is_atomic() {
             &yes,
         )
         .unwrap();
-    assert!(matches!(out, pico2peta_core::ReplaceManyOutcome::Conflict { .. }));
+    assert!(matches!(out, o5s_core::ReplaceManyOutcome::Conflict { .. }));
     assert_eq!(r.resolve(&a).unwrap().unwrap().hash, h(1));
     // A rule violation on one name: nothing changes.
     r.replace(&p, &[(p.clone(), Observed::Absent)], h(5), &yes).unwrap();
@@ -643,7 +643,7 @@ fn update_many_mixes_sets_and_deletes_atomically() {
             &yes,
         )
         .unwrap();
-    assert_eq!(out, pico2peta_core::ReplaceManyOutcome::Ok { versions: vec![1, 1] });
+    assert_eq!(out, o5s_core::ReplaceManyOutcome::Ok { versions: vec![1, 1] });
     assert_eq!(r.resolve(&a).unwrap(), None);
     // A forbidden delete of an immutable tag aborts the whole transaction.
     let e = r.update_many(
@@ -674,7 +674,7 @@ fn large_batch_is_durable_and_visible_to_other_handles() {
     let names: Vec<Name> = (0..6000).map(|i| n(&format!("big/{i}/{long}"))).collect();
     let ups: Vec<(Name, Hash)> = names.iter().map(|nm| (nm.clone(), h(1))).collect();
     let rs: Vec<(Name, Observed)> = names.iter().map(|nm| (nm.clone(), Observed::Absent)).collect();
-    assert!(matches!(a.replace_many(&ups, &rs, &yes).unwrap(), pico2peta_core::ReplaceManyOutcome::Ok { .. }));
+    assert!(matches!(a.replace_many(&ups, &rs, &yes).unwrap(), o5s_core::ReplaceManyOutcome::Ok { .. }));
     // Another handle sees it, and its next commit must not truncate it.
     assert_eq!(b.list("big").unwrap().len(), 6000);
     let z = n("z");

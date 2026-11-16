@@ -1,8 +1,8 @@
 //! The per-cell reachability index (object-read authorization).
 
-use pico2peta_core::{Hash, Name, ObjectStore, Observed, RefValue, Repository};
-use pico2peta_repo::reach::ReachIndex;
-use pico2peta_repo::{LocalRepo, PackConfig};
+use o5s_core::{Hash, Name, ObjectStore, Observed, RefValue, Repository};
+use o5s_repo::reach::ReachIndex;
+use o5s_repo::{LocalRepo, PackConfig};
 
 fn set(r: &LocalRepo, name: &str, h: Hash) {
     let n = Name::new(name).unwrap();

@@ -1,9 +1,9 @@
 //! Shared test harness: a real server on a loopback port.
 #![allow(dead_code, unused_imports)]
 
-pub use pico2peta_client::{ClientConfig, RemoteRepo, wire};
-pub use pico2peta_core::{Error, Hash, Name, ObjectStore, Observed, ReplaceOutcome, Repository, Rule};
-pub use pico2peta_server::config::{Access, AuditSection, AuthSection, Config, PolicyEntry, RepoSection, TokenEntry};
+pub use o5s_client::{ClientConfig, RemoteRepo, wire};
+pub use o5s_core::{Error, Hash, Name, ObjectStore, Observed, ReplaceOutcome, Repository, Rule};
+pub use o5s_server::config::{Access, AuditSection, AuthSection, Config, PolicyEntry, RepoSection, TokenEntry};
 pub use std::io::Read;
 pub use std::net::SocketAddr;
 pub use std::path::PathBuf;
@@ -18,7 +18,7 @@ pub fn hex(b: &[u8]) -> String {
 }
 
 pub fn token(principal: &str, secret: &str) -> TokenEntry {
-    TokenEntry { principal: principal.into(), sha256: hex(&pico2peta_server::auth::sha256(secret.as_bytes())) }
+    TokenEntry { principal: principal.into(), sha256: hex(&o5s_server::auth::sha256(secret.as_bytes())) }
 }
 
 pub fn grant(p: &str, ns: &str, a: Access) -> PolicyEntry {
@@ -28,7 +28,7 @@ pub fn grant(p: &str, ns: &str, a: Access) -> PolicyEntry {
 pub struct TestServer {
     pub addr: SocketAddr,
     pub dir: tempfile::TempDir,
-    pub state: std::sync::Arc<pico2peta_server::api::AppState>,
+    pub state: std::sync::Arc<o5s_server::api::AppState>,
     pub stop: Option<tokio::sync::oneshot::Sender<()>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -67,7 +67,7 @@ impl TestServer {
             limits: Vec::new(),
         };
         tweak(&mut cfg);
-        let state = pico2peta_server::build_state(&cfg).unwrap();
+        let state = o5s_server::build_state(&cfg).unwrap();
         let state_keep = state.clone();
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
         let (addr_tx, addr_rx) = std::sync::mpsc::channel();
@@ -78,7 +78,7 @@ impl TestServer {
             rt.block_on(async move {
                 let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
                 addr_tx.send(l.local_addr().unwrap()).unwrap();
-                pico2peta_server::serve(l, state, timeout, grace, async {
+                o5s_server::serve(l, state, timeout, grace, async {
                     let _ = stop_rx.await;
                 })
                 .await

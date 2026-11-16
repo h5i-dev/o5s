@@ -6,11 +6,11 @@ Per (front, metric, corpus, system), the medians are compared. A metric fails wh
 by more than max(3 %, its baseline range (max-min)/median). Worse = higher, except throughputs
 (`_mbps`, `_per_s`, `throughput`), where lower is worse. Functional checks must all be true. With
 the two reports, tiers are compared too (no tier may get worse). Reference systems (the
-specialists) are listed but are not pico2peta's regressions.
+specialists) are listed but are not o5s's regressions.
 """
-import collections, json, statistics, sys
+import collections, json, re, statistics, sys
 
-PICO = ("pico2peta",)
+O5S = ("o5s",)
 TIER = {"STRONG PASS": 3, "PASS": 2, "FAIL": 1}
 
 
@@ -19,6 +19,8 @@ def load(p):
     func = {}
     for line in open(p):
         r = json.loads(line)
+        # Rows recorded before the rename (2026-11-16) name the system "pico2peta".
+        r["system"] = re.sub(r"^pico2peta", "o5s", r["system"])
         v = r["value"]
         if r["metric"].startswith("functional"):
             func[(r["front"], r["metric"])] = v
@@ -56,7 +58,7 @@ def main():
         delta = (hm - bm) / bm if bm else 0.0
         worse = delta if higher_is_worse(k[1]) else -delta
         ok = worse <= allow
-        ref = k[3] not in PICO and not k[3].startswith("pico2peta")
+        ref = k[3] not in PICO and not k[3].startswith("o5s")
         tag = "ref" if ref else ("ok" if ok else "FAIL")
         lines.append(f"| {k[0]} | {k[1]} | {k[2]} | {k[3]} | {bm:.4g} | {hm:.4g} | {delta:+.1%} | {allow:.1%} | {tag} |")
         if not ok and not ref:

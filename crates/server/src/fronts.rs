@@ -1,4 +1,4 @@
-//! The server's domain fronts on the core Front API (`pico2peta_repo::front`).
+//! The server's domain fronts on the core Front API (`o5s_repo::front`).
 //!
 //! | front | claims | GC tracer (snapshot per run) | repack grouping |
 //! |---|---|---|---|
@@ -19,10 +19,10 @@
 
 use crate::git::{GitGrouper, GitTracer};
 use crate::oci::OciTracer;
-use pico2peta_core::{Error, Hash, ObjectStore, Repository, Result};
-use pico2peta_repo::LocalRepo;
-use pico2peta_repo::front::{Front, FrontRegistry};
-use pico2peta_repo::gc::{GroupKey, Grouper, Tracer};
+use o5s_core::{Error, Hash, ObjectStore, Repository, Result};
+use o5s_repo::LocalRepo;
+use o5s_repo::front::{Front, FrontRegistry};
+use o5s_repo::gc::{GroupKey, Grouper, Tracer};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock, Weak};
 
@@ -165,7 +165,7 @@ impl Fronts {
             .with(Arc::new(PypiFront))?
             .with(Arc::new(NpmFront))?
             .with(Arc::new(MavenFront))?
-            .with(Arc::new(pico2peta_weights::SafetensorsFront))?;
+            .with(Arc::new(o5s_weights::SafetensorsFront))?;
         let repo = repo.with_fronts(reg)?;
         let mut handles: HashMap<String, Arc<dyn Repository>> = HashMap::new();
         for (id, slot) in [("git", &git.handle), ("oci", &oci.handle)] {

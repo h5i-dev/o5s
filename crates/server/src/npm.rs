@@ -12,9 +12,9 @@
 //!   it; later downloads, including while the upstream is down, come from the store.
 //!
 //! **Storage.** Version `v` of package `p` in registry `r` is the name `npm/<r>/<seg>/<v>`
-//! → a record (`P2PNPMV1`, content hash, JSON with the version manifest and digests).
+//! → a record (`O5SNPMV1`, content hash, JSON with the version manifest and digests).
 //! `<seg>` is `p`, or `scope+name` for `@scope/name` ('+' cannot occur in npm names).
-//! Dist-tags are `npm/<r>/<seg>/_tags/<tag>` → a `P2PNPMT1` blob holding the version. The
+//! Dist-tags are `npm/<r>/<seg>/_tags/<tag>` → a `O5SNPMT1` blob holding the version. The
 //! `npm` front claims `npm/`, and its GC tracer follows record → tarball. Authorization is
 //! on `npm/<r>`.
 
@@ -31,15 +31,15 @@ use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use pico2peta_core::{Error, Hash, Name, ObjectStore, Observed, ReplaceOutcome, Repository, Result};
+use o5s_core::{Error, Hash, Name, ObjectStore, Observed, ReplaceOutcome, Repository, Result};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-const RECORD_MAGIC: &[u8; 8] = b"P2PNPMV1";
-const TAG_MAGIC: &[u8; 8] = b"P2PNPMT1";
-const DEPRECATED_MAGIC: &[u8; 8] = b"P2PNPMD1";
+const RECORD_MAGIC: &[u8; 8] = b"O5SNPMV1";
+const TAG_MAGIC: &[u8; 8] = b"O5SNPMT1";
+const DEPRECATED_MAGIC: &[u8; 8] = b"O5SNPMD1";
 const MAX_PUBLISH_BODY: usize = 512 << 20;
 
 pub struct NpmState {
@@ -56,7 +56,7 @@ type CachedDoc = (Instant, Arc<Value>);
 impl NpmState {
     pub fn new(
         repo: Arc<dyn Repository>,
-        local: Option<pico2peta_repo::LocalRepo>,
+        local: Option<o5s_repo::LocalRepo>,
         upstreams: BTreeMap<String, Upstream>,
     ) -> std::result::Result<NpmState, String> {
         let http = crate::pkg::http_client(&upstreams.values().collect::<Vec<_>>())?;
@@ -790,7 +790,7 @@ async fn update_document(
     let current = doc_rev(&local, &deps);
     // A named revision must be the current one (the extracted kernel's `publish::decide_rev`).
     if let Some(r) = rev.or_else(|| doc["_rev"].as_str())
-        && !pico2peta_net_kernel::publish::decide_rev(&r.as_bytes().to_vec(), &current.as_bytes().to_vec())
+        && !o5s_net_kernel::publish::decide_rev(&r.as_bytes().to_vec(), &current.as_bytes().to_vec())
     {
         return npm_err(StatusCode::CONFLICT, "document update conflict: the package changed since it was read");
     }
@@ -868,9 +868,7 @@ async fn unpublish_all(
         Err(r) => return r,
     };
     let current = doc_rev(&local, &deps);
-    if rev.is_some_and(|r| {
-        !pico2peta_net_kernel::publish::decide_rev(&r.as_bytes().to_vec(), &current.as_bytes().to_vec())
-    }) {
+    if rev.is_some_and(|r| !o5s_net_kernel::publish::decide_rev(&r.as_bytes().to_vec(), &current.as_bytes().to_vec())) {
         return npm_err(StatusCode::CONFLICT, "document update conflict: the package changed since it was read");
     }
     for v in local.0.keys() {

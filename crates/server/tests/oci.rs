@@ -75,7 +75,7 @@ fn auth_challenge_and_basic_auth() {
     let s = oci_server();
     let r = http().get(format!("{}/v2/", s.url())).send().unwrap();
     assert_eq!(r.status(), 401);
-    assert_eq!(r.headers()["www-authenticate"], "Basic realm=\"pico2peta\"");
+    assert_eq!(r.headers()["www-authenticate"], "Basic realm=\"o5s\"");
     let r = http().get(format!("{}/v2/", s.url())).header("authorization", basic(ALICE)).send().unwrap();
     assert_eq!(r.status(), 200);
     assert_eq!(r.headers()["docker-distribution-api-version"], "registry/2.0");
@@ -205,8 +205,8 @@ fn gc_tracer_follows_manifests_through_the_digest_index() {
     assert_eq!(o.push_blob("team/g", &layer), 201);
     let m = manifest(config, &[&layer]);
     assert_eq!(o.push_manifest("team/g", "t", &m).status(), 201);
-    let repo = pico2peta_repo::LocalRepo::open(s.dir.path().join("repo")).unwrap();
-    let tracer = pico2peta_server::oci::OciTracer::new(std::sync::Arc::new(repo.clone()));
+    let repo = o5s_repo::LocalRepo::open(s.dir.path().join("repo")).unwrap();
+    let tracer = o5s_server::oci::OciTracer::new(std::sync::Arc::new(repo.clone()));
     let mh = repo.resolve(&n("oci/team/g/tags/t")).unwrap().unwrap().hash;
     let mut kids = tracer.children_of(&mh, &repo).unwrap().unwrap();
     kids.sort();

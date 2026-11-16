@@ -22,8 +22,8 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use base64::Engine;
-use pico2peta_core::{Error, Hash, Name, Observed, Repository, Result};
-use pico2peta_prov::{Provenance, Record};
+use o5s_core::{Error, Hash, Name, Observed, Repository, Result};
+use o5s_prov::{Provenance, Record};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -292,7 +292,7 @@ pub fn attest(repo: &dyn Repository, log_ref: &Name, envelope: &Envelope) -> Res
             .collect(),
         })
         .collect();
-    pico2peta_prov::record(repo, log_ref, &recs)?;
+    o5s_prov::record(repo, log_ref, &recs)?;
     Ok(eh)
 }
 
@@ -364,10 +364,9 @@ pub fn promote(
 ) -> Result<PromoteOutcome> {
     // The shell gathers the facts (signatures verified, provenance read); the
     // extracted kernel decides (`promote::decide_promote`, P7).
-    use pico2peta_kernel as kernel;
-    let kref = |v: Option<pico2peta_core::RefValue>| {
-        v.map(|v| kernel::RefVal { hash: *v.hash.as_bytes(), version: v.version })
-    };
+    use o5s_kernel as kernel;
+    let kref =
+        |v: Option<o5s_core::RefValue>| v.map(|v| kernel::RefVal { hash: *v.hash.as_bytes(), version: v.version });
     let sv = repo.resolve(src)?;
     let dv = repo.resolve(dst)?;
     let mut atts: Vec<kernel::promote::Attestation> = Vec::new();
@@ -422,8 +421,8 @@ pub fn promote(
     };
     let read_set = [(src.clone(), obs(plan.src_observed)), (dst.clone(), obs(plan.dst_observed))];
     match repo.update_many(&[(dst.clone(), Some(obj))], &read_set)? {
-        pico2peta_core::ReplaceManyOutcome::Ok { .. } => {}
-        pico2peta_core::ReplaceManyOutcome::Conflict { .. } => return Ok(PromoteOutcome::Conflict),
+        o5s_core::ReplaceManyOutcome::Ok { .. } => {}
+        o5s_core::ReplaceManyOutcome::Conflict { .. } => return Ok(PromoteOutcome::Conflict),
     }
     // The keys whose signatures counted (for the audit record).
     let mut signed: Vec<String> = Vec::new();
@@ -451,6 +450,6 @@ pub fn promote(
         .into_iter()
         .collect(),
     };
-    let hs = pico2peta_prov::record(repo, log_ref, &[rec])?;
+    let hs = o5s_prov::record(repo, log_ref, &[rec])?;
     Ok(PromoteOutcome::Promoted { object: obj, record: hs.first().copied().unwrap_or(obj) })
 }

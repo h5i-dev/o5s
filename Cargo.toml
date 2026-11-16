@@ -12,16 +12,16 @@ license = "Apache-2.0"
 # h5i-app (H5I_PLAN): kernel helpers and the guard, extracted with our kernels.
 h5i-app-std = "=0.5.5"
 h5i-app-core = "=0.5.5"
-pico2peta-core = { path = "crates/core" }
-pico2peta-pack = { path = "crates/pack" }
-pico2peta-refs = { path = "crates/refs" }
-pico2peta-repo = { path = "crates/repo" }
-pico2peta-prov = { path = "crates/prov" }
-pico2peta-weights = { path = "crates/weights" }
-pico2peta-chunk = { path = "crates/chunk" }
-pico2peta-order = { path = "crates/order" }
-pico2peta-kernel = { path = "crates/kernel" }
-pico2peta-attest = { path = "crates/attest" }
+o5s-core = { path = "crates/core" }
+o5s-pack = { path = "crates/pack" }
+o5s-refs = { path = "crates/refs" }
+o5s-repo = { path = "crates/repo" }
+o5s-prov = { path = "crates/prov" }
+o5s-weights = { path = "crates/weights" }
+o5s-chunk = { path = "crates/chunk" }
+o5s-order = { path = "crates/order" }
+o5s-kernel = { path = "crates/kernel" }
+o5s-attest = { path = "crates/attest" }
 blake3 = "1"
 memmap2 = "0.9"
 fastcdc = "3"

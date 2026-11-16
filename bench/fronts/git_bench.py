@@ -1,4 +1,4 @@
-"""PLAN §6.5, Git protocol: pico2peta's /git front vs `git daemon` serving a bare repo.
+"""PLAN §6.5, Git protocol: o5s's /git front vs `git daemon` serving a bare repo.
 
 Corpus: ripgrep, jq, redis (heads + tags). Per corpus and run:
 - full push into an empty repository;
@@ -6,12 +6,12 @@ Corpus: ripgrep, jq, redis (heads + tags). Per corpus and run:
 - incremental fetch: a client 10 commits behind on the default branch;
 - clone bytes on the wire, through a counting TCP proxy (separate, untimed clone).
 
-usage: git_bench.py <pico2peta-server binary>
+usage: git_bench.py <o5s-server binary>
 """
 import os
 import sys
 
-from common import CountingProxy, Proc, RUNS, SCRATCH, TOKEN, TOOLS, check, free_port, log, pico_server, record, run, timed, wait_port, workdir
+from common import CountingProxy, Proc, RUNS, SCRATCH, TOKEN, TOOLS, check, free_port, log, o5s_server, record, run, timed, wait_port, workdir
 
 MIRRORS = f"{SCRATCH}/bench-data/mirrors"
 CORPUS = os.environ.get("FRONTS_GIT_CORPUS", "ripgrep,jq,redis").split(",")
@@ -112,13 +112,13 @@ def main():
             finally:
                 daemon.stop()
             run(["rm", "-rf", root])
-            p2p = os.path.join(d, "p2p")
-            os.makedirs(p2p)
-            with pico_server(p2p, server_bin) as (base, _):
+            o5s = os.path.join(d, "o5s")
+            os.makedirs(o5s)
+            with o5s_server(o5s, server_bin) as (base, _):
                 port = int(base.rsplit(":", 1)[1])
                 url = lambda r: f"http://bench:{TOKEN}@127.0.0.1:{port}/git/bench/{r}.git"
                 bench_system(
-                    "pico2peta",
+                    "o5s",
                     url,
                     url,
                     d, name, src, head, behind,
@@ -127,12 +127,12 @@ def main():
             # push_s runs 2..n go into the same store (content already there). A first push into
             # an empty store needs a fresh server per run (reported untiered; see NET_PROGRESS).
             for i in range(RUNS):
-                fresh = os.path.join(d, f"p2p-fresh{i}")
+                fresh = os.path.join(d, f"o5s-fresh{i}")
                 os.makedirs(fresh)
-                with pico_server(fresh, server_bin) as (base, _):
+                with o5s_server(fresh, server_bin) as (base, _):
                     port = int(base.rsplit(":", 1)[1])
                     t = timed(["git", "-C", src, "push", "-q", f"http://bench:{TOKEN}@127.0.0.1:{port}/git/bench/{name}.git", *REFSPECS])
-                    record("git", "first_push_s", "pico2peta", t, "s", corpus=name, run=i)
+                    record("git", "first_push_s", "o5s", t, "s", corpus=name, run=i)
                 run(["rm", "-rf", fresh])
 
 

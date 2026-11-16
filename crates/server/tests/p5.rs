@@ -3,8 +3,8 @@
 mod common;
 
 use common::*;
-use pico2peta_core::{Name, ObjectStore, Observed, Repository};
-use pico2peta_server::config::{Access, PromotionRule};
+use o5s_core::{Name, ObjectStore, Observed, Repository};
+use o5s_server::config::{Access, PromotionRule};
 use serde_json::{Value, json};
 use std::process::Command;
 
@@ -18,7 +18,7 @@ fn provenance_attestation_promotion_and_audit_across_fronts() {
         eprintln!("skipping: git not installed");
         return;
     }
-    let signer = pico2peta_attest::Ed25519Signer::from_seed(&[7u8; 32]);
+    let signer = o5s_attest::Ed25519Signer::from_seed(&[7u8; 32]);
     let pk = hexs(&signer.verifier().public());
     let srv = TestServer::start(move |cfg| {
         cfg.policy.push(grant("alice", "git/team", Access::Write));
@@ -123,12 +123,12 @@ fn provenance_attestation_promotion_and_audit_across_fronts() {
     let r = promote("prod/app/app-1.0-py3-none-any.whl");
     assert_eq!(r.status(), 403);
     assert!(r.text().unwrap().contains("missing a valid signature"));
-    let stmt = pico2peta_attest::Statement {
-        subjects: vec![pico2peta_attest::Subject { name: n.to_string(), hash: wheel }],
+    let stmt = o5s_attest::Statement {
+        subjects: vec![o5s_attest::Subject { name: n.to_string(), hash: wheel }],
         predicate_type: "https://slsa.dev/provenance/v1".into(),
         predicate: json!({ "builder": { "id": "ci-runner-7" } }),
     };
-    let env = pico2peta_attest::Envelope::sign(&stmt, &[&signer]);
+    let env = o5s_attest::Envelope::sign(&stmt, &[&signer]);
     let r = http.post(format!("{}/v1/attestations", srv.url())).bearer_auth(ALICE).body(env.to_json()).send().unwrap();
     assert_eq!(r.status(), 201);
     let a: Value = r.json().unwrap();
@@ -168,9 +168,9 @@ fn provenance_attestation_promotion_and_audit_across_fronts() {
 /// The client's P5 helpers (used by the CLI's `--remote` attest/promote/lineage/search).
 #[test]
 fn remote_repo_attest_promote_lineage_search() {
-    use pico2peta_attest::PromoteOutcome;
-    use pico2peta_client::Search;
-    let signer = pico2peta_attest::Ed25519Signer::from_seed(&[9u8; 32]);
+    use o5s_attest::PromoteOutcome;
+    use o5s_client::Search;
+    let signer = o5s_attest::Ed25519Signer::from_seed(&[9u8; 32]);
     let pk = hexs(&signer.verifier().public());
     let srv = TestServer::start(move |cfg| {
         for ns in ["dev", "prod", "staging"] {
@@ -207,12 +207,12 @@ fn remote_repo_attest_promote_lineage_search() {
         PromoteOutcome::Refused(r) => assert!(r.iter().any(|x| x.contains("signature")), "{r:?}"),
         o => panic!("expected a refusal, got {o:?}"),
     }
-    let stmt = pico2peta_attest::Statement {
-        subjects: vec![pico2peta_attest::Subject { name: n.to_string(), hash: wheel }],
+    let stmt = o5s_attest::Statement {
+        subjects: vec![o5s_attest::Subject { name: n.to_string(), hash: wheel }],
         predicate_type: "https://example.com/reviewed".into(),
         predicate: json!({}),
     };
-    let env = pico2peta_attest::Envelope::sign(&stmt, &[&signer]);
+    let env = o5s_attest::Envelope::sign(&stmt, &[&signer]);
     let (eh, trusted) = client.attest(&env).unwrap();
     assert_eq!(trusted.len(), 1);
     let at = client.attestations(&format!("name:{n}")).unwrap();
