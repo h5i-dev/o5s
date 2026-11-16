@@ -1581,22 +1581,6 @@ async fn lfs_batch(
     r
 }
 
-/// `Read` adapter hashing with sha256 and counting.
-pub(crate) struct HashRead<R> {
-    pub(crate) inner: R,
-    pub(crate) sha: Sha256,
-    pub(crate) n: u64,
-}
-
-impl<R: Read> Read for HashRead<R> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let n = self.inner.read(buf)?;
-        self.sha.update(&buf[..n]);
-        self.n += n as u64;
-        Ok(n)
-    }
-}
-
 pub(crate) struct ChanRead {
     pub(crate) rx: mpsc::Receiver<std::io::Result<Bytes>>,
     pub(crate) cur: Bytes,
@@ -1626,6 +1610,17 @@ async fn lfs_upload(st: &Arc<AppState>, hf: &Arc<HfState>, token: &str, body: Bo
         return hf_err(StatusCode::PAYLOAD_TOO_LARGE, None, "object too large");
     }
     let (tx, rx) = mpsc::channel::<std::io::Result<Bytes>>(8);
+    // SHA-256 runs on its own thread, fed the same (refcounted) buffers as the store.
+    let (stx, mut srx) = mpsc::channel::<Bytes>(64);
+    let hasher = tokio::task::spawn_blocking(move || {
+        let mut sha = Sha256::new();
+        let mut n = 0u64;
+        while let Some(b) = srx.blocking_recv() {
+            sha.update(&b);
+            n += b.len() as u64;
+        }
+        (hex(&sha.finalize()), n)
+    });
     let metrics = st.metrics.clone();
     let pump = tokio::spawn(async move {
         let mut s = body.into_data_stream();
@@ -1635,6 +1630,9 @@ async fn lfs_upload(st: &Arc<AppState>, hf: &Arc<HfState>, token: &str, body: Bo
                 Ok(None) => None,
                 Ok(Some(Ok(b))) => {
                     metrics.bytes_in.inc_by(b.len() as u64);
+                    if stx.send(b.clone()).await.is_err() {
+                        return;
+                    }
                     Some(Ok(b))
                 }
                 Ok(Some(Err(e))) => Some(Err(std::io::Error::other(e.to_string()))),
@@ -1651,16 +1649,22 @@ async fn lfs_upload(st: &Arc<AppState>, hf: &Arc<HfState>, token: &str, body: Bo
         }
     });
     let (hf2, r2) = (hf.clone(), repo.clone());
-    let res = tokio::task::spawn_blocking(move || -> Result<(Hash, String, u64)> {
-        let mut r = HashRead { inner: ChanRead { rx, cur: Bytes::new() }, sha: Sha256::new(), n: 0 };
-        let h = hf2.put_content(&r2, &mut r)?;
-        Ok((h, hex(&r.sha.finalize()), r.n))
+    let res = tokio::task::spawn_blocking(move || -> Result<Hash> {
+        let mut r = ChanRead { rx, cur: Bytes::new() };
+        hf2.put_content(&r2, &mut r)
     })
     .await;
-    pump.abort();
-    let (h, got, n) = match res {
+    // The pump has ended (the store read to EOF) or failed; either way the hasher finishes.
+    if !pump.is_finished() {
+        pump.abort();
+    }
+    let h = match res {
         Ok(Ok(x)) => x,
         Ok(Err(e)) => return core_err(e),
+        Err(e) => return internal(e),
+    };
+    let (got, n) = match hasher.await {
+        Ok(x) => x,
         Err(e) => return internal(e),
     };
     if got != sha || n != size {

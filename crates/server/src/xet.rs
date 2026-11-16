@@ -295,7 +295,23 @@ pub(crate) fn put_xorb(hf: &HfState, repo: &RepoId, url_hash: &MerkleHash, body:
         return Ok(false);
     }
     let chunks = parse_xorb(body)?;
-    let hs: Vec<(MerkleHash, u64)> = chunks.iter().map(|c| (chunk_hash(c), c.len() as u64)).collect();
+    // Chunk hashes (verifying the xorb's name) on worker threads, while this thread stores
+    // the content; a mismatch only leaves an unreferenced object for GC.
+    let (hs, content) = std::thread::scope(|sc| -> Result<(Vec<(MerkleHash, u64)>, Hash)> {
+        let workers = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 4);
+        let per = chunks.len().div_ceil(workers).max(1);
+        let parts: Vec<_> = chunks
+            .chunks(per)
+            .map(|part| sc.spawn(move || part.iter().map(|c| (chunk_hash(c), c.len() as u64)).collect::<Vec<_>>()))
+            .collect();
+        let mut cat = std::io::Cursor::new(chunks.concat());
+        let content = hf.put_content(repo, &mut cat);
+        let mut hs = Vec::with_capacity(chunks.len());
+        for p in parts {
+            hs.extend(p.join().map_err(|_| Error::Corrupt("xorb hash worker panicked".into()))?);
+        }
+        Ok((hs, content?))
+    })?;
     if xorb_hash(&hs) != *url_hash {
         return Err(bad(format!("xorb hash mismatch: body is {}", to_hex(&xorb_hash(&hs)))));
     }
@@ -305,8 +321,6 @@ pub(crate) fn put_xorb(hf: &HfState, repo: &RepoId, url_hash: &MerkleHash, body:
         off += l;
         ends.push((*h, u32::try_from(off).map_err(|_| bad("xorb too large"))?));
     }
-    let mut cat = std::io::Cursor::new(chunks.concat());
-    let content = hf.put_content(repo, &mut cat)?;
     let rec = XorbRecord { content, chunks: ends };
     let rh = hf.git_repo().put(&rec.encode())?;
     let n = hf.xet.insert_blocking(vec![(key, crate::segmap::Value { hash: rh, aux: off })])?;
@@ -445,12 +459,28 @@ pub(crate) fn put_shard(hf: &HfState, repo: &RepoId, body: &[u8]) -> Result<usiz
             return Err(bad("file hash does not match its chunks"));
         }
         // Rebuild the file into a core object while hashing it.
-        let mut src = Concat { store: hf.git_repo(), plan: plan.into_iter(), cur: None, sha: Sha256::new(), n: 0 };
-        let content = hf.put_content(repo, &mut src)?;
+        // SHA-256 runs on its own thread, overlapping the store's chunking and hashing.
+        let (content, got, n) = std::thread::scope(|sc| -> Result<(Hash, String, u64)> {
+            let (stx, srx) = std::sync::mpsc::sync_channel::<Vec<u8>>(32);
+            let hasher = sc.spawn(move || {
+                let mut sha = Sha256::new();
+                let mut n = 0u64;
+                for b in srx {
+                    sha.update(&b);
+                    n += b.len() as u64;
+                }
+                (crate::git::hex(&sha.finalize()), n)
+            });
+            let mut src = Concat { store: hf.git_repo(), plan: plan.into_iter(), cur: None, sha: stx };
+            let content = hf.put_content(repo, &mut src);
+            drop(src);
+            let (got, n) = hasher.join().map_err(|_| Error::Corrupt("sha256 thread panicked".into()))?;
+            Ok((content?, got, n))
+        })?;
         // The shard stores sha256 as a DataHash built with `from_be_bytes`: its word-wise hex
         // is the ordinary sha256 hex.
-        let (want, got) = (to_hex(&sha), crate::git::hex(&src.sha.finalize()));
-        if got != want || src.n != total {
+        let want = to_hex(&sha);
+        if got != want || n != total {
             return Err(bad(format!("file content is sha256 {got}, shard says {want}")));
         }
         hf.register_lfs(repo, &want, content, total)?;
@@ -622,12 +652,17 @@ impl FileRecord {
             let (s, e) = (self.start(i) - base, self.chunks[i].1 - base);
             let len = (e - s) as u32;
             let l = len.to_le_bytes();
-            let mut piece = vec![0u8, l[0], l[1], l[2], 0, l[0], l[1], l[2]];
-            piece.extend_from_slice(&data[s as usize..e as usize]);
+            let header = [0u8, l[0], l[1], l[2], 0, l[0], l[1], l[2]];
+            let body = &data[s as usize..e as usize];
             // Clip to the requested range (normally chunk aligned, so whole pieces).
-            let (ps, pe) = (ser_pos, ser_pos + piece.len() as u64);
-            let (cs, ce) = (bs.max(ps) - ps, be.min(pe) - ps);
-            out.extend_from_slice(&piece[cs as usize..ce as usize]);
+            let (ps, pe) = (ser_pos, ser_pos + 8 + body.len() as u64);
+            let (cs, ce) = ((bs.max(ps) - ps) as usize, (be.min(pe) - ps) as usize);
+            if cs < 8 {
+                out.extend_from_slice(&header[cs..ce.min(8)]);
+            }
+            if ce > 8 {
+                out.extend_from_slice(&body[cs.max(8) - 8..ce - 8]);
+            }
             ser_pos = pe;
         }
         Ok(out)
@@ -639,8 +674,8 @@ struct Concat<'a, I> {
     store: &'a dyn pico2peta_core::Repository,
     plan: I,
     cur: Option<Box<dyn Read + Send>>,
-    sha: Sha256,
-    n: u64,
+    /// Copies of what was read, for the SHA-256 thread.
+    sha: std::sync::mpsc::SyncSender<Vec<u8>>,
 }
 
 impl<I: Iterator<Item = (Hash, std::ops::Range<u64>)>> Read for Concat<'_, I> {
@@ -655,8 +690,7 @@ impl<I: Iterator<Item = (Hash, std::ops::Range<u64>)>> Read for Concat<'_, I> {
                 self.cur = None;
                 continue;
             }
-            self.sha.update(&buf[..k]);
-            self.n += k as u64;
+            self.sha.send(buf[..k].to_vec()).map_err(|_| std::io::Error::other("sha256 thread stopped"))?;
             return Ok(k);
         }
     }
