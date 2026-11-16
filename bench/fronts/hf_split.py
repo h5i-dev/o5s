@@ -77,7 +77,7 @@ def main():
                     by = {}
                     for s, e, rt in iv:
                         by.setdefault(rt, []).append((s, e))
-                    print(json.dumps({"mode": mode, "op": op, "client_s": round(r["s"], 3),
+                    print(json.dumps({"mode": mode, "op": op, "client_s": round(r["s"], 3), "client_cpu_s": round(r.get("cpu_s", 0), 3),
                                       "server_busy_s": round(union([(s, e) for s, e, _ in iv]), 3),
                                       "requests": len(iv),
                                       "by_route": {k: {"n": len(v), "busy_s": round(union(v), 3)} for k, v in sorted(by.items())}}),
