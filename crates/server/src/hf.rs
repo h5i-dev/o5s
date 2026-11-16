@@ -1184,6 +1184,20 @@ pub async fn xet_cas(
             let Some(xh) = crate::xet::from_hex(h) else {
                 return hf_err(StatusCode::BAD_REQUEST, None, "bad xorb hash");
             };
+            // Already stored (a re-upload): drain the body without buffering it.
+            let hf2 = hf.clone();
+            if let Ok(Ok(Some(_))) = tokio::task::spawn_blocking(move || hf2.xet.get_live_blocking(&xh)).await {
+                let mut s = body.into_data_stream();
+                let mut n = 0usize;
+                while let Some(Ok(b)) = s.next().await {
+                    n += b.len();
+                    if n > crate::xet::MAX_XORB_BODY {
+                        return hf_err(StatusCode::PAYLOAD_TOO_LARGE, None, "xorb too large");
+                    }
+                }
+                st.metrics.bytes_in.inc_by(n as u64);
+                return axum::Json(serde_json::json!({ "was_inserted": false })).into_response();
+            }
             let Ok(raw) = axum::body::to_bytes(body, crate::xet::MAX_XORB_BODY).await else {
                 return hf_err(StatusCode::PAYLOAD_TOO_LARGE, None, "xorb too large");
             };
