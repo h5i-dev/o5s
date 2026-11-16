@@ -19,6 +19,8 @@ unmodified.
 
 ## CLI example
 
+### Store and read objects
+
 The `o5s` CLI is the low-level plumbing over the core (reference: `docs/CLI.md`).
 
 ```sh
@@ -27,61 +29,84 @@ alias o5s=target/release/o5s
 R=/data/repo
 
 o5s -C $R init
-H=$(o5s -C $R put model.safetensors)               # stores the file, prints its BLAKE3 hash
-o5s -C $R get $H > model.safetensors               # every read is verified against the hash
+H=$(o5s -C $R put model.safetensors)       # stores the file, prints its BLAKE3 hash
+o5s -C $R get $H > model.safetensors       # every read is verified against the hash
 o5s -C $R get $H --range 0..1024 > head.bin
+```
 
+### Move names
+
+```sh
 o5s -C $R replace models/acme/main $H --expect absent   # a name moves only by compare-and-swap; prints "ok 1"
 o5s -C $R replace models/acme/main $H2 --expect 1       # move it from version 1 (exit 3 if someone else moved it)
 o5s -C $R ns set releases immutable                     # published names never move
-
-o5s -C $R prov record train --in data=$D --out model=$H # provenance
-o5s -C $R prov lineage models/acme/main
-o5s -C $R promote dev/app prod/app --require-provenance  # policy-gated, audited
-o5s -C $R gc
-
-# Against a server:
-export O5S_REMOTE=https://o5s.example.com O5S_TOKEN=o5s_...
-o5s put --for-name models/acme/main model.safetensors
 ```
 
 Exit codes: 0 ok, 1 error, 2 not found, 3 conflict, 4 forbidden, 5 unauthorized.
 
-## Supported fronts
+### Provenance, promotion, GC
 
-Each front speaks its domain's protocol, so the real client works unmodified.
+```sh
+o5s -C $R prov record train --in data=$D --out model=$H
+o5s -C $R prov lineage models/acme/main
+o5s -C $R promote dev/app prod/app --require-provenance  # policy-gated, audited
+o5s -C $R gc
+```
+
+### Run a server
 
 ```sh
 o5s-server gen-token admin                    # prints the token once, plus its tokens.toml entry
 o5s-server serve --config deploy/server.toml  # local disk or any S3-compatible bucket
-export S=o5s.example.com TOKEN=o5s_...
 
-# Git (SHA-1 and SHA-256, shallow and partial clone)
+export O5S_REMOTE=https://o5s.example.com O5S_TOKEN=o5s_...
+o5s put --for-name models/acme/main model.safetensors
+```
+
+### Supported fronts
+
+Each front speaks its domain's protocol, so the real client works unmodified
+(`S=o5s.example.com`, `TOKEN=o5s_...`).
+
+**Git** (SHA-1 and SHA-256, shallow and partial clone)
+```sh
 git clone https://any:$TOKEN@$S/git/team/proj.git
 git push
+```
 
-# OCI
+**OCI**
+```sh
 docker login $S -u any -p "$TOKEN"
 docker push $S/team/app:1.0
 oras push $S/team/app:sbom ./sbom.json
+```
 
-# Hugging Face (LFS and Xet)
+**Hugging Face** (LFS and Xet)
+```sh
 export HF_ENDPOINT=https://$S HF_TOKEN=$TOKEN
 hf upload team/tiny ./model
 hf download team/tiny
+```
 
-# PyPI
+**PyPI**
+```sh
 twine upload --repository-url https://$S/pypi/team/ -u token -p "$TOKEN" dist/*
 pip install --index-url https://token:$TOKEN@$S/pypi/team/simple/ mypkg
+```
 
-# npm (.npmrc: registry=https://$S/npm/team/ and //$S/npm/team/:_authToken=${TOKEN})
+**npm** (`.npmrc`: `registry=https://$S/npm/team/` and `//$S/npm/team/:_authToken=${TOKEN}`)
+```sh
 npm publish
 npm install mypkg
+```
 
-# Maven (settings.xml: server "o5s", user "token", password = the token)
+**Maven** (`settings.xml`: server `o5s`, user `token`, password = the token)
+```sh
 mvn deploy -DaltDeploymentRepository=o5s::https://$S/maven/releases
+```
 
-# Native API
+**Native API**
+```sh
 curl -T big.bin -H "Authorization: Bearer $TOKEN" https://$S/v1/objects   # {"hash","size"}
 curl -H "Authorization: Bearer $TOKEN" -r 0-1023 https://$S/v1/objects/<hash>
 ```
