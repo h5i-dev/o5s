@@ -4,7 +4,7 @@
 #   scripts/oci-conformance.sh <o5s-server binary> [workdir]
 # Needs Go (builds the suite from the pinned spec release on first use).
 set -euo pipefail
-BIN=${1:?usage: $0 <o5s-server> [workdir]}
+BIN=$(realpath "${1:?usage: $0 <o5s-server> [workdir]}")   # absolute: the suite runs after `cd "$SRV"`
 SPEC=${OCI_SPEC_VERSION:-v1.1.1}
 WORK=${2:-$(mktemp -d)}
 PORT=${OCI_CONF_PORT:-18181}

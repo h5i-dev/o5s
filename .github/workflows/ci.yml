@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, demo, net]
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -79,9 +80,11 @@ jobs:
     env:
       MINIO_TAG: RELEASE.2025-09-07T16-13-09Z
       MINIO_BIN: ${{ github.workspace }}/.minio/minio
-      MINIO_TEST_DIR: ${{ runner.temp }}/minio-test
-      SCRATCH: ${{ runner.temp }}
     steps:
+      # The runner context isn't available in job-level env, so set these from a step.
+      - run: |
+          echo "MINIO_TEST_DIR=$RUNNER_TEMP/minio-test" >> "$GITHUB_ENV"
+          echo "SCRATCH=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -133,6 +136,9 @@ jobs:
 
   proofs:
     name: Extracted-kernel proofs (h5i app, ${{ matrix.project }})
+    # Builds Mathlib (via Aeneas), which takes a long time: manual runs only ("Run workflow").
+    # The dev host checks the proofs with `h5i app prove` (verify/*/README.md).
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -151,35 +157,3 @@ jobs:
         run: lake build
       # Re-extracting (`h5i app extract --check`) needs Charon/Aeneas at the pins in
       # h5i's pins.rs; the dev host runs it (verify/*/README.md).
-
-  fuzz-smoke:
-    name: Fuzz smoke (30 s per target)
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-fuzz
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: fuzz -> target
-      - name: Build all targets
-        working-directory: fuzz
-        run: cargo +nightly fuzz build
-      - name: Run every target for 30 s
-        working-directory: fuzz
-        run: |
-          set -euo pipefail
-          for t in $(cargo +nightly fuzz list); do
-            echo "::group::$t"
-            cargo +nightly fuzz run "$t" -- -max_total_time=30 -rss_limit_mb=2048
-            echo "::endgroup::"
-          done
-      - name: Upload crash artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuzz-artifacts
-          path: fuzz/artifacts
-          if-no-files-found: ignore

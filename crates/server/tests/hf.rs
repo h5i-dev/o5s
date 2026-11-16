@@ -148,6 +148,10 @@ fn hf_repo_is_a_git_repo() {
                 "filter.lfs.smudge=",
                 "-c",
                 "filter.lfs.process=",
+                // With git-lfs installed, its config says `required = true`, and the empty
+                // smudge above would then fail the checkout.
+                "-c",
+                "filter.lfs.required=false",
             ])
             .args(args)
             .env("GIT_LFS_SKIP_SMUDGE", "1")

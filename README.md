@@ -1,107 +1,86 @@
 # o5s
 
-**One store for immutable, content-addressed data** (source code, packages, container images, model weights)
-that replaces Git hosting, Hugging Face, Artifactory and registries with a single, verified core
-(`docs/VISION.md`).
+Why do we need a separate GitHub for source code, JFrog for build outputs, Docker Hub for container images,
+PyPI and npm for packages, Hugging Face for LLM weights, and so on? They are all just data: sequences of 0s
+and 1s. Why not treat them all the same way? All the operations we really have are push, pull, and overwrite.
 
-- **One core, every domain.** Objects are BLAKE3-256 content addresses, stored in append-only packs. Small objects
-  are bundled; large ones are cut by content-defined chunking into deduplicated chunks under a manifest tree. Every
-  read is verified, in strict mode by default (`docs/ARCHITECTURE.md`).
-- **Names** move only by optimistic compare-and-swap over the read set a writer depended on (`replace`, multi-name
-  `update`). Per-namespace rules (`mutable`, `immutable`, `head-release`) make published names immovable.
-- **Fronts** speak each domain's protocol on top of the same core: Git (smart HTTP, SHA-1 and SHA-256, shallow and
-  partial clone), OCI distribution, Hugging Face Hub and Xet, PyPI, npm and Maven (with upstream proxy-caches).
-  Domain-specific storage choices (chunker, derived versions, byte grouping) are **namespace profiles**, not core
-  code.
-- **Similarity repack** (default, every domain): GC lays out repacked objects by content similarity. On the Exp1
-  corpus it stores 0.79–0.95× `git gc --aggressive` (geomean 0.84), including the held-out redis and git.git
-  (`docs/EXP1.md`, Experiment 3).
-- **Provenance, signing, promotion, search, retention:**
-  - provenance records link a commit → build → wheel → image → model, with lineage and impact queries across
-    domains;
-  - in-toto/DSSE attestations;
-  - policy-gated `promote` (dev → prod) as one audited OCC transaction;
-  - search over names and metadata;
-  - per-profile retention.
-- **Storage:** local disk or any S3-compatible store; many writers per repository; crash consistency tested at
-  every write and fsync point, and with real SIGKILLs.
-- **Verification:** every decision (name layer, rules, fronts' ownership, promotion, retention, GC, object reads) is an h5i-app kernel in `crates/kernel`, extracted to Lean with Charon/Aeneas and proved there (`verify/core/README.md`); authorization is net's kernel (`verify/net`).
-  The proofs cover content immutability, no lost updates, immutable names never moving, authorization, GC safety,
-  front-owned prefixes, and promotion.
+o5s is one content-addressed, immutable store for all of it: source code, packages, container images and model
+weights. The clients you already use (`git`, `docker`, `pip`, `npm`, `mvn`, `huggingface_hub`) talk to it
+unmodified.
 
-## Quick start (CLI: low-level plumbing over the core; reference in `docs/CLI.md`)
+## Potential pushback
+
+- *"Merge in Git is necessary"* → Merge is just a special case of overwrite.
+- *"Git packs source code better"* → Then use it for every domain.
+- *"Hugging Face's Xet makes large weights fast"* → Then use it for every domain.
+- *"Registries need their own rules"* → They're per-namespace rules: `mutable`, `immutable`, `head-release`.
+- *"One store means one bug breaks everything"* → Every decision is formally verified in Lean 4.
+- *"Separate systems are fine"* → Not for lineage: one store links commit → build → package → image → model.
+
+## CLI example
+
+The `o5s` CLI is the low-level plumbing over the core (reference: `docs/CLI.md`).
 
 ```sh
 cargo build --release
 alias o5s=target/release/o5s
 R=/data/repo
 
-# A repository whose models/ namespace derives each new version from the previous one
-# (stored as a delta, planned by the safetensors front):
-o5s -C $R init --profile weights=front:safetensors,derive:previous --namespace models/=weights
-H=$(o5s -C $R put --for-name models/acme/main model.safetensors)   # stored per the profile; prints the hash
-o5s -C $R replace models/acme/main $H --expect absent              # names move only by OCC
-o5s -C $R get $H --range 0..1024 > head.bin                          # verified reads
+# Store and read objects
+o5s -C $R init
+H=$(o5s -C $R put model.safetensors)                    # stores the file, prints its BLAKE3 hash
+o5s -C $R get $H > model.safetensors                    # every read is verified against the hash
+o5s -C $R get $H --range 0..1024 > head.bin
 
-o5s -C $R ns set releases immutable                                 # published names never move
-o5s -C $R update dev/app=$H prod/app=$H --expect dev/app=absent --expect prod/app=absent
+# Move names
+o5s -C $R replace models/acme/main $H --expect absent   # a name moves only by compare-and-swap; prints "ok 1"
+o5s -C $R replace models/acme/main $H2 --expect 1       # move it from version 1 (exit 3 if someone else moved it)
+o5s -C $R ns set releases immutable                     # published names never move
 
-o5s -C $R prov record train --in data=$D --out model=$H              # provenance
-o5s -C $R prov lineage models/acme/main                              # a HASH or a NAME
-o5s -C $R attest keygen ci.key                                      # prints "<keyid> <pubkey>"
-o5s -C $R attest create dev/app --key ci.key
-o5s -C $R promote dev/app prod/app --require-key $PUB --require-provenance
-o5s -C $R search tensor library                                     # names + metadata
-o5s -C $R gc                                                        # from cron; default grace 1h
+# Provenance, promotion, GC
+o5s -C $R prov record train --in data=$D --out model=$H
+o5s -C $R prov lineage models/acme/main
+o5s -C $R promote dev/app prod/app --require-provenance  # policy-gated, audited
+o5s -C $R gc
 
-# Against a server (domain clients such as git, pip, npm, docker and huggingface_hub talk to its fronts):
+# Run a server
+o5s-server gen-token admin                    # prints the token once, plus its tokens.toml entry
+o5s-server serve --config deploy/server.toml  # local disk or any S3-compatible bucket
 export O5S_REMOTE=https://o5s.example.com O5S_TOKEN=o5s_...
 o5s put --for-name models/acme/main model.safetensors
 ```
-
-CLI exit codes: 0 ok, 1 error, 2 not found/absent, 3 OCC conflict, 4 forbidden (namespace rule or promotion
-policy), 5 unauthorized.
-
-## Quick start for each front (server; details in `docs/API.md`, deployment in `deploy/README.md`)
+Each front speaks its domain's protocol, so the real client works unmodified
+(`S=o5s.example.com`, `TOKEN=o5s_...`).
 
 ```sh
-o5s-server gen-token admin      # prints the token once, plus a [[tokens]] entry for tokens.toml
-o5s-server serve --config deploy/server.toml
-export S=o5s.example.com TOKEN=o5s_...
+# Git (SHA-1 and SHA-256, shallow and partial clone)
+git clone https://any:$TOKEN@$S/git/team/proj.git
+git push
+
+# OCI
+docker login $S -u any -p "$TOKEN"
+docker push $S/team/app:1.0
+oras push $S/team/app:sbom ./sbom.json
+
+# Hugging Face (LFS and Xet)
+export HF_ENDPOINT=https://$S HF_TOKEN=$TOKEN
+hf upload team/tiny ./model
+hf download team/tiny
+
+# PyPI
+twine upload --repository-url https://$S/pypi/team/ -u token -p "$TOKEN" dist/*
+pip install --index-url https://token:$TOKEN@$S/pypi/team/simple/ mypkg
+
+# npm
+npm config set registry https://$S/npm/team/
+npm config set //$S/npm/team/:_authToken $TOKEN
+npm publish
+npm install mypkg
+
+# Maven (~/.m2/settings.xml: <server><id>o5s</id><username>token</username><password>${env.TOKEN}</password></server>)
+mvn deploy -DaltDeploymentRepository=o5s::https://$S/maven/releases
+
+# Native API
+curl -T big.bin -H "Authorization: Bearer $TOKEN" https://$S/v1/objects   # {"hash","size"}
+curl -H "Authorization: Bearer $TOKEN" -r 0-1023 https://$S/v1/objects/<hash>
 ```
-
-| front | the real client, unmodified |
-|---|---|
-| **Git** | `git clone https://any:$TOKEN@$S/git/team/proj.git`, then `git push` (each ref update is an OCC compare-and-swap) |
-| **OCI** | `docker login $S -u any -p "$TOKEN"`; `docker push $S/team/app:1.0`; `oras push $S/team/app:sbom ./sbom.json` |
-| **Hugging Face** | `export HF_ENDPOINT=https://$S HF_TOKEN=$TOKEN`; `hf upload team/tiny ./model`; `hf_hub_download` / `snapshot_download` (LFS and Xet) |
-| **PyPI** | `twine upload --repository-url https://$S/pypi/team/ -u token -p "$TOKEN" dist/*`; `pip install --index-url https://token:$TOKEN@$S/pypi/team/simple/ mypkg` |
-| **npm** | `.npmrc`: `registry=https://$S/npm/team/` and `//$S/npm/team/:_authToken=${TOKEN}`; `npm publish`, `npm install` |
-| **Maven** | `settings.xml` server `o5s` (user `token`, password = token); `mvn deploy -DaltDeploymentRepository=o5s::https://$S/maven/releases` |
-| **native** | `PUT /v1/objects`, `POST /v1/refs/...` (OCC), provenance/attestations/promotion/search under `/v1` |
-
-PyPI, npm and Maven can proxy-cache their public upstreams (`[pypi.upstream.<index>]` etc.). One provenance log,
-audit log and policy cover every front.
-
-## Layout
-
-| crate | role |
-|---|---|
-| `o5s-core` | `Hash`, `Error`, `Encoding`, `ReadVerify`, the `ObjectStore`/`Repository`/`Backend` traits, LocalDisk, conformance suite, fault injection |
-| `o5s-pack` | pack store: packs, indexes, chunking, codecs, frames (incl. reference frames), derived objects, recovery |
-| `o5s-refs` | ref store: journal with group commit, or a create-only log on a backend; OCC; namespace rules |
-| `o5s-repo` | `LocalRepo`: profiles, the Front API, idmap, GC with similarity repack, fsck |
-| `o5s-order` | domain-agnostic similarity features, ordering and framing |
-| `o5s-chunk` | content-defined chunkers (FastCDC, byte-exact Xet) |
-| `o5s-prov` | provenance, search, retention |
-| `o5s-attest` | in-toto/DSSE attestations, Ed25519, policy-gated promotion |
-| `o5s-weights` | the safetensors front (tensor-aligned deltas, byte grouping) |
-| `o5s-cli` | the `o5s` binary |
-| `o5s-server`, `-client`, `-backend-s3` | HTTP server with every front, remote client, S3 backend |
-| `o5s-kernel` | the decision kernels (Aeneas subset), extracted and proved in `verify/core` |
-| `bench/*`, `fuzz/`, `verify/` | experiments and benchmarks, fuzz targets, proofs about the extracted kernels |
-
-- **Design:** `docs/VISION.md`, `docs/ARCHITECTURE.md`, `docs/PLAN.md`.
-- **Status:** `docs/PROGRESS.md`, `docs/NET_PROGRESS.md`, `docs/ROADMAP.md`.
-- **Measurements:** `docs/EXP1.md`, `docs/BENCH.md`.
-- **Reference:** HTTP API `docs/API.md`, CLI `docs/CLI.md`.
