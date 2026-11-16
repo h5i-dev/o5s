@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/pack", "crates/refs", "crates/repo", "crates/cli", "crates/prov", "crates/weights", "crates/chunk", "crates/order", "crates/attest", "crates/backend-s3", "crates/server", "crates/client", "bench/exp1", "bench/exp1c", "bench/exp3", "bench/micro"]
+members = ["crates/core", "crates/pack", "crates/refs", "crates/repo", "crates/cli", "crates/prov", "crates/weights", "crates/chunk", "crates/order", "crates/kernel", "crates/attest", "crates/backend-s3", "crates/server", "crates/client", "bench/exp1", "bench/exp1c", "bench/exp3", "bench/micro"]
 exclude = ["fuzz"]
 
 [workspace.package]
@@ -17,6 +17,7 @@ pico2peta-prov = { path = "crates/prov" }
 pico2peta-weights = { path = "crates/weights" }
 pico2peta-chunk = { path = "crates/chunk" }
 pico2peta-order = { path = "crates/order" }
+pico2peta-kernel = { path = "crates/kernel" }
 pico2peta-attest = { path = "crates/attest" }
 blake3 = "1"
 memmap2 = "0.9"

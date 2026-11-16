@@ -497,25 +497,21 @@ pub fn is_under(s: &str, prefix: &str) -> bool {
 
 /// Validates a name or namespace prefix (same grammar).
 pub fn validate_path(s: &str) -> Result<()> {
-    let bad = |why| Err(Error::InvalidName(s.to_string(), why));
-    if s.is_empty() {
-        return bad("empty");
+    // The grammar is the extracted kernel's (`pico2peta_kernel::names::validate`).
+    use pico2peta_kernel::names::Invalid;
+    match pico2peta_kernel::names::validate(&s.as_bytes().to_vec()) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(Error::InvalidName(
+            s.to_string(),
+            match e {
+                Invalid::Empty => "empty",
+                Invalid::TooLong => "longer than 1024 bytes",
+                Invalid::EmptySegment => "empty segment",
+                Invalid::DotSegment => "'.' or '..' segment",
+                Invalid::BadByte => "segments may only contain [A-Za-z0-9._+-]",
+            },
+        )),
     }
-    if s.len() > 1024 {
-        return bad("longer than 1024 bytes");
-    }
-    for seg in s.split('/') {
-        if seg.is_empty() {
-            return bad("empty segment");
-        }
-        if seg == "." || seg == ".." {
-            return bad("'.' or '..' segment");
-        }
-        if !seg.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-' | b'+')) {
-            return bad("segments may only contain [A-Za-z0-9._+-]");
-        }
-    }
-    Ok(())
 }
 
 impl fmt::Display for Name {
@@ -587,38 +583,6 @@ impl FromStr for Rule {
     }
 }
 
-/// What the effective rule says about a single name move.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mobility {
-    /// May move freely.
-    Mutable,
-    /// May only be created (from `Absent`).
-    CreateOnce,
-    /// May never be written.
-    Forbidden(&'static str),
-}
-
-/// Pure decision: given the rule of the namespace `prefix` that governs
-/// `name`, how may `name` move? Shared by implementation, model and (in
-/// spirit) the Lean development.
-pub fn mobility(rule: Rule, prefix: &str, name: &Name) -> Mobility {
-    match rule {
-        Rule::Mutable => Mobility::Mutable,
-        Rule::ImmutableAfterPublish => Mobility::CreateOnce,
-        Rule::HeadMutableReleaseImmutable => {
-            let rest =
-                if prefix.is_empty() { name.as_str() } else { name.as_str().get(prefix.len() + 1..).unwrap_or("") };
-            if rest.strip_prefix("heads/").is_some_and(|r| !r.is_empty()) {
-                return Mobility::Mutable;
-            }
-            if rest.strip_prefix("releases/").is_some_and(|r| !r.is_empty()) {
-                return Mobility::CreateOnce;
-            }
-            Mobility::Forbidden("only heads/* and releases/* may be written in a head-release namespace")
-        }
-    }
-}
-
 /// The state of one name as observed by a reader.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Observed {
@@ -681,24 +645,6 @@ pub enum ReplaceManyOutcome {
     },
 }
 
-/// Finds the governing namespace for `name`: the longest prefix in `rules`
-/// that `name` lies under; `(default, "")` if none.
-pub fn governing<'a, I>(rules: I, default: Rule, name: &Name) -> (Rule, String)
-where
-    I: IntoIterator<Item = (&'a String, &'a Rule)>,
-{
-    let mut best: Option<(&String, Rule)> = None;
-    for (p, r) in rules {
-        if name.is_under(p) && best.is_none_or(|(bp, _)| p.len() > bp.len()) {
-            best = Some((p, *r));
-        }
-    }
-    match best {
-        Some((p, r)) => (r, p.clone()),
-        None => (default, String::new()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -721,17 +667,6 @@ mod tests {
         assert!(n.is_under("pkg/foo"));
         assert!(!n.is_under("pk"));
         assert!(!n.is_under("pkg/foo/bar"));
-    }
-
-    #[test]
-    fn mobility_head_release() {
-        let r = Rule::HeadMutableReleaseImmutable;
-        let n = |s| Name::new(s).unwrap();
-        assert_eq!(mobility(r, "m", &n("m/heads/main")), Mobility::Mutable);
-        assert_eq!(mobility(r, "m", &n("m/releases/v1")), Mobility::CreateOnce);
-        assert!(matches!(mobility(r, "m", &n("m/other")), Mobility::Forbidden(_)));
-        assert!(matches!(mobility(r, "m", &n("m")), Mobility::Forbidden(_)));
-        assert!(matches!(mobility(r, "m", &n("m/heads")), Mobility::Forbidden(_)));
     }
 
     #[test]

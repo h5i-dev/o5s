@@ -1293,6 +1293,7 @@ name = "pico2peta-core"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "pico2peta-kernel",
  "thiserror",
 ]
 
@@ -1320,6 +1321,13 @@ dependencies = [
  "pico2peta-weights",
  "sha1_smol",
  "zstd",
+]
+
+[[package]]
+name = "pico2peta-kernel"
+version = "0.1.0"
+dependencies = [
+ "proptest",
 ]
 
 [[package]]
@@ -1375,6 +1383,7 @@ dependencies = [
  "blake3",
  "crc32fast",
  "pico2peta-core",
+ "pico2peta-kernel",
  "proptest",
  "tempfile",
 ]
