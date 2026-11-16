@@ -36,7 +36,7 @@ Policies grant `read < write < admin` on namespace prefixes (segment-aligned; `"
 | `replace` / `replace_many` / `update_many` / `delete_ref` | `write` on every target, plus `read` on every read-set name (a conflict reveals versions) |
 | `set_rule` | `admin` on the prefix |
 | `PUT /v1/objects` | `write` on some namespace |
-| `GET /v1/objects/{hash}` | `read` on some namespace (objects are global and content-addressed) |
+| `GET` / `HEAD /v1/objects/{hash}` | the object must be **reachable from a name the caller may read** (see below); otherwise `404 not_found`, exactly as for a missing object |
 | `oci/…`, `git/…`, `_prov/…` through `/v1` | global `admin`, because these namespaces are managed by the adapters |
 | OCI pull / push | `read` / `write` on `oci/<repo>` |
 | git fetch / push | `read` / `write` on `git/<repo>` |
@@ -50,7 +50,7 @@ All bodies are JSON unless noted. Every error has the form `{"error":{"code","me
 
 | code | HTTP | meaning |
 |---|---|---|
-| `not_found` | 404 | object does not exist |
+| `not_found` | 404 | object does not exist, **or** no name the caller may read reaches it (the two are indistinguishable by design) |
 | `ref_not_found` | 404 | name does not exist |
 | `invalid_range` | 416 | range outside the object (`Content-Range: bytes */<len>`) |
 | `invalid_name`, `parse`, `bad_request`, `target_not_in_read_set`, `hash_mismatch` | 400 | bad input |
@@ -66,9 +66,24 @@ All bodies are JSON unless noted. Every error has the form `{"error":{"code","me
 | `backend`, `corrupt`, `io`, `internal` | 5xx | server-side failure |
 
 ### Objects
+**Reads by hash follow reachability** (since the h5i rebuild, 2026-11-16). Knowing a hash is not a
+capability.
+- `GET`/`HEAD /v1/objects/<hash>` serve an object only if it is reachable from a name the caller may read:
+  through the name's target, its chunks, and its front's references (a Git tree's entries, an OCI
+  manifest's layers, an LFS pointer's content, ...).
+- Otherwise the answer is `404 not_found`, the same body and the same early refusal as for an object that
+  does not exist, so an unreadable object cannot be told from a missing one.
+- An object that no name reaches is unreadable to everyone, admins included, until a name points at it.
+- Put-then-get therefore needs a name in between, e.g. a `replace` that creates one. The decision is the
+  access kernel's (`crates/net-kernel`, proven in `verify/net`: `visible_object_spec`, with
+  noninterference for unreadable objects). Which names reach which objects comes from the core's
+  reachability index.
 ```sh
 # put (streamed; returns {"hash","size"}). Optional end-to-end check:
 curl -T big.bin -H "Authorization: Bearer $T" -H "x-o5s-expect-hash: <blake3 hex>" $S/v1/objects
+# name it (a read needs a readable name that reaches the object)
+curl -H "Authorization: Bearer $T" -H "Content-Type: application/json" $S/v1/replace \
+  -d '{"name":"team/data/a","read_set":[{"name":"team/data/a","observed":null}],"new":"<hash>"}'
 # get, whole or ranged (206 with Content-Range); HEAD for the size
 curl -H "Authorization: Bearer $T" -r 0-1023 $S/v1/objects/<hash>
 # make earlier puts durable without a replace
@@ -114,6 +129,11 @@ The rules are `mutable`, `immutable` (create-once) and `head-release`, where `<n
 - `GET /v1/whoami` returns `{"principal","authenticated"}`.
 - Token management (admin on `""`; needs `auth.token_file`):
   - `POST /v1/admin/tokens {"principal":"ci"}` returns `{"token","sha256"}`. The token is shown once and only its hash is stored.
+  - With `auth.token_key_file` (a file of at least 32 random bytes, the HMAC key), the issued tokens are
+    h5i-app tokens, `v1.0.<user>.<expiry>.<hmac-sha256>`. An optional `"ttl_secs"` sets the lifetime
+    (default one year). They are parsed by h5i-app-token's extracted, proven parser and checked against
+    the key (constant time), the expiry and the token table, so revoking still works. Without a key, a
+    random `o5s_…` secret is issued as before. Static `[[auth.tokens]]` entries keep working either way.
   - `GET /v1/admin/tokens` lists principals and hashes.
   - `DELETE /v1/admin/tokens/<sha256>` revokes a token immediately.
 
@@ -206,7 +226,9 @@ mvn deploy -DaltDeploymentRepository=o5s::https://o5s.example.com/maven/releases
   - `pypi:<index>/<project>/<file>`, `npm:<registry>/<pkg>@<version>`, `maven:<repo>/<path>`;
   - `oci:<repo>@sha256:<hex>`.
 
-  Each requires read access on its front's namespace.
+  Each requires read access on its front's namespace. Ids that name an object by hash (`blake3:<hex>`,
+  and `git:<repo>@<oid>`, which goes through the global oid map) also need the object to be reachable from
+  a name the caller may read; otherwise they are refused exactly like an unknown id.
 - **`GET /v1/provenance?ref=<id>`** returns producers, consumers, transitive `lineage` and `impact`.
 - **`POST /v1/provenance`** `{op, inputs: {role: id}, outputs: {role: id}, meta}` records a client-declared derivation, e.g. a wheel built from a git commit. It needs write access on every output.
 - **`GET /v1/search?q=<text>`** (or `prefix=` / `exact=`) searches names, front metadata and provenance. Results are limited to names the caller can read.
