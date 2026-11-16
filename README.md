@@ -10,7 +10,7 @@ unmodified.
 
 ## Potential pushback
 
-- "Merge in Git is necessary" → Overwrite is enough. Assign jobs well and conflicts are rare; when one happens, the stale write is refused, never lost, and redone on the latest version.
+- "Merge in Git is necessary" → Merge is just a special case of overwrite: combine the versions, then overwrite.
 - "Xet makes large weights fast" → Then use it for every domain.
 - "Git packs source code better" → Similarity repack stores 0.79–0.95× of `git gc --aggressive`, for any data.
 - "Registries need their own rules" → They're per-namespace rules: `mutable`, `immutable`, `head-release`.
