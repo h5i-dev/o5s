@@ -48,6 +48,24 @@ pre-registered metric was plain RSS, so it is reported as **missed**; the split 
   292 B/object projection was stopped early, as soon as the 10⁷ disk number showed it could not fit.
 - The bench's disk number now counts each inode once.
 
+## 2026-11-16: H2 dev check (not the H3 run): kernel overhead is not measurable
+
+Two `scripts/baseline-core.sh micro` dev runs on the H2 commit failed different metrics: run 1 (load 2.2–3.0)
+small objects and stream; run 2 (load 0.5–2.8) large reads and stream put. The same metrics passed in the
+other run with the same code, so these were environmental. Confirmed by an **interleaved A/B** of the baseline
+binary (`baseline-pre-h5i`) against the H2 binary, 3 rounds each, alternating under the lock (load 4.2–5.0):
+
+| case | baseline (3 rounds) | H2 (3 rounds) |
+|---|---|---|
+| 64 MiB random: get / open strict / open eof, MB/s | 1046–1356 / 1802–2012 / 1952–2150 | 675–1284 / 916–1997 / 1316–2145 |
+| 1 KiB put 1 thread, k/s | 128.3–134.2 | 106.0–135.1 |
+| 1 KiB get 1 thread, k/s | 231.3–268.2 | 207.5–268.8 |
+
+H2 matched or beat the baseline in rounds 1 and 2; in round 3 both dropped together. **Consequence for H3:** at
+this host's noise level, the §6.8 rule (3 % or the baseline range) needs quiet windows. A metric that fails at a
+load well above its baseline load is rerun once, as §6.8 and the batch protocol allow, and an interleaved A/B
+against the baseline binary is reported alongside.
+
 ## 2026-11-16: generic front (PLAN §6.4), pre-registered run
 
 `p2p-bench generic bench-micro 1024`: 1 GiB incompressible input from tmpfs, local NVMe, under the bench lock, three
