@@ -122,3 +122,46 @@ fn pending_creates_settle_exactly_with_or_without_the_worker() {
     assert!(idx.readable_many(&more, &[1]).unwrap().iter().all(|b| *b));
     assert!(idx.readable_many(&more, &[0]).unwrap().iter().all(|b| !*b), "other cells are unaffected");
 }
+
+/// Commits by another writer, which this handle never sees as a local observer: another process on
+/// a local journal, or another host on a backend log (here a second handle on the same repository,
+/// with its own ref store). Reads stay exact: grants after a foreign create, revocations after a
+/// foreign move or delete.
+fn foreign_writer_case(store: o5s_repo::RefsStore) {
+    let d = tempfile::tempdir().unwrap();
+    let mut cfg = o5s_repo::RepoConfig::default();
+    cfg.refs.store = store;
+    let r1 = LocalRepo::init_config(d.path(), &cfg).unwrap();
+    let r2 = LocalRepo::open(d.path()).unwrap();
+    let idx = ReachIndex::open(&r1, vec![String::new(), "team".to_string()]).unwrap();
+    let big = blob(9, 2 << 20);
+    let a = r2.put(&big).unwrap();
+    let b = r2.put(b"other target").unwrap();
+    r2.flush().unwrap();
+    let chunks = r2.packs().chunks(&a).unwrap().unwrap();
+    // A foreign create: readable through handle 1 at once, chunks included, in the right cell.
+    set(&r2, "team/m", a);
+    let got = idx.cells_reaching_many(&[a, chunks[0], b], &[0, 1]).unwrap();
+    assert_eq!(got[0], vec![1], "{store:?}: foreign create grants");
+    assert_eq!(got[1], vec![1], "{store:?}: with its chunks");
+    assert!(got[2].is_empty());
+    // A foreign move revokes the old target.
+    set(&r2, "team/m", b);
+    assert_eq!(idx.readable_many(&[a, b], &[1]).unwrap(), vec![false, true], "{store:?}: foreign move revokes");
+    // A foreign delete revokes.
+    del(&r2, "team/m");
+    assert_eq!(idx.readable_many(&[a, b], &[0, 1]).unwrap(), vec![false, false], "{store:?}: foreign delete revokes");
+    // And a re-create (version > 1) grants again.
+    set(&r2, "team/m", a);
+    assert_eq!(idx.readable_many(&[a], &[1]).unwrap(), vec![true]);
+}
+
+#[test]
+fn foreign_writers_on_a_local_journal_are_seen() {
+    foreign_writer_case(o5s_repo::RefsStore::Local);
+}
+
+#[test]
+fn foreign_hosts_on_a_backend_log_are_seen() {
+    foreign_writer_case(o5s_repo::RefsStore::Backend);
+}

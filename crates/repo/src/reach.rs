@@ -23,10 +23,16 @@
 //! recomputes that cell exactly first. "Unreadable as soon as its last readable
 //! name is deleted" therefore holds immediately.
 //!
-//! **Limits (v1).** In memory only (rebuilt at open, about one GC mark per
-//! cell). Writes by other processes or hosts to the same repository are not
-//! observed; the server must be the repository's only writer for the index to
-//! be exact (the CLI on the server host writes through its own handle).
+//! **Other writers.** Commits by other processes (a local journal) or other
+//! hosts (a backend ref log, e.g. on S3) reach the index through the ref
+//! store's foreign observer (`RefStore::add_foreign_observer`) as the store
+//! applies them, and are handled exactly like local ones. A snapshot rebase or
+//! journal rotation replaces the whole ref state, so it marks every cell dirty.
+//! Every query first catches the ref store up (`RefStore::catch_up`, what every
+//! ref read does), so answers include every commit made before the query, by
+//! any writer: foreign creations grant, foreign moves and deletes revoke.
+//!
+//! **Limits.** In memory only: rebuilt at open, about one GC mark per cell.
 
 use crate::{LocalRepo, Tracer};
 use o5s_core::{Error, Hash, Name, ObjectStore, Repository, Result};
@@ -112,9 +118,23 @@ impl ReachIndex {
                 queue: Arc::default(),
             }),
         };
-        idx.rebuild_all()?;
-        // The observer and the worker hold the index weakly: dropping the index stops both.
+        // The observers and the worker hold the index weakly: dropping the index stops them.
+        // Both observers are registered before the first build (every cell starts dirty), so no
+        // change between the build and the registration is missed.
         repo.add_ref_observer(Arc::new(Observer(Arc::downgrade(&idx.inner))));
+        // Changes by other writers (processes on a local journal, hosts on a backend log), as the
+        // ref store applies them.
+        let foreign = Arc::downgrade(&idx.inner);
+        repo.refs.add_foreign_observer(Arc::new(move |f: &o5s_refs::Foreign| {
+            if let Some(inner) = foreign.upgrade() {
+                let idx = ReachIndex { inner };
+                match f {
+                    o5s_refs::Foreign::Changes(c) => idx.on_change(c),
+                    o5s_refs::Foreign::Reset => idx.all_dirty(),
+                }
+            }
+        }));
+        idx.rebuild_all()?;
         let weak = Arc::downgrade(&idx.inner);
         let queue = idx.inner.queue.clone();
         std::thread::Builder::new()
@@ -145,6 +165,9 @@ impl ReachIndex {
     /// For each hash, the candidate cells whose names reach it (in candidate
     /// order). Unknown cell ids are ignored.
     pub fn cells_reaching_many(&self, hashes: &[Hash], candidates: &[CellId]) -> Result<Vec<Vec<CellId>>> {
+        // First apply what other writers committed: the ref store reports it to this index (as
+        // creations or as dirty cells) before the cells are settled, so the answer is exact.
+        self.inner.repo.refs.catch_up()?;
         let (cells, states) = self.snapshot()?;
         let mut out = vec![Vec::new(); hashes.len()];
         for &c in candidates {
@@ -232,6 +255,17 @@ impl ReachIndex {
             }
         }
         Ok((members, traced))
+    }
+
+    /// Every cell is recomputed by its next query (another writer replaced the whole ref state).
+    fn all_dirty(&self) {
+        let Ok((_, states)) = self.snapshot() else { return };
+        for s in states.iter() {
+            if let Ok(mut inbox) = s.inbox.lock() {
+                inbox.dirty = true;
+                inbox.roots.clear();
+            }
+        }
     }
 
     /// The commit path: O(changes), no traversal, never waits for a traversal.

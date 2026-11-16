@@ -96,8 +96,12 @@ for that rule to be sound:
   references is missed (`crates/repo/tests/front.rs`).
 - **An unreferenced object is unreadable** through the server, even right after its `put`. A missing object and
   a forbidden one get the same answer.
-- **Limit:** writes to the repository from other processes or hosts are not observed. The server must be the
-  repository's only writer for the index to be exact.
+- **Every writer counts.** Commits by other processes on a local journal, and by other hosts on a backend ref
+  log (several servers on one S3 bucket), are applied by the ref store's catch-up. They reach the index through
+  its foreign observer: creations grant, and moves and deletes mark the cell dirty, so they revoke. A snapshot
+  rebase or journal rotation marks every cell dirty. Each query catches the refs up first, so it reflects every
+  commit made before it, from any writer (`crates/repo/tests/reach.rs`, `crates/refs/tests/foreign.rs`, and the
+  two-server S3 test in `crates/server/tests/server.rs`).
 
 ## Findings fixed in this review
 
