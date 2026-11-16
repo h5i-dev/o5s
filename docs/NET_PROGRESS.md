@@ -374,6 +374,32 @@ The contended run checks that no update is lost: the final version equals the nu
 - **read_verify, server side: DONE** (as agreed with the core: one policy source, the repo's `[read]` config, and no server setting).
   - `GET /v1/objects/<h>?verify=strict|eof` calls `open_verified`. `eof` gets 403 unless the repo allows it, and a bad value gets 400. With no parameter, the plain `open` follows `[read] verify`, so strict is the default by construction.
   - `RemoteRepo::open_verified` sends the parameter. Test `read_verify_parameter_follows_repo_policy`.
+- **HF transfers vs /v1 (human's priority 2): front overhead removed; the rest is core work or client-side.** SmolLM2-135M (270 MB); dev checks under the bench lock in a quiet window (load 1.5–2.7).
+  - Front fixes:
+    - LFS uploads compute SHA-256 on their own task, fed the same refcounted buffers, instead of inline in the store's read loop;
+    - Xet shard rebuilds also hash SHA-256 on their own thread;
+    - xorb chunk hashes are verified on worker threads while the content is stored;
+    - virtual-xorb downloads are streamed in 4 MiB windows, instead of materialising ~64 MiB per range, and without a per-chunk allocation.
+  - **Server-side** (curl, to `/dev/null`, so no client or disk effects; medians of 6–7):
+
+    | path | pico2peta | /v1 reference | ratio |
+    |---|---|---|---|
+    | LFS download (resolve) | 0.277 s | 0.273 s | **1.01×** |
+    | Xet download (reconstruction + 5 xorb ranges, 8 parallel) | 0.276 s | 0.278 s | **0.99×** (was 0.340 s, 1.23×) |
+    | LFS PUT | 0.327 s | 0.257 s | 1.27× |
+
+    Of the LFS PUT's 1.27×, the hf namespace's Xet chunker profile accounts for 1.19× (`/v1?for_name=hf/...` takes 0.305 s). The front adds ~7%.
+  - **End-to-end with the real clients** (medians of 5, same window): LFS upload 0.58 s, LFS download 0.69 s, Xet upload 1.05 s, Xet download 0.51 s, vs curl `/v1` put 0.26 s and get 0.31 s. These ratios include work the HF clients do that curl doesn't:
+    - huggingface_hub hashes the file (SHA-256) before an LFS upload;
+    - hf_xet chunks and hashes locally (~0.8 s per 270 MB);
+    - downloads write through Python into the HF cache, and dirty-page writeback alone moves a plain curl GET from 0.31 s to 0.93 s once other downloads have written to disk.
+  - Remaining server-side items, both with the core:
+    - XetChunker speed (16.5% of a shard-only upload; the core is speeding up the gear loop, byte-exact);
+    - `put_concat` (core API v1.20, agreed). Xet shard registration rebuilds the file object: read-back + SHA-256 + re-chunk + hash + dedup put, ~1.1 s for 270 MB even when every chunk exists. With `put_concat` it becomes one BLAKE3+SHA-256 pass reusing the xorbs' chunk records. Net wires it in when it lands.
+- **OCI pull (human's priority 3): front overhead is negligible; the bottleneck is the core's verified read path, sent to the core with evidence.**
+  - Pull of the 4-image set: 0.35–0.40 s vs 0.18–0.19 s for distribution (~2.05×).
+  - Server profile over 8 pull rounds: BLAKE3 36.8%, frame CRC32 11.6%, memset 6.1% (zeroed read buffers in `stream_reader`), kernel ~12%; no zstd (gzip layers are stored raw).
+  - The front is the same `stream_reader` path as `/v1` GET. Questions to the core: is the CRC redundant where BLAKE3 verifies the same bytes, and can strict reads avoid hashing twice?
 - **Git first push into an empty store (human's request): DONE, target met** (≤1.2×). `index_pack` was rebuilt the way git's index-pack works:
   - pass 1 is one sequential buffered read; it used to seek back and refill a fresh 64 KiB buffer per entry. The trailer checksum is verified on another thread at the same time;
   - pass 1 keeps the inflated data (256 MiB budget: deltas and small whole objects), so pass 2 doesn't inflate twice;

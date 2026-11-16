@@ -1082,6 +1082,7 @@ async fn xet_xorb(hf: &Arc<HfState>, token: &str, headers: &HeaderMap) -> Respon
         if hf2.lfs_for(&repo, &hex(&rec.sha256))?.is_none() {
             return Ok(None);
         }
+        let rec = Arc::new(rec);
         let groups = rec.groups();
         let Some(g) = groups.get(gi as usize) else { return Ok(None) };
         let total: u64 = g.clone().map(|i| 8 + rec.chunks[i].1 - if i == 0 { 0 } else { rec.chunks[i - 1].1 }).sum();
@@ -1092,15 +1093,35 @@ async fn xet_xorb(hf: &Arc<HfState>, token: &str, headers: &HeaderMap) -> Respon
             }
             None => (0, total),
         };
-        if bs >= be {
-            return Ok(Some((Vec::new(), bs, be, total)));
-        }
-        Ok(Some((rec.serialize_range(hf2.git_repo(), gi as usize, bs, be)?, bs, be, total)))
+        Ok(Some((rec, bs, be, total)))
     })
     .await;
     match res {
-        Ok(Some((data, bs, be, total))) => {
-            let mut r = Response::new(Body::from(data));
+        Ok(Some((rec, bs, be, total))) => {
+            // Streamed in windows, so serializing overlaps sending (a virtual xorb is ~64 MiB).
+            const WINDOW: u64 = 4 << 20;
+            let (tx, rx) = mpsc::channel::<std::io::Result<Bytes>>(2);
+            let hf3 = hf.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut at = bs;
+                while at < be {
+                    let end = (at + WINDOW).min(be);
+                    let item = rec
+                        .serialize_range(hf3.git_repo(), gi as usize, at, end)
+                        .map(Bytes::from)
+                        .map_err(|e| std::io::Error::other(e.to_string()));
+                    let stop = item.is_err();
+                    if tx.blocking_send(item).is_err() || stop {
+                        return;
+                    }
+                    at = end;
+                }
+            });
+            let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+                rx.recv().await.map(|i| (i, rx))
+            }));
+            let mut r = Response::new(body);
+            r.headers_mut().insert(header::CONTENT_LENGTH, HeaderValue::from(be.saturating_sub(bs)));
             if partial {
                 *r.status_mut() = StatusCode::PARTIAL_CONTENT;
                 if let Ok(v) = HeaderValue::from_str(&format!("bytes {bs}-{}/{total}", be.saturating_sub(1))) {
