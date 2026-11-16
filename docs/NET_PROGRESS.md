@@ -1,5 +1,18 @@
 # Net session progress (backends & server, branch `net`)
 
+## Status (2026-11-16, after the o5s rename)
+
+- **Project renamed pico2peta → o5s** (demo 7387883, merged into net 61b45f2). The gate is green, and `verify/net` re-extracts unchanged with the official h5i 0.5.5; `h5i app prove` is ok and both obligations are proven. Local paths (`/mnt/scratch/pico2peta`) and the frozen pre-h5i baseline files keep the old name; the report scripts map it.
+- **H2 (h5i rebuild), net side: done.**
+  - Kernels extracted and proven: access/authz guard, object-read reachability, git push, publish rules, wire parsers, LFS pointer.
+  - h5i obligations: panic-free and read-only.
+  - Mutants: 18/18 caught.
+  - Server on h5i-app-http; issued tokens via h5i-app-token.
+  - Released crates.io h5i 0.5.5 only.
+- **H3:** run partly. Its findings were fixed: first push (reach closure), clone-pack order, GET (core d00980b). Per the human's re-plan it is folded into one final batch.
+- **H4 (Xet/LFS), dev results:** see the H4 section and the PLAN §6.8 HF amendments. Xet up 0.35× and Xet down 1.05× CPU meet the target. LFS up is 1.34×, recorded as FAIL by the human's ruling (Xet chunker kept for LFS↔Xet dedup; parallel chunker post-RC). LFS down is 1.04× CPU.
+- **Final batch:** the core's windows on demo 9914209 partly done (suite to rerun after an outside render loaded the host). Net windows A/B cancelled for now; measurements stopped until the human says otherwise.
+
 ## Status (2026-11-15)
 
 **Summary (verified 2026-11-15):** all six goals in AGENT_TASK_NET.md are done and verified. The checks: clippy `-D warnings`; all 18 net test binaries, including MinIO; OCI conformance 73/0; real-git round-trips; and the cargo-fuzz targets. CI also has Lean and fuzz-smoke jobs. Production hardening continued beyond the goals (see "Hardening after goal 6"). Remaining limits are listed under "Production gaps". The parts:
