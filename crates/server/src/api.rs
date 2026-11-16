@@ -403,12 +403,12 @@ impl AppState {
                     Vec::new()
                 } else {
                     vec![(
-                        h.0,
+                        h.0.to_vec(),
                         cs.iter().map(|&c| cells.get(c as usize).cloned().unwrap_or_default().into_bytes()).collect(),
                     )]
                 };
                 let snap = Snapshot { refs: Vec::new(), objects };
-                pico2peta_net_kernel::guarded_transition(&grants, &snap, &Command::ReadObject(h.0)).is_ok()
+                pico2peta_net_kernel::guarded_transition(&grants, &snap, &Command::ReadObject(h.0.to_vec())).is_ok()
             })
             .collect())
     }
@@ -1211,6 +1211,8 @@ pub struct TokenAdmin {
     pub inline: Vec<crate::config::TokenEntry>,
     pub allow_anonymous: bool,
     pub lock: tokio::sync::Mutex<()>,
+    /// `auth.token_key_file`: issue h5i-app tokens instead of random secrets.
+    pub key: Option<Vec<u8>>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Default)]
@@ -1263,6 +1265,9 @@ impl TokenAdmin {
 #[derive(serde::Deserialize)]
 struct CreateToken {
     principal: String,
+    /// Lifetime of an issued (h5i-app) token; default one year.
+    #[serde(default)]
+    ttl_secs: Option<u64>,
 }
 
 async fn create_token(
@@ -1279,9 +1284,15 @@ async fn create_token(
         return Err(ApiError::bad_request("invalid principal name"));
     }
     st.require_audit_healthy()?;
-    let mut raw = [0u8; 32];
-    getrandom::fill(&mut raw).map_err(|e| ApiError::internal(format!("no system randomness: {e}")))?;
-    let token = format!("p2p_{}", raw.iter().map(|b| format!("{b:02x}")).collect::<String>());
+    let token = match &ta.key {
+        // An h5i-app token (`v1.0.<user>.<expiry>.<hmac>`), accepted while listed and unexpired.
+        Some(key) => crate::auth::issue_token(key, &req.principal, req.ttl_secs.unwrap_or(365 * 24 * 3600)),
+        None => {
+            let mut raw = [0u8; 32];
+            getrandom::fill(&mut raw).map_err(|e| ApiError::internal(format!("no system randomness: {e}")))?;
+            format!("p2p_{}", raw.iter().map(|b| format!("{b:02x}")).collect::<String>())
+        }
+    };
     let sha: String = crate::auth::sha256(token.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
     let _g = ta.lock.lock().await;
     let mut file = ta.read().map_err(ApiError::internal)?;

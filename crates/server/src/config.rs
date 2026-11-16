@@ -459,6 +459,11 @@ pub struct AuthSection {
     /// Accept OIDC/JWT bearer tokens from this issuer (in addition to static tokens).
     #[serde(default)]
     pub oidc: Option<OidcSection>,
+    /// HMAC key (a file of at least 32 random bytes) for issued tokens: with it, the token API
+    /// issues h5i-app tokens (`v1.0.<user>.<expiry>.<hmac-sha256>`), parsed by the extracted,
+    /// proven `h5i_app_token::parse` and checked against the key and the token table.
+    #[serde(default)]
+    pub token_key_file: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

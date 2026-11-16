@@ -5,6 +5,7 @@
 pub mod access;
 pub mod gitpush;
 pub mod parse;
+pub mod publish;
 
 use access::{Access, Command, Error, Hash, Principal, Reply, Row, Snapshot, Write, cells_of, ref_of};
 
@@ -21,7 +22,7 @@ pub fn one_row(r: Row) -> Reply {
 pub fn transition(_p: &Principal, s: &Snapshot, cmd: &Command) -> Result<(Vec<Write>, Reply), Error> {
     match cmd {
         Command::ReadObject(h) => match cells_of(s, h) {
-            Some(_) => Ok((Vec::new(), one_row(Row::Object(*h)))),
+            Some(_) => Ok((Vec::new(), one_row(Row::Object(h.clone())))),
             None => Err(Error::NotFound),
         },
         Command::ReadRef(n) => match ref_of(s, n) {

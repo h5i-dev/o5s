@@ -987,3 +987,41 @@ fn object_reads_follow_reachability() {
     // An admin reads anything named.
     assert_eq!(get(ADMIN, &private).0, 200);
 }
+
+/// With `auth.token_key_file`, the token API issues h5i-app tokens: parsed by the extracted,
+/// proven `h5i_app_token::parse`, signed with HMAC-SHA256, and still revocable through the table.
+#[test]
+fn issued_tokens_are_h5i_app_tokens() {
+    let s = TestServer::start(|c| {
+        let dir = c.repo.path.parent().unwrap().to_path_buf();
+        c.auth.token_file = Some(dir.join("tokens.toml"));
+        std::fs::write(dir.join("token.key"), [7u8; 32]).unwrap();
+        c.auth.token_key_file = Some(dir.join("token.key"));
+    });
+    let admin = |m: reqwest::Method, p: &str| http().request(m, format!("{}{p}", s.url())).bearer_auth(ADMIN);
+    let v: serde_json::Value = admin(reqwest::Method::POST, "/v1/admin/tokens")
+        .json(&serde_json::json!({"principal": "robot", "ttl_secs": 3600}))
+        .send()
+        .unwrap()
+        .json()
+        .unwrap();
+    let tok = v["token"].as_str().unwrap().to_string();
+    let sha = v["sha256"].as_str().unwrap().to_string();
+    assert!(tok.starts_with("v1.0."), "{tok}");
+    let who = |t: &str| http().get(format!("{}/v1/whoami", s.url())).bearer_auth(t).send().unwrap();
+    let r = who(&tok);
+    assert_eq!(r.status(), 200);
+    assert!(r.text().unwrap().contains("robot"));
+    // A tampered signature, user or expiry is refused.
+    let mut bad = tok.clone().into_bytes();
+    let last = bad.len() - 1;
+    bad[last] = if bad[last] == b'0' { b'1' } else { b'0' };
+    assert_eq!(who(std::str::from_utf8(&bad).unwrap()).status(), 401);
+    let parts: Vec<&str> = tok.split('.').collect();
+    let forged = format!("v1.0.{}.{}.{}", parts[2].parse::<u64>().unwrap() + 1, parts[3], parts[4]);
+    assert_eq!(who(&forged).status(), 401);
+    // Static tokens keep working; revocation still works for issued ones.
+    assert_eq!(who(ALICE).status(), 200);
+    assert_eq!(admin(reqwest::Method::DELETE, &format!("/v1/admin/tokens/{sha}")).send().unwrap().status(), 204);
+    assert_eq!(who(&tok).status(), 401);
+}

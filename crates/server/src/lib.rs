@@ -163,7 +163,21 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
     } else {
         None
     };
-    let tokens = Arc::new(auth::TokenAuthenticator::new(&cfg.auth.tokens, cfg.auth.allow_anonymous));
+    let token_key = match &cfg.auth.token_key_file {
+        Some(f) => {
+            let k = std::fs::read(f).map_err(|e| StartError::Audit(f.clone(), e))?;
+            if k.len() < 32 {
+                return Err(StartError::Audit(
+                    f.clone(),
+                    std::io::Error::other("auth.token_key_file must hold at least 32 bytes"),
+                ));
+            }
+            Some(k)
+        }
+        None => None,
+    };
+    let tokens =
+        Arc::new(auth::TokenAuthenticator::new(&cfg.auth.tokens, cfg.auth.allow_anonymous).with_key(token_key.clone()));
     let audit = audit::AuditLog::open_with(&cfg.audit.path, cfg.audit.rotate_bytes)
         .map_err(|e| StartError::Audit(cfg.audit.path.clone(), e))?;
     Ok(Arc::new(AppState {
@@ -196,6 +210,7 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
                     inline: Vec::new(),
                     allow_anonymous: cfg.auth.allow_anonymous,
                     lock: tokio::sync::Mutex::new(()),
+                    key: token_key.clone(),
                 };
                 // Inline = configured tokens that are not in the token file.
                 let in_file = ta.read_hashes().map_err(StartError::S3)?;

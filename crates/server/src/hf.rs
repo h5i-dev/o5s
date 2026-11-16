@@ -47,6 +47,7 @@ use std::io::Read;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+#[cfg(test)]
 const LFS_POINTER_PREFIX: &[u8] = b"version https://git-lfs.github.com/spec/v1\n";
 /// Files at least this large (or with a NUL byte in their sample) are uploaded via LFS.
 const LFS_THRESHOLD: u64 = 64 * 1024;
@@ -347,22 +348,10 @@ fn lfs_pointer(sha: &str, size: u64) -> Vec<u8> {
 
 /// `(sha256 hex, size)` if `body` is a Git LFS pointer.
 pub fn parse_lfs_pointer(body: &[u8]) -> Option<(String, u64)> {
-    if body.len() > 512 || !body.starts_with(LFS_POINTER_PREFIX) {
-        return None;
-    }
-    let text = std::str::from_utf8(body).ok()?;
-    let mut oid = None;
-    let mut size = None;
-    for l in text.lines() {
-        if let Some(v) = l.strip_prefix("oid sha256:") {
-            if v.len() == 64 && v.bytes().all(|c| c.is_ascii_hexdigit()) {
-                oid = Some(v.to_ascii_lowercase());
-            }
-        } else if let Some(v) = l.strip_prefix("size ") {
-            size = v.trim().parse().ok();
-        }
-    }
-    Some((oid?, size?))
+    // The extracted net kernel's parser (`net-kernel/src/parse.rs`): the version line, then
+    // `oid sha256:<64 hex>` and `size <strict decimal>` lines, the last of each winning.
+    let (oid, size) = pico2peta_net_kernel::parse::parse_lfs_pointer(body)?;
+    Some((hex(&oid), size))
 }
 
 pub(crate) fn sha_key(hex64: &str) -> Option<Key> {
@@ -613,15 +602,6 @@ fn make_commit(
         let Some((ref_name, ref_val)) = res.branch.clone() else {
             return Ok(Err((StatusCode::BAD_REQUEST, "BadRequest", "commits must target a branch".to_string())));
         };
-        if let Some(p) = parent
-            && p != res.commit
-        {
-            return Ok(Err((
-                StatusCode::PRECONDITION_FAILED,
-                "BadRequest",
-                format!("parent commit {} is not the head of {rev}", hex(&p)),
-            )));
-        }
         let mut tree = load_tree(&view, &res.tree)?;
         let mut w = Writer { st, entries: Vec::new() };
         // Every LFS file of the commit, checked with one batched lookup.
@@ -638,6 +618,39 @@ fn make_commit(
             .zip(hf.lfs_for_many(repo, &lfs_shas)?)
             .filter_map(|(s, v)| v.map(|v| (s, v)))
             .collect();
+        // The acceptance rule is the extracted kernel's (`net-kernel/src/publish.rs`,
+        // `decide_commit`): a given parent must be the head, paths valid (checked while
+        // parsing), and every LFS file uploaded with its declared size.
+        let missing_lfs = ops.iter().find_map(|op| match op {
+            Op::AddLfs { sha, size, .. } if !lfs_have.get(sha).is_some_and(|v| v.aux == *size) => {
+                Some((sha.clone(), *size))
+            }
+            _ => None,
+        });
+        let parent_bytes = parent.map(|p| p.to_vec());
+        match pico2peta_net_kernel::publish::decide_commit(
+            &parent_bytes,
+            &Some(res.commit.to_vec()),
+            true,
+            missing_lfs.is_none(),
+        ) {
+            Err(pico2peta_net_kernel::publish::CommitNg::StaleParent) => {
+                return Ok(Err((
+                    StatusCode::PRECONDITION_FAILED,
+                    "BadRequest",
+                    format!("parent commit {} is not the head of {rev}", parent.map(|p| hex(&p)).unwrap_or_default()),
+                )));
+            }
+            Err(_) => {
+                let (sha, size) = missing_lfs.unwrap_or_default();
+                return Ok(Err((
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "EntryNotFound",
+                    format!("LFS object {sha} ({size} B) was not uploaded"),
+                )));
+            }
+            Ok(()) => {}
+        }
         for op in ops {
             match op {
                 Op::Add { path, content } => {
@@ -645,16 +658,6 @@ fn make_commit(
                     insert_path(&mut tree, path, Node::File { mode: "100644".into(), oid })?;
                 }
                 Op::AddLfs { path, sha, size } => {
-                    match lfs_have.get(sha) {
-                        Some(v) if v.aux == *size => {}
-                        _ => {
-                            return Ok(Err((
-                                StatusCode::UNPROCESSABLE_ENTITY,
-                                "EntryNotFound",
-                                format!("LFS object {sha} ({size} B) was not uploaded"),
-                            )));
-                        }
-                    }
                     let oid = w.put(Kind::Blob, &lfs_pointer(sha, *size))?;
                     insert_path(&mut tree, path, Node::File { mode: "100644".into(), oid })?;
                 }

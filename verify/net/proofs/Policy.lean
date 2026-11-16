@@ -145,4 +145,64 @@ theorem reads_some_spec (p : access.Principal) (cells : alloc.vec.Vec (alloc.vec
     h5i_iter [IterSearchStep, access.READ, vec_deref_val]
     all_goals (exact (vec_deref_val cells) ▸ ‹i < (alloc.vec.Vec.deref cells).val.length›)
 
+/-- The cells reaching `h` in the snapshot (the first entry for `h`). -/
+def cellsS (s : access.Snapshot) (h : alloc.vec.Vec U8) : Option (alloc.vec.Vec (alloc.vec.Vec U8)) :=
+  (s.objects.val.find? (fun e => decide (e.1 = h))).map (·.2)
+
+@[step]
+theorem cells_of_spec (s : access.Snapshot) (h : alloc.vec.Vec U8) :
+    access.cells_of s h ⦃ r => r = cellsS s h ⦄ := by
+  unfold access.cells_of access.cells_of_loop
+  step*
+  try subst_vars
+  apply WP.spec_mono (iter_search (alloc.vec.Vec.deref s.objects) (fun e => decide (e.1 = h)) id
+    (fun _ x => some x.2) none _ ?_ 0 (by simp))
+  · intro y hy; rw [id_eq] at hy; rw [hy, searchFrom_find]; simp [cellsS, vec_deref_val]
+  · intro i hi
+    unfold access.cells_of_loop.body
+    rw [H5iAppLib.slice_iter_next]
+    split
+    · rename_i hlt
+      simp only [bind_ok]
+      rcases hx : (alloc.vec.Vec.deref s.objects).val[i] with ⟨a, v⟩
+      show (match (some (a, v) : Option _) with
+        | none => ok (ControlFlow.done none)
+        | some e =>
+          (match e with
+          | (v0, v1) => do
+            let b ← alloc.vec.partial_eq.PartialEqVec.eq core.cmp.PartialEqU8 v0 h
+            if b = true then do
+              let v2 ← alloc.vec.CloneVec.clone (core.clone.CloneallocvecVec core.clone.CloneU8) v1
+              ok (ControlFlow.done (some v2))
+            else ok (ControlFlow.cont ({ slice := alloc.vec.Vec.deref s.objects, i := i + 1 } : SIter _)))) ⦃ _ ⦄
+      dsimp only
+      step*
+      · unfold IterSearchStep; left
+        refine ⟨hlt, ?_, ?_⟩
+        · erw [hx]; simp_all
+        · erw [hx]; simp_all
+      · unfold IterSearchStep
+        refine ⟨hlt, ?_, rfl⟩
+        erw [hx]; simp_all
+    · step*
+      unfold IterSearchStep; right; simp_all
+
+/-- **The object-read policy.** An object row is visible to `actor` iff the snapshot lists
+cells reaching it and `actor` may read one of them. -/
+theorem visible_object_spec (actor : access.Principal) (s : access.Snapshot) (h : alloc.vec.Vec U8) :
+    access.Access.Insts.H5i_app_stdAuthzPolicyPrincipalSnapshotWriteRow.visible actor s (access.Row.Object h)
+      ⦃ b => b = match cellsS s h with
+        | some cs => readsSomeS actor cs.val
+        | none => false ⦄ := by
+  unfold access.Access.Insts.H5i_app_stdAuthzPolicyPrincipalSnapshotWriteRow.visible
+  step*
+
+/-- **The ref-write policy.** A ref write is permitted iff `actor` holds write on the name. -/
+theorem permits_spec (actor : access.Principal) (s : access.Snapshot) (n : alloc.vec.Vec U8) :
+    access.Access.Insts.H5i_app_stdAuthzPolicyPrincipalSnapshotWriteRow.permits actor s (access.Write.Ref n)
+      ⦃ b => b = allowsS actor.grants.val (B n.val) 2 ⦄ := by
+  unfold access.Access.Insts.H5i_app_stdAuthzPolicyPrincipalSnapshotWriteRow.permits
+  step*
+  all_goals simp_all [access.WRITE, vec_deref_val]
+
 end pico2peta_net_kernel.Spec.Policy

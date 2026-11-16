@@ -35,8 +35,9 @@ pub struct Principal {
     pub grants: Vec<Grant>,
 }
 
-/// An object id (BLAKE3).
-pub type Hash = [u8; 32];
+/// An object id (BLAKE3, 32 bytes). A byte vector, so its equality has a proven spec
+/// (`H5iAppLib.vec_u8_eq_spec`).
+pub type Hash = Vec<u8>;
 
 /// What one request needs to see of the store: the refs it reads, and for each object it
 /// reads, the cells (policy prefixes) from whose names the object is reachable. An object
@@ -135,7 +136,7 @@ pub fn cells_of(s: &Snapshot, h: &Hash) -> Option<Vec<Vec<u8>>> {
 pub fn ref_of(s: &Snapshot, name: &Vec<u8>) -> Option<Hash> {
     for e in s.refs.iter() {
         if e.0 == *name {
-            return Some(e.1);
+            return Some(e.1.clone());
         }
     }
     None
@@ -234,28 +235,31 @@ mod tests {
 
     #[test]
     fn objects_follow_reachability() {
-        let h1 = [1u8; 32];
-        let shared = [2u8; 32];
+        let h1 = vec![1u8; 32];
+        let shared = vec![2u8; 32];
         let s = Snapshot {
-            refs: vec![(b"team-a/x".to_vec(), h1)],
-            objects: vec![(h1, vec![b"team-a".to_vec()]), (shared, vec![b"team-a".to_vec(), b"team-b".to_vec()])],
+            refs: vec![(b"team-a/x".to_vec(), h1.clone())],
+            objects: vec![
+                (h1.clone(), vec![b"team-a".to_vec()]),
+                (shared.clone(), vec![b"team-a".to_vec(), b"team-b".to_vec()]),
+            ],
         };
         let a = p(&[("team-a", READ)]);
         let b = p(&[("team-b", READ)]);
         // Cross-team read: denied, exactly like a missing object.
-        assert_eq!(guarded(&b, &s, &Command::ReadObject(h1)), Err(Guarded::App(Error::NotFound)));
-        assert!(guarded(&a, &s, &Command::ReadObject(h1)).is_ok());
+        assert_eq!(guarded(&b, &s, &Command::ReadObject(h1.clone())), Err(Guarded::App(Error::NotFound)));
+        assert!(guarded(&a, &s, &Command::ReadObject(h1.clone())).is_ok());
         // A shared blob is readable by both.
-        assert!(guarded(&a, &s, &Command::ReadObject(shared)).is_ok());
-        assert!(guarded(&b, &s, &Command::ReadObject(shared)).is_ok());
+        assert!(guarded(&a, &s, &Command::ReadObject(shared.clone())).is_ok());
+        assert!(guarded(&b, &s, &Command::ReadObject(shared.clone())).is_ok());
         // Unknown objects.
-        assert_eq!(guarded(&a, &s, &Command::ReadObject([9u8; 32])), Err(Guarded::App(Error::NotFound)));
+        assert_eq!(guarded(&a, &s, &Command::ReadObject(vec![9u8; 32])), Err(Guarded::App(Error::NotFound)));
         // Refs: read needs read, write needs write.
         assert!(guarded(&a, &s, &Command::ReadRef(b"team-a/x".to_vec())).is_ok());
         assert_eq!(guarded(&a, &s, &Command::WriteRef(b"team-a/x".to_vec(), None)), Err(Guarded::Denied));
         let w = p(&[("team-a", WRITE)]);
         assert!(guarded(&w, &s, &Command::WriteRef(b"team-a/x".to_vec(), None)).is_ok());
         // Admin on "" reads everything.
-        assert!(guarded(&p(&[("", ADMIN)]), &s, &Command::ReadObject(h1)).is_ok());
+        assert!(guarded(&p(&[("", ADMIN)]), &s, &Command::ReadObject(h1.clone())).is_ok());
     }
 }

@@ -923,34 +923,41 @@ async fn put_manifest(
         oe(StatusCode::PAYLOAD_TOO_LARGE, "SIZE_INVALID", format!("manifest larger than {MAX_MANIFEST}"))
     })?;
     let hex = sha256_hex(&bytes);
-    let tag = if let Some(want) = reference.strip_prefix("sha256:") {
-        if want != hex {
+    // The push rule is the extracted kernel's (`net-kernel/src/publish.rs`, `decide_manifest`):
+    // a digest reference must be the body's digest, a tag must be valid, and every referenced
+    // blob and child manifest must be present.
+    use pico2peta_net_kernel::publish::{ManifestNg, decide_manifest};
+    let by_digest = reference.strip_prefix("sha256:");
+    let digest_ok = by_digest == Some(hex.as_str());
+    let tag_ok = by_digest.is_none() && valid_tag(reference);
+    match decide_manifest(by_digest.is_some(), digest_ok, tag_ok, 0) {
+        Err(ManifestNg::DigestInvalid) => {
             return Err(oe(
                 StatusCode::BAD_REQUEST,
                 "DIGEST_INVALID",
                 format!("manifest is sha256:{hex}, not {reference}"),
             ));
         }
-        None
-    } else if valid_tag(reference) {
-        Some(reference.to_string())
-    } else {
-        return Err(oe(StatusCode::BAD_REQUEST, "TAG_INVALID", format!("invalid tag {reference:?}")));
-    };
+        Err(ManifestNg::TagInvalid) => {
+            return Err(oe(StatusCode::BAD_REQUEST, "TAG_INVALID", format!("invalid tag {reference:?}")));
+        }
+        _ => {}
+    }
+    let tag = by_digest.is_none().then(|| reference.to_string());
     let (blobs, manifests, subject) = manifest_refs(&bytes, &media_type)?;
+    let mut missing: Vec<String> = Vec::new();
     for b in blobs {
         if oci.blob(repo, &b).await?.is_none() {
-            return Err(oe(StatusCode::BAD_REQUEST, "MANIFEST_BLOB_UNKNOWN", format!("blob sha256:{b} not in {repo}")));
+            missing.push(format!("blob sha256:{b}"));
         }
     }
     for m in manifests {
         if resolve(&st.oci_repo(), manifest_link(repo, &m)?).await?.is_none() {
-            return Err(oe(
-                StatusCode::BAD_REQUEST,
-                "MANIFEST_BLOB_UNKNOWN",
-                format!("manifest sha256:{m} not in {repo}"),
-            ));
+            missing.push(format!("manifest sha256:{m}"));
         }
+    }
+    if decide_manifest(by_digest.is_some(), digest_ok, tag_ok, missing.len() as u64) == Err(ManifestNg::BlobUnknown) {
+        return Err(oe(StatusCode::BAD_REQUEST, "MANIFEST_BLOB_UNKNOWN", format!("{} not in {repo}", missing[0])));
     }
     let r = st.oci_repo();
     let b2 = bytes.clone();
