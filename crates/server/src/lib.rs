@@ -109,6 +109,11 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
     let fronts = Arc::new(fronts::Fronts::open(local)?);
     let local = fronts.repo.clone();
     let repo: Arc<dyn Repository> = Arc::new(local.clone());
+    // Object-read authorization: which policy cells reach each object (core's reachability
+    // index, kept current by this handle's ref writes). Opened after the fronts, whose tracers
+    // it walks.
+    let cells = api::policy_cells(&cfg.policy);
+    let reach = pico2peta_repo::reach::ReachIndex::open(&local, cells.clone())?;
     let oci = if cfg.oci.enabled {
         let dir = cfg.oci.upload_dir.clone().unwrap_or_else(|| {
             let parent = path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| path.clone());
@@ -213,6 +218,8 @@ pub fn build_state(cfg: &Config) -> Result<Arc<AppState>, StartError> {
         maven,
         search: Default::default(),
         promotion: cfg.promotion.clone(),
+        reach: Some(reach),
+        cells: std::sync::RwLock::new(cells),
         ns_limits: (!cfg.limits.is_empty()).then(|| Arc::new(limits::NamespaceLimits::new(cfg.limits.clone()))),
         limits_scan: Duration::from_secs(cfg.server.limits_scan_secs.max(1)),
         fronts: Some(fronts),
@@ -406,6 +413,18 @@ pub async fn reload(
         t.reload(&cfg.auth.tokens, cfg.auth.allow_anonymous);
     }
     state.authz.reload(cfg.policy.clone());
+    // New policy prefixes mean new cells for object-read authorization.
+    let cells = api::policy_cells(&cfg.policy);
+    if let Some(r) = state.reach.clone() {
+        let c = cells.clone();
+        tokio::task::spawn_blocking(move || r.on_policy_reload(c))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+    }
+    if let Ok(mut g) = state.cells.write() {
+        *g = cells;
+    }
     state.audit.record_nowait(audit::Event {
         request_id: "-".into(),
         principal: "system".into(),

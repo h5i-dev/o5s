@@ -76,6 +76,11 @@ pub struct AppState {
     pub promotion: Vec<crate::config::PromotionRule>,
     /// The domain fronts and their write handles (`None` only in tests that build state by hand).
     pub fronts: Option<Arc<crate::fronts::Fronts>>,
+    /// Which policy cells reach each object (`None` only in tests that build state by hand,
+    /// where object reads are refused).
+    pub reach: Option<pico2peta_repo::reach::ReachIndex>,
+    /// The cells: every policy namespace, and `""`.
+    pub cells: std::sync::RwLock<Vec<String>>,
     /// `[[limits]]` (per-namespace rate and quota); `None` without rules.
     pub ns_limits: Option<Arc<crate::limits::NamespaceLimits>>,
     /// Quota re-measurement period.
@@ -372,6 +377,52 @@ impl AppState {
         Err(ApiError::denied(format!("{} may not {action} {target}", p.name)))
     }
 
+    /// May `p` read each of `hashes`? An object is readable only if it is reachable from a
+    /// name `p` may read: the extracted access kernel decides (`guarded_transition`,
+    /// `ReadObject`), on a view holding, for each hash, the cells `p` can read that reach it
+    /// (core's reachability index). Unreferenced objects are readable by no one.
+    pub(crate) async fn objects_readable(&self, p: &Principal, hashes: Vec<Hash>) -> ApiResult<Vec<bool>> {
+        use pico2peta_net_kernel::access::{Command, READ, Snapshot};
+        let Some(reach) = self.reach.clone() else { return Ok(vec![false; hashes.len()]) };
+        let grants = self.authz.grants(p);
+        let cells = self.cells.read().map(|c| c.clone()).unwrap_or_default();
+        // The candidate cells: those the caller's grants cover (the kernel's `allows`).
+        let candidates: Vec<u32> = (0..cells.len() as u32)
+            .filter(|&i| pico2peta_net_kernel::access::allows(&grants, cells[i as usize].as_bytes(), READ))
+            .collect();
+        if candidates.is_empty() {
+            return Ok(vec![false; hashes.len()]);
+        }
+        let hs = hashes.clone();
+        let reaching = blocking(move || reach.cells_reaching_many(&hs, &candidates)).await?;
+        Ok(hashes
+            .iter()
+            .zip(reaching)
+            .map(|(h, cs)| {
+                let objects = if cs.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![(
+                        h.0,
+                        cs.iter().map(|&c| cells.get(c as usize).cloned().unwrap_or_default().into_bytes()).collect(),
+                    )]
+                };
+                let snap = Snapshot { refs: Vec::new(), objects };
+                pico2peta_net_kernel::guarded_transition(&grants, &snap, &Command::ReadObject(h.0)).is_ok()
+            })
+            .collect())
+    }
+
+    /// [`Self::objects_readable`] for one object, refusing exactly as a missing object is
+    /// refused (same error, before any store access), so the two can't be told apart.
+    pub(crate) async fn require_object(&self, p: &Principal, h: Hash) -> ApiResult<()> {
+        if self.objects_readable(p, vec![h]).await?.first() == Some(&true) {
+            Ok(())
+        } else {
+            Err(ApiError::from(pico2peta_core::Error::NotFound(h)))
+        }
+    }
+
     /// Applies the `[[limits]]` rule for `name` (after authorization). `write`: the request may
     /// add data, so the quota applies (except for global admins, who must be able to clean up).
     pub(crate) fn admit(&self, p: &Principal, name: &str, write: bool) -> ApiResult<()> {
@@ -424,6 +475,18 @@ impl AppState {
             ApiError::internal(format!("operation applied but audit write failed: {e}"))
         })
     }
+}
+
+/// The cells of object-read authorization: `""` and every policy namespace. Every grant is
+/// one of them, so a grant covers a ref iff it covers the ref's cell (the deepest cell over it).
+pub fn policy_cells(policy: &[crate::config::PolicyEntry]) -> Vec<String> {
+    let mut cells: Vec<String> = vec![String::new()];
+    for e in policy {
+        if !cells.contains(&e.namespace) {
+            cells.push(e.namespace.clone());
+        }
+    }
+    cells
 }
 
 /// Token buckets keyed by principal (bounded table).
@@ -709,6 +772,7 @@ async fn head_object(
 ) -> ApiResult<Response> {
     st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &c, "get", "objects")?;
     let hash = parse_hash(&hash)?;
+    st.require_object(&p, hash).await?;
     let repo = st.repo.clone();
     let size = blocking(move || repo.size(&hash)).await?;
     let mut r = StatusCode::OK.into_response();
@@ -734,6 +798,7 @@ async fn get_object(
 ) -> ApiResult<Response> {
     st.require(st.authz.allows_somewhere(&p, Access::Read), &p, &c, "get", "objects")?;
     let hash = parse_hash(&hash)?;
+    st.require_object(&p, hash).await?;
     let verify = match q.verify.as_deref() {
         None => None,
         Some(v) => Some(
