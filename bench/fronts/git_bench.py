@@ -46,6 +46,9 @@ def bench_system(system, url_of, push_target, d, name, src, head, behind, wire_p
         url = push_target(f"{name}-push{i}")
         t = timed(["git", "-C", src, "push", "-q", url, *REFSPECS])
         record("git", "push_s", system, t, "s", corpus=name, run=i)
+        if system == "git-daemon":
+            # Every daemon push goes into an empty repository: its push is a first push.
+            record("git", "first_push_s", system, t, "s", corpus=name, run=i)
     served = url_of(f"{name}-push0")
     for proto in (2, 0):
         for i in range(RUNS):
@@ -121,6 +124,16 @@ def main():
                     d, name, src, head, behind,
                     lambda: (port, lambda u, p: u.replace(f":{port}/", f":{p}/")),
                 )
+            # push_s runs 2..n go into the same store (content already there). A first push into
+            # an empty store needs a fresh server per run (reported untiered; see NET_PROGRESS).
+            for i in range(RUNS):
+                fresh = os.path.join(d, f"p2p-fresh{i}")
+                os.makedirs(fresh)
+                with pico_server(fresh, server_bin) as (base, _):
+                    port = int(base.rsplit(":", 1)[1])
+                    t = timed(["git", "-C", src, "push", "-q", f"http://bench:{TOKEN}@127.0.0.1:{port}/git/bench/{name}.git", *REFSPECS])
+                    record("git", "first_push_s", "pico2peta", t, "s", corpus=name, run=i)
+                run(["rm", "-rf", fresh])
 
 
 if __name__ == "__main__":

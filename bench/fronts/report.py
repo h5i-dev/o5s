@@ -80,6 +80,12 @@ def main():
     for front in TIERED:
         fs = func.get(front, [])
         print(f"| {front} | {sum(1 for _, ok, _ in fs if ok)}/{len(fs)} passed | {verdict.get(front, 'not run')} |")
+    # Untiered ratios added after pre-registration (not part of the verdicts).
+    for (f, m, base_sys) in [("git", "first_push_s", "git-daemon")]:
+        for (f2, m2, corpus, system), v in sorted(med.items()):
+            if (f2, m2) == (f, m) and system.startswith("pico2peta") and (f, m, corpus, base_sys) in med:
+                b = med[(f, m, corpus, base_sys)]
+                print(f"\n(untiered) {f} {m} {corpus}: {v:.3f} s vs {b:.3f} s ({base_sys}) = {v / b:.2f}x")
     # Untiered context (e.g. HF LFS-mode times, cold/hot totals).
     extra = [(k, v) for k, v in sorted(med.items()) if k[1] not in TIERED.get(k[0], [])]
     if extra:
