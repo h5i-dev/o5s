@@ -3358,7 +3358,25 @@ pub struct GitTracer {
     /// sha256 → Xet file record (for Xet downloads of files uploaded through Xet).
     xetsha: SegMap,
     xetsha_root: Root,
+    /// Oids resolved so far by [`Self::children_of_many`] (`None`: not in the map). Unchanged
+    /// blobs and trees are referenced from many trees across a history, so a closure resolves
+    /// each oid once instead of once per reference. Bounded by [`MEMO_MAX`].
+    memo: std::sync::Mutex<Memo>,
 }
+
+#[derive(Default)]
+struct Memo {
+    oids: HashMap<Key, Option<Hash>>,
+    /// Blobs the oid map says cannot be LFS pointers (longer than one, or shorter than its
+    /// prefix): leaves, known without reading them.
+    leaves: HashSet<Hash>,
+}
+
+/// The longest Git LFS pointer body the tracer looks into.
+const LFS_POINTER_MAX: u64 = 512;
+
+/// Entries kept in [`GitTracer`]'s oid memo (~100 bytes each).
+const MEMO_MAX: usize = 4 << 20;
 
 /// [`GitTracer::plan`]: an object's children, or the oid-map keys that give them.
 enum Plan {
@@ -3380,7 +3398,7 @@ impl GitTracer {
         let n = Name::new("git/_xetsha").unwrap_or_else(|_| unreachable!("static name is valid"));
         let xetsha = SegMap::new(repo, n, Arc::new(SegCache::default()));
         let xetsha_root = xetsha.root_blocking()?.1;
-        Ok(GitTracer { oidmap, root, lfs, lfs_root, xetsha, xetsha_root })
+        Ok(GitTracer { oidmap, root, lfs, lfs_root, xetsha, xetsha_root, memo: Default::default() })
     }
 
     /// [`Self::children_of`] of many objects: commits' and trees' oids are resolved with one
@@ -3389,19 +3407,48 @@ impl GitTracer {
         let mut out: Vec<Vec<Hash>> = vec![Vec::new(); hs.len()];
         // (object index, key) for every oid reference of the wave's commits and trees.
         let mut want: Vec<(usize, Key)> = Vec::new();
+        let leaves: Vec<bool> = {
+            let m = self.memo.lock().map_err(|_| pico2peta_core::Error::Corrupt("git tracer memo poisoned".into()))?;
+            hs.iter().map(|h| m.leaves.contains(h)).collect()
+        };
         for (i, h) in hs.iter().enumerate() {
+            if leaves[i] {
+                continue;
+            }
             match self.plan(h, store)? {
                 Plan::NotGit => {}
                 Plan::Done(kids) => out[i] = kids,
                 Plan::Keys(keys) => want.extend(keys.into_iter().map(|k| (i, k))),
             }
         }
-        if !want.is_empty() {
-            let keys: Vec<Key> = want.iter().map(|(_, k)| *k).collect();
-            for ((i, _), v) in want.iter().zip(self.oidmap.get_many(&self.root, &keys)?) {
+        if want.is_empty() {
+            return Ok(out);
+        }
+        let mut memo =
+            self.memo.lock().map_err(|_| pico2peta_core::Error::Corrupt("git tracer memo poisoned".into()))?;
+        let mut miss: Vec<Key> = want.iter().map(|(_, k)| *k).filter(|k| !memo.oids.contains_key(k)).collect();
+        miss.sort_unstable();
+        miss.dedup();
+        if !miss.is_empty() {
+            let got = self.oidmap.get_many(&self.root, &miss)?;
+            if memo.oids.len() + miss.len() > MEMO_MAX {
+                memo.oids.clear();
+                memo.leaves.clear();
+            }
+            const LFS_PREFIX: u64 = b"version https://git-lfs".len() as u64;
+            for (k, v) in miss.into_iter().zip(got) {
                 if let Some(v) = v {
-                    out[*i].push(v.hash);
+                    let (kind, len) = ((v.aux >> 56) as u8, v.aux & ((1 << 56) - 1));
+                    if Kind::from_code(kind) == Some(Kind::Blob) && !(LFS_PREFIX..=LFS_POINTER_MAX).contains(&len) {
+                        memo.leaves.insert(v.hash);
+                    }
                 }
+                memo.oids.insert(k, v.map(|v| v.hash));
+            }
+        }
+        for (i, k) in &want {
+            if let Some(Some(h)) = memo.oids.get(k) {
+                out[*i].push(*h);
             }
         }
         Ok(out)

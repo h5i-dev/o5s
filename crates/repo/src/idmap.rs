@@ -356,7 +356,17 @@ impl SegMap {
     fn segment_many(&self, seg: &Hash, count: u64, keys: &[(Key, usize)], found: &mut [Option<Value>]) -> Result<()> {
         if count <= CACHE_WHOLE {
             let entries = self.small_segment(seg, count)?;
-            merge_join(entries.iter().map(|e| Ok((e.0, e.1))), keys, found)?;
+            if (keys.len() as u64).saturating_mul(64) < count {
+                // Few keys (e.g. one closure wave): binary search the cached entries, rather
+                // than walking up to `CACHE_WHOLE` of them on every call.
+                for (k, slot) in keys {
+                    if let Ok(i) = entries.binary_search_by(|e| e.0.cmp(k)) {
+                        found[*slot] = Some(entries[i].1);
+                    }
+                }
+            } else {
+                merge_join(entries.iter().map(|e| Ok((e.0, e.1))), keys, found)?;
+            }
             return Ok(());
         }
         self.range_many(seg, count, 0, count, keys, found)
