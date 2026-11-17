@@ -16,7 +16,7 @@ PyPI and npm for packages, Hugging Face for LLM weights, and so on?
 **Potential pushback**
 
 - *"Why should I use o5s?"* → Less infrastructure to manage and no need to change the tools you already use.
-- *"How do I migrate everything?"* → You don't have to migrate everything at once. Start with one registry and keep your existing tools.
+- *"How do I migrate everything?"* → No need to migrate everything at once. Start with one registry and keep your existing tools.
 - *"Merge in Git is necessary"* → Merge is just a special case of `replace`.
 - *"Git packs source code better"* → Then use it for every domain.
 - *"Hugging Face's Xet makes large weights fast"* → Then use it for every domain.
