@@ -78,9 +78,18 @@ enum Cmd {
     /// the namespace profile of `--for-name` (chunker, derive from the name's current
     /// object, the profile's front); without it, the store's defaults. Works with
     /// `--remote` too. Doesn't move any name.
+    ///
+    /// Several FILEs (and `--batch`) are stored by one writer and sealed together:
+    /// one hash per line, in input order, printed only once all of them are durable.
     Put {
-        #[arg(default_value = "-")]
-        file: PathBuf,
+        /// Files to store, in order; `-` is stdin. Default: stdin.
+        files: Vec<PathBuf>,
+        /// Also read paths from stdin, one per line, after any FILEs.
+        #[arg(long)]
+        batch: bool,
+        /// With `--batch`: paths are NUL-terminated instead (e.g. `find -print0`).
+        #[arg(short = 'z', long, requires = "batch")]
+        null: bool,
         /// Apply NAME's namespace profile (see `init --profile/--namespace`).
         #[arg(long, value_name = "NAME", conflicts_with = "encoding")]
         for_name: Option<Name>,
@@ -491,21 +500,43 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
     let mut out = std::io::stdout().lock();
     match cli.cmd {
         Cmd::Init { .. } | Cmd::Name { .. } => unreachable!("handled above"),
-        Cmd::Put { file, for_name, encoding } => {
-            let mut src: Box<dyn Read> = if file.as_os_str() == "-" {
-                Box::new(std::io::stdin().lock())
-            } else {
-                Box::new(std::io::BufReader::new(std::fs::File::open(&file)?))
-            };
-            let h = match (&for_name, &local, &remote) {
-                (Some(n), Some(l), _) => l.put_named(n, &mut src)?,
-                (Some(n), None, Some(rr)) => rr.put_named(n, &mut src)?,
-                (Some(_), None, None) => return Err(Error::Unsupported("no repository")),
-                (None, _, _) if !encoding.is_empty() => r.put_encoded(&mut src, &parse_encoding(&encoding)?)?,
-                (None, _, _) => r.put_stream(&mut src)?,
-            };
+        Cmd::Put { files, batch, null, for_name, encoding } => {
+            let mut paths = files;
+            if batch {
+                if paths.iter().any(|p| p.as_os_str() == "-") {
+                    return Err(Error::Parse("put --batch reads paths from stdin, so no FILE can be `-`".into()));
+                }
+                paths.extend(read_path_list(&mut std::io::stdin().lock(), if null { b'\0' } else { b'\n' })?);
+            } else if paths.is_empty() {
+                paths.push(PathBuf::from("-"));
+            }
+            if paths.iter().filter(|p| p.as_os_str() == "-").count() > 1 {
+                return Err(Error::Parse("put: stdin (`-`) can be given only once".into()));
+            }
+            let enc = if encoding.is_empty() { None } else { Some(parse_encoding(&encoding)?) };
+            let mut hashes = Vec::with_capacity(paths.len());
+            for path in &paths {
+                let mut src: Box<dyn Read> = if path.as_os_str() == "-" {
+                    Box::new(std::io::stdin().lock())
+                } else {
+                    let f = std::fs::File::open(path).map_err(|e| in_file(path, e.into()))?;
+                    Box::new(std::io::BufReader::new(f))
+                };
+                let h = match (&for_name, &local, &remote, &enc) {
+                    (Some(n), Some(l), _, _) => l.put_named(n, &mut src),
+                    (Some(n), None, Some(rr), _) => rr.put_named(n, &mut src),
+                    (Some(_), None, None, _) => return Err(Error::Unsupported("no repository")),
+                    (None, _, _, Some(e)) => r.put_encoded(&mut src, e),
+                    (None, _, _, None) => r.put_stream(&mut src),
+                };
+                hashes.push(h.map_err(|e| in_file(path, e))?);
+            }
+            // One seal for the whole batch; nothing is printed before it, so every
+            // printed hash is durable.
             r.flush()?;
-            writeln!(out, "{h}")?;
+            for h in hashes {
+                writeln!(out, "{h}")?;
+            }
         }
         Cmd::Get { hash, range, output, read_verify } => {
             let range = range.as_deref().map(parse_range).transpose()?;
@@ -1033,5 +1064,31 @@ fn envelopes(
     match remote {
         Some(rr) => Ok(rr.attestations(&ref_id(target))?.into_iter().map(|(_, e, _)| e).collect()),
         None => o5s_attest::attestations(r, log, &resolve_target(r, target)?),
+    }
+}
+
+/// Splits a path list (from `put --batch`) on `sep`. Empty entries are skipped;
+/// on Unix, paths are taken as raw bytes, so any file name works.
+fn read_path_list(src: &mut dyn Read, sep: u8) -> Result<Vec<PathBuf>, Error> {
+    let mut buf = Vec::new();
+    src.read_to_end(&mut buf)?;
+    let mut out = Vec::new();
+    for item in buf.split(|b| *b == sep).filter(|s| !s.is_empty()) {
+        #[cfg(unix)]
+        out.push(PathBuf::from(<std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(item)));
+        #[cfg(not(unix))]
+        out.push(PathBuf::from(
+            std::str::from_utf8(item).map_err(|_| Error::Parse("put --batch: path is not UTF-8".into()))?,
+        ));
+    }
+    Ok(out)
+}
+
+/// Names the file an I/O error came from (for multi-file `put`). Other errors
+/// keep their kind, so the exit code still says what went wrong.
+fn in_file(path: &std::path::Path, e: Error) -> Error {
+    match e {
+        Error::Io(io) => Error::Io(std::io::Error::new(io.kind(), format!("{}: {io}", path.display()))),
+        e => e,
     }
 }

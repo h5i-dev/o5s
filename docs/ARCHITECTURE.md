@@ -90,6 +90,14 @@ entries) and v2 (`O5SIDX02`, 62 B) are still read.
 3. Recovery on open: any staging file whose lock is free belongs to a dead writer. It's scanned record
    by record, truncated at the first torn or corrupt record, and sealed.
 4. Readers re-list `packs/` on a miss, and before trusting a dedup hit if their view is older than 60 s.
+5. **One seal per process, not per object.** `o5s put FILE...` / `put --batch` store every file through one
+   writer and seal once at the end; hashes are printed only after that seal, so a printed hash is always
+   durable and visible. A single-file put still seals its own pack. Leaving its staging file unsealed for the
+   next writer (or sealing lazily) was rejected: staging files are local and only adopted when a store is
+   *opened*, so a long-lived reader (the server, another host on a shared backend) would not find an object
+   whose hash `put` had already printed, and a name could be moved to it. Small packs are instead merged by
+   GC (`small_pack_bytes`), and opening a store costs one listing of `packs/` plus one read per index not
+   yet loaded.
 
 ## Names (crates/refs)
 
