@@ -1383,28 +1383,3 @@ fn put_stream_xet_parallel_windows_cut_exactly_like_serial() {
         assert_eq!(s.get(&h, None).unwrap(), data, "len {len}");
     }
 }
-
-/// A pack that fills up is frozen and fsynced in the background while appends go on
-/// (`maybe_seal`): its objects stay readable before any flush, `flush` seals every
-/// pack and leaves no staging file, and a reopened store reads everything.
-#[test]
-fn full_packs_seal_in_the_background() {
-    let d = tempfile::tempdir().unwrap();
-    let cfg = PackConfig { pack_cap: 4096, ..PackConfig::tiny() };
-    let s = open(d.path(), cfg.clone());
-    let objs: Vec<Vec<u8>> = (0..40).map(|i| pseudo(700 + i * 13, 900 + i as u64)).collect();
-    let hs: Vec<Hash> = objs.iter().map(|o| s.put(o).unwrap()).collect();
-    // Several packs filled up; every object reads back before any flush.
-    for (h, o) in hs.iter().zip(&objs) {
-        assert_eq!(&s.get(h, None).unwrap(), o);
-    }
-    s.flush().unwrap();
-    let packs = s.backend().list("packs/").unwrap().into_iter().filter(|m| m.key.ends_with(".pack")).count();
-    assert!(packs >= 5, "expected several sealed packs, got {packs}");
-    assert_eq!(std::fs::read_dir(d.path().join("staging")).unwrap().count(), 0);
-    drop(s);
-    let s = open(d.path(), cfg);
-    for (h, o) in hs.iter().zip(&objs) {
-        assert_eq!(&s.get(h, None).unwrap(), o);
-    }
-}

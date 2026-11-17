@@ -376,12 +376,9 @@ struct Inner {
     faults: FaultHandle,
     index: RwLock<Index>,
     writer: Mutex<Option<OpenPack>>,
-    /// Frozen open packs (never appended to again), still readable, sealed on the next
-    /// seal point: packs whose seal failed after publication (retried), and the last
-    /// full pack, whose fsync runs in the background (see `maybe_seal`).
+    /// Open packs whose seal failed after publication: frozen (never appended
+    /// to), still readable, and retried on the next flush.
     pending: Mutex<Vec<OpenPack>>,
-    /// The background fsync of the last full pack, joined before any seal.
-    presync: Mutex<Option<std::thread::JoinHandle<()>>>,
     /// Serializes refreshes, so an older listing can't overwrite a newer one.
     refresh_lock: Mutex<()>,
     generation: AtomicU64,
@@ -406,14 +403,6 @@ const FRAME_CACHE: usize = 8;
 const FRAME_PREFIX_MIN: usize = 256 << 10;
 
 impl Inner {
-    /// Waits for the background fsync of the last full pack, if one is running.
-    fn join_presync(&self) {
-        let h = self.presync.lock().ok().and_then(|mut p| p.take());
-        if let Some(h) = h {
-            let _ = h.join();
-        }
-    }
-
     fn fault(&self, point: &'static str) -> Result<()> {
         Ok(self.faults.hit(point)?)
     }
@@ -526,7 +515,6 @@ impl PackStore {
                 index: RwLock::new(Index::default()),
                 writer: Mutex::new(None),
                 pending: Mutex::new(Vec::new()),
-                presync: Mutex::new(None),
                 refresh_lock: Mutex::new(()),
                 generation: AtomicU64::new(1),
                 dedup_refresh_ms: AtomicU64::new(DEDUP_REFRESH_INTERVAL.as_millis() as u64),
@@ -1256,20 +1244,13 @@ impl PackStore {
 
     /// Seals the open pack if there is one.
     fn seal_locked(&self, w: &mut Option<OpenPack>) -> Result<()> {
-        self.seal_pending(w)?;
-        let Some(op) = w.take() else { return Ok(()) };
-        self.seal_one(op, w, false)
-    }
-
-    /// Seals the frozen packs: the last full pack (after its background fsync) and
-    /// retries of seals that failed after their pack was published.
-    fn seal_pending(&self, w: &mut Option<OpenPack>) -> Result<()> {
-        self.inner.join_presync();
+        // First retry seals that failed after their pack was published.
         let pending: Vec<OpenPack> = std::mem::take(&mut *self.inner.pending.lock().map_err(poisoned)?);
         for op in pending {
             self.seal_one(op, w, true)?;
         }
-        Ok(())
+        let Some(op) = w.take() else { return Ok(()) };
+        self.seal_one(op, w, false)
     }
 
     fn seal_one(&self, op: OpenPack, w: &mut Option<OpenPack>, was_pending: bool) -> Result<()> {
@@ -1347,31 +1328,8 @@ impl PackStore {
         self.seal_locked(&mut w)
     }
 
-    /// At the pack cap, freezes the open pack and starts its fsync in the background, so
-    /// appends go on into a fresh pack while the disk drains the full one. The frozen
-    /// pack stays readable (in `pending`) and is sealed at the next seal point: the next
-    /// full pack, `seal`/`flush`, or drop. By then its fsync is done, so the seal's own
-    /// `sync_all` (still the durability point; nothing is published before it) is
-    /// nearly free. Without the overlap every seal stalled the put for the whole fsync
-    /// (~70 ms per 256 MiB pack on NVMe, about 5 % of a durable 1 GiB put).
     fn maybe_seal(&self, w: &mut Option<OpenPack>) -> Result<()> {
-        if !w.as_ref().is_some_and(|op| op.len >= self.inner.cfg.pack_cap) {
-            return Ok(());
-        }
-        // At most one pack in flight: finish the previous one first.
-        self.seal_pending(w)?;
-        let Some(op) = w.take() else { return Ok(()) };
-        let f = op.file.clone();
-        match std::thread::Builder::new().name("o5s-presync".into()).spawn(move || {
-            let _ = f.sync_all(); // errors resurface in the seal's own sync_all
-        }) {
-            Ok(h) => {
-                *self.inner.presync.lock().map_err(poisoned)? = Some(h);
-                self.inner.pending.lock().map_err(poisoned)?.push(op);
-                Ok(())
-            }
-            Err(_) => self.seal_one(op, w, false), // no thread: seal inline, as before
-        }
+        if w.as_ref().is_some_and(|op| op.len >= self.inner.cfg.pack_cap) { self.seal_locked(w) } else { Ok(()) }
     }
 
     fn lookup_local(&self, hash: &Hash) -> Result<Option<Loc>> {
@@ -2589,10 +2547,6 @@ impl PackStore {
 
 impl Drop for Inner {
     fn drop(&mut self) {
-        // The background fsync holds the frozen pack's file (and its flock): finish it in
-        // every case, so a reopen can take the lock. (In a crashed process the thread
-        // would be gone; a completed fsync is just a later crash.)
-        self.join_presync();
         // Best effort. If this fails, the next open adopts the staging file.
         if self.faults.crashed() {
             return; // simulate a dead process: leave the staging file behind
