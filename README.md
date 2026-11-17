@@ -6,7 +6,7 @@
 
 - Why do we need a separate GitHub for source code, JFrog for build outputs, Docker Hub for container images,
 PyPI and npm for packages, Hugging Face for LLM weights, and so on?
-- Why do we need separate APIs, authentication, access controls, versioning, and release workflows for each?
+- Why do we keep reinventing the same infrastructure for versioning, access control, and release management?
 - Why not treat them all the same way? They are all just data, just sequences of 0s and 1s.
 
 **Our Answer**
