@@ -78,7 +78,9 @@ to merge until this passes.
 
 **Requests for net**
 - Register `o5s_tree::TreeFront` in the server's front registry. Any process that runs GC on a repository with
-  trees must have it; without it, blobs referenced only by a tree are collected.
+  trees must have it; without it, blobs referenced only by a tree are collected. **Done by net** on branch
+  `net-tree-front` (`dcb0350`, cut from `tree-object` `3990e76`, gate green). Its test,
+  `tree_entries_keep_blobs_alive_and_readable`, fails without the registration. Merge it right after `tree-object`.
 
 **Follow-ups**
 - `put_dir` reads files one at a time. Parallel hashing and compression across files would help big trees.
