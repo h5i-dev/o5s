@@ -14,6 +14,12 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
     `Name::from_path` / `to_path` (and `_bytes`) in the core API; `o5s name encode PATH...` /
     `o5s name decode NAME...` in the CLI; and a fuzz target, `name_path`.
 
+### Fixed
+- **A listing prefix with a trailing `/` now lists the same names** (`o5s refs f/` = `o5s refs f`). Prefixes are
+  segment-aligned, so `f/` used to match nothing locally, and `/v1/refs?prefix=f/` returned 400 (an empty
+  segment). This applies to the CLI, `/v1/refs` and remote clients; `/` lists everything. Search's `prefix=` is a
+  plain string prefix and already accepted it (now tested).
+
 ## [0.1.0-rc.1] - 2026-11-17
 
 The first release candidate. Benchmarks against `docs/BASELINE.md` (PLAN §6.8): BENCH.md, 2026-11-17 final batch.

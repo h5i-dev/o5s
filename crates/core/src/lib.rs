@@ -540,6 +540,13 @@ pub fn is_under(s: &str, prefix: &str) -> bool {
     prefix.is_empty() || (s.starts_with(prefix) && (s.len() == prefix.len() || s.as_bytes()[prefix.len()] == b'/'))
 }
 
+/// A listing prefix as a user may write it: trailing `/`s name the same prefix
+/// (`f/` lists what `f` lists; `/` lists everything). Prefixes are segment-aligned,
+/// so without this `f/` would match nothing.
+pub fn list_prefix(prefix: &str) -> &str {
+    prefix.trim_end_matches('/')
+}
+
 /// Validates a name or namespace prefix (same grammar).
 pub fn validate_path(s: &str) -> Result<()> {
     // The grammar is the extracted kernel's (`o5s_kernel::names::validate`).

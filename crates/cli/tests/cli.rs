@@ -352,3 +352,20 @@ fn prov_attest_promote_and_update_via_cli() {
     assert!(p.starts_with(&format!("promoted {hw}")), "{p}");
     assert!(ok(&repo, &["resolve", "prod/app"]).starts_with(&hw));
 }
+
+/// `o5s refs f/` lists what `o5s refs f` lists (a trailing `/` names the same prefix).
+#[test]
+fn refs_prefix_with_a_trailing_slash() {
+    let d = tempfile::tempdir().unwrap();
+    let repo = d.path().join("r");
+    ok(&repo, &["init"]);
+    let f = d.path().join("x");
+    std::fs::write(&f, b"x").unwrap();
+    let h = ok(&repo, &["put", f.to_str().unwrap()]).trim().to_string();
+    for name in ["f/a", "f/b", "foo/c"] {
+        ok(&repo, &["replace", name, &h, "--expect", "absent"]);
+    }
+    let plain = ok(&repo, &["refs", "f"]);
+    assert_eq!(plain.lines().count(), 2, "{plain}");
+    assert_eq!(ok(&repo, &["refs", "f/"]), plain);
+}
