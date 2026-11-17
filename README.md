@@ -109,7 +109,7 @@ Numbers are o5s divided by the specialist, so lower is better.
 
 ## Formally verified in Lean 4
 
-Proved on the Rust code itself, extracted to Lean with Charon and Aeneas (`verify/core`, `verify/net`).
+Proved on the Rust code itself via [h5i](https://github.com/h5i-dev/h5i).
 
 - **Verified reads.** A read returns bytes only if they hash to the requested address.
 - **Immutable objects.** A `put` never overwrites a stored object.
