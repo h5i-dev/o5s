@@ -547,16 +547,21 @@ impl PackStore {
         let _serial = self.inner.refresh_lock.lock().map_err(poisoned)?;
         let listed = self.inner.backend.list("packs/")?;
         let keys: HashSet<&str> = listed.iter().map(|m| m.key.as_str()).collect();
-        let live_idx: Vec<String> = listed
+        // Listed index sizes, so loading one doesn't need another `head`.
+        let idx_len: HashMap<&str, u64> = listed
             .iter()
-            .filter_map(|m| m.key.strip_prefix("packs/").and_then(|k| k.strip_suffix(".idx")))
-            .map(|s| s.to_string())
+            .filter_map(|m| m.key.strip_prefix("packs/").and_then(|k| k.strip_suffix(".idx")).map(|n| (n, m.len)))
             .collect();
         // An index without its pack is a pack being deleted by GC (it deletes the
         // index first, but a non-atomic listing can still show it): skip it.
         // A permanently missing pack is reported by fsck.
-        let live_idx: Vec<String> =
-            live_idx.into_iter().filter(|name| keys.contains(format!("packs/{name}.pack").as_str())).collect();
+        let live_idx: Vec<String> = idx_len
+            .keys()
+            .filter(|name| keys.contains(format!("packs/{name}.pack").as_str()))
+            .map(|s| s.to_string())
+            .collect::<std::collections::BTreeSet<String>>()
+            .into_iter()
+            .collect();
         // GC condemnation records (small, create-only, cached by key).
         let gc_keys: Vec<String> = self
             .inner
@@ -601,10 +606,8 @@ impl PackStore {
         let threshold = self.inner.mmap_index_bytes.load(Ordering::Relaxed);
         for name in to_load {
             let key = format!("packs/{name}.idx");
-            let size = match self.inner.backend.head(&key)? {
-                Some(m) => m.len,
-                None => continue, // deleted by GC between list and read
-            };
+            // Deleted by GC between list and read: the open below says so.
+            let size = idx_len.get(name.as_str()).copied().unwrap_or(0);
             if size >= threshold {
                 match self.map_index(&name, &key) {
                     Ok(view) => {
@@ -1007,6 +1010,7 @@ impl PackStore {
             .filter(|p| p.extension().is_some_and(|x| x == "pack"))
             .collect();
         paths.sort();
+        let mut changed = false;
         for p in paths {
             let f = match OpenOptions::new().read(true).write(true).open(&p) {
                 Ok(f) => f,
@@ -1045,8 +1049,12 @@ impl PackStore {
             }
             let len = f.metadata()?.len();
             self.inner.seal_file(&p, &f, len, entries)?;
+            changed = true;
         }
-        self.refresh()?;
+        // Only a recovered pack is new since the caller's refresh.
+        if changed {
+            self.refresh()?;
+        }
         Ok(())
     }
 

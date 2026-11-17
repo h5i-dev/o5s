@@ -78,17 +78,31 @@ Options:
 ## `put`
 
 ```text
-Store a file (or stdin with `-`), print its hash. How it is stored comes from the namespace profile of `--for-name` (chunker, derive from the name's current object, the profile's front); without it, the store's defaults. Works with `--remote` too. Doesn't move any name
+Store a file (or stdin with `-`), print its hash. How it is stored comes from the namespace profile of `--for-name` (chunker, derive from the name's current object, the profile's front); without it, the store's defaults. Works with `--remote` too. Doesn't move any name.
 
-Usage: o5s put [OPTIONS] [FILE]
+Several FILEs (and `--batch`) are stored by one writer and sealed together: one hash per line, in input order, printed only once all of them are durable.
+
+Usage: o5s put [OPTIONS] [FILES]...
 
 Arguments:
-  [FILE]  [default: -]
+  [FILES]...
+          Files to store, in order; `-` is stdin. Default: stdin
 
 Options:
-      --for-name <NAME>       Apply NAME's namespace profile (see `init --profile/--namespace`)
-      --encoding <KEY=VALUE>  Low-level override of the encoding, as KEY=VALUE (repeatable): `chunker=ID` (fastcdc|xet), `group-width=N`, `derive-from=HASH`, `patch=xor|xor-anchored` (with derive-from; default xor-anchored). Storage only, never the hash
-  -h, --help                  Print help
+      --batch
+          Also read paths from stdin, one per line, after any FILEs
+
+  -z, --null
+          With `--batch`: paths are NUL-terminated instead (e.g. `find -print0`)
+
+      --for-name <NAME>
+          Apply NAME's namespace profile (see `init --profile/--namespace`)
+
+      --encoding <KEY=VALUE>
+          Low-level override of the encoding, as KEY=VALUE (repeatable): `chunker=ID` (fastcdc|xet), `group-width=N`, `derive-from=HASH`, `patch=xor|xor-anchored` (with derive-from; default xor-anchored). Storage only, never the hash
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## `get`

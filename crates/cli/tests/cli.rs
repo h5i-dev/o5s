@@ -352,3 +352,59 @@ fn prov_attest_promote_and_update_via_cli() {
     assert!(p.starts_with(&format!("promoted {hw}")), "{p}");
     assert!(ok(&repo, &["resolve", "prod/app"]).starts_with(&hw));
 }
+
+#[test]
+fn put_many_files_shares_one_pack() {
+    use std::io::Write as _;
+    use std::process::Stdio;
+    let d = tempfile::tempdir().unwrap();
+    let repo = d.path().join("r");
+    ok(&repo, &["init"]);
+    let src = d.path().join("src");
+    std::fs::create_dir(&src).unwrap();
+    let mut paths = Vec::new();
+    for i in 0..50 {
+        // Odd names (space, newline-free) and one duplicate content.
+        let p = src.join(format!("f {i}.txt"));
+        std::fs::write(&p, format!("file {}\n", i % 49)).unwrap();
+        paths.push(p.to_str().unwrap().to_string());
+    }
+    let args: Vec<&str> = std::iter::once("put").chain(paths.iter().map(|s| s.as_str())).collect();
+    let out = ok(&repo, &args);
+    let hashes: Vec<&str> = out.lines().collect();
+    assert_eq!(hashes.len(), 50);
+    assert_eq!(hashes[0], hashes[49]);
+    for (p, h) in paths.iter().zip(&hashes) {
+        assert_eq!(ok(&repo, &["get", h]).as_bytes(), std::fs::read(p).unwrap());
+    }
+    let packs = || {
+        std::fs::read_dir(repo.join("objects/packs"))
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().path().extension().unwrap() == "pack")
+            .count()
+    };
+    assert_eq!(packs(), 1, "one process, one sealed pack");
+
+    // --batch: same hashes in the same order, NUL- and newline-separated, after FILE args.
+    for (sep, flag) in [("\n", None), ("\0", Some("-z"))] {
+        let mut cmd = bin();
+        cmd.arg("-C").arg(&repo).args(["put", &paths[0], "--batch"]);
+        if let Some(f) = flag {
+            cmd.arg(f);
+        }
+        let mut c = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+        c.stdin.take().unwrap().write_all((paths[1..].join(sep) + sep).as_bytes()).unwrap();
+        let o = c.wait_with_output().unwrap();
+        assert!(o.status.success());
+        assert_eq!(String::from_utf8(o.stdout).unwrap(), out);
+    }
+    assert_eq!(packs(), 1, "nothing new to seal");
+
+    // A missing file fails the whole command, naming the file, and prints no hash.
+    let o = run(&repo, &["put", &paths[0], "/nonexistent/x"]);
+    assert!(!o.status.success());
+    assert!(o.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&o.stderr).contains("/nonexistent/x"));
+    assert!(!run(&repo, &["put", "--batch", "-"]).status.success());
+    assert!(!run(&repo, &["put", "-", "-"]).status.success());
+}

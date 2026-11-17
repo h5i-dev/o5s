@@ -435,7 +435,15 @@ impl Backend for LocalDisk {
 
     fn list(&self, prefix: &str) -> Result<Vec<BlobMeta>> {
         let mut out = Vec::new();
-        let mut stack = vec![self.root.clone()];
+        // Walk only the directory the prefix lives in (`packs/` must not stat
+        // every other blob in the store). Keys are validated paths, so the part
+        // up to the last `/` is a directory; an invalid one just lists nothing.
+        let start = match prefix.rsplit_once('/') {
+            Some((dir, _)) if validate_key(dir).is_ok() => self.root.join(dir),
+            Some(_) => return Ok(out),
+            None => self.root.clone(),
+        };
+        let mut stack = vec![start];
         while let Some(dir) = stack.pop() {
             let rd = match std::fs::read_dir(&dir) {
                 Ok(rd) => rd,
