@@ -7,6 +7,8 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 ## [0.1.0-rc.1] - 2026-11-17
 
 The first release candidate. Benchmarks against `docs/BASELINE.md` (PLAN §6.8): BENCH.md, 2026-11-17 final batch.
+Fuzz smoke for rc.1, per the human's ruling: `ref_journal` only, ≥ 60 s clean under ASan on the tag commit,
+since rc.1 changed ref-journal replay. The full suite (every target ≥ 60 s) runs before v0.1.0 final.
 
 ### Fixed (rc.1)
 - **Reads by hash through another server, or after another process committed, returned 404.** The reach index

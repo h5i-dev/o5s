@@ -224,17 +224,24 @@ A parallel Xet upload cutter was tried and reverted (c155ab3): it lost the pipel
   reach traversal), and the human chose a full batch rerun on the new head.
 
 ## Release candidate v0.1.0-rc.1: status, 2026-11-17
-**Not tagged yet. The final batch reruns in full on the new head** (the human, 2026-11-17).
-- **Pass 1 (`78bf513`)** found two memory regressions, fixed in `20f55ad`.
-- **Pass 2 (`20f55ad`)**, core and net, found:
-  - three unruled Exp3 FAILs, now pre-registered for a controlled re-measurement (PLAN §6.8, amendment
-    2026-11-17);
-  - net's git re-push tier FAIL, fixed: the reach index has no background traversal any more.
-
-BENCH.md keeps both passes. Already-ruled FAILs:
-- the durable-write tier (recheck 2: 0.866×; 95f6a4a had no effect);
-- the §6.4 verified-read target (strict 0.351×, eof 0.457× in pass 2);
-- net's LFS upload at 1.21× (pass 2).
+**Final batch on one commit, `ba21b99`: PASS under PLAN §6.8 and its amendments,** apart from the FAILs the human
+ruled on (BENCH.md 2026-11-17; raw data in `bench/final/rc1/ba21b99/` and `bench/results/fronts-rc1-ba21b99*`).
+- **Core:**
+  - the suite is 76/77 within allowance; stream peak RSS failed by the letter at whole-MB granularity, and W9
+    decided it PASS (medians 22 vs 22 MB);
+  - §6.4 metrics are within allowance;
+  - Exp3 sizes are 28/28 byte-identical, every A3 build is faster, and no build-time tier is worse;
+  - the rechecks: 1 (ingest) PASS and 3 (redis A3 RSS) PASS;
+  - W8: git A3 RSS PASS, the 6 GB tier met, jq A3 RSS and p99 PASS.
+- **Net:** functional 75/75, no metric over its allowance, no tier worse. The git re-push regression from pass 2 is
+  gone.
+- **FAIL, as ruled by the human:**
+  - recheck 2, the durable-write tier: 0.868× vs 0.90×. 95f6a4a had no measurable effect.
+  - §6.4 verified read: strict 0.355×, eof 0.45× vs 0.50×.
+  - HF LFS upload: 1.35× vs 1.2×.
+  - OCI pull vs Distribution was a FAIL in the baseline too, so it isn't a regression.
+- **Earlier passes:** pass 1 (`78bf513`) found two memory regressions, fixed in `20f55ad`. Pass 2 (`20f55ad`)
+  found net's git re-push FAIL, fixed in `ba21b99`. Both passes are kept in BENCH.md.
 
 ## Post-RC (agreed, not started)
 - Re-measure the §6.4 verified read on a many-core host (the human, 2026-11-16).

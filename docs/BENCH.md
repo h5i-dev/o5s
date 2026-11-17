@@ -48,6 +48,36 @@ pre-registered metric was plain RSS, so it is reported as **missed**; the split 
   292 B/object projection was stopped early, as soon as the 10⁷ disk number showed it could not fit.
 - The bench's disk number now counts each inode once.
 
+## 2026-11-17: final batch for v0.1.0-rc.1, core side, on `ba21b99` (PLAN §6.8 and amendments)
+
+**One commit:** `release/v0.1.0-rc.1` at `ba21b99`, dirty 0 in every header. It is `20f55ad` plus the lazy reach
+drain (net's pass-2 git re-push FAIL). The human chose a full rerun on it.
+- **Windows:** W1–W8 one at a time under the lock, each starting at load < 1.0, with a 10 s process sampler. A
+  window with any foreign process over 20 % CPU was discarded and rerun.
+- **Discarded:** W5 try 1 (root `nix` at 08:33:51) and W8 try 1 (a `du` at 53 % at 09:50:03).
+- **Raw data:** `bench/final/rc1/ba21b99/`. Net's §6.5 windows A and B ran on the same commit: §6.8 PASS (functional 75/75, no metric over its allowance, no tier worse; LFS upload 1.35× recorded FAIL as ruled; NET_PROGRESS, `bench/results/fronts-rc1-ba21b99*`).
+
+| part | result |
+|---|---|
+| core suite (W1; load 0.66–1.72) | 76/77 within allowance. **FAIL by the letter: stream peak RSS 21 → 22 MB** (per run 21, 22, 22; baseline 21, 21, 21, so the 3 % floor is 0.63 MB at whole-MB granularity). Decided by W9 below. |
+| §6.4 generic (W2) | every metric within allowance; durable write 0.927, 0.901, 0.889× (median 0.901×); range p99 0.109 ms; sizes identical; verified read strict 0.352–0.421×, eof 0.449–0.527× of warm `cat`: **the 0.50× target is missed** (median strict 0.355×, eof 0.45×; ruled: recorded as missed) |
+| Exp3 (W3–W5), 28 rows | **sizes 28/28 byte-identical**; 0 failed reads; every A3 build faster (ripgrep 5.98 → 5.52 s, jq 12.19 → 10.99, redis 190.4 → 178.9, git 401.0 → 331.6); A3 read p50/p99 equal or better; jq and ripgrep A3 RSS equal or better. Redis A3 RSS +9.1 % and git A3 RSS +21.7 % in this single run are decided by recheck 3 and W8 (amendments). |
+| Exp3 build re-time | ripgrep 0.877, jq 1.096 (baseline 0.944 and decisive 1.179): no tier worse |
+| Recheck 1: ingest put | baseline 185/190/190/190/190, rc.1 194/194/194/194/193 MB/s; medians 190 vs 194 (+2.1 %): **PASS** |
+| Recheck 2: durable-write tier | per-run put/dd 0.897, 0.868, 0.868, 0.866, 0.868; median 0.868 vs 0.90: **FAIL** (ruled FAIL) |
+| Recheck 3: redis A3 peak RSS | baseline 3.08/2.47/2.25 GB, rc.1 3.01/2.47/2.73 GB; medians 2.47 vs 2.73 GB (+10.3 %, allowed 33.7 %): **PASS** |
+| W7, the 95f6a4a check (interleaved) | before 184/184/184 MB/s put (ratios 0.927, 0.868, 0.868); rc.1 184/184/184 (0.867 each): no measurable effect |
+| **W8 (amendment 2026-11-17): git A3 and jq A3, 3+3 interleaved** | git A3 RSS: baseline 5.41/4.91/6.68 GB, rc.1 5.32/5.29/5.79 GB; medians 5.41 vs 5.32 GB (−1.6 %): **PASS**, and the RSS tier (≤ 6 GB) is met. jq A3 RSS: medians 528 vs 512 MB: **PASS**. jq A3 read p99: medians 14.14 vs 14.15 ms (+0.0 %): **PASS**. |
+| **W9 (amendment 2026-11-17 b): stream peak RSS, 5+5 interleaved** | baseline 22/21/21/22/22 MB, rc.1 24/22/23/20/22 MB; medians 22 vs 22 MB (0 %, allowed max(3 %, the baseline binary's range 4.5 %)): **PASS**. The baseline binary itself moves by 1 MB between runs. |
+
+**Fuzz smoke (RELEASE.md step 5, the human's ruling for rc.1):** `ref_journal` only, ≥ 60 s under ASan on the
+tag commit: FUZZ_RESULT. The other 19 targets are skipped for rc.1 and run before v0.1.0 final.
+
+**Disclosures.**
+- W8's baseline binary spans 4.91–6.68 GB for git A3 peak RSS: the 4-thread build's RSS scatters by itself.
+- The guard reads `ps` CPU, averaged over a process's lifetime, so a short burst inside a long-lived process could
+  go unseen. The load at each window's start is recorded beside it.
+
 ## 2026-11-17: final batch for v0.1.0-rc.1, pass 2, core side, on `20f55ad` (superseded)
 
 **Superseded.** Net's windows A and B on `20f55ad` found one more FAIL: the git push tier for jq fell from STRONG

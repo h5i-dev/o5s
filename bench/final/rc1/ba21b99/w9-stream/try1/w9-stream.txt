@@ -1,0 +1,71 @@
+# binaries: baseline /mnt/scratch/pico2peta/tmp/o5s-bench-base (baseline-pre-h5i), rc.1 /mnt/scratch/pico2peta/tmp/o5s-bench-rc1 (built from ba21b99)
+## base 1 load 0.35
+| input | put_stream 512 MiB | re-put (dedup) | open+read (verified) |
+|---|---|---|---|
+| incompressible | 305 MB/s | 936 MB/s | 1942 MB/s |
+| code-like text | 317 MB/s | 1009 MB/s | 1063 MB/s |
+
+peak RSS: 22 MB
+## rc1 1 load 0.77
+| input | put_stream 512 MiB | re-put (dedup) | open+read (verified) |
+|---|---|---|---|
+| incompressible | 336 MB/s | 1017 MB/s | 2642 MB/s |
+| code-like text | 333 MB/s | 1009 MB/s | 1122 MB/s |
+
+peak RSS: 24 MB
+## base 2 load 0.79
+| input | put_stream 512 MiB | re-put (dedup) | open+read (verified) |
+|---|---|---|---|
+| incompressible | 308 MB/s | 1018 MB/s | 2037 MB/s |
+| code-like text | 318 MB/s | 1012 MB/s | 968 MB/s |
+
+peak RSS: 21 MB
+## rc1 2 load 1.44
+| input | put_stream 512 MiB | re-put (dedup) | open+read (verified) |
+|---|---|---|---|
+| incompressible | 337 MB/s | 1015 MB/s | 2739 MB/s |
+| code-like text | 331 MB/s | 1011 MB/s | 1124 MB/s |
+
+peak RSS: 22 MB
+## base 3 load 1.49
+| input | put_stream 512 MiB | re-put (dedup) | open+read (verified) |
+|---|---|---|---|
+| incompressible | 309 MB/s | 1023 MB/s | 2034 MB/s |
+| code-like text | 318 MB/s | 1020 MB/s | 1098 MB/s |
+
+peak RSS: 21 MB
+## rc1 3 load 2.03
+| input | put_stream 512 MiB | re-put (dedup) | open+read (verified) |
+|---|---|---|---|
+| incompressible | 338 MB/s | 1012 MB/s | 2620 MB/s |
+| code-like text | 335 MB/s | 1015 MB/s | 1132 MB/s |
+
+peak RSS: 23 MB
+## base 4 load 1.95
+| input | put_stream 512 MiB | re-put (dedup) | open+read (verified) |
+|---|---|---|---|
+| incompressible | 307 MB/s | 1023 MB/s | 2076 MB/s |
+| code-like text | 318 MB/s | 1013 MB/s | 1122 MB/s |
+
+peak RSS: 22 MB
+## rc1 4 load 2.21
+| input | put_stream 512 MiB | re-put (dedup) | open+read (verified) |
+|---|---|---|---|
+| incompressible | 337 MB/s | 1019 MB/s | 2694 MB/s |
+| code-like text | 336 MB/s | 1014 MB/s | 1134 MB/s |
+
+peak RSS: 20 MB
+## base 5 load 2.35
+| input | put_stream 512 MiB | re-put (dedup) | open+read (verified) |
+|---|---|---|---|
+| incompressible | 309 MB/s | 1023 MB/s | 2030 MB/s |
+| code-like text | 321 MB/s | 1008 MB/s | 1134 MB/s |
+
+peak RSS: 22 MB
+## rc1 5 load 2.14
+| input | put_stream 512 MiB | re-put (dedup) | open+read (verified) |
+|---|---|---|---|
+| incompressible | 337 MB/s | 1035 MB/s | 2657 MB/s |
+| code-like text | 334 MB/s | 1018 MB/s | 1134 MB/s |
+
+peak RSS: 22 MB
