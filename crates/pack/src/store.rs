@@ -1927,9 +1927,7 @@ impl PackStore {
                 });
                 self.put_chunks(chunks, group)
             }
-            ChunkerKind::Xet => {
-                self.put_chunks(LengthChunks::new(reader, Box::new(o5s_chunk::XetChunker::new())), group)
-            }
+            ChunkerKind::Xet => self.put_chunks(PipelinedXetChunks::new(reader), group),
         }
     }
 
@@ -2582,74 +2580,6 @@ struct Level {
     len: u64,
 }
 
-/// Turns a length-reporting streaming [`o5s_chunk::Chunker`] over a
-/// reader into an iterator of owned chunks.
-struct LengthChunks<R> {
-    r: R,
-    c: Box<dyn o5s_chunk::Chunker>,
-    buf: Vec<u8>,
-    start: usize,
-    lens: std::collections::VecDeque<usize>,
-    scratch: Vec<usize>,
-    done: bool,
-}
-
-/// Read size for [`LengthChunks`].
-const LENGTH_CHUNKS_BLOCK: usize = 1 << 20;
-
-impl<R: Read> LengthChunks<R> {
-    fn new(r: R, c: Box<dyn o5s_chunk::Chunker>) -> Self {
-        LengthChunks { r, c, buf: Vec::new(), start: 0, lens: Default::default(), scratch: Vec::new(), done: false }
-    }
-}
-
-impl<R: Read> Iterator for LengthChunks<R> {
-    type Item = Result<Vec<u8>>;
-
-    fn next(&mut self) -> Option<Result<Vec<u8>>> {
-        loop {
-            if let Some(l) = self.lens.pop_front() {
-                let end = self.start + l;
-                if end > self.buf.len() {
-                    return Some(Err(Error::Corrupt("chunker reported more bytes than it was given".into())));
-                }
-                let v = self.buf[self.start..end].to_vec();
-                self.start = end;
-                return Some(Ok(v));
-            }
-            if self.done {
-                return None;
-            }
-            // Drop emitted bytes (what's left is at most one partial chunk).
-            self.buf.drain(..self.start);
-            self.start = 0;
-            let old = self.buf.len();
-            self.buf.resize(old + LENGTH_CHUNKS_BLOCK, 0);
-            let n = match self.r.read(&mut self.buf[old..]) {
-                Ok(n) => n,
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
-                    self.buf.truncate(old);
-                    continue;
-                }
-                Err(e) => {
-                    self.buf.truncate(old);
-                    self.done = true;
-                    return Some(Err(Error::Io(e)));
-                }
-            };
-            self.buf.truncate(old + n);
-            self.scratch.clear();
-            if n == 0 {
-                self.c.finish(&mut self.scratch);
-                self.done = true;
-            } else {
-                self.c.update(&self.buf[old..], &mut self.scratch);
-            }
-            self.lens.extend(self.scratch.iter().copied());
-        }
-    }
-}
-
 /// One chunk out of a `put_chunks` worker: its bytes, hash and, unless it was
 /// already stored, its encoded record.
 struct Encoded {
@@ -2975,6 +2905,169 @@ type VerifyThread = (
 fn hash_threads() -> usize {
     static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *N.get_or_init(|| (std::thread::available_parallelism().map_or(1, |n| n.get()) / 2).clamp(1, 4))
+}
+
+/// Xet chunks of a stream with the chunker on its own thread: this thread reads blocks and hands
+/// out chunks while the chunker thread cuts the blocks already read. Reading and cutting (the
+/// put path's serial bottleneck, about 1.4 GB/s for Xet) overlap, and nothing waits for a whole
+/// window. The chunker sees exactly the stream's bytes in order, so the cuts are the serial
+/// `XetChunker`'s whatever the block boundaries (a streaming chunker's cuts don't depend on how its
+/// input is split).
+struct PipelinedXetChunks<R> {
+    r: R,
+    /// Blocks read and not yet fully handed out; `off` is the read position in `blocks[0]`.
+    blocks: std::collections::VecDeque<std::sync::Arc<Vec<u8>>>,
+    off: usize,
+    /// Bytes in `blocks` from `off` on.
+    avail: usize,
+    lens: std::collections::VecDeque<usize>,
+    to_cut: Option<std::sync::mpsc::SyncSender<std::sync::Arc<Vec<u8>>>>,
+    cut: std::sync::mpsc::Receiver<Vec<usize>>,
+    /// Blocks sent to the chunker whose lengths have not come back.
+    in_flight: usize,
+    eof: bool,
+    finished: bool,
+}
+
+/// Read size, and how many blocks may wait for the chunker, in [`PipelinedXetChunks`].
+const PIPE_BLOCK: usize = 1 << 20;
+const PIPE_DEPTH: usize = 8;
+
+impl<R: Read> PipelinedXetChunks<R> {
+    fn new(r: R) -> Self {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<std::sync::Arc<Vec<u8>>>(PIPE_DEPTH);
+        let (ltx, lrx) = std::sync::mpsc::channel::<Vec<usize>>();
+        // One message back per block (possibly empty), then one for `finish`.
+        std::thread::spawn(move || {
+            let mut c = o5s_chunk::XetChunker::new();
+            use o5s_chunk::Chunker as _;
+            for b in rx {
+                let mut out = Vec::new();
+                c.update(&b, &mut out);
+                if ltx.send(out).is_err() {
+                    return;
+                }
+            }
+            let mut out = Vec::new();
+            c.finish(&mut out);
+            let _ = ltx.send(out);
+        });
+        PipelinedXetChunks {
+            r,
+            blocks: Default::default(),
+            off: 0,
+            avail: 0,
+            lens: Default::default(),
+            to_cut: Some(tx),
+            cut: lrx,
+            in_flight: 0,
+            eof: false,
+            finished: false,
+        }
+    }
+
+    /// Takes `n` bytes from the front of the buffered blocks (`n <= avail`).
+    fn take(&mut self, n: usize) -> Vec<u8> {
+        let mut v = Vec::with_capacity(n);
+        while v.len() < n {
+            let b = &self.blocks[0];
+            let k = (n - v.len()).min(b.len() - self.off);
+            v.extend_from_slice(&b[self.off..self.off + k]);
+            self.off += k;
+            if self.off == b.len() {
+                self.blocks.pop_front();
+                self.off = 0;
+            }
+        }
+        self.avail -= n;
+        v
+    }
+
+    /// Reads one block and sends it to the chunker; at EOF, closes the chunker's input.
+    fn read_block(&mut self) -> std::io::Result<()> {
+        let mut b = vec![0u8; PIPE_BLOCK];
+        let mut n = 0;
+        while n < b.len() {
+            match self.r.read(&mut b[n..]) {
+                Ok(0) => {
+                    self.eof = true;
+                    break;
+                }
+                Ok(k) => n += k,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+        b.truncate(n);
+        if n > 0 {
+            let b = std::sync::Arc::new(b);
+            self.avail += n;
+            self.blocks.push_back(b.clone());
+            if let Some(tx) = &self.to_cut {
+                tx.send(b).map_err(|_| std::io::Error::other("Xet chunker thread stopped"))?;
+                self.in_flight += 1;
+            }
+        }
+        if self.eof {
+            self.to_cut = None; // the chunker finishes and sends the last lengths
+            self.in_flight += 1;
+        }
+        Ok(())
+    }
+
+    fn recv(&mut self, block: bool) -> Result<bool> {
+        let got = if block {
+            self.cut.recv().map_err(|_| Error::Corrupt("Xet chunker thread stopped".into()))?
+        } else {
+            match self.cut.try_recv() {
+                Ok(v) => v,
+                Err(std::sync::mpsc::TryRecvError::Empty) => return Ok(false),
+                Err(_) => return Err(Error::Corrupt("Xet chunker thread stopped".into())),
+            }
+        };
+        self.in_flight -= 1;
+        if self.eof && self.in_flight == 0 {
+            self.finished = true;
+        }
+        self.lens.extend(got);
+        Ok(true)
+    }
+}
+
+impl<R: Read> Iterator for PipelinedXetChunks<R> {
+    type Item = Result<Vec<u8>>;
+
+    fn next(&mut self) -> Option<Result<Vec<u8>>> {
+        loop {
+            if let Some(&l) = self.lens.front() {
+                if l > self.avail {
+                    return Some(Err(Error::Corrupt("chunker reported more bytes than it was given".into())));
+                }
+                self.lens.pop_front();
+                return Some(Ok(self.take(l)));
+            }
+            if self.finished {
+                return None;
+            }
+            // Keep the chunker fed while it cuts what it has; wait for it only when the read-ahead
+            // is full or the stream has ended.
+            match self.recv(false) {
+                Ok(true) => continue,
+                Ok(false) => {}
+                Err(e) => return Some(Err(e)),
+            }
+            if !self.eof && self.in_flight < PIPE_DEPTH {
+                if let Err(e) = self.read_block() {
+                    self.finished = true;
+                    return Some(Err(Error::Io(e)));
+                }
+                continue;
+            }
+            if let Err(e) = self.recv(true) {
+                return Some(Err(e));
+            }
+        }
+    }
 }
 
 /// One read-ahead job: fetch and verify chunk `hash`, return bytes `[a, b)`.
