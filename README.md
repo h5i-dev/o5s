@@ -1,6 +1,6 @@
 # o5s
 
-**Question**
+**Motivation**
 
 - Why do we need a separate GitHub for source code, JFrog for build outputs, Docker Hub for container images,
 PyPI and npm for packages, Hugging Face for LLM weights, and so on?
@@ -11,7 +11,7 @@ PyPI and npm for packages, Hugging Face for LLM weights, and so on?
 - `o5s` treats every kind of data with the same three operations, `put`, `get`, and `replace`.
 - It also ships adapters for popular tools such as Git, OCI, Hugging Face, PyPI, npm and Maven, so it fits into existing workflows as they are.
 
-## Potential pushback
+**Potential pushback**
 
 - *"Merge in Git is necessary"* → Merge is just a special case of `replace`.
 - *"Git packs source code better"* → Then use it for every domain.
