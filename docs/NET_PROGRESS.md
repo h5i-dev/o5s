@@ -1,5 +1,27 @@
 # Net session progress (backends & server, branch `net`)
 
+## Final batch for v0.1.0-rc.1: net §6.5 windows A and B (2026-11-17, on release/v0.1.0-rc.1 ba21b99)
+
+- **Runs.** A (git, oci, hf, pypi, npm) ran 10:59–11:17 and B (maven) 11:18–11:44. Release build from a clean worktree at ba21b99.
+  - The process log, every 10 s, shows no foreign process above 15 % CPU; peak load 3.9 came from our own processes.
+  - Raw data: `bench/results/fronts-rc1-ba21b99.jsonl`. Tiers: `…-report.md`. §6.8 comparison against BASELINE: `…-vs-baseline.md`. Window logs: `bench/results/rc1-logs/`.
+- **§6.8 verdict: PASS.**
+  - Functional checks: 75/75.
+  - Metrics: none worse than its allowance.
+  - Tiers: 28 compared, none worse.
+  - The back-to-back re-push regression of the superseded 20f55ad pass is fixed (core: reach without a background traversal). jq `push_s` 0.480 vs 0.476 s, redis 8.63 vs 9.04, ripgrep 0.554 vs 0.563.
+  - The 20f55ad pass stays on record on branch `net-batch-rc1`.
+- **H4 HF, judged per the PLAN amendments (no pre-h5i baseline for these rows):**
+  - Xet upload, server busy: 0.37× (STRONG PASS).
+  - LFS upload: 1.35×. It misses the 1.2× target and is recorded as a FAIL per the human's ruling (the Xet chunker is kept for LFS↔Xet dedup; the parallel chunker is post-RC).
+  - Downloads, on server CPU: LFS 1.01× (PASS), Xet 0.99× (STRONG PASS).
+  - Family storage: 0.91× (STRONG PASS).
+- **Front verdicts (worst tier):** git, pypi, npm and maven PASS.
+  - OCI's FAIL is pull vs Distribution, as in the baseline: not a regression, and core's verified-read work.
+  - HF's FAIL is the ruled LFS upload.
+  - Maven: cold p50 0.99×, hot p50 1.03×, stored 0.93×.
+- `bench/fronts/h3_compare.py` is fixed for the rename (an undefined constant; tier keys now map pico2peta → o5s).
+
 ## Status (2026-11-16, after the o5s rename)
 
 - **Project renamed pico2peta → o5s** (demo 7387883, merged into net 61b45f2). The gate is green, and `verify/net` re-extracts unchanged with the official h5i 0.5.5; `h5i app prove` is ok and both obligations are proven. Local paths (`/mnt/scratch/pico2peta`) and the frozen pre-h5i baseline files keep the old name; the report scripts map it.

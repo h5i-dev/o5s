@@ -1,0 +1,3 @@
+# scale-gc-1e7 rep 1 commit 20f55ad dirty 0 load_start 1.42 2026-11-17T02:42:52+00:00
+{"part":"gc","n":10000000,"gc_s":100.4,"all_live_kept":true,"peak_rss_mb":2123,"load":"1.08"}
+# load_end 1.08

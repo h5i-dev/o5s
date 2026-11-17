@@ -1,0 +1,7 @@
+# commits rep 3 commit 78bf513 dirty 0 load_start 1.07 2026-11-16T23:37:39+00:00
+| threads (one handle, distinct names) | commits/s |
+|---|---|
+| 1 | 8060 |
+| 4 | 12762 |
+| 8 | 14259 |
+# load_end 1.30

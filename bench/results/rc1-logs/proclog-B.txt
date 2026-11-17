@@ -1,0 +1,954 @@
+== 11:18:15 0.81 1.29 2.10
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.5 root     bun
+ 0.5 root     codex
+== 11:18:25 1.14 1.35 2.11
+ 360 ec2-user java
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 ec2-user python3
+== 11:18:35 1.26 1.37 2.11
+63.3 ec2-user java
+ 2.9 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:18:45 1.30 1.37 2.10
+ 346 ec2-user java
+35.4 ec2-user java
+ 3.2 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:18:55 1.64 1.45 2.11
+ 294 ec2-user java
+25.6 ec2-user java
+ 3.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:19:05 1.69 1.46 2.11
+20.7 ec2-user java
+ 3.9 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:19:16 1.89 1.51 2.12
+17.0 ec2-user java
+ 4.1 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:19:26 2.21 1.60 2.14
+ 561 ec2-user java
+14.5 ec2-user java
+ 4.1 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:19:36 2.40 1.66 2.16
+ 332 ec2-user java
+13.0 ec2-user java
+ 4.2 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:19:46 2.49 1.70 2.17
+ 225 ec2-user java
+11.6 ec2-user java
+ 4.3 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:19:56 2.41 1.71 2.17
+74.0 ec2-user java
+10.6 ec2-user java
+ 4.3 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:20:06 2.28 1.71 2.16
+ 215 ec2-user java
+ 9.8 ec2-user java
+ 4.3 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:20:16 2.30 1.73 2.16
+ 9.5 ec2-user java
+ 4.3 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:20:26 2.42 1.77 2.17
+ 250 ec2-user java
+ 9.1 ec2-user java
+ 4.3 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:20:36 2.51 1.82 2.18
+ 184 ec2-user java
+ 8.8 ec2-user java
+ 4.4 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:20:46 2.59 1.85 2.19
+ 189 ec2-user java
+ 8.2 ec2-user java
+ 4.4 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:20:56 2.34 1.83 2.18
+ 123 ec2-user java
+ 7.8 ec2-user java
+ 4.4 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:21:06 2.22 1.82 2.17
+77.0 ec2-user java
+ 7.5 ec2-user java
+ 4.5 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:21:16 2.41 1.87 2.18
+71.0 ec2-user java
+ 7.1 ec2-user java
+ 4.5 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:21:26 2.50 1.91 2.19
+ 6.7 ec2-user java
+ 4.5 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:21:36 2.27 1.88 2.18
+ 153 ec2-user java
+ 6.4 ec2-user java
+ 4.6 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:21:46 2.07 1.85 2.17
+ 127 ec2-user java
+ 6.1 ec2-user java
+ 4.6 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:21:56 1.91 1.82 2.15
+ 177 ec2-user java
+ 5.9 ec2-user java
+ 4.6 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:22:06 1.69 1.78 2.14
+ 150 ec2-user java
+ 5.7 ec2-user java
+ 4.6 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:22:16 1.58 1.75 2.12
+ 155 ec2-user java
+ 5.5 ec2-user java
+ 4.6 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:22:26 1.73 1.78 2.13
+ 5.4 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:22:36 2.22 1.88 2.16
+ 279 ec2-user java
+ 5.2 ec2-user java
+ 4.6 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:22:46 2.34 1.92 2.17
+ 283 ec2-user java
+ 5.1 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:22:56 2.20 1.91 2.16
+ 356 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:23:06 2.49 1.98 2.18
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.7 ec2-user o5s-server
+== 11:23:16 2.50 1.99 2.19
+ 323 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:23:26 2.72 2.06 2.20
+ 472 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:23:36 2.70 2.07 2.21
+ 310 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:23:46 2.44 2.04 2.19
+ 270 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:23:56 2.44 2.05 2.20
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.5 root     bun
+== 11:24:06 2.30 2.04 2.19
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 ec2-user o5s-server
+== 11:24:16 2.18 2.02 2.18
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 ec2-user o5s-server
+== 11:24:26 2.15 2.02 2.18
+ 356 ec2-user java <defunct>
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:24:36 2.19 2.03 2.18
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.7 ec2-user o5s-server
+== 11:24:47 2.25 2.05 2.19
+ 324 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:24:57 2.36 2.08 2.19
+ 402 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.9 ec2-user o5s-server
+== 11:25:07 2.62 2.14 2.21
+ 213 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.0 ec2-user ps
+== 11:25:17 2.61 2.16 2.22
+ 162 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:25:27 2.52 2.15 2.21
+ 189 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.0 root     sshd-session
+== 11:25:37 2.59 2.18 2.22
+81.0 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.9 root     systemd-hostnam
+== 11:25:47 2.73 2.22 2.24
+ 254 ec2-user java
+38.8 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:25:57 2.86 2.26 2.25
+ 208 ec2-user java
+25.8 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:26:07 3.10 2.34 2.28
+ 311 ec2-user java
+19.7 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:26:17 2.92 2.33 2.27
+ 315 ec2-user java
+16.3 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:26:27 2.93 2.35 2.28
+ 256 ec2-user java
+13.6 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:26:37 2.71 2.32 2.27
+ 179 ec2-user java
+11.7 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:26:47 2.84 2.36 2.28
+ 238 ec2-user java
+10.4 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:26:57 2.94 2.40 2.30
+ 334 ec2-user java
+ 9.4 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:27:07 2.79 2.38 2.29
+ 214 ec2-user java
+ 8.6 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:27:17 2.83 2.40 2.30
+ 257 ec2-user java
+ 8.5 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:27:27 2.93 2.44 2.31
+ 225 ec2-user java
+57.5 ec2-user java
+ 8.2 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+== 11:27:37 2.71 2.41 2.31
+ 214 ec2-user java
+33.5 ec2-user java
+ 7.6 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+== 11:27:47 2.68 2.41 2.31
+ 243 ec2-user java
+24.6 ec2-user java
+ 7.1 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+== 11:27:57 2.65 2.42 2.31
+ 250 ec2-user java
+19.8 ec2-user java
+ 6.7 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+== 11:28:07 2.85 2.47 2.33
+ 342 ec2-user java
+16.5 ec2-user java
+ 6.7 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+== 11:28:17 2.88 2.49 2.34
+14.2 ec2-user java
+ 6.6 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:28:27 2.98 2.52 2.35
+ 270 ec2-user java
+12.7 ec2-user java
+ 6.6 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+== 11:28:37 3.13 2.57 2.37
+ 409 ec2-user java
+11.5 ec2-user java
+ 6.6 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+== 11:28:47 2.95 2.55 2.36
+ 251 ec2-user java
+10.5 ec2-user java
+ 6.3 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+== 11:28:57 2.73 2.52 2.35
+ 9.7 ec2-user java
+ 6.0 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:29:07 2.77 2.53 2.36
+ 306 ec2-user java
+ 9.4 ec2-user java
+ 5.8 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+== 11:29:17 2.66 2.51 2.36
+ 9.0 ec2-user java
+ 5.5 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:29:27 2.86 2.56 2.38
+ 8.6 ec2-user java
+ 5.3 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:29:38 3.04 2.61 2.39
+ 8.1 ec2-user java
+ 5.1 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:29:48 2.95 2.61 2.39
+ 349 ec2-user java
+ 7.6 ec2-user java
+ 4.9 ec2-user claude
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+== 11:29:58 2.89 2.60 2.40
+ 304 ec2-user java
+ 7.3 ec2-user java
+ 4.7 ec2-user python3
+ 4.7 ec2-user claude
+ 2.8 ec2-user claude
+== 11:30:08 2.98 2.63 2.41
+ 197 ec2-user java
+ 6.9 ec2-user java
+ 4.7 ec2-user python3
+ 4.5 ec2-user claude
+ 2.8 ec2-user claude
+== 11:30:18 2.68 2.58 2.39
+ 6.6 ec2-user java
+ 4.7 ec2-user python3
+ 4.4 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:30:28 3.02 2.66 2.42
+ 219 ec2-user java
+ 6.2 ec2-user java
+ 4.7 ec2-user python3
+ 4.3 ec2-user claude
+ 2.8 ec2-user claude
+== 11:30:38 3.10 2.69 2.43
+ 226 ec2-user java
+ 6.0 ec2-user java
+ 4.7 ec2-user python3
+ 4.1 ec2-user claude
+ 2.8 ec2-user claude
+== 11:30:48 3.24 2.73 2.45
+48.0 ec2-user java
+ 5.7 ec2-user java
+ 4.7 ec2-user python3
+ 4.0 ec2-user claude
+ 2.8 ec2-user claude
+== 11:30:58 3.44 2.79 2.47
+47.0 ec2-user java
+ 5.5 ec2-user java
+ 4.7 ec2-user python3
+ 3.9 ec2-user claude
+ 2.8 ec2-user claude
+== 11:31:08 3.52 2.83 2.49
+ 5.3 ec2-user java
+ 4.7 ec2-user python3
+ 3.8 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:31:18 3.59 2.87 2.50
+ 325 ec2-user java
+ 5.2 ec2-user java
+ 4.7 ec2-user python3
+ 3.7 ec2-user claude
+ 2.8 ec2-user claude
+== 11:31:28 3.42 2.86 2.50
+ 273 ec2-user java
+ 5.0 ec2-user java
+ 4.7 ec2-user python3
+ 3.6 ec2-user claude
+ 2.8 ec2-user claude
+== 11:31:38 3.27 2.84 2.50
+ 287 ec2-user java
+ 5.0 ec2-user java
+ 4.7 ec2-user python3
+ 3.5 ec2-user claude
+ 2.8 ec2-user claude
+== 11:31:48 3.15 2.83 2.50
+ 196 ec2-user java
+ 4.7 ec2-user python3
+ 3.4 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:31:58 2.98 2.81 2.50
+ 198 ec2-user java
+ 4.8 ec2-user python3
+ 3.3 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:32:08 3.06 2.83 2.51
+ 333 ec2-user java
+ 4.7 ec2-user python3
+ 3.2 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:32:18 2.98 2.82 2.51
+ 244 ec2-user java
+ 4.7 ec2-user python3
+ 3.2 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:32:28 3.14 2.86 2.53
+ 206 ec2-user java
+ 4.8 ec2-user python3
+ 3.4 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:32:38 2.81 2.79 2.51
+ 4.8 ec2-user python3
+ 3.4 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:32:48 2.91 2.82 2.52
+ 304 ec2-user java
+ 4.7 ec2-user python3
+ 3.3 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:32:58 2.92 2.82 2.53
+ 269 ec2-user java
+ 4.7 ec2-user python3
+ 3.3 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:33:08 3.08 2.86 2.54
+ 359 ec2-user java
+ 4.8 ec2-user python3
+ 3.2 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:33:18 3.00 2.85 2.54
+ 234 ec2-user java
+ 4.8 ec2-user python3
+ 3.2 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:33:28 3.13 2.89 2.56
+ 353 ec2-user java
+ 4.7 ec2-user python3
+ 3.1 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:33:38 2.97 2.86 2.55
+ 196 ec2-user java
+ 4.7 ec2-user python3
+ 3.0 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:33:48 3.12 2.90 2.57
+ 4.8 ec2-user python3
+ 3.0 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 0.9 ec2-user o5s-server
+== 11:33:58 3.25 2.93 2.58
+ 263 ec2-user java
+ 4.7 ec2-user python3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:34:08 3.22 2.94 2.59
+ 437 ec2-user java
+ 4.7 ec2-user python3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:34:18 3.04 2.91 2.58
+ 336 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:34:28 3.03 2.91 2.59
+ 254 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:34:38 3.03 2.91 2.59
+ 259 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 2.7 ec2-user claude
+== 11:34:48 3.18 2.95 2.61
+ 230 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 2.7 ec2-user claude
+== 11:34:59 3.39 3.00 2.63
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 2.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:35:09 3.56 3.05 2.65
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 2.6 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:35:19 3.47 3.05 2.65
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 2.6 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:35:29 3.24 3.01 2.64
+29.0 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 2.5 ec2-user claude
+== 11:35:39 3.04 2.98 2.64
+ 169 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 2.5 ec2-user claude
+== 11:35:49 3.03 2.98 2.64
+ 238 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 2.5 ec2-user claude
+== 11:35:59 3.03 2.98 2.64
+ 256 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 2.4 ec2-user claude
+== 11:36:09 2.95 2.96 2.64
+ 229 ec2-user java
+ 122 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:36:19 3.02 2.98 2.65
+ 188 ec2-user java
+47.1 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:36:29 3.02 2.98 2.66
+73.0 ec2-user java
+30.1 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:36:39 3.09 3.00 2.66
+ 214 ec2-user java
+22.6 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:36:49 2.84 2.95 2.65
+ 214 ec2-user java
+18.7 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:36:59 2.77 2.93 2.65
+ 197 ec2-user java
+15.8 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:37:09 2.89 2.95 2.66
+ 204 ec2-user java
+13.7 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:37:19 3.06 2.99 2.67
+12.5 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 2.2 ec2-user claude
+== 11:37:29 3.12 3.01 2.68
+11.3 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 2.1 ec2-user claude
+== 11:37:39 2.94 2.97 2.68
+ 302 ec2-user java
+10.3 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:37:49 3.25 3.04 2.70
+ 155 ec2-user java
+10.0 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:37:59 3.21 3.04 2.70
+ 344 ec2-user java
+ 9.4 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:38:09 2.95 2.99 2.69
+ 414 ec2-user java
+ 9.1 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:38:19 2.96 2.99 2.69
+ 318 ec2-user java
+ 8.7 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:38:29 2.98 2.99 2.70
+ 283 ec2-user java
+ 8.2 ec2-user java
+ 4.7 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:38:39 3.05 3.00 2.71
+ 280 ec2-user java
+ 7.7 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:38:49 3.12 3.02 2.72
+ 209 ec2-user java
+ 7.4 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:38:59 3.57 3.12 2.75
+ 203 ec2-user java
+ 7.0 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:39:09 3.71 3.16 2.77
+ 308 ec2-user java
+ 6.7 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:39:19 3.60 3.16 2.77
+ 304 ec2-user java
+ 6.4 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:39:29 3.65 3.19 2.79
+ 257 ec2-user java
+ 6.1 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:39:39 3.63 3.20 2.80
+ 311 ec2-user java
+ 5.9 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:39:49 3.62 3.21 2.80
+ 309 ec2-user java
+ 5.6 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+== 11:39:59 3.75 3.25 2.82
+ 5.5 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.8 ec2-user claude
+== 11:40:09 3.55 3.22 2.82
+ 5.3 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.8 ec2-user claude
+== 11:40:19 3.54 3.23 2.83
+ 5.3 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.8 ec2-user claude
+== 11:40:30 3.53 3.24 2.83
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.7 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:40:40 3.29 3.20 2.82
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.7 ec2-user claude
+ 0.9 ec2-user o5s-server
+== 11:40:50 3.25 3.19 2.83
+ 477 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.7 ec2-user claude
+== 11:41:00 3.06 3.15 2.82
+ 129 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.7 ec2-user claude
+== 11:41:10 3.13 3.16 2.83
+ 149 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.7 ec2-user claude
+== 11:41:20 3.18 3.18 2.83
+ 143 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.7 ec2-user claude
+== 11:41:30 3.15 3.17 2.83
+49.0 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.6 ec2-user claude
+== 11:41:40 3.12 3.16 2.84
+75.0 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.6 ec2-user claude
+== 11:41:50 3.03 3.14 2.83
+ 227 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.6 ec2-user claude
+== 11:42:00 2.94 3.12 2.83
+ 277 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.6 ec2-user claude
+== 11:42:10 2.89 3.10 2.83
+ 239 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.6 ec2-user claude
+== 11:42:20 2.76 3.06 2.82
+ 208 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.6 ec2-user claude
+== 11:42:30 2.95 3.10 2.83
+ 176 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.6 ec2-user claude
+== 11:42:40 2.88 3.07 2.83
+ 238 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.6 ec2-user claude
+== 11:42:50 2.67 3.02 2.81
+ 270 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.5 ec2-user claude
+== 11:43:00 2.73 3.02 2.81
+ 204 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.5 ec2-user claude
+== 11:43:10 2.84 3.04 2.82
+ 197 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.5 ec2-user claude
+== 11:43:20 2.86 3.04 2.82
+ 141 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.5 ec2-user claude
+== 11:43:30 2.72 3.00 2.81
+ 163 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.5 ec2-user claude
+== 11:43:40 2.61 2.97 2.80
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.5 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:43:50 2.74 2.99 2.81
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.5 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:44:00 2.86 3.00 2.82
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.5 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:44:10 2.95 3.02 2.83
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.4 ec2-user claude
+ 0.7 root     nv-hostengine
+== 11:44:20 2.81 2.98 2.82
+ 235 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.4 ec2-user claude
+== 11:44:30 2.83 2.98 2.82
+ 205 ec2-user java
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.4 ec2-user claude
+== 11:44:40 3.00 3.02 2.83
+ 4.8 ec2-user python3
+ 2.8 ec2-user claude
+ 2.7 ec2-user claude
+ 1.4 ec2-user claude
+ 0.7 root     nv-hostengine

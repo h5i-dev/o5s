@@ -630,9 +630,14 @@ impl Feed {
         }
     }
 
+    /// Whether any observer is registered (callers skip collecting changes otherwise).
+    fn active(&self) -> bool {
+        self.0.read().map(|v| !v.is_empty()).unwrap_or(false)
+    }
+
     /// Reports mutations applied from other writers (nothing if no observer is registered).
     fn applied(&self, muts: &[Mutation]) {
-        if self.0.read().map(|v| v.is_empty()).unwrap_or(true) {
+        if !self.active() {
             return;
         }
         let mut out = Vec::new();
@@ -869,6 +874,9 @@ impl Journal {
         let mut buf = vec![0u8; (len - g.applied) as usize];
         g.file.read_exact_at(&mut buf, g.applied)?;
         let (muts, used, err) = parse_records(&buf);
+        // Records are cloned for the feed only when someone watches it: a replay at open (no
+        // observer yet) costs no extra memory.
+        let watch = self.feed.active();
         let mut applied = Vec::new();
         for m in muts {
             if let Mutation::Rotated(next) = m {
@@ -876,8 +884,10 @@ impl Journal {
                 self.switch(g, next)?;
                 return Ok(true);
             }
-            g.state.apply(m.clone());
-            applied.push(m);
+            if watch {
+                applied.push(m.clone());
+            }
+            g.state.apply(m);
         }
         self.feed.applied(&applied);
         g.applied += used as u64;

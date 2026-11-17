@@ -13,11 +13,12 @@
 //! handle: every successful `replace` / `replace_many` / `update_many` /
 //! `delete_ref` on any clone of that `LocalRepo` notifies it before returning.
 //! A name created from nothing (version 1) only adds objects, so its target is
-//! queued as a **pending root** of its cell; the commit does no traversal. A
-//! background worker drains pending roots (one cell at a time, under that
-//! cell's lock), and a query on a cell with pending roots drains them first, so
-//! answers are exact and read-your-writes holds. (The worker never runs an
-//! exact recompute: that is left to the next query of a dirty cell.) A move, a re-creation after a
+//! queued as a **pending root** of its cell; the commit does no traversal. The
+//! next query on that cell drains its pending roots first (under the cell's
+//! lock), so answers are exact and read-your-writes holds. Nothing runs in the
+//! background: a workload that never reads by hash (e.g. git pushes) never pays
+//! for a traversal, and one push's traversal never competes with the next push
+//! (BENCH 2026-11-17, rc.1 batch). A move, a re-creation after a
 //! delete, or a delete may make objects unreachable, so it marks the cell
 //! **dirty** at once (dropping its pending roots); a query on a dirty cell
 //! recomputes that cell exactly first. "Unreadable as soon as its last readable
@@ -36,8 +37,8 @@
 
 use crate::{LocalRepo, Tracer};
 use o5s_core::{Error, Hash, Name, ObjectStore, Repository, Result};
-use std::collections::{HashSet, VecDeque};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, Weak};
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, Weak};
 
 /// The cell prefixes and one state per cell.
 type Cells = (Arc<Vec<String>>, Vec<Arc<Cell>>);
@@ -61,24 +62,6 @@ struct Inner {
     repo: LocalRepo,
     /// The cell prefixes and one state per cell (replaced together on a policy reload).
     cells: RwLock<Cells>,
-    /// Cells with pending roots, for the worker (which holds the queue, not the index).
-    queue: Arc<Queue>,
-}
-
-#[derive(Default)]
-struct Queue {
-    work: Mutex<(VecDeque<Arc<Cell>>, bool)>,
-    wake: Condvar,
-}
-
-impl Drop for Inner {
-    fn drop(&mut self) {
-        // Tell the worker to stop now rather than at its next timeout.
-        if let Ok(mut w) = self.queue.work.lock() {
-            w.1 = true;
-        }
-        self.queue.wake.notify_all();
-    }
 }
 
 /// One cell. Commits touch only `inbox` (briefly); whoever settles the cell holds `members`.
@@ -91,9 +74,9 @@ struct Cell {
 #[derive(Default)]
 struct Members {
     set: HashSet<Hash>,
-    /// Members reached as objects (a ref target or a front child) whose front children were
-    /// traced. Hashes reached only as chunks of a stored object are members but not traced.
-    traced: HashSet<Hash>,
+    /// Members reached so far only as chunks of a stored object: not traced (they are not front
+    /// objects). An object edge to one of them traces it then. Only chunk hashes are kept here.
+    chunk_only: HashSet<Hash>,
     /// Recompute from the cell's names before the next answer.
     dirty: bool,
 }
@@ -111,14 +94,8 @@ impl ReachIndex {
     /// Builds the index over `cells` (each a name prefix; `""` covers every
     /// name) and registers it with `repo` (and every clone of it).
     pub fn open(repo: &LocalRepo, cells: Vec<String>) -> Result<ReachIndex> {
-        let idx = ReachIndex {
-            inner: Arc::new(Inner {
-                repo: repo.clone(),
-                cells: RwLock::new(Self::fresh(cells)),
-                queue: Arc::default(),
-            }),
-        };
-        // The observers and the worker hold the index weakly: dropping the index stops them.
+        let idx = ReachIndex { inner: Arc::new(Inner { repo: repo.clone(), cells: RwLock::new(Self::fresh(cells)) }) };
+        // The observers hold the index weakly: dropping the index makes them no-ops.
         // Both observers are registered before the first build (every cell starts dirty), so no
         // change between the build and the registration is missed.
         repo.add_ref_observer(Arc::new(Observer(Arc::downgrade(&idx.inner))));
@@ -135,12 +112,6 @@ impl ReachIndex {
             }
         }));
         idx.rebuild_all()?;
-        let weak = Arc::downgrade(&idx.inner);
-        let queue = idx.inner.queue.clone();
-        std::thread::Builder::new()
-            .name("o5s-reach".into())
-            .spawn(move || worker(weak, queue))
-            .map_err(|e| Error::Corrupt(format!("reach worker: {e}")))?;
         Ok(idx)
     }
 
@@ -148,7 +119,7 @@ impl ReachIndex {
         let states = (0..cells.len())
             .map(|_| {
                 Arc::new(Cell {
-                    members: Mutex::new(Members { set: HashSet::new(), traced: HashSet::new(), dirty: true }),
+                    members: Mutex::new(Members { set: HashSet::new(), chunk_only: HashSet::new(), dirty: true }),
                     ..Cell::default()
                 })
             })
@@ -223,14 +194,14 @@ impl ReachIndex {
             };
             m.dirty |= dirty;
             if m.dirty {
-                (m.set, m.traced) = self.mark_cell(cells, c)?;
+                (m.set, m.chunk_only) = self.mark_cell(cells, c)?;
                 m.dirty = false;
             } else if !roots.is_empty() {
                 let repo = &self.inner.repo;
                 let tracer = repo.fronts().tracer(repo)?;
-                let Members { set, traced, .. } = &mut *m;
+                let Members { set, chunk_only, .. } = &mut *m;
                 for h in roots {
-                    if let Err(e) = closure(repo, &tracer, h, set, traced) {
+                    if let Err(e) = closure(repo, &tracer, h, set, chunk_only) {
                         // Never guess: recompute exactly on the next answer.
                         m.dirty = true;
                         return Err(e);
@@ -246,15 +217,15 @@ impl ReachIndex {
     fn mark_cell(&self, cells: &[String], c: usize) -> Result<(HashSet<Hash>, HashSet<Hash>)> {
         let repo = &self.inner.repo;
         let mut members = HashSet::new();
-        let mut traced = HashSet::new();
+        let mut chunk_only = HashSet::new();
         let tracer = repo.fronts().tracer(repo)?;
         let prefix = &cells[c];
         for (name, v) in repo.list_refs(prefix.trim_end_matches('/'))? {
             if Self::cell_of(cells, name.as_str()) == Some(c as CellId) {
-                closure(repo, &tracer, v.hash, &mut members, &mut traced)?;
+                closure(repo, &tracer, v.hash, &mut members, &mut chunk_only)?;
             }
         }
-        Ok((members, traced))
+        Ok((members, chunk_only))
     }
 
     /// Every cell is recomputed by its next query (another writer replaced the whole ref state).
@@ -271,31 +242,17 @@ impl ReachIndex {
     /// The commit path: O(changes), no traversal, never waits for a traversal.
     fn on_change(&self, changes: &[(Name, Option<Hash>, u64)]) {
         let Ok((cells, states)) = self.snapshot() else { return };
-        let mut queued: Vec<usize> = Vec::new();
         for (name, new, version) in changes {
             let Some(c) = Self::cell_of(&cells, name.as_str()) else { continue };
             let c = c as usize;
             let Ok(mut inbox) = states[c].inbox.lock() else { continue };
             match (new, *version) {
-                (Some(h), 1) => {
-                    inbox.roots.push(*h);
-                    if !queued.contains(&c) {
-                        queued.push(c);
-                    }
-                }
+                (Some(h), 1) => inbox.roots.push(*h),
                 _ => {
                     inbox.dirty = true;
                     inbox.roots.clear();
                 }
             }
-        }
-        if !queued.is_empty()
-            && let Ok(mut w) = self.inner.queue.work.lock()
-        {
-            for c in queued {
-                w.0.push_back(states[c].clone());
-            }
-            self.inner.queue.wake.notify_one();
         }
     }
 }
@@ -306,45 +263,6 @@ fn poisoned() -> Error {
 
 fn lock(m: &Mutex<Members>) -> Result<MutexGuard<'_, Members>> {
     m.lock().map_err(|_| poisoned())
-}
-
-/// Drains pending roots in the background until the index is dropped. Holds
-/// the index only while settling one cell, so dropping it ends the thread.
-fn worker(weak: Weak<Inner>, queue: Arc<Queue>) {
-    loop {
-        let state = {
-            let Ok(mut w) = queue.work.lock() else { return };
-            loop {
-                if w.1 {
-                    return;
-                }
-                if let Some(s) = w.0.pop_front() {
-                    break s;
-                }
-                w = match queue.wake.wait(w) {
-                    Ok(w) => w,
-                    Err(_) => return,
-                };
-            }
-        };
-        let Some(inner) = weak.upgrade() else { return };
-        let idx = ReachIndex { inner };
-        let Ok((cells, states)) = idx.snapshot() else { return };
-        // A cell from before a policy reload is gone: skip it.
-        let Some(c) = states.iter().position(|s| Arc::ptr_eq(s, &state)) else { continue };
-        // Only additions are done early. A cell that a move or delete made dirty is recomputed
-        // by its next query instead: an exact recompute is a full mark of the cell, and running
-        // it in the background right after a push would compete with the next push.
-        let inbox_dirty = state.inbox.lock().map(|i| i.dirty).unwrap_or(true);
-        if inbox_dirty {
-            continue;
-        }
-        if let Ok(mut m) = lock(&state.members)
-            && !m.dirty
-        {
-            let _ = idx.settle(&cells, c, &state, &mut m);
-        }
-    }
 }
 
 struct Observer(Weak<Inner>);
@@ -361,19 +279,19 @@ impl RefObserver for Observer {
 /// at a time so fronts can resolve a wave's children in one batch. Objects that
 /// are missing (a dangling ref) contribute nothing.
 ///
-/// Two kinds of edges, two sets. A *chunk* edge (`PackStore::chunks`) reaches
-/// a raw part of a stored object: a member, but not a front object, so the
-/// tracer is not run on it (that would read and decompress every chunk of a
-/// large file again). An *object* edge (a root or a front child) also traces
-/// the object, once (`traced`). A hash that is both a chunk and an object is
-/// traced when its object edge arrives, even if it became a member as a chunk
-/// first, so nothing a front references is ever missed.
+/// Two kinds of edges. A *chunk* edge (`PackStore::chunks`) reaches a raw part
+/// of a stored object: a member, but not a front object, so the tracer is not
+/// run on it (that would read and decompress every chunk of a large file
+/// again); it is remembered in `chunk_only`. An *object* edge (a root or a front
+/// child) traces the object if it is new, or if it was so far only a chunk. So a
+/// hash that is both a chunk and an object is traced when its object edge
+/// arrives, whichever came first, and nothing a front references is ever missed.
 fn closure(
     repo: &LocalRepo,
     tracer: &dyn Tracer,
     root: Hash,
     members: &mut HashSet<Hash>,
-    traced: &mut HashSet<Hash>,
+    chunk_only: &mut HashSet<Hash>,
 ) -> Result<()> {
     // (hash, reached as an object)
     let mut wave = vec![(root, true)];
@@ -381,7 +299,9 @@ fn closure(
         let mut objects = Vec::new();
         let mut next = Vec::new();
         for (h, object) in wave.drain(..) {
-            if !members.contains(&h) {
+            let new = if members.contains(&h) {
+                false
+            } else {
                 if !repo.packs().contains(&h)? {
                     continue;
                 }
@@ -389,13 +309,18 @@ fn closure(
                 if let Some(kids) = repo.packs().chunks(&h)? {
                     next.extend(kids.into_iter().filter(|k| !members.contains(k)).map(|k| (k, false)));
                 }
-            }
-            if object && traced.insert(h) {
-                objects.push(h);
+                true
+            };
+            if object {
+                if new || chunk_only.remove(&h) {
+                    objects.push(h);
+                }
+            } else if new {
+                chunk_only.insert(h);
             }
         }
         for kids in children_of_wave(tracer, &objects, repo)? {
-            next.extend(kids.into_iter().filter(|k| !traced.contains(k)).map(|k| (k, true)));
+            next.extend(kids.into_iter().filter(|k| !members.contains(k) || chunk_only.contains(k)).map(|k| (k, true)));
         }
         wave = next;
     }

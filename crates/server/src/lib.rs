@@ -658,6 +658,26 @@ pub mod fuzzing {
                 .ok_or_else(|| o5s_core::Error::Corrupt("out of range".into()))
         };
         let _ = crate::pkg::wheel_metadata_with(data.len() as u64, &read);
+        auth_header(data);
+    }
+
+    /// Bearer/Basic header parsing and issued (h5i-app) token verification on any header bytes.
+    pub fn auth_header(data: &[u8]) {
+        use std::sync::OnceLock;
+        static AUTH: OnceLock<crate::auth::TokenAuthenticator> = OnceLock::new();
+        let a = AUTH.get_or_init(|| {
+            let sha: String = crate::auth::sha256(b"fuzz-token").iter().map(|b| format!("{b:02x}")).collect();
+            crate::auth::TokenAuthenticator::new(
+                &[crate::config::TokenEntry { principal: "f".into(), sha256: sha }],
+                false,
+            )
+            .with_key(Some(vec![7u8; 32]))
+        });
+        if let Ok(v) = axum::http::HeaderValue::from_bytes(data) {
+            let mut h = axum::http::HeaderMap::new();
+            h.insert(axum::http::header::AUTHORIZATION, v);
+            let _ = a.check_sync(&h);
+        }
     }
 
     pub fn range(header: &str, size: u64) {

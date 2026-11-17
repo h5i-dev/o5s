@@ -1,0 +1,8 @@
+# stream rep 3 commit ba21b99 dirty 0 load_start 1.26 2026-11-17T07:14:42+00:00
+| input | put_stream 512 MiB | re-put (dedup) | open+read (verified) |
+|---|---|---|---|
+| incompressible | 344 MB/s | 1031 MB/s | 2709 MB/s |
+| code-like text | 313 MB/s | 1040 MB/s | 1126 MB/s |
+
+peak RSS: 22 MB
+# load_end 1.54

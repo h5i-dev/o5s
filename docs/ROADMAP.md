@@ -5,11 +5,11 @@
 **Standing orders**
 - Work this list top to bottom **without waiting for further instructions**. When an item is done, start the next one.
 - Make decisions yourself. Write genuine human-only questions under "Questions for human" in your progress doc, pick the safe default, and keep going.
-- Commit and push as you go: gate green (check the exit status), no force-push, never touch `main`, no Claude attribution.
+- Commit and push as you go, on task branches cut from `origin/main`: gate green (check the exit status), no force-push, never touch `main`, no Claude attribution. The human opens the PRs and merges; there are no `demo`/`net` branches.
 - Every measurement is pre-registered in `PLAN.md` before its code. Report results honestly against the frozen thresholds.
 - Disk hygiene: target dir < 4 GB, no TMPDIR leaks, nothing under `/home` or `/tmp`, perf build-id cache on scratch. `/mnt/scratch` has about 14 GB free. If space blocks an item, record it and do the next item.
 
-## Core session (`o5s`, branch `demo`)
+## Core session (`o5s`)
 1. **Finish in-flight work:** `read_verify = strict (default) | eof` (see PROGRESS "Answered"), and the idmap fix handoff with net.
 2. **Experiment 3 held-out run:** redis and git.git, once, under the bench lock (protocol in "Batch measurement" below). Write the verdict in `EXP1.md`/`PROGRESS.md`. If it fails on a repo, analyse why and improve the generic orderer or framer. Never add a Git-specific path.
 3. **P5 cross-domain features (core side):**
@@ -26,10 +26,10 @@
 6. **Security review of the core:** decoder limits, path handling, resource exhaustion (huge manifests, deep delta/reference chains, zip-bomb-like frames), concurrency races. Fix the findings, and add fuzz targets for every new format (Frame3, attestations, the search index).
 7. **Release prep (v0.1):**
    - CHANGELOG, README rewrite (what it is, quick start for each front), ARCHITECTURE/API docs current, upgrade and format-compatibility policy.
-   - Tag a release candidate on `demo` (`v0.1.0-rc.N`).
+   - Tag a release candidate (`v0.1.0-rc.N`) on its release branch (`release/v0.1.0-rc.N`, cut from `main`).
    - Write `docs/RELEASE.md` with the merge-to-main checklist. The human merges to `main`.
 
-## Net session (`o5s-net`, branch `net`)
+## Net session (`o5s-net`)
 1. **Finish in-flight work:** the idmap ranged-lookup fix (agreed with core), and the server side of `read_verify`.
 2. **Front completeness, each tested with the real unmodified client:**
    - **OCI:** referrers API, and cosign/notation signatures stored as OCI artifacts (wire them to the core attestations once item 3 lands).

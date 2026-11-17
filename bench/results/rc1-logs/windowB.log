@@ -1,0 +1,45 @@
+start 11:18:15 ba21b99   11:18:15 up 4 days, 23:14,  6 users,  load average: 0.81, 1.29, 2.10
+# host: ip-172-31-80-80.ec2.internal 4 vCPU; 2026-11-17T11:18:16Z; commit ba21b99
+== maven
+11:18:16 maven: warming the plugin repository
+11:18:26 maven: reposilite run 0
+11:20:42 maven cold_p50_s reposilite: 2.5846512999851257 s {'run': 0, 'files': 50}
+11:20:42 maven cold_total_s reposilite: 129.76712127792416 s {'run': 0, 'files': 50}
+11:22:49 maven hot_p50_s reposilite: 2.3997166350018233 s {'run': 0, 'files': 50}
+11:22:49 maven hot_total_s reposilite: 120.0520773640601 s {'run': 0, 'files': 50}
+11:22:49 maven stored_bytes reposilite: 48869376 B {'run': 0}
+11:22:49 maven: o5s run 0
+11:25:02 maven cold_p50_s o5s: 2.51624751399504 s {'run': 0, 'files': 50}
+11:25:02 maven cold_total_s o5s: 126.21363680972718 s {'run': 0, 'files': 50}
+11:27:13 maven hot_p50_s o5s: 2.4722927489783615 s {'run': 0, 'files': 50}
+11:27:13 maven hot_total_s o5s: 124.29682536004111 s {'run': 0, 'files': 50}
+11:27:13 maven stored_bytes o5s: 45588480 B {'run': 0}
+11:27:13 maven functional:no_refetch_on_hit_run0 o5s: True bool {'detail': '129.0 upstream fetches cold, 129.0 after hot'}
+11:27:17 maven: reposilite run 1
+11:29:32 maven cold_p50_s reposilite: 2.549026667024009 s {'run': 1, 'files': 50}
+11:29:32 maven cold_total_s reposilite: 128.83983991388232 s {'run': 1, 'files': 50}
+11:31:38 maven hot_p50_s reposilite: 2.3824589369469322 s {'run': 1, 'files': 50}
+11:31:38 maven hot_total_s reposilite: 119.00897694763262 s {'run': 1, 'files': 50}
+11:31:38 maven stored_bytes reposilite: 48869376 B {'run': 1}
+11:31:38 maven: o5s run 1
+11:33:54 maven cold_p50_s o5s: 2.552910796017386 s {'run': 1, 'files': 50}
+11:33:54 maven cold_total_s o5s: 128.5942532310728 s {'run': 1, 'files': 50}
+11:36:03 maven hot_p50_s o5s: 2.444074191036634 s {'run': 1, 'files': 50}
+11:36:03 maven hot_total_s o5s: 122.23920601909049 s {'run': 1, 'files': 50}
+11:36:03 maven stored_bytes o5s: 45588480 B {'run': 1}
+11:36:03 maven functional:no_refetch_on_hit_run1 o5s: True bool {'detail': '129.0 upstream fetches cold, 129.0 after hot'}
+11:36:06 maven: reposilite run 2
+11:38:20 maven cold_p50_s reposilite: 2.5474346919800155 s {'run': 2, 'files': 50}
+11:38:20 maven cold_total_s reposilite: 127.63218878093176 s {'run': 2, 'files': 50}
+11:40:26 maven hot_p50_s reposilite: 2.3858795990236104 s {'run': 2, 'files': 50}
+11:40:26 maven hot_total_s reposilite: 119.01076736988034 s {'run': 2, 'files': 50}
+11:40:26 maven stored_bytes reposilite: 48869376 B {'run': 2}
+11:40:26 maven: o5s run 2
+11:42:40 maven cold_p50_s o5s: 2.516733234981075 s {'run': 2, 'files': 50}
+11:42:40 maven cold_total_s o5s: 126.96366946416674 s {'run': 2, 'files': 50}
+11:44:50 maven hot_p50_s o5s: 2.4636562090017833 s {'run': 2, 'files': 50}
+11:44:50 maven hot_total_s o5s: 123.06200444186106 s {'run': 2, 'files': 50}
+11:44:50 maven stored_bytes o5s: 45588480 B {'run': 2}
+11:44:50 maven functional:no_refetch_on_hit_run2 o5s: True bool {'detail': '129.0 upstream fetches cold, 129.0 after hot'}
+report: /mnt/scratch/pico2peta/rc1-final/fronts-B-report.md
+EXIT=0 end 11:44:50  11:44:50 up 4 days, 23:41,  7 users,  load average: 3.00, 3.02, 2.83

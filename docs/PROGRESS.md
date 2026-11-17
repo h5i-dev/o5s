@@ -37,7 +37,8 @@ Milestones M0–M9 are complete. `scripts/check.sh` passes.
 | **h5i rebuild (docs/H5I_PLAN.md, from the human 2026-11-16)** | **H0 done**: `baseline-pre-h5i` tagged (1b8f608); docs/BASELINE.md; PLAN §6.8 rule. **H1 done.** **H2, core side, done**: every core decision is a kernel in `crates/kernel`, extracted with Charon/Aeneas and called by its shell. That covers the name grammar and governance, the OCC batch decision, front ownership, promotion, retention, GC victims and verify-before-delete, the read digest check and put dedup, the pack record header decoder, and the journal framing. `verify/core` proves P1–P3 and P5–P7 plus totality of every kernel function: 182 theorems on the extracted code, standard axioms only. `h5i app mutate` caught 17/17. The hand model (`lean/`) and its difftest are deleted. Trusted, as documented in `verify/core/README.md`: BLAKE3, ed25519, the backend's create-only puts, fsync/flock, the shells' view building (tested), and the ref log's timing protocol (multi-host and fault tests). P4 is net's (`verify/net`). **H3, core side, run on `cbbbb8a`** (BENCH 2026-11-16): two real regressions found and fixed (name validation copy, commit-path allocations). Exp3 sizes 28/28 byte-identical. Three FAILs by the letter of §6.8, flagged to the human with A/B evidence: ingest put −5.9%, §6.4 durable-write tier 0.886× (dd faster), redis A3 peak RSS +14%. The human ruled on the three FAILs: one pre-declared re-measurement each, in the final batch (PLAN §6.8 amendment). **v0.5.5 switch done** (eb357b9): every h5i crate comes from crates.io at `=0.5.5`, the CLI is the official v0.5.5, and the extraction is byte-identical. The re-plan put H4 before any further H3. **H4, core side, done:**
 - multi-core whole-object BLAKE3 for verified reads, exactly the serial hash, proptested (d6bfd5f, with the d00980b fix for compressible reads that net caught);
 - reach and GC no longer trace chunk edges (9aba438);
-- the reach worker drains additions only (eb357b9).
+- the reach worker drains additions only (eb357b9); the worker was later removed entirely, with additions settled
+  lazily by the next query (rc.1: one push's traversal no longer competes with the next push).
 
 A parallel Xet upload cutter was tried and reverted (c155ab3): it lost the pipeline overlap. §6.4 strict read rose from 0.17× to 0.22× of `cat`, short of 0.50× (question for the human). **Next:** the human's answers on net's two HF questions, then net H4 done, then the one final batch (core windows, the three rechecks, then net's §6.5 A and B), then the RC. |
 | Scale (ROADMAP item 4) | **done within the disk budget.** Windows 1–2 (BENCH.md): every §6.7 target met except plain RSS per object (110 B; heap is 3.4 B/object, the rest is mapped index pages). Three bottlenecks fixed: quadratic `replace_many`, idmap ranged lookups (net), and the duplicate index copy in `idx-cache` (now a hard link: 292 → 226 B/object on disk, cold open 6.6 → 3.6 s at 10⁷). 10⁸ objects **not run**: ≈ 22.6 GB doesn't fit the pre-registered disk rule. Limits are in ARCHITECTURE.md. |
@@ -216,22 +217,38 @@ A parallel Xet upload cutter was tried and reverted (c155ab3): it lost the pipel
   (LFS↔Xet chunk dedup is worth more) and is recorded as a FAIL at 1.34× of `/v1`. Downloads are judged on
   server CPU against `/v1`, with busy time informational.
 
-## Release candidate: checklist status (docs/RELEASE.md), 2026-11-16, demo `0951c7b`
-Not tagged: the human said not to tag yet.
-- **Done:**
-  - **1, 2.** Gate green on `0951c7b`, with net merged.
-  - **3.** CHANGELOG: the rename is listed as breaking; H2 and H4 are listed.
-  - **4.** Docs current: CLI.md regenerated, no changes. SECURITY.md has the reachability section, ARCHITECTURE
-    the verified-read limit, and net updated API.md.
-  - **6.** Proofs: `h5i app prove` ok in both projects after the rename (core 182, net 167 theorems).
-- **Dev pass only:**
-  - **5.** Fuzz: all 20 targets 60 s clean under ASan, no artifacts, but on a lock that had two transitive h5i
-    crates at 0.5.6 (fixed since). It must be rerun on the commit to tag.
-- **Blocked on the human resuming measurements:**
-  - the final batch's core suite (no usable run);
-  - net's §6.5 windows A and B;
-  - a measurement of 95f6a4a (the staging-file writeback, against the durable-write FAIL).
-- **Then:** the fuzz smoke on the tag commit, the tag (7), and its PROGRESS record (8).
+- **Three unruled Exp3 FAILs on `20f55ad` (answered by the human, 2026-11-17).** jq A3 read p99 +14.5 %, jq A3
+  peak RSS +6.5 %, and git A3 peak RSS +20.4 % (over the 6 GB tier) stay FAIL by the letter. **Decision:** one
+  pre-declared controlled re-measurement (PLAN §6.8, amendment 2026-11-17) on the final rc.1 commit, then tag if
+  it passes, or fix if it doesn't. **The git re-push tier FAIL** (net, pass 2) was fixed instead (no background
+  reach traversal), and the human chose a full batch rerun on the new head.
+
+## Release candidate v0.1.0-rc.1: status, 2026-11-17
+**Final batch on one commit, `ba21b99`: PASS under PLAN §6.8 and its amendments,** apart from the FAILs the human
+ruled on (BENCH.md 2026-11-17; raw data in `bench/final/rc1/ba21b99/` and `bench/results/fronts-rc1-ba21b99*`).
+- **Core:**
+  - the suite is 76/77 within allowance; stream peak RSS failed by the letter at whole-MB granularity, and W9
+    decided it PASS (medians 22 vs 22 MB);
+  - §6.4 metrics are within allowance;
+  - Exp3 sizes are 28/28 byte-identical, every A3 build is faster, and no build-time tier is worse;
+  - the rechecks: 1 (ingest) PASS and 3 (redis A3 RSS) PASS;
+  - W8: git A3 RSS PASS, the 6 GB tier met, jq A3 RSS and p99 PASS.
+- **Net:** functional 75/75, no metric over its allowance, no tier worse. The git re-push regression from pass 2 is
+  gone.
+- **FAIL, as ruled by the human:**
+  - recheck 2, the durable-write tier: 0.868× vs 0.90×. 95f6a4a had no measurable effect.
+  - §6.4 verified read: strict 0.355×, eof 0.45× vs 0.50×.
+  - HF LFS upload: 1.35× vs 1.2×.
+  - OCI pull vs Distribution was a FAIL in the baseline too, so it isn't a regression.
+- **Release checklist (RELEASE.md):**
+  - gate green (exit code checked) on `f691647` and on the tag commit;
+  - `h5i app prove` ok (core 182 theorems, standard axioms; net with both obligations proven);
+  - fuzz smoke `ref_journal` clean on `f691647` (356,998 runs in 76 s under ASan), per the human's rc.1 ruling;
+  - CHANGELOG `[0.1.0-rc.1] - 2026-11-17`; docs current.
+- **Tagged** `v0.1.0-rc.1` on the head of `release/v0.1.0-rc.1` (the commit that records this). The human opens
+  the PR and merges.
+- **Earlier passes:** pass 1 (`78bf513`) found two memory regressions, fixed in `20f55ad`. Pass 2 (`20f55ad`)
+  found net's git re-push FAIL, fixed in `ba21b99`. Both passes are kept in BENCH.md.
 
 ## Post-RC (agreed, not started)
 - Re-measure the §6.4 verified read on a many-core host (the human, 2026-11-16).

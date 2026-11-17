@@ -1,0 +1,8 @@
+# small rep 2 commit 20f55ad dirty 0 load_start 0.65 2026-11-17T02:35:42+00:00
+| re-put (all dedup) | 718.6k/s | |
+| ensure_live | 3795.5k/s | |
+| 1 KiB objects (n = 100000) | 1 thread | 4 threads |
+|---|---|---|
+| put (+ flush) | 137.4k/s | 95.2k/s |
+| get (warm, random) | 276.7k/s | 666.9k/s |
+# load_end 1.08

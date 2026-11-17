@@ -1,11 +1,11 @@
 # Task for the backends & server session (`o5s-net`)
 
 You work autonomously in tmux session `o5s-net`, in git worktree
-`/home/ec2-user/Dev/pico2peta-net` on branch `net`. The human may be disconnected for long periods.
+`/home/ec2-user/Dev/pico2peta-net`, on a task branch cut from `origin/main` (see Git workflow below). The human may be disconnected for long periods.
 
 Read first: `docs/DESIGN_BRIEF.md`, `docs/AGENT_TASK.md` (esp. "Quality bar" and "Team"), `docs/PLAN.md`, `docs/PROGRESS.md`.
 
-This is a **production-grade** product, not a demo. The core lead (session `o5s`, branch `demo`) owns the storage core and its traits. You build on top of them.
+This is a **production-grade** product, not a demo. The core lead (session `o5s`) owns the storage core and its traits. You build on top of them.
 
 ## You own
 `crates/backend-s3`, `crates/server`, `crates/client`, `deploy/`, `.github/workflows/`, `docs/NET_PROGRESS.md`. Don't edit core crates. Ask for trait or API changes under "Requests for core" in `docs/NET_PROGRESS.md`. Small, obviously correct fixes to core are OK if you list them there so the lead sees them on merge.
@@ -26,15 +26,21 @@ This is a **production-grade** product, not a demo. The core lead (session `o5s`
 5. **Deploy (`deploy/`)**: Dockerfile, a sample config, and a systemd unit.
 6. Later: the Git smart-HTTP and OCI distribution adapters (compatibility layer). Agree the hash-mapping design with the lead first, and write it down in `docs/NET_PROGRESS.md`.
 
-Until the core traits land on `demo`, design against the trait shapes in `docs/PLAN.md` and the current `crates/core`. Merge `demo` often and adapt.
+Build on `main`. When you need core work that is not merged yet, merge the core session's pushed task branch.
 
 ## Environment
 - `CARGO_TARGET_DIR=/mnt/scratch/pico2peta/cargo-target-net` and `TMPDIR=/mnt/scratch/pico2peta/tmp` are set. The root disk is nearly full, so keep builds, MinIO data and binaries under `/mnt/scratch/pico2peta/`.
 - 4 cores and 15 GB RAM, shared with the lead's builds. Use `cargo build -j2` to avoid starving them.
 
 ## Working rules
-- `git merge demo` into `net` at least every hour. Keep `net` building against the latest `demo`, because the lead merges `net` into `demo` at milestones.
-- Commit often. **Do not add any Claude / Claude Code attribution** (no `Co-Authored-By: Claude…` trailer, no "Generated with Claude Code"). A commit-msg hook strips them anyway. **Push `net` to `origin` yourself** after each goal or meaningful batch, once fmt, clippy and tests pass (`git push origin net`; never force-push, never push `main`).
+- **Git workflow (from the human, 2026-11-16).** There are no long-lived `demo` or `net` branches any more.
+  - Each task gets its own branch cut from the current `origin/main` (`git fetch; git switch -c <topic> origin/main`).
+  - Agents push only their task branches, gate green (check `scripts/check.sh`'s exit code, never off a pipe). Never
+    force-push, never push `main`, no Claude attribution.
+  - The human opens the PR and merges it. The next task branches from the new `main`.
+  - When one session needs the other's unmerged work, it merges that session's pushed task branch and says so in
+    its message.
+- Commit often. **Do not add any Claude / Claude Code attribution** (no `Co-Authored-By: Claude…` trailer, no "Generated with Claude Code"). A commit-msg hook strips them anyway. **Push your task branch to `origin` yourself** once fmt, clippy and tests pass (`git push origin <branch>`; never force-push, never push `main`). The human opens the PR.
 - Keep `docs/NET_PROGRESS.md` current: what's done, what's next, production gaps, requests for core, and questions for the human. If a decision belongs to the human, write it down there and carry on with a sensible default.
 
 ## Phase 2 (2026-11-15): share the core's speed-up backlog (from the human)

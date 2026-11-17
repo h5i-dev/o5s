@@ -1,0 +1,8 @@
+# small rep 1 commit ba21b99 dirty 0 load_start 0.66 2026-11-17T07:14:01+00:00
+| re-put (all dedup) | 719.2k/s | |
+| ensure_live | 3833.1k/s | |
+| 1 KiB objects (n = 100000) | 1 thread | 4 threads |
+|---|---|---|
+| put (+ flush) | 137.1k/s | 96.1k/s |
+| get (warm, random) | 270.4k/s | 783.6k/s |
+# load_end 0.76

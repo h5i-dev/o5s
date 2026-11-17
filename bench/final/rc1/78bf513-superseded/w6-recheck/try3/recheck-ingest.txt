@@ -1,0 +1,11 @@
+# ingest start load 0.67 2026-11-17T01:39:28+00:00
+base 1 0.67 {"mode":"ingest","api":"put","objects":30911,"raw_mb":1073.8,"secs":5.66,"mb_s":190,"obj_s":5463,"load":"0.84"}
+new 1 0.84 {"mode":"ingest","api":"put","objects":30911,"raw_mb":1073.8,"secs":5.54,"mb_s":194,"obj_s":5581,"load":"0.90"}
+base 2 0.90 {"mode":"ingest","api":"put","objects":30911,"raw_mb":1073.8,"secs":5.77,"mb_s":186,"obj_s":5356,"load":"1.01"}
+new 2 1.41 {"mode":"ingest","api":"put","objects":30911,"raw_mb":1073.8,"secs":5.61,"mb_s":191,"obj_s":5505,"load":"1.44"}
+base 3 1.40 {"mode":"ingest","api":"put","objects":30911,"raw_mb":1073.8,"secs":5.64,"mb_s":190,"obj_s":5481,"load":"1.36"}
+new 3 1.33 {"mode":"ingest","api":"put","objects":30911,"raw_mb":1073.8,"secs":5.58,"mb_s":193,"obj_s":5543,"load":"1.31"}
+base 4 1.53 {"mode":"ingest","api":"put","objects":30911,"raw_mb":1073.8,"secs":5.63,"mb_s":191,"obj_s":5486,"load":"1.45"}
+new 4 1.42 {"mode":"ingest","api":"put","objects":30911,"raw_mb":1073.8,"secs":5.57,"mb_s":193,"obj_s":5549,"load":"1.30"}
+base 5 1.59 {"mode":"ingest","api":"put","objects":30911,"raw_mb":1073.8,"secs":5.68,"mb_s":189,"obj_s":5444,"load":"1.42"}
+new 5 1.71 {"mode":"ingest","api":"put","objects":30911,"raw_mb":1073.8,"secs":5.59,"mb_s":192,"obj_s":5533,"load":"1.51"}

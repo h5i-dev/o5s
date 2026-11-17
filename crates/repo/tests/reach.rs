@@ -99,7 +99,7 @@ fn batched_updates_and_versions_after_delete() {
 }
 
 #[test]
-fn pending_creates_settle_exactly_with_or_without_the_worker() {
+fn pending_creates_settle_exactly_on_the_next_query() {
     let d = tempfile::tempdir().unwrap();
     let r = LocalRepo::init(d.path(), &PackConfig::default()).unwrap();
     let idx = ReachIndex::open(&r, vec![String::new(), "t".to_string()]).unwrap();
@@ -113,7 +113,7 @@ fn pending_creates_settle_exactly_with_or_without_the_worker() {
     let got = idx.readable_many(&hs, &[1]).unwrap();
     assert!(!got[0], "deleted name's target is unreadable immediately");
     assert!(got[1..].iter().all(|b| *b));
-    // More creates, then let the background worker settle them before asking.
+    // More creates, and a pause: nothing settles in the background; the query drains them.
     let more: Vec<Hash> = (0..20u64).map(|i| r.put(&blob(i + 100, 1000)).unwrap()).collect();
     for (i, h) in more.iter().enumerate() {
         set(&r, &format!("t/m{i}"), *h);

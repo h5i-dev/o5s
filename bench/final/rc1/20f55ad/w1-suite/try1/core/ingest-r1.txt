@@ -1,0 +1,8 @@
+# ingest rep 1 commit 20f55ad dirty 0 load_start 1.56 2026-11-17T02:40:36+00:00
+{"mode":"ingest-level","level":-1,"objects":30911,"raw_mb":1073.8,"ratio":0.3869,"mb_s":320}
+{"mode":"ingest-level","level":1,"objects":30911,"raw_mb":1073.8,"ratio":0.3391,"mb_s":296}
+{"mode":"ingest-level","level":2,"objects":30911,"raw_mb":1073.8,"ratio":0.3308,"mb_s":269}
+{"mode":"ingest-level","level":3,"objects":30911,"raw_mb":1073.8,"ratio":0.3220,"mb_s":228}
+{"mode":"ingest","api":"put","objects":30911,"raw_mb":1073.8,"secs":5.60,"mb_s":192,"obj_s":5521,"load":"1.40"}
+{"mode":"ingest","api":"put_many","objects":30911,"raw_mb":1073.8,"secs":2.50,"mb_s":430,"obj_s":12364,"load":"1.69"}
+# load_end 1.69

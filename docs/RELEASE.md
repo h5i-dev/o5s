@@ -1,7 +1,7 @@
 # Releasing o5s
 
-v0.1 is the first release. It is cut from `demo` as release candidates (`v0.1.0-rc.N`). The human merges a
-candidate to `main`; agents never push `main`.
+v0.1 is the first release. It is cut as release candidates (`v0.1.0-rc.N`), each on a branch `release/v0.1.0-rc.N`
+cut from `main`. The human opens the PR and merges a candidate to `main`; agents never push `main`.
 
 ## Compatibility policy (from v0.1)
 
@@ -46,11 +46,12 @@ candidate to `main`; agents never push `main`.
 | front id maps (segment map) | `O5SSEG01` / `O5SMAP01` | |
 | front records | `O5SPYPI1`, `O5SPYYK1`, `O5SNPMV1`, `O5SNPMT1`, `O5SNPMD1`, `O5SMVN01`, `O5SXORB1`, `O5SXFIL1` | owned by each front |
 
-## Release-candidate checklist (agents, on `demo`)
+## Release-candidate checklist (agents, on `release/v0.1.0-rc.N`)
 
 1. `scripts/check.sh` exits 0 on a clean checkout of the commit to tag. Check the exit code; don't read it
    off a pipe.
-2. Merge the latest `net` and re-run the gate. Both sessions confirm that nothing is in flight.
+2. Merge any pushed task branches meant for the candidate and re-run the gate. Both sessions confirm that nothing
+   is in flight.
 3. CHANGELOG.md:
    - move `[Unreleased]` to `[0.1.0-rc.N] - <date>`;
    - breaking changes listed;
@@ -62,9 +63,11 @@ candidate to `main`; agents never push `main`.
    - ARCHITECTURE.md limits;
    - SECURITY.md;
    - BENCH.md numbers with their dates and loads.
-5. Fuzz smoke: every target in fuzz/ runs ≥ 60 s clean under ASan.
+5. Fuzz smoke: every target in fuzz/ runs ≥ 60 s clean under ASan, locally (never in CI), on the commit to tag.
+   **Exception for v0.1.0-rc.1 (the human, 2026-11-17):** only `ref_journal` (≥ 60 s clean under ASan), since
+   rc.1 changed ref-journal replay. The full suite, every target ≥ 60 s, runs before v0.1.0 final.
 6. Proofs: `h5i app prove` in `verify/core` (and net's `verify/net`) passes, with no `sorry` (verify/core/README.md).
-7. Tag: `git tag -a v0.1.0-rc.N -m "o5s 0.1.0 release candidate N"` on `demo`, then push the tag. Never
+7. Tag: `git tag -a v0.1.0-rc.N -m "o5s 0.1.0 release candidate N"` on the release branch head, then push the branch and the tag. Never
    move or delete a pushed tag; fix forward with rc.N+1.
 8. Record the candidate, its commit and its gate run in PROGRESS.md.
 
@@ -73,5 +76,5 @@ candidate to `main`; agents never push `main`.
 1. Pick a candidate tag and review CHANGELOG.md and the open "Questions for human" in PROGRESS.md.
 2. `git checkout main && git merge --no-ff v0.1.0-rc.N` (or fast-forward), then `scripts/check.sh`.
 3. Tag `v0.1.0` on the merge commit and push `main` and the tag.
-4. Afterwards, agents rebase nothing onto `main`. They keep working on `demo`/`net` and open the next
-   `[Unreleased]` section.
+4. Afterwards, agents rebase nothing onto `main`. Each new task branches from the new `main`; the next
+   change opens a new `[Unreleased]` section.

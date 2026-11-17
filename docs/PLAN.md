@@ -626,6 +626,28 @@ metric still regresses, it is a real regression, found and fixed before H4, not 
    with the baseline and the H3 `exp3` binary, interleaved. The verdict compares the two medians of
    `peak_rss_kb` against the §6.8 allowance: max(3 %, the baseline binary's range in these 3 reps).
 
+**Amendment 2026-11-17 (human ruling, written before these runs).** Three Exp3 FAILs on `20f55ad` (rc.1 batch,
+BENCH 2026-11-17) stay recorded as FAIL by the letter: jq A3 read p99 +14.5 %, jq A3 peak RSS +6.5 %, and git A3
+peak RSS +20.4 % (6.17 GB, over the ≤ 6 GB tier). They are decided by **one** pre-declared re-measurement on
+the final rc.1 commit (the whole batch reruns there, per the human, 2026-11-17), in one exclusive window: load < 1.0 at start, no foreign process, 10 s process log.
+- **Runs.** `exp3 run <work dir> a3 4 10000`, git then jq, **3 reps each** with the `baseline-pre-h5i` and the
+  rc.1 `exp3` binaries, interleaved: baseline, then rc.1.
+- **Verdict.** For git A3 `peak_rss_kb`, jq A3 `peak_rss_kb` and jq A3 `read_p99_ms`: rc.1 median against
+  baseline median, with the §6.8 allowance max(3 %, the baseline binary's range in these 3 reps). For git A3, the
+  rc.1 median `peak_rss_kb` must also be ≤ 6 GB (the RSS tier).
+- **Action.** Tag rc.1 if all pass. Anything still failing is a real regression, found and fixed before the tag.
+
+**Amendment 2026-11-17 b (human ruling, written before this run).** The core suite on the final rc.1 commit
+`ba21b99` failed one metric by the letter: stream peak RSS 21 → 22 MB (+4.8 %; per run 21, 22, 22). The baseline
+was 21, 21, 21, so its allowance is the 3 % floor (0.63 MB), and RSS is reported in whole MB. The row stays FAIL
+by the letter. It is decided by **one** pre-declared re-measurement on `ba21b99`, in one exclusive window: load
+< 1.0 at start, no foreign process, 10 s process log.
+- **Runs.** `o5s-bench stream <dir> 512` (the suite's command and size), **5 rounds** with the `baseline-pre-h5i`
+  and the rc.1 binaries, interleaved: baseline, then rc.1.
+- **Verdict.** The rc.1 median `peak RSS` (MB) against the baseline median, with the allowance max(3 %, the
+  baseline binary's range in these 5 rounds).
+- **Action.** Tag rc.1 if it passes; fix it first if it does not.
+
 **Amendment 2026-11-16 (human ruling, H4 HF target; written before the final batch).** For HF, the §6.5
 upload and download times and the H4 target (≤ 1.2× the `/v1` reference) are judged on **server-side busy
 time**, not on the client's wall time. The reason: dev checks showed that the real client's own CPU

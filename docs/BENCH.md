@@ -48,6 +48,84 @@ pre-registered metric was plain RSS, so it is reported as **missed**; the split 
   292 B/object projection was stopped early, as soon as the 10⁷ disk number showed it could not fit.
 - The bench's disk number now counts each inode once.
 
+## 2026-11-17: final batch for v0.1.0-rc.1, core side, on `ba21b99` (PLAN §6.8 and amendments)
+
+**One commit:** `release/v0.1.0-rc.1` at `ba21b99`, dirty 0 in every header. It is `20f55ad` plus the lazy reach
+drain (net's pass-2 git re-push FAIL). The human chose a full rerun on it.
+- **Windows:** W1–W8 one at a time under the lock, each starting at load < 1.0, with a 10 s process sampler. A
+  window with any foreign process over 20 % CPU was discarded and rerun.
+- **Discarded:** W5 try 1 (root `nix` at 08:33:51) and W8 try 1 (a `du` at 53 % at 09:50:03).
+- **Raw data:** `bench/final/rc1/ba21b99/`. Net's §6.5 windows A and B ran on the same commit: §6.8 PASS (functional 75/75, no metric over its allowance, no tier worse; LFS upload 1.35× recorded FAIL as ruled; NET_PROGRESS, `bench/results/fronts-rc1-ba21b99*`).
+
+| part | result |
+|---|---|
+| core suite (W1; load 0.66–1.72) | 76/77 within allowance. **FAIL by the letter: stream peak RSS 21 → 22 MB** (per run 21, 22, 22; baseline 21, 21, 21, so the 3 % floor is 0.63 MB at whole-MB granularity). Decided by W9 below. |
+| §6.4 generic (W2) | every metric within allowance; durable write 0.927, 0.901, 0.889× (median 0.901×); range p99 0.109 ms; sizes identical; verified read strict 0.352–0.421×, eof 0.449–0.527× of warm `cat`: **the 0.50× target is missed** (median strict 0.355×, eof 0.45×; ruled: recorded as missed) |
+| Exp3 (W3–W5), 28 rows | **sizes 28/28 byte-identical**; 0 failed reads; every A3 build faster (ripgrep 5.98 → 5.52 s, jq 12.19 → 10.99, redis 190.4 → 178.9, git 401.0 → 331.6); A3 read p50/p99 equal or better; jq and ripgrep A3 RSS equal or better. Redis A3 RSS +9.1 % and git A3 RSS +21.7 % in this single run are decided by recheck 3 and W8 (amendments). |
+| Exp3 build re-time | ripgrep 0.877, jq 1.096 (baseline 0.944 and decisive 1.179): no tier worse |
+| Recheck 1: ingest put | baseline 185/190/190/190/190, rc.1 194/194/194/194/193 MB/s; medians 190 vs 194 (+2.1 %): **PASS** |
+| Recheck 2: durable-write tier | per-run put/dd 0.897, 0.868, 0.868, 0.866, 0.868; median 0.868 vs 0.90: **FAIL** (ruled FAIL) |
+| Recheck 3: redis A3 peak RSS | baseline 3.08/2.47/2.25 GB, rc.1 3.01/2.47/2.73 GB; medians 2.47 vs 2.73 GB (+10.3 %, allowed 33.7 %): **PASS** |
+| W7, the 95f6a4a check (interleaved) | before 184/184/184 MB/s put (ratios 0.927, 0.868, 0.868); rc.1 184/184/184 (0.867 each): no measurable effect |
+| **W8 (amendment 2026-11-17): git A3 and jq A3, 3+3 interleaved** | git A3 RSS: baseline 5.41/4.91/6.68 GB, rc.1 5.32/5.29/5.79 GB; medians 5.41 vs 5.32 GB (−1.6 %): **PASS**, and the RSS tier (≤ 6 GB) is met. jq A3 RSS: medians 528 vs 512 MB: **PASS**. jq A3 read p99: medians 14.14 vs 14.15 ms (+0.0 %): **PASS**. |
+| **W9 (amendment 2026-11-17 b): stream peak RSS, 5+5 interleaved** | baseline 22/21/21/22/22 MB, rc.1 24/22/23/20/22 MB; medians 22 vs 22 MB (0 %, allowed max(3 %, the baseline binary's range 4.5 %)): **PASS**. The baseline binary itself moves by 1 MB between runs. |
+
+**Fuzz smoke (RELEASE.md step 5, the human's ruling for rc.1):** `ref_journal` only, ≥ 60 s under ASan on the
+tag commit's code (`f691647`; the tag commit adds only docs): 356,998 runs in 76 s, exit 0, no sanitizer
+report, no crash artifact: **clean**. The other 19 targets are skipped for rc.1 and run before v0.1.0 final.
+
+**Disclosures.**
+- W8's baseline binary spans 4.91–6.68 GB for git A3 peak RSS: the 4-thread build's RSS scatters by itself.
+- The guard reads `ps` CPU, averaged over a process's lifetime, so a short burst inside a long-lived process could
+  go unseen. The load at each window's start is recorded beside it.
+
+## 2026-11-17: final batch for v0.1.0-rc.1, pass 2, core side, on `20f55ad` (superseded)
+
+**Superseded.** Net's windows A and B on `20f55ad` found one more FAIL: the git push tier for jq fell from STRONG
+PASS to PASS (re-push 0.608 vs 0.476 s). The reach index walked each new history in a background thread while the
+next push ran. The fix is a code change: pending additions are settled lazily, by the next query. Per the human,
+the whole batch reruns on the new head. These results are kept as the record of pass 2.
+
+
+**One commit:** `release/v0.1.0-rc.1` at `20f55ad`, dirty 0 in every header. It is origin/main `303deb9`, plus
+net's `fuzz-auth-header`, the new-workflow docs, and the fix for two regressions that an earlier pass of this
+batch found (below). The bench data was regenerated first: the six Exp3 inputs, byte-identical to the previous
+ones, and the old-format stores under `bench-micro` deleted.
+- **Windows:** one at a time, under the lock, each starting at load < 1.0, with a 10 s process sampler. A window
+  with any foreign process over 20 % CPU was discarded and rerun.
+- **Discarded:** W3 tries 1 and 2 (a root `nix` at 03:03:54, then `dnf` from `update-motd` at 03:27); W6 try 1
+  (`nix` again at 05:03:54).
+- **Raw data:** `bench/final/rc1/20f55ad/` (clean tries named in each window's directory).
+
+| part | result |
+|---|---|
+| core suite (W1; load 0.62–1.71) | **77/77 metrics within the allowance** (`core-verdict.md`) |
+| §6.4 generic (W2) | every metric within allowance; durable write 0.95, 0.909, 0.916× (median 0.916×: tier PASS in this run); range p99 0.108 ms; sizes identical; verified read strict 0.322–0.383×, eof 0.408–0.485× of warm `cat`: **the 0.50× target is missed** (ruled by the human: recorded as missed) |
+| Exp3 (W3–W5), 28 rows | **sizes 28/28 byte-identical**; 0 failed reads; every A3 build faster (ripgrep 5.98 → 5.33 s, jq 12.19 → 11.10, redis 190.4 → 178.1, git 401.0 → 333.6) |
+| Exp3 A3 reads and RSS | ripgrep and redis A3 equal or better. **FAIL: jq A3 read p99 14.43 → 16.52 ms (+14.5 %), jq A3 peak RSS 513 → 547 MB (+6.5 %), git A3 peak RSS 5.13 → 6.17 GB (+20.4 %), which also misses the ≤ 6 GB RSS tier.** One rep each, allowance 3 %. Not ruled. |
+| Exp3 build re-time | ripgrep 0.911, jq 1.054 (baseline 0.944 and decisive 1.179): no tier worse |
+| Recheck 1: ingest put | baseline 183/181/190/190/191, rc.1 194/192/185/194/194 MB/s; medians 190 vs 194 (+2.1 %): **PASS** |
+| Recheck 2: durable-write tier | per-run put/dd 0.899, 0.866, 0.866, 0.865, 0.867; median 0.866 vs 0.90: **FAIL** (ruled FAIL) |
+| Recheck 3: redis A3 peak RSS | baseline 2.24/2.78/3.45 GB, rc.1 2.61/2.84/2.36 GB; medians 2.78 vs 2.61 GB: **PASS** |
+| 95f6a4a check (W7): put/dd, before (7387883) vs rc.1, interleaved | before 188/184/184 MB/s (ratios 0.948, 0.869, 0.867); rc.1 184/184/184 (0.869, 0.867, 0.869): **no measurable effect**. The staging-file writeback did not explain the durable-write gap. Our put has been 184 MB/s since the baseline; `dd conv=fsync` on this volume moved from 153–187 to about 211 MB/s. |
+
+**Regressions found and fixed on the way** (pass 1 of this batch, on `78bf513`; its raw data is kept in
+`bench/final/rc1/78bf513-superseded/`):
+- Scale names 1e6: RSS 148 → 238 MB, open +16 %. The ref journal cloned every replayed record for the new
+  foreign feed even with no observer.
+- Scale GC 1e7: peak RSS +25 %, time +9 %. GC's mark kept a second set of every traced object.
+
+Both are fixed in `20f55ad`, which is why the whole batch reran on it. Pass 1 also had process-guard false
+positives on our own baseline binaries (`o5s-bench-base`, `exp3-base`). I checked those logs by hand and fixed
+the guard's pattern.
+
+**Disclosures.**
+- Peak RSS of the 4-thread Exp3 build scatters between runs. git A3 measured 5.13 GB (baseline), 5.09 GB
+  (`cbbbb8a`), 4.94 GB (`9914209`) and 6.17 GB (this run). That doesn't decide the FAIL; a controlled
+  re-measurement would, like the redis A3 recheck.
+- The guard reads `ps` CPU, which is averaged over a process's lifetime, so a short burst inside a long-lived
+  process could go unseen. The load at each window's start is recorded beside it.
+
 ## 2026-11-16: final batch after H4 (PLAN §6.8), core side, on `9914209`: incomplete
 
 **Status: incomplete.** Exp3, the build re-time, §6.4 and the three controlled re-measurements ran to the end.

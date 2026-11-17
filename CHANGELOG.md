@@ -4,6 +4,25 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 
 ## [Unreleased]
 
+## [0.1.0-rc.1] - 2026-11-17
+
+The first release candidate. Benchmarks against `docs/BASELINE.md` (PLAN §6.8): BENCH.md, 2026-11-17 final batch.
+Fuzz smoke for rc.1, per the human's ruling: `ref_journal` only, ≥ 60 s clean under ASan on the tag commit,
+since rc.1 changed ref-journal replay. The full suite (every target ≥ 60 s) runs before v0.1.0 final.
+
+### Fixed (rc.1)
+- **Reads by hash through another server, or after another process committed, returned 404.** The reach index
+  saw only its own handle's commits. Both ref engines now report what they apply from other writers (other hosts
+  on a backend log, other processes on a local journal), and every reachability query catches the refs up first.
+  So multi-host deployments on S3 authorize reads exactly: foreign creations grant, and foreign moves and deletes
+  revoke. SECURITY.md's single-writer limit is gone.
+- **Two memory regressions** found by the rc.1 batch before tagging: the ref journal cloned every replayed record
+  at open (scale names 1e6: RSS 148 → 238 MB), and GC's mark kept a second set of every traced object (scale GC
+  1e7: peak RSS +25 %). Both are back to baseline.
+- **Back-to-back git pushes were slower** (jq re-push 0.608 vs 0.476 s; tier STRONG PASS → PASS): the reach
+  index walked each new history in a background thread while the next push ran. Pending additions are now settled
+  by the next query of their cell only, so a workload that never reads by hash never pays.
+
 ### Changed (breaking): the project is renamed pico2peta → o5s
 - **Code:** crates `o5s-*`; binaries `o5s`, `o5s-server`, `o5s-bench`; environment variables `O5S_*`;
   metrics `o5s_*`; Lean modules `O5sKernel` and `O5sNetKernel`.
@@ -26,8 +45,8 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 - **Object reads by hash are authorized by reachability** (with net's authz kernel): a principal reads an object
   only if a name it may read reaches it. An object that no name references is not readable through the server,
   so `put` then `get` by hash needs a name first. The core building block is `o5s_repo::reach`:
-  - commits never traverse; created names queue their targets for a background worker, and a query settles its
-    cell first, so answers are exact;
+  - commits never traverse, and nothing traverses in the background; created names queue their targets, and the
+    next query of their cell settles that cell first, so answers are exact;
   - deletes and moves still revoke at once (the cell is recomputed by its next query);
   - the walk skips the tracer on chunk edges and keeps a separate traced set, so a hash that is both a chunk and
     a front object is still traced; GC's mark uses the same rule.

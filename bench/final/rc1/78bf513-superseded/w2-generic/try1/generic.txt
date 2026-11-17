@@ -1,0 +1,6 @@
+load 0.89 commit 78bf513
+{"mib":1024,"dd_fsync_mb_s":205,"put_mb_s":191,"write_ratio":0.933,"cat_mb_s":7380,"get_strict_mb_s":2622,"read_ratio_strict":0.355,"get_eof_mb_s":3335,"read_ratio_eof":0.452,"range4k_p99_ms":0.109,"scattered_10v_bytes":1135462813,"inserted_10v_bytes":1091744331,"one_copy_bytes":1073741824}
+load 4.48 commit 78bf513
+{"mib":1024,"dd_fsync_mb_s":208,"put_mb_s":191,"write_ratio":0.917,"cat_mb_s":5881,"get_strict_mb_s":2595,"read_ratio_strict":0.441,"get_eof_mb_s":3350,"read_ratio_eof":0.570,"range4k_p99_ms":0.109,"scattered_10v_bytes":1135462813,"inserted_10v_bytes":1091744331,"one_copy_bytes":1073741824}
+load 3.52 commit 78bf513
+{"mib":1024,"dd_fsync_mb_s":211,"put_mb_s":189,"write_ratio":0.899,"cat_mb_s":7941,"get_strict_mb_s":2632,"read_ratio_strict":0.331,"get_eof_mb_s":3334,"read_ratio_eof":0.420,"range4k_p99_ms":0.111,"scattered_10v_bytes":1135462813,"inserted_10v_bytes":1091744331,"one_copy_bytes":1073741824}

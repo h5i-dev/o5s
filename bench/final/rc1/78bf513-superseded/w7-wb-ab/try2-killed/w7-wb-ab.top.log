@@ -1,0 +1,54 @@
+## 2026-11-17T01:19:48+00:00 load 0.64 2.16 2.70
+%CPU USER     COMMAND
+ 3.0 ec2-user claude
+ 2.9 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.4 root     bun
+ 0.1 root     kcompactd0
+ 0.1 root     tmux: server
+## 2026-11-17T01:19:58+00:00 load 0.69 2.13 2.68
+%CPU USER     COMMAND
+46.6 ec2-user o5s-bench-prewb
+ 3.0 ec2-user claude
+ 2.9 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.4 root     bun
+ 0.1 root     kcompactd0
+## 2026-11-17T01:20:08+00:00 load 0.74 2.09 2.66
+%CPU USER     COMMAND
+75.0 ec2-user o5s-bench-prewb
+ 3.0 ec2-user claude
+ 2.9 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.4 root     bun
+ 0.1 root     kcompactd0
+## 2026-11-17T01:20:18+00:00 load 0.94 2.08 2.65
+%CPU USER     COMMAND
+ 112 ec2-user o5s-bench-prewb
+ 3.0 ec2-user claude
+ 2.9 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.4 root     bun
+ 0.1 root     kcompactd0
+## 2026-11-17T01:20:28+00:00 load 1.10 2.08 2.65
+%CPU USER     COMMAND
+ 126 ec2-user o5s-bench-prewb
+ 3.0 ec2-user claude
+ 2.9 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.4 root     bun
+ 0.1 root     kcompactd0
+## 2026-11-17T01:20:38+00:00 load 1.08 2.05 2.63
+%CPU USER     COMMAND
+ 135 ec2-user o5s-bench-prewb
+ 3.0 ec2-user claude
+ 2.9 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.4 root     bun
+ 0.1 root     kcompactd0
