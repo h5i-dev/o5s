@@ -403,7 +403,19 @@ pub async fn serve(
     grace: Duration,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
-    serve_on(listener, state, request_timeout, grace, shutdown).await
+    serve_on(nodelay(listener), state, request_timeout, grace, shutdown).await
+}
+
+/// Plain TCP with `TCP_NODELAY` on every accepted connection (as the TLS listener does). Without
+/// it, a small response written as headers then body can wait on the client's delayed ACK
+/// (Nagle): an OCI pull of 4 images (25 requests) took 0.33 s instead of 0.19 s (BENCH, H4).
+pub fn nodelay(
+    listener: TcpListener,
+) -> impl axum::serve::Listener<Addr = std::net::SocketAddr, Io = tokio::net::TcpStream> {
+    use axum::serve::ListenerExt;
+    listener.tap_io(|tcp: &mut tokio::net::TcpStream| {
+        let _ = tcp.set_nodelay(true);
+    })
 }
 
 /// Serves on any listener (plain TCP or [`tls::TlsListener`]) until `shutdown`
@@ -712,5 +724,21 @@ pub mod fuzzing {
         {
             let _ = c.validate();
         }
+    }
+}
+
+#[cfg(test)]
+mod nodelay_tests {
+    /// Every connection the plain listener accepts has TCP_NODELAY set.
+    #[tokio::test]
+    async fn accepted_connections_have_nodelay() {
+        use axum::serve::Listener as _;
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        let mut l = super::nodelay(l);
+        let client = tokio::spawn(async move { tokio::net::TcpStream::connect(addr).await.unwrap() });
+        let (io, _) = l.accept().await;
+        assert!(io.nodelay().unwrap(), "accepted connection without TCP_NODELAY");
+        drop(client.await.unwrap());
     }
 }
