@@ -1,0 +1,398 @@
+start 10:59:24 ba21b99   10:59:24 up 4 days, 22:55,  6 users,  load average: 0.99, 3.00, 3.58
+# host: ip-172-31-80-80.ec2.internal 4 vCPU; 2026-11-17T10:59:25Z; commit ba21b99
+== git
+10:59:25 git: preparing ripgrep
+10:59:27 git push_s git-daemon: 0.5417582579539157 s {'corpus': 'ripgrep', 'run': 0}
+10:59:27 git first_push_s git-daemon: 0.5417582579539157 s {'corpus': 'ripgrep', 'run': 0}
+10:59:28 git push_s git-daemon: 0.5757116680033505 s {'corpus': 'ripgrep', 'run': 1}
+10:59:28 git first_push_s git-daemon: 0.5757116680033505 s {'corpus': 'ripgrep', 'run': 1}
+10:59:28 git push_s git-daemon: 0.5409635370015167 s {'corpus': 'ripgrep', 'run': 2}
+10:59:28 git first_push_s git-daemon: 0.5409635370015167 s {'corpus': 'ripgrep', 'run': 2}
+10:59:29 git clone_v2_s git-daemon: 0.6066782799898647 s {'corpus': 'ripgrep', 'run': 0}
+10:59:29 git functional:fsck_git-daemon_ripgrep_v2 o5s: True bool {'detail': ''}
+10:59:29 git functional:refs_git-daemon_ripgrep_v2 o5s: True bool {'detail': ''}
+10:59:30 git clone_v2_s git-daemon: 0.5850025409599766 s {'corpus': 'ripgrep', 'run': 1}
+10:59:31 git functional:fsck_git-daemon_ripgrep_v2 o5s: True bool {'detail': ''}
+10:59:31 git functional:refs_git-daemon_ripgrep_v2 o5s: True bool {'detail': ''}
+10:59:31 git clone_v2_s git-daemon: 0.5831766530172899 s {'corpus': 'ripgrep', 'run': 2}
+10:59:32 git functional:fsck_git-daemon_ripgrep_v2 o5s: True bool {'detail': ''}
+10:59:32 git functional:refs_git-daemon_ripgrep_v2 o5s: True bool {'detail': ''}
+10:59:32 git clone_v0_s git-daemon: 0.487949360976927 s {'corpus': 'ripgrep', 'run': 0}
+10:59:33 git functional:fsck_git-daemon_ripgrep_v0 o5s: True bool {'detail': ''}
+10:59:33 git functional:refs_git-daemon_ripgrep_v0 o5s: True bool {'detail': ''}
+10:59:33 git clone_v0_s git-daemon: 0.48666793102165684 s {'corpus': 'ripgrep', 'run': 1}
+10:59:34 git functional:fsck_git-daemon_ripgrep_v0 o5s: True bool {'detail': ''}
+10:59:34 git functional:refs_git-daemon_ripgrep_v0 o5s: True bool {'detail': ''}
+10:59:34 git clone_v0_s git-daemon: 0.4843381939572282 s {'corpus': 'ripgrep', 'run': 2}
+10:59:35 git functional:fsck_git-daemon_ripgrep_v0 o5s: True bool {'detail': ''}
+10:59:35 git functional:refs_git-daemon_ripgrep_v0 o5s: True bool {'detail': ''}
+10:59:35 git fetch10_s git-daemon: 0.2054727750364691 s {'corpus': 'ripgrep', 'run': 0}
+10:59:35 git functional:fetch_git-daemon_ripgrep o5s: True bool {'detail': ''}
+10:59:35 git fetch10_s git-daemon: 0.1687172589590773 s {'corpus': 'ripgrep', 'run': 1}
+10:59:35 git functional:fetch_git-daemon_ripgrep o5s: True bool {'detail': ''}
+10:59:36 git fetch10_s git-daemon: 0.1815264020115137 s {'corpus': 'ripgrep', 'run': 2}
+10:59:36 git functional:fetch_git-daemon_ripgrep o5s: True bool {'detail': ''}
+10:59:36 git clone_wire_bytes git-daemon: 6074383 B {'corpus': 'ripgrep'}
+10:59:37 git push_s o5s: 0.7482314429944381 s {'corpus': 'ripgrep', 'run': 0}
+10:59:38 git push_s o5s: 0.5539273799513467 s {'corpus': 'ripgrep', 'run': 1}
+10:59:38 git push_s o5s: 0.5244308050023392 s {'corpus': 'ripgrep', 'run': 2}
+10:59:39 git clone_v2_s o5s: 0.5954740549786948 s {'corpus': 'ripgrep', 'run': 0}
+10:59:39 git functional:fsck_o5s_ripgrep_v2 o5s: True bool {'detail': ''}
+10:59:39 git functional:refs_o5s_ripgrep_v2 o5s: True bool {'detail': ''}
+10:59:40 git clone_v2_s o5s: 0.48800403403583914 s {'corpus': 'ripgrep', 'run': 1}
+10:59:41 git functional:fsck_o5s_ripgrep_v2 o5s: True bool {'detail': ''}
+10:59:41 git functional:refs_o5s_ripgrep_v2 o5s: True bool {'detail': ''}
+10:59:41 git clone_v2_s o5s: 0.44836901902453974 s {'corpus': 'ripgrep', 'run': 2}
+10:59:42 git functional:fsck_o5s_ripgrep_v2 o5s: True bool {'detail': ''}
+10:59:42 git functional:refs_o5s_ripgrep_v2 o5s: True bool {'detail': ''}
+10:59:42 git clone_v0_s o5s: 0.44266449502902105 s {'corpus': 'ripgrep', 'run': 0}
+10:59:43 git functional:fsck_o5s_ripgrep_v0 o5s: True bool {'detail': ''}
+10:59:43 git functional:refs_o5s_ripgrep_v0 o5s: True bool {'detail': ''}
+10:59:43 git clone_v0_s o5s: 0.44483262998983264 s {'corpus': 'ripgrep', 'run': 1}
+10:59:44 git functional:fsck_o5s_ripgrep_v0 o5s: True bool {'detail': ''}
+10:59:44 git functional:refs_o5s_ripgrep_v0 o5s: True bool {'detail': ''}
+10:59:44 git clone_v0_s o5s: 0.44109796796692535 s {'corpus': 'ripgrep', 'run': 2}
+10:59:45 git functional:fsck_o5s_ripgrep_v0 o5s: True bool {'detail': ''}
+10:59:45 git functional:refs_o5s_ripgrep_v0 o5s: True bool {'detail': ''}
+10:59:45 git fetch10_s o5s: 0.1524256559787318 s {'corpus': 'ripgrep', 'run': 0}
+10:59:45 git functional:fetch_o5s_ripgrep o5s: True bool {'detail': ''}
+10:59:45 git fetch10_s o5s: 0.13951972196809947 s {'corpus': 'ripgrep', 'run': 1}
+10:59:45 git functional:fetch_o5s_ripgrep o5s: True bool {'detail': ''}
+10:59:46 git fetch10_s o5s: 0.15060246497159824 s {'corpus': 'ripgrep', 'run': 2}
+10:59:46 git functional:fetch_o5s_ripgrep o5s: True bool {'detail': ''}
+10:59:46 git clone_wire_bytes o5s: 6414357 B {'corpus': 'ripgrep'}
+10:59:47 git first_push_s o5s: 0.732747689995449 s {'corpus': 'ripgrep', 'run': 0}
+10:59:48 git first_push_s o5s: 0.8149801610270515 s {'corpus': 'ripgrep', 'run': 1}
+10:59:49 git first_push_s o5s: 0.7422335380106233 s {'corpus': 'ripgrep', 'run': 2}
+10:59:49 git: preparing jq
+10:59:51 git push_s git-daemon: 0.5461747789522633 s {'corpus': 'jq', 'run': 0}
+10:59:51 git first_push_s git-daemon: 0.5461747789522633 s {'corpus': 'jq', 'run': 0}
+10:59:51 git push_s git-daemon: 0.547335896990262 s {'corpus': 'jq', 'run': 1}
+10:59:51 git first_push_s git-daemon: 0.547335896990262 s {'corpus': 'jq', 'run': 1}
+10:59:52 git push_s git-daemon: 0.5502697399933822 s {'corpus': 'jq', 'run': 2}
+10:59:52 git first_push_s git-daemon: 0.5502697399933822 s {'corpus': 'jq', 'run': 2}
+10:59:52 git clone_v2_s git-daemon: 0.5722270800033584 s {'corpus': 'jq', 'run': 0}
+10:59:53 git functional:fsck_git-daemon_jq_v2 o5s: True bool {'detail': ''}
+10:59:53 git functional:refs_git-daemon_jq_v2 o5s: True bool {'detail': ''}
+10:59:54 git clone_v2_s git-daemon: 0.5853912390302867 s {'corpus': 'jq', 'run': 1}
+10:59:54 git functional:fsck_git-daemon_jq_v2 o5s: True bool {'detail': ''}
+10:59:54 git functional:refs_git-daemon_jq_v2 o5s: True bool {'detail': ''}
+10:59:55 git clone_v2_s git-daemon: 0.5800455930293538 s {'corpus': 'jq', 'run': 2}
+10:59:56 git functional:fsck_git-daemon_jq_v2 o5s: True bool {'detail': ''}
+10:59:56 git functional:refs_git-daemon_jq_v2 o5s: True bool {'detail': ''}
+10:59:56 git clone_v0_s git-daemon: 0.5791592140449211 s {'corpus': 'jq', 'run': 0}
+10:59:57 git functional:fsck_git-daemon_jq_v0 o5s: True bool {'detail': ''}
+10:59:57 git functional:refs_git-daemon_jq_v0 o5s: True bool {'detail': ''}
+10:59:57 git clone_v0_s git-daemon: 0.5761537149664946 s {'corpus': 'jq', 'run': 1}
+10:59:58 git functional:fsck_git-daemon_jq_v0 o5s: True bool {'detail': ''}
+10:59:58 git functional:refs_git-daemon_jq_v0 o5s: True bool {'detail': ''}
+10:59:59 git clone_v0_s git-daemon: 0.5865170960314572 s {'corpus': 'jq', 'run': 2}
+10:59:59 git functional:fsck_git-daemon_jq_v0 o5s: True bool {'detail': ''}
+10:59:59 git functional:refs_git-daemon_jq_v0 o5s: True bool {'detail': ''}
+11:00:00 git fetch10_s git-daemon: 0.154036741994787 s {'corpus': 'jq', 'run': 0}
+11:00:00 git functional:fetch_git-daemon_jq o5s: True bool {'detail': ''}
+11:00:00 git fetch10_s git-daemon: 0.14656356698833406 s {'corpus': 'jq', 'run': 1}
+11:00:00 git functional:fetch_git-daemon_jq o5s: True bool {'detail': ''}
+11:00:00 git fetch10_s git-daemon: 0.1582176880328916 s {'corpus': 'jq', 'run': 2}
+11:00:00 git functional:fetch_git-daemon_jq o5s: True bool {'detail': ''}
+11:00:01 git clone_wire_bytes git-daemon: 8360796 B {'corpus': 'jq'}
+11:00:01 git push_s o5s: 0.7058922480209731 s {'corpus': 'jq', 'run': 0}
+11:00:02 git push_s o5s: 0.43241180502809584 s {'corpus': 'jq', 'run': 1}
+11:00:02 git push_s o5s: 0.48014118702849373 s {'corpus': 'jq', 'run': 2}
+11:00:03 git clone_v2_s o5s: 0.7600460789981298 s {'corpus': 'jq', 'run': 0}
+11:00:04 git functional:fsck_o5s_jq_v2 o5s: True bool {'detail': ''}
+11:00:04 git functional:refs_o5s_jq_v2 o5s: True bool {'detail': ''}
+11:00:04 git clone_v2_s o5s: 0.5489945620065555 s {'corpus': 'jq', 'run': 1}
+11:00:05 git functional:fsck_o5s_jq_v2 o5s: True bool {'detail': ''}
+11:00:05 git functional:refs_o5s_jq_v2 o5s: True bool {'detail': ''}
+11:00:06 git clone_v2_s o5s: 0.5640364580322057 s {'corpus': 'jq', 'run': 2}
+11:00:06 git functional:fsck_o5s_jq_v2 o5s: True bool {'detail': ''}
+11:00:06 git functional:refs_o5s_jq_v2 o5s: True bool {'detail': ''}
+11:00:07 git clone_v0_s o5s: 0.5181216329801828 s {'corpus': 'jq', 'run': 0}
+11:00:08 git functional:fsck_o5s_jq_v0 o5s: True bool {'detail': ''}
+11:00:08 git functional:refs_o5s_jq_v0 o5s: True bool {'detail': ''}
+11:00:08 git clone_v0_s o5s: 0.519235962012317 s {'corpus': 'jq', 'run': 1}
+11:00:09 git functional:fsck_o5s_jq_v0 o5s: True bool {'detail': ''}
+11:00:09 git functional:refs_o5s_jq_v0 o5s: True bool {'detail': ''}
+11:00:09 git clone_v0_s o5s: 0.5237292450037785 s {'corpus': 'jq', 'run': 2}
+11:00:10 git functional:fsck_o5s_jq_v0 o5s: True bool {'detail': ''}
+11:00:10 git functional:refs_o5s_jq_v0 o5s: True bool {'detail': ''}
+11:00:10 git fetch10_s o5s: 0.10691903799306601 s {'corpus': 'jq', 'run': 0}
+11:00:10 git functional:fetch_o5s_jq o5s: True bool {'detail': ''}
+11:00:10 git fetch10_s o5s: 0.11530917597701773 s {'corpus': 'jq', 'run': 1}
+11:00:11 git functional:fetch_o5s_jq o5s: True bool {'detail': ''}
+11:00:11 git fetch10_s o5s: 0.11842487601097673 s {'corpus': 'jq', 'run': 2}
+11:00:11 git functional:fetch_o5s_jq o5s: True bool {'detail': ''}
+11:00:11 git clone_wire_bytes o5s: 9188916 B {'corpus': 'jq'}
+11:00:12 git first_push_s o5s: 0.723745280993171 s {'corpus': 'jq', 'run': 0}
+11:00:13 git first_push_s o5s: 0.7296646879985929 s {'corpus': 'jq', 'run': 1}
+11:00:14 git first_push_s o5s: 0.736720024025999 s {'corpus': 'jq', 'run': 2}
+11:00:14 git: preparing redis
+11:00:49 git push_s git-daemon: 10.709501315024681 s {'corpus': 'redis', 'run': 0}
+11:00:49 git first_push_s git-daemon: 10.709501315024681 s {'corpus': 'redis', 'run': 0}
+11:01:00 git push_s git-daemon: 10.821419492014684 s {'corpus': 'redis', 'run': 1}
+11:01:00 git first_push_s git-daemon: 10.821419492014684 s {'corpus': 'redis', 'run': 1}
+11:01:11 git push_s git-daemon: 10.73103056504624 s {'corpus': 'redis', 'run': 2}
+11:01:11 git first_push_s git-daemon: 10.73103056504624 s {'corpus': 'redis', 'run': 2}
+11:01:22 git clone_v2_s git-daemon: 10.729826913040597 s {'corpus': 'redis', 'run': 0}
+11:01:35 git functional:fsck_git-daemon_redis_v2 o5s: True bool {'detail': ''}
+11:01:35 git functional:refs_git-daemon_redis_v2 o5s: True bool {'detail': ''}
+11:01:46 git clone_v2_s git-daemon: 10.742056517978199 s {'corpus': 'redis', 'run': 1}
+11:02:00 git functional:fsck_git-daemon_redis_v2 o5s: True bool {'detail': ''}
+11:02:00 git functional:refs_git-daemon_redis_v2 o5s: True bool {'detail': ''}
+11:02:11 git clone_v2_s git-daemon: 10.888032864022534 s {'corpus': 'redis', 'run': 2}
+11:02:24 git functional:fsck_git-daemon_redis_v2 o5s: True bool {'detail': ''}
+11:02:24 git functional:refs_git-daemon_redis_v2 o5s: True bool {'detail': ''}
+11:02:35 git clone_v0_s git-daemon: 10.864698140998371 s {'corpus': 'redis', 'run': 0}
+11:02:49 git functional:fsck_git-daemon_redis_v0 o5s: True bool {'detail': ''}
+11:02:49 git functional:refs_git-daemon_redis_v0 o5s: True bool {'detail': ''}
+11:03:00 git clone_v0_s git-daemon: 10.688854628999252 s {'corpus': 'redis', 'run': 1}
+11:03:14 git functional:fsck_git-daemon_redis_v0 o5s: True bool {'detail': ''}
+11:03:14 git functional:refs_git-daemon_redis_v0 o5s: True bool {'detail': ''}
+11:03:25 git clone_v0_s git-daemon: 10.855071513040457 s {'corpus': 'redis', 'run': 2}
+11:03:38 git functional:fsck_git-daemon_redis_v0 o5s: True bool {'detail': ''}
+11:03:38 git functional:refs_git-daemon_redis_v0 o5s: True bool {'detail': ''}
+11:03:38 git fetch10_s git-daemon: 0.21843341598287225 s {'corpus': 'redis', 'run': 0}
+11:03:38 git functional:fetch_git-daemon_redis o5s: True bool {'detail': ''}
+11:03:39 git fetch10_s git-daemon: 0.21302325499709696 s {'corpus': 'redis', 'run': 1}
+11:03:39 git functional:fetch_git-daemon_redis o5s: True bool {'detail': ''}
+11:03:39 git fetch10_s git-daemon: 0.21565024001756683 s {'corpus': 'redis', 'run': 2}
+11:03:39 git functional:fetch_git-daemon_redis o5s: True bool {'detail': ''}
+11:03:50 git clone_wire_bytes git-daemon: 226930803 B {'corpus': 'redis'}
+11:04:03 git push_s o5s: 12.673567050951533 s {'corpus': 'redis', 'run': 0}
+11:04:10 git push_s o5s: 7.562549315975048 s {'corpus': 'redis', 'run': 1}
+11:04:19 git push_s o5s: 8.629121006000787 s {'corpus': 'redis', 'run': 2}
+11:04:31 git clone_v2_s o5s: 12.295201002969407 s {'corpus': 'redis', 'run': 0}
+11:04:44 git functional:fsck_o5s_redis_v2 o5s: True bool {'detail': ''}
+11:04:44 git functional:refs_o5s_redis_v2 o5s: True bool {'detail': ''}
+11:04:52 git clone_v2_s o5s: 7.926178455003537 s {'corpus': 'redis', 'run': 1}
+11:05:04 git functional:fsck_o5s_redis_v2 o5s: True bool {'detail': ''}
+11:05:04 git functional:refs_o5s_redis_v2 o5s: True bool {'detail': ''}
+11:05:12 git clone_v2_s o5s: 7.9365932130021974 s {'corpus': 'redis', 'run': 2}
+11:05:24 git functional:fsck_o5s_redis_v2 o5s: True bool {'detail': ''}
+11:05:24 git functional:refs_o5s_redis_v2 o5s: True bool {'detail': ''}
+11:05:32 git clone_v0_s o5s: 7.99108091997914 s {'corpus': 'redis', 'run': 0}
+11:05:44 git functional:fsck_o5s_redis_v0 o5s: True bool {'detail': ''}
+11:05:44 git functional:refs_o5s_redis_v0 o5s: True bool {'detail': ''}
+11:05:52 git clone_v0_s o5s: 7.951489600003697 s {'corpus': 'redis', 'run': 1}
+11:06:04 git functional:fsck_o5s_redis_v0 o5s: True bool {'detail': ''}
+11:06:04 git functional:refs_o5s_redis_v0 o5s: True bool {'detail': ''}
+11:06:12 git clone_v0_s o5s: 7.94702301803045 s {'corpus': 'redis', 'run': 2}
+11:06:25 git functional:fsck_o5s_redis_v0 o5s: True bool {'detail': ''}
+11:06:25 git functional:refs_o5s_redis_v0 o5s: True bool {'detail': ''}
+11:06:25 git fetch10_s o5s: 0.15397523099090904 s {'corpus': 'redis', 'run': 0}
+11:06:25 git functional:fetch_o5s_redis o5s: True bool {'detail': ''}
+11:06:25 git fetch10_s o5s: 0.15165602398337796 s {'corpus': 'redis', 'run': 1}
+11:06:25 git functional:fetch_o5s_redis o5s: True bool {'detail': ''}
+11:06:25 git fetch10_s o5s: 0.15260430000489578 s {'corpus': 'redis', 'run': 2}
+11:06:25 git functional:fetch_o5s_redis o5s: True bool {'detail': ''}
+11:06:33 git clone_wire_bytes o5s: 131548978 B {'corpus': 'redis'}
+11:06:45 git first_push_s o5s: 12.08187746204203 s {'corpus': 'redis', 'run': 0}
+11:06:58 git first_push_s o5s: 12.026676020002924 s {'corpus': 'redis', 'run': 1}
+11:07:10 git first_push_s o5s: 12.00889721000567 s {'corpus': 'redis', 'run': 2}
+== oci
+11:07:10 oci: fetching images
+11:07:12 oci image_set_bytes source: 135684096 B 
+11:07:13 oci push_s distribution: 0.1785622569732368 s {'run': 0, 'images': 4}
+11:07:13 oci stored_bytes distribution: 76042240 B 
+11:07:13 oci pull_s distribution: 0.18888475699350238 s {'run': 0, 'images': 4}
+11:07:13 oci functional:digest_distribution_python_3.11-slim_run0 o5s: True bool {'detail': 'sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd vs sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd'}
+11:07:13 oci functional:digest_distribution_python_3.12-slim_run0 o5s: True bool {'detail': 'sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177 vs sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177'}
+11:07:13 oci functional:digest_distribution_python_3.13-slim_run0 o5s: True bool {'detail': 'sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20 vs sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20'}
+11:07:13 oci functional:digest_distribution_alpine_3.20_run0 o5s: True bool {'detail': 'sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e vs sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e'}
+11:07:13 oci push_s distribution: 0.16576510295271873 s {'run': 1, 'images': 4}
+11:07:13 oci pull_s distribution: 0.18386099400231615 s {'run': 1, 'images': 4}
+11:07:13 oci functional:digest_distribution_python_3.11-slim_run1 o5s: True bool {'detail': 'sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd vs sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd'}
+11:07:13 oci functional:digest_distribution_python_3.12-slim_run1 o5s: True bool {'detail': 'sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177 vs sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177'}
+11:07:13 oci functional:digest_distribution_python_3.13-slim_run1 o5s: True bool {'detail': 'sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20 vs sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20'}
+11:07:13 oci functional:digest_distribution_alpine_3.20_run1 o5s: True bool {'detail': 'sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e vs sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e'}
+11:07:13 oci push_s distribution: 0.1751907310099341 s {'run': 2, 'images': 4}
+11:07:14 oci pull_s distribution: 0.1900568959536031 s {'run': 2, 'images': 4}
+11:07:14 oci functional:digest_distribution_python_3.11-slim_run2 o5s: True bool {'detail': 'sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd vs sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd'}
+11:07:14 oci functional:digest_distribution_python_3.12-slim_run2 o5s: True bool {'detail': 'sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177 vs sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177'}
+11:07:14 oci functional:digest_distribution_python_3.13-slim_run2 o5s: True bool {'detail': 'sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20 vs sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20'}
+11:07:14 oci functional:digest_distribution_alpine_3.20_run2 o5s: True bool {'detail': 'sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e vs sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e'}
+11:07:14 oci push_s o5s: 0.21340239100391045 s {'run': 0, 'images': 4}
+11:07:14 oci stored_bytes o5s: 76238848 B 
+11:07:14 oci pull_s o5s: 0.3755456148646772 s {'run': 0, 'images': 4}
+11:07:14 oci functional:digest_o5s_python_3.11-slim_run0 o5s: True bool {'detail': 'sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd vs sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd'}
+11:07:14 oci functional:digest_o5s_python_3.12-slim_run0 o5s: True bool {'detail': 'sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177 vs sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177'}
+11:07:14 oci functional:digest_o5s_python_3.13-slim_run0 o5s: True bool {'detail': 'sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20 vs sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20'}
+11:07:14 oci functional:digest_o5s_alpine_3.20_run0 o5s: True bool {'detail': 'sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e vs sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e'}
+11:07:15 oci push_s o5s: 0.1055369260138832 s {'run': 1, 'images': 4}
+11:07:15 oci pull_s o5s: 0.3142631179653108 s {'run': 1, 'images': 4}
+11:07:15 oci functional:digest_o5s_python_3.11-slim_run1 o5s: True bool {'detail': 'sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd vs sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd'}
+11:07:15 oci functional:digest_o5s_python_3.12-slim_run1 o5s: True bool {'detail': 'sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177 vs sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177'}
+11:07:15 oci functional:digest_o5s_python_3.13-slim_run1 o5s: True bool {'detail': 'sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20 vs sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20'}
+11:07:15 oci functional:digest_o5s_alpine_3.20_run1 o5s: True bool {'detail': 'sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e vs sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e'}
+11:07:15 oci push_s o5s: 0.10529981192667037 s {'run': 2, 'images': 4}
+11:07:15 oci pull_s o5s: 0.32821722101652995 s {'run': 2, 'images': 4}
+11:07:15 oci functional:digest_o5s_python_3.11-slim_run2 o5s: True bool {'detail': 'sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd vs sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd'}
+11:07:15 oci functional:digest_o5s_python_3.12-slim_run2 o5s: True bool {'detail': 'sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177 vs sha256:05a994d2344eb364cc186910f4fc8786a38215f39f00d0acc25bff33a08f4177'}
+11:07:15 oci functional:digest_o5s_python_3.13-slim_run2 o5s: True bool {'detail': 'sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20 vs sha256:48d884813cf44e927cf64c5529dd630dd3b18338c6dc727991eef9b71e934a20'}
+11:07:15 oci functional:digest_o5s_alpine_3.20_run2 o5s: True bool {'detail': 'sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e vs sha256:c64c687cbea9300178b30c95835354e34c4e4febc4badfe27102879de0483b5e'}
+== hf
+11:07:16 hf upload_s v1-reference: 0.45718139404198155 s {'run': 0}
+11:07:16 hf upload_server_s v1-reference: 0.4481809139251709 s {'run': 0}
+11:07:16 hf upload_server_cpu_s v1-reference: 1.52 s {'run': 0}
+11:07:17 hf download_s v1-reference: 0.2933730040094815 s {'run': 0}
+11:07:17 hf download_server_s v1-reference: 0.2838931083679199 s {'run': 0}
+11:07:17 hf download_server_cpu_s v1-reference: 0.8300000000000001 s {'run': 0}
+11:07:17 hf upload_s v1-reference: 0.25504492002073675 s {'run': 1}
+11:07:17 hf upload_server_s v1-reference: 0.2457599639892578 s {'run': 1}
+11:07:17 hf upload_server_cpu_s v1-reference: 0.6799999999999997 s {'run': 1}
+11:07:17 hf download_s v1-reference: 0.29399385600117967 s {'run': 1}
+11:07:17 hf download_server_s v1-reference: 0.2847919464111328 s {'run': 1}
+11:07:17 hf download_server_cpu_s v1-reference: 0.8400000000000003 s {'run': 1}
+11:07:18 hf upload_s v1-reference: 0.25103138299891725 s {'run': 2}
+11:07:18 hf upload_server_s v1-reference: 0.24207401275634766 s {'run': 2}
+11:07:18 hf upload_server_cpu_s v1-reference: 0.6600000000000001 s {'run': 2}
+11:07:18 hf download_s v1-reference: 0.29076297098072246 s {'run': 2}
+11:07:18 hf download_server_s v1-reference: 0.28076910972595215 s {'run': 2}
+11:07:18 hf download_server_cpu_s v1-reference: 0.8399999999999999 s {'run': 2}
+11:07:21 hf upload_s o5s-xet: 2.275536714005284 s {'run': 0}
+11:07:21 hf upload_server_s o5s-xet: 1.794867753982544 s {'run': 0}
+11:07:21 hf upload_client_cpu_s o5s-xet: 1.7035209999999998 s {'run': 0}
+11:07:21 hf upload_server_cpu_s o5s-xet: 3.25 s {'run': 0}
+11:07:22 hf download_s o5s-xet: 0.4343782779760659 s {'run': 0}
+11:07:22 hf download_server_s o5s-xet: 0.32355523109436035 s {'run': 0}
+11:07:22 hf download_client_cpu_s o5s-xet: 0.452387 s {'run': 0}
+11:07:22 hf download_server_cpu_s o5s-xet: 0.8799999999999999 s {'run': 0}
+11:07:22 hf functional:download_sha256_xet_0 o5s: True bool {'detail': ''}
+11:07:23 hf upload_s o5s-xet: 1.339977533032652 s {'run': 1}
+11:07:23 hf upload_server_s o5s-xet: 0.08336257934570312 s {'run': 1}
+11:07:23 hf upload_client_cpu_s o5s-xet: 1.628209 s {'run': 1}
+11:07:23 hf upload_server_cpu_s o5s-xet: 0.08000000000000007 s {'run': 1}
+11:07:24 hf download_s o5s-xet: 0.41318300599232316 s {'run': 1}
+11:07:24 hf download_server_s o5s-xet: 0.2994349002838135 s {'run': 1}
+11:07:24 hf download_client_cpu_s o5s-xet: 0.44052099999999994 s {'run': 1}
+11:07:24 hf download_server_cpu_s o5s-xet: 0.8300000000000001 s {'run': 1}
+11:07:24 hf functional:download_sha256_xet_1 o5s: True bool {'detail': ''}
+11:07:26 hf upload_s o5s-xet: 1.31596359499963 s {'run': 2}
+11:07:26 hf upload_server_s o5s-xet: 0.09052395820617676 s {'run': 2}
+11:07:26 hf upload_client_cpu_s o5s-xet: 1.609415 s {'run': 2}
+11:07:26 hf upload_server_cpu_s o5s-xet: 0.08999999999999986 s {'run': 2}
+11:07:27 hf download_s o5s-xet: 0.45895596395712346 s {'run': 2}
+11:07:27 hf download_server_s o5s-xet: 0.30985283851623535 s {'run': 2}
+11:07:27 hf download_client_cpu_s o5s-xet: 0.462618 s {'run': 2}
+11:07:27 hf download_server_cpu_s o5s-xet: 0.8200000000000003 s {'run': 2}
+11:07:27 hf functional:download_sha256_xet_2 o5s: True bool {'detail': ''}
+11:07:31 hf family_added_bytes o5s-xet: 212512768 B {'note': 'growth of the repo for base+instruct; base content was already stored by the timing runs'}
+11:07:33 hf upload_s o5s-lfs: 0.7496414899942465 s {'run': 0}
+11:07:33 hf upload_server_s o5s-lfs: 0.5518779754638672 s {'run': 0}
+11:07:33 hf upload_client_cpu_s o5s-lfs: 0.336491 s {'run': 0}
+11:07:33 hf upload_server_cpu_s o5s-lfs: 1.86 s {'run': 0}
+11:07:34 hf download_s o5s-lfs: 0.6928139899973758 s {'run': 0}
+11:07:34 hf download_server_s o5s-lfs: 0.646834135055542 s {'run': 0}
+11:07:34 hf download_client_cpu_s o5s-lfs: 0.687371 s {'run': 0}
+11:07:34 hf download_server_cpu_s o5s-lfs: 0.8499999999999999 s {'run': 0}
+11:07:34 hf functional:download_sha256_lfs_0 o5s: True bool {'detail': ''}
+11:07:35 hf upload_s o5s-lfs: 0.5286673409864306 s {'run': 1}
+11:07:35 hf upload_server_s o5s-lfs: 0.33136677742004395 s {'run': 1}
+11:07:35 hf upload_client_cpu_s o5s-lfs: 0.33411599999999997 s {'run': 1}
+11:07:35 hf upload_server_cpu_s o5s-lfs: 0.8999999999999999 s {'run': 1}
+11:07:36 hf download_s o5s-lfs: 0.6946969699929468 s {'run': 1}
+11:07:36 hf download_server_s o5s-lfs: 0.6730830669403076 s {'run': 1}
+11:07:36 hf download_client_cpu_s o5s-lfs: 0.686321 s {'run': 1}
+11:07:36 hf download_server_cpu_s o5s-lfs: 0.8500000000000001 s {'run': 1}
+11:07:36 hf functional:download_sha256_lfs_1 o5s: True bool {'detail': ''}
+11:07:37 hf upload_s o5s-lfs: 0.521154098038096 s {'run': 2}
+11:07:37 hf upload_server_s o5s-lfs: 0.32377099990844727 s {'run': 2}
+11:07:37 hf upload_client_cpu_s o5s-lfs: 0.333653 s {'run': 2}
+11:07:37 hf upload_server_cpu_s o5s-lfs: 0.9100000000000001 s {'run': 2}
+11:07:38 hf download_s o5s-lfs: 0.6964686100254767 s {'run': 2}
+11:07:38 hf download_server_s o5s-lfs: 0.6750240325927734 s {'run': 2}
+11:07:38 hf download_client_cpu_s o5s-lfs: 0.6896149999999999 s {'run': 2}
+11:07:38 hf download_server_cpu_s o5s-lfs: 0.8600000000000003 s {'run': 2}
+11:07:38 hf functional:download_sha256_lfs_2 o5s: True bool {'detail': ''}
+11:07:44 hf family_stored_bytes o5s-xet: 424796160 B 
+11:07:47 hf family_stored_bytes xet-dedup: 465944177 B {'files': 2, 'bytes': 538121104, 'chunks': 8395, 'distinct_chunks': 8395, 'unique_bytes': 538121104}
+11:07:47 hf family_raw_bytes source: 538121104 B 
+== pypi
+11:07:50 pypi: devpi run 0
+11:08:13 pypi cold_p50_s devpi: 0.37906899000518024 s {'run': 0, 'files': 50}
+11:08:13 pypi cold_total_s devpi: 22.385765002749395 s {'run': 0, 'files': 50}
+11:08:30 pypi hot_p50_s devpi: 0.34096661099465564 s {'run': 0, 'files': 50}
+11:08:30 pypi hot_total_s devpi: 17.225480820052326 s {'run': 0, 'files': 50}
+11:08:30 pypi stored_bytes devpi: 14512128 B {'run': 0}
+11:08:30 pypi: o5s run 0
+11:08:51 pypi cold_p50_s o5s: 0.422167276032269 s {'run': 0, 'files': 50}
+11:08:51 pypi cold_total_s o5s: 20.937404333031736 s {'run': 0, 'files': 50}
+11:09:11 pypi hot_p50_s o5s: 0.39988517004530877 s {'run': 0, 'files': 50}
+11:09:11 pypi hot_total_s o5s: 20.21387448097812 s {'run': 0, 'files': 50}
+11:09:11 pypi stored_bytes o5s: 6791168 B {'run': 0}
+11:09:11 pypi functional:one_fetch_per_file_run0 o5s: True bool {'detail': '50.0 upstream fetches for 50 files'}
+11:09:11 pypi functional:all_files_run0 o5s: True bool {'detail': '50 files'}
+11:09:15 pypi: devpi run 1
+11:09:37 pypi cold_p50_s devpi: 0.3797118299989961 s {'run': 1, 'files': 50}
+11:09:37 pypi cold_total_s devpi: 21.944518654840067 s {'run': 1, 'files': 50}
+11:09:54 pypi hot_p50_s devpi: 0.3391257709590718 s {'run': 1, 'files': 50}
+11:09:54 pypi hot_total_s devpi: 17.220147252024617 s {'run': 1, 'files': 50}
+11:09:54 pypi stored_bytes devpi: 14577664 B {'run': 1}
+11:09:54 pypi: o5s run 1
+11:10:15 pypi cold_p50_s o5s: 0.40865665598539636 s {'run': 1, 'files': 50}
+11:10:15 pypi cold_total_s o5s: 20.830003223672975 s {'run': 1, 'files': 50}
+11:10:35 pypi hot_p50_s o5s: 0.39494831301271915 s {'run': 1, 'files': 50}
+11:10:35 pypi hot_total_s o5s: 20.231976206123363 s {'run': 1, 'files': 50}
+11:10:35 pypi stored_bytes o5s: 6791168 B {'run': 1}
+11:10:35 pypi functional:one_fetch_per_file_run1 o5s: True bool {'detail': '50.0 upstream fetches for 50 files'}
+11:10:35 pypi functional:all_files_run1 o5s: True bool {'detail': '50 files'}
+11:10:39 pypi: devpi run 2
+11:11:01 pypi cold_p50_s devpi: 0.37803087901556864 s {'run': 2, 'files': 50}
+11:11:01 pypi cold_total_s devpi: 21.994276773824822 s {'run': 2, 'files': 50}
+11:11:18 pypi hot_p50_s devpi: 0.3399485280388035 s {'run': 2, 'files': 50}
+11:11:18 pypi hot_total_s devpi: 17.236519371159375 s {'run': 2, 'files': 50}
+11:11:18 pypi stored_bytes devpi: 14512128 B {'run': 2}
+11:11:18 pypi: o5s run 2
+11:11:39 pypi cold_p50_s o5s: 0.4188660449581221 s {'run': 2, 'files': 50}
+11:11:39 pypi cold_total_s o5s: 20.781871284998488 s {'run': 2, 'files': 50}
+11:11:59 pypi hot_p50_s o5s: 0.40408871200634167 s {'run': 2, 'files': 50}
+11:11:59 pypi hot_total_s o5s: 20.44422651012428 s {'run': 2, 'files': 50}
+11:11:59 pypi stored_bytes o5s: 6791168 B {'run': 2}
+11:11:59 pypi functional:one_fetch_per_file_run2 o5s: True bool {'detail': '50.0 upstream fetches for 50 files'}
+11:11:59 pypi functional:all_files_run2 o5s: True bool {'detail': '50 files'}
+== npm
+11:12:01 npm: verdaccio run 0
+11:12:31 npm cold_p50_s verdaccio: 0.5700233210227452 s {'run': 0, 'files': 50}
+11:12:31 npm cold_total_s verdaccio: 30.56191404699348 s {'run': 0, 'files': 50}
+11:12:59 npm hot_p50_s verdaccio: 0.53853906103177 s {'run': 0, 'files': 50}
+11:12:59 npm hot_total_s verdaccio: 27.920361473108642 s {'run': 0, 'files': 50}
+11:12:59 npm stored_bytes verdaccio: 14708736 B {'run': 0}
+11:13:00 npm: o5s run 0
+11:13:31 npm cold_p50_s o5s: 0.6022936259978451 s {'run': 0, 'files': 50}
+11:13:31 npm cold_total_s o5s: 30.883840147056617 s {'run': 0, 'files': 50}
+11:13:59 npm hot_p50_s o5s: 0.5695681850193068 s {'run': 0, 'files': 50}
+11:13:59 npm hot_total_s o5s: 28.533021959243342 s {'run': 0, 'files': 50}
+11:13:59 npm stored_bytes o5s: 1658880 B {'run': 0}
+11:13:59 npm functional:one_fetch_per_file_run0 o5s: True bool {'detail': '50.0 upstream fetches for 50 packages'}
+11:13:59 npm functional:all_files_run0 o5s: True bool {'detail': '50 tarballs'}
+11:14:00 npm: verdaccio run 1
+11:14:30 npm cold_p50_s verdaccio: 0.5662571280263364 s {'run': 1, 'files': 50}
+11:14:30 npm cold_total_s verdaccio: 29.788699246186297 s {'run': 1, 'files': 50}
+11:14:58 npm hot_p50_s verdaccio: 0.5361976400017738 s {'run': 1, 'files': 50}
+11:14:58 npm hot_total_s verdaccio: 27.698990401113406 s {'run': 1, 'files': 50}
+11:14:58 npm stored_bytes verdaccio: 14708736 B {'run': 1}
+11:14:58 npm: o5s run 1
+11:15:28 npm cold_p50_s o5s: 0.5990714420331642 s {'run': 1, 'files': 50}
+11:15:28 npm cold_total_s o5s: 30.28220841399161 s {'run': 1, 'files': 50}
+11:15:57 npm hot_p50_s o5s: 0.5687406720244326 s {'run': 1, 'files': 50}
+11:15:57 npm hot_total_s o5s: 28.43336843518773 s {'run': 1, 'files': 50}
+11:15:57 npm stored_bytes o5s: 1658880 B {'run': 1}
+11:15:57 npm functional:one_fetch_per_file_run1 o5s: True bool {'detail': '50.0 upstream fetches for 50 packages'}
+11:15:57 npm functional:all_files_run1 o5s: True bool {'detail': '50 tarballs'}
+11:15:57 npm: verdaccio run 2
+11:16:27 npm cold_p50_s verdaccio: 0.5675272659864277 s {'run': 2, 'files': 50}
+11:16:27 npm cold_total_s verdaccio: 29.82157166179968 s {'run': 2, 'files': 50}
+11:16:55 npm hot_p50_s verdaccio: 0.5379104319727048 s {'run': 2, 'files': 50}
+11:16:55 npm hot_total_s verdaccio: 27.74028479779372 s {'run': 2, 'files': 50}
+11:16:55 npm stored_bytes verdaccio: 14708736 B {'run': 2}
+11:16:55 npm: o5s run 2
+11:17:25 npm cold_p50_s o5s: 0.5937135179992765 s {'run': 2, 'files': 50}
+11:17:25 npm cold_total_s o5s: 30.086615682055708 s {'run': 2, 'files': 50}
+11:17:54 npm hot_p50_s o5s: 0.5698014560039155 s {'run': 2, 'files': 50}
+11:17:54 npm hot_total_s o5s: 28.523802218900528 s {'run': 2, 'files': 50}
+11:17:54 npm stored_bytes o5s: 1658880 B {'run': 2}
+11:17:54 npm functional:one_fetch_per_file_run2 o5s: True bool {'detail': '50.0 upstream fetches for 50 packages'}
+11:17:54 npm functional:all_files_run2 o5s: True bool {'detail': '50 tarballs'}
+report: /mnt/scratch/pico2peta/rc1-final/fronts-A-report.md
+EXIT=0 end 11:17:54  11:17:54 up 4 days, 23:14,  6 users,  load average: 1.14, 1.38, 2.15

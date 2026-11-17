@@ -40,7 +40,8 @@ def tiers(report):
     for line in open(report):
         c = [x.strip() for x in line.split("|")]
         if len(c) > 8 and c[7] in TIER:
-            out[(c[1], c[2], c[3], c[4].split(" (")[1].split(",")[0] if " (" in c[4] else "")] = c[7]
+            sysname = c[4].split(" (")[1].split(",")[0] if " (" in c[4] else ""
+            out[(c[1], c[2], c[3], re.sub(r"^pico2peta", "o5s", sysname))] = c[7]
     return out
 
 
@@ -58,7 +59,7 @@ def main():
         delta = (hm - bm) / bm if bm else 0.0
         worse = delta if higher_is_worse(k[1]) else -delta
         ok = worse <= allow
-        ref = k[3] not in PICO and not k[3].startswith("o5s")
+        ref = k[3] not in O5S and not k[3].startswith("o5s")
         tag = "ref" if ref else ("ok" if ok else "FAIL")
         lines.append(f"| {k[0]} | {k[1]} | {k[2]} | {k[3]} | {bm:.4g} | {hm:.4g} | {delta:+.1%} | {allow:.1%} | {tag} |")
         if not ok and not ref:
