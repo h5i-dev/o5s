@@ -250,6 +250,28 @@ ruled on (BENCH.md 2026-11-17; raw data in `bench/final/rc1/ba21b99/` and `bench
 - **Earlier passes:** pass 1 (`78bf513`) found two memory regressions, fixed in `20f55ad`. Pass 2 (`20f55ad`)
   found net's git re-push FAIL, fixed in `ba21b99`. Both passes are kept in BENCH.md.
 
+## v0.1.0 final: full fuzz suite (RELEASE.md step 5), 2026-11-17
+**Clean.** All 21 targets in `fuzz/` ran 66 s each under ASan, locally (never in CI), on origin/main
+`5d24b45`. Start 21:34:59 UTC at load 0.51, end 22:04:13, no other session's timing window during the run.
+There were no crashes, no leaks, no OOMs (`-rss_limit_mb=2048`) and no artifacts, so nothing needed fixing. Runs per
+target:
+
+| target | runs | target | runs | target | runs |
+|---|---:|---|---:|---|---:|
+| attestations | 1,874,889 | manifest | 15,031,626 | provenance | 7,692,160 |
+| audit_log | 231,764 | midx | 6,747,184 | ref_journal | 310,866 |
+| delta_config | 180,210 | name_path | 1,347,466 | s3_xml | 549,606 |
+| frames | 7,251,685 | names | 5,768,422 | search_index | 19,173 |
+| git_parsers | 1,365,681 | oci_parsers | 1,247,176 | segmap | 10,004,300 |
+| git_push | 33,593 | pack_index | 6,628,082 | staging_recovery | 96,719 |
+| http_range | 9,762,444 | pack_record | 6,616,815 | pkg_parsers | 622,062 |
+
+- **Scope:** `oci_parsers`, the 2026-11-16 finding fixed in c8f9942, is clean. `name_path` is new since rc.1.
+  The `tree` target (pico2peta-store, branch tree-object) is not on main yet, so it needs its own ≥ 60 s run
+  when it merges, before the tag.
+- **Data:** logs and corpora are in `/mnt/scratch/pico2peta/fuzz-v010-5d24b45/` (summary.txt). The fuzz build
+  dir was deleted afterwards (6.8 GB, which is over the target-dir budget).
+
 ## Post-RC (agreed, not started)
 - Re-measure the §6.4 verified read on a many-core host (the human, 2026-11-16).
 - A double-buffered parallel Xet upload chunker: cut window i while window i+1 is read. The windowed version lost

@@ -66,6 +66,9 @@ cut from `main`. The human opens the PR and merges a candidate to `main`; agents
 5. Fuzz smoke: every target in fuzz/ runs ≥ 60 s clean under ASan, locally (never in CI), on the commit to tag.
    **Exception for v0.1.0-rc.1 (the human, 2026-11-17):** only `ref_journal` (≥ 60 s clean under ASan), since
    rc.1 changed ref-journal replay. The full suite, every target ≥ 60 s, runs before v0.1.0 final.
+   **v0.1.0 final:** full suite clean on `5d24b45` (21/21 targets, 66 s each under ASan, 2026-11-17; PROGRESS.md
+   "v0.1.0 final: full fuzz suite"). Any target added or changed after that commit (e.g. `tree`) gets its own
+   ≥ 60 s run on the commit to tag.
 6. Proofs: `h5i app prove` in `verify/core` (and net's `verify/net`) passes, with no `sorry` (verify/core/README.md).
 7. Tag: `git tag -a v0.1.0-rc.N -m "o5s 0.1.0 release candidate N"` on the release branch head, then push the branch and the tag. Never
    move or delete a pushed tag; fix forward with rc.N+1.
