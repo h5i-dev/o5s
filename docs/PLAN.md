@@ -679,3 +679,25 @@ with a zero-time server (NET_PROGRESS, H4).
    than the time. FastCDC for LFS PUTs measured 1.04× in a dev check but is not applied. **Post-RC item:**
    a double-buffered parallel Xet chunker in the store's put path. `pico2peta_chunk::xet_cuts_parallel[_seg]`
    already gives byte-identical cuts. A first, non-double-buffered wiring was slower and was reverted.
+
+**Amendment 2026-11-17 c (durable-write gap, task from the human; written before any of its timing runs or
+code).** Goal: raise fsync'd put throughput so the §6.4 durable-write tier (put / `dd conv=fsync` ≥ 0.90×)
+passes again. rc.1 failed it at 0.868×, and 95f6a4a had no measurable effect (BENCH.md W7).
+- **Diagnosis runs** come first, under the bench lock in announced windows. They are not verdicts and only
+  locate the bottleneck:
+  - the put to tmpfs (no disk);
+  - the put with the seal's fsync timed separately;
+  - a syscall summary of one put;
+  - `dd conv=fsync` at the store's write sizes.
+- **Verdict** on the candidate commit, in one exclusive window: load < 2.5 at start and no foreign
+  CPU-heavy process.
+  - **Durable-write tier (§6.4):** `o5s-bench generic <dir> 1024`, **5 runs**, with the per-run put/dd ratios
+    and their median compared against 0.90× (the same command and protocol as recheck 2 above).
+  - **No regression (§6.8) against BASELINE.md, on the put-path metrics this change can touch:** the
+    candidate's 5 runs and 5 interleaved runs of the rc.1 binary (`v0.1.0-rc.1`) give medians for
+    `put_mb_s`, `get_strict_mb_s`, `get_eof_mb_s`, `range4k_p99_ms` and the sizes. The allowance is
+    max(3 %, the rc.1 binary's range in those runs); sizes must be identical. Plus the core suite's
+    `ingest` row (`baseline-core.sh micro`, 3 reps), against BASELINE.md by the §6.8 rule.
+  - **Functional:** the gate, and `h5i app prove`.
+- **Reporting:** a FAIL is reported as a FAIL. Durability must not be weakened: every byte acknowledged by
+  `flush` is fsync'd (file and directory) before `flush` returns, and the crash tests keep passing.
