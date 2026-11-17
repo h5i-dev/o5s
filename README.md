@@ -24,6 +24,25 @@ PyPI and npm for packages, Hugging Face for LLM weights, and so on?
 - *"One store means one bug breaks everything"* → Every decision is formally verified in Lean 4.
 - *"How do I migrate everything?"* → Start with one registry and keep your existing tools.
 
+## Benchmarks
+
+Each adapter is measured against the specialist server for its domain, driven by the real, unmodified client
+(v0.1.0-rc.1, one 4-vCPU AMD EPYC host with 15 GB RAM and NVMe, medians of 3 runs).
+Numbers are o5s divided by the specialist, so lower is better.
+
+| Adapter | Specialist | Push / upload | Pull / download | Stored bytes |
+|---|---|---|---|---|
+| Git (jq, ripgrep, redis) | `git daemon` | 0.80–1.02× | clone 0.73–0.97×, fetch 0.71–0.83× | clone wire 0.58–1.10× |
+| OCI | Distribution (`registry`) | 0.60× | 1.74× | 1.00× |
+| Hugging Face (Xet) | Xet dedup | server time 0.37× of a plain upload | server CPU 0.99× of a plain download | 0.91× |
+| PyPI | devpi | | cold 1.10×, hot 1.18× | 0.47× |
+| npm | Verdaccio | | cold 1.06×, hot 1.06× | 0.11× |
+| Maven | Reposilite | | cold 0.99×, hot 1.03× | 0.93× |
+
+Where o5s is still slower, OCI pull pays for verifying every byte against its hash on read, and a first Git push
+into an empty server is 1.1–1.4×, mostly a fixed per-push cost that shows on small repos. Full results and methodology are in `docs/BENCH.md` and
+`bench/results/fronts-rc1-ba21b99-report.md`.
+
 ## CLI example
 
 The `o5s` CLI is the low-level plumbing over the core (see `docs/CLI.md`).
