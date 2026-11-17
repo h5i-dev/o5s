@@ -1822,6 +1822,7 @@ dependencies = [
  "o5s-pack",
  "o5s-prov",
  "o5s-repo",
+ "o5s-tree",
  "o5s-weights",
  "prometheus-client",
  "proptest",

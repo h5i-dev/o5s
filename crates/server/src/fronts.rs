@@ -165,7 +165,10 @@ impl Fronts {
             .with(Arc::new(PypiFront))?
             .with(Arc::new(NpmFront))?
             .with(Arc::new(MavenFront))?
-            .with(Arc::new(o5s_weights::SafetensorsFront))?;
+            .with(Arc::new(o5s_weights::SafetensorsFront))?
+            // Trees claim no names, but their entries keep blobs alive (GC) and reachable (reads
+            // by hash). Every process that runs GC on a repo with trees needs this front.
+            .with(Arc::new(o5s_tree::TreeFront))?;
         let repo = repo.with_fronts(reg)?;
         let mut handles: HashMap<String, Arc<dyn Repository>> = HashMap::new();
         for (id, slot) in [("git", &git.handle), ("oci", &oci.handle)] {

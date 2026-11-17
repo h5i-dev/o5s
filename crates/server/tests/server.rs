@@ -1031,3 +1031,29 @@ fn issued_tokens_are_h5i_app_tokens() {
     assert_eq!(admin(reqwest::Method::DELETE, &format!("/v1/admin/tokens/{sha}")).send().unwrap().status(), 204);
     assert_eq!(who(&tok).status(), 401);
 }
+
+/// Trees (`o5s_tree`) claim no names, but the server registers their front: a blob referenced
+/// only by a named tree is readable by hash (reachability follows the tree's entries) and
+/// survives GC.
+#[test]
+fn tree_entries_keep_blobs_alive_and_readable() {
+    let s = TestServer::start(|_| {});
+    let c = s.client(ADMIN);
+    let blob = c.put(b"only a tree references me").unwrap();
+    let tree = o5s_tree::Tree::new(vec![o5s_tree::Entry {
+        name: b"f.txt".to_vec(),
+        mode: o5s_tree::Mode::Regular,
+        hash: blob,
+    }])
+    .unwrap();
+    let th = c.put(&tree.encode().unwrap()).unwrap();
+    keep(&c, "team", &th);
+    // Readable by hash through the tree (and the tree itself through its name).
+    assert_eq!(c.get(&blob, None).unwrap(), b"only a tree references me");
+    // GC (plan, sweep, delete) keeps it.
+    for _ in 0..3 {
+        c.gc(false).unwrap();
+    }
+    assert_eq!(c.get(&blob, None).unwrap(), b"only a tree references me");
+    assert_eq!(c.get(&th, None).unwrap(), tree.encode().unwrap());
+}

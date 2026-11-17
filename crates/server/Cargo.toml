@@ -15,6 +15,7 @@ o5s-repo.workspace = true
 o5s-pack.workspace = true
 o5s-prov.workspace = true
 o5s-weights.workspace = true
+o5s-tree.workspace = true
 o5s-attest = { path = "../attest" }
 o5s-client = { path = "../client" }
 o5s-net-kernel = { path = "../net-kernel" }
