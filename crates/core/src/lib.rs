@@ -487,6 +487,51 @@ impl Name {
     pub fn is_under(&self, prefix: &str) -> bool {
         is_under(&self.0, prefix)
     }
+
+    /// The name of a file path, under the path-name convention (the extracted kernel
+    /// `o5s_kernel::pathname`): per `/`-separated segment, every byte outside
+    /// `[A-Za-z0-9._-]` becomes `+XX` (uppercase hex), and a `.` or `..` segment has
+    /// its dots escaped. An empty path, an empty segment, or a result over 1024
+    /// bytes is refused. The encoding is reversible ([`Name::to_path`]) and injective.
+    pub fn from_path(path: &str) -> Result<Name> {
+        Self::from_path_bytes(path.as_bytes())
+    }
+
+    /// [`Name::from_path`] for paths that need not be UTF-8.
+    pub fn from_path_bytes(path: &[u8]) -> Result<Name> {
+        match o5s_kernel::pathname::encode(path) {
+            // The kernel's output is ASCII and passes the name grammar (proved).
+            Ok(n) => Ok(Name(String::from_utf8(n).map_err(|_| Error::Corrupt("path encoding: not ASCII".into()))?)),
+            Err(e) => Err(Error::InvalidName(String::from_utf8_lossy(path).into_owned(), path_error(e))),
+        }
+    }
+
+    /// The file path this name encodes, as bytes. Strict: only the canonical
+    /// encoding of a path decodes, so a name that wasn't made by
+    /// [`Name::from_path`] (lowercase hex, a needless escape, a `.` segment, a byte
+    /// that is not allowed) is refused.
+    pub fn to_path_bytes(&self) -> Result<Vec<u8>> {
+        o5s_kernel::pathname::decode(self.0.as_bytes()).map_err(|e| Error::InvalidName(self.0.clone(), path_error(e)))
+    }
+
+    /// [`Name::to_path_bytes`] as UTF-8 (refused if the path is not UTF-8).
+    pub fn to_path(&self) -> Result<String> {
+        String::from_utf8(self.to_path_bytes()?)
+            .map_err(|_| Error::InvalidName(self.0.clone(), "encodes a path that is not UTF-8"))
+    }
+}
+
+fn path_error(e: o5s_kernel::pathname::PathError) -> &'static str {
+    use o5s_kernel::pathname::PathError;
+    match e {
+        PathError::Empty => "empty path",
+        PathError::EmptySegment => "empty path segment (a leading, trailing or doubled '/')",
+        PathError::TooLong => "encoded name longer than 1024 bytes",
+        PathError::BadByte => "a byte that is neither allowed nor an escape",
+        PathError::BadEscape => "'+' not followed by two uppercase hex digits",
+        PathError::NonCanonical => "not the canonical encoding of a path",
+        PathError::Invalid => "encoded name is not valid",
+    }
 }
 
 /// True if path `s` equals `prefix` or lies under `prefix/` (segment-aligned).
@@ -667,6 +712,26 @@ mod tests {
         assert!(n.is_under("pkg/foo"));
         assert!(!n.is_under("pk"));
         assert!(!n.is_under("pkg/foo/bar"));
+    }
+
+    #[test]
+    fn names_from_file_paths() {
+        for (path, name) in
+            [("src/a b.py", "src/a+20b.py"), ("a/../b", "a/+2E+2E/b"), ("é", "+C3+A9"), ("c++/x.h", "c+2B+2B/x.h")]
+        {
+            let n = Name::from_path(path).unwrap();
+            assert_eq!(n.as_str(), name);
+            assert_eq!(n.to_path().unwrap(), path);
+        }
+        assert_eq!(Name::from_path_bytes(&[0xff]).unwrap().to_path_bytes().unwrap(), vec![0xff]);
+        assert!(Name::from_path_bytes(&[0xff]).unwrap().to_path().is_err(), "not UTF-8");
+        for bad in ["", "/a", "a/", "a//b"] {
+            assert!(matches!(Name::from_path(bad), Err(Error::InvalidName(..))), "{bad:?}");
+        }
+        // Strict decoding: valid names that are not canonical encodings.
+        for n in ["a+2bb", "+61", "x+2Ey", "a+2Fb"] {
+            assert!(Name::new(n).unwrap().to_path().is_err(), "{n}");
+        }
     }
 
     #[test]

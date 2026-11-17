@@ -46,6 +46,11 @@ Every denial is audited.
 
 ## Native API (`/v1`)
 
+Names in URLs and bodies follow the name grammar (`[A-Za-z0-9._+-]` segments, ARCHITECTURE.md "Names").
+A name that stands for a file path uses the path-name convention (ARCHITECTURE.md, "File paths as names"):
+`src/a b.py` is the name `src/a+20b.py`. The core API (`Name::from_path` / `Name::to_path`) and the CLI
+(`o5s name encode|decode`) implement it; clients in other languages follow the same rules.
+
 All bodies are JSON unless noted. Every error has the form `{"error":{"code","message","rule?","subject?"}}`, where `code` is a stable string:
 
 | code | HTTP | meaning |

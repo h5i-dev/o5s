@@ -4,6 +4,16 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 
 ## [Unreleased]
 
+### Added
+- **File paths as names: a canonical, reversible encoding** (ARCHITECTURE.md, "File paths as names").
+  - **The rule:** per `/`-separated segment, every byte outside `[A-Za-z0-9._-]` becomes `+XX` (uppercase hex),
+    and a `.`/`..` segment has its dots escaped. Decoding is strict, so the encoding is a bijection onto what
+    decoding accepts.
+  - **Where:** a kernel (`o5s_kernel::pathname`) with Lean proofs (`verify/core/proofs/PathName.lean`: the output
+    is always a valid name, decoding inverts encoding, only canonical names decode, the encoding is injective);
+    `Name::from_path` / `to_path` (and `_bytes`) in the core API; `o5s name encode PATH...` /
+    `o5s name decode NAME...` in the CLI; and a fuzz target, `name_path`.
+
 ## [0.1.0-rc.1] - 2026-11-17
 
 The first release candidate. Benchmarks against `docs/BASELINE.md` (PLAN §6.8): BENCH.md, 2026-11-17 final batch.

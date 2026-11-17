@@ -26,6 +26,7 @@ input sizes, not from an assumption. The properties:
 | P7 promotion | `promote_plan`, `promote_src_fresh` | an accepted plan meets every policy requirement and targets `src`'s current object at its current version; committed, `src` was still at that version (with P2) |
 | decoders | `parse_header_spec`, `le32_spec`, `le64_spec`, `hash_at_spec` | the pack record header decoder equals its little-endian spec on every input: the first failing check (short, magic, kind, codec, bounds) or every field decoded |
 | journal framing | `journal_step_spec` | a CRC-invalid record followed by more data is corruption, never a torn tail: valid history is never truncated |
+| file paths as names (`PathName.lean`) | `encode_valid`, `decode_encode`, `decode_canonical`, `encode_injective` | every encoding passes `names::validate`; decoding inverts encoding; only canonical names decode; the encoding is injective |
 | retention | `plan_spec` | one action per entry; the newest `keep` are kept; a deletion is old, regenerable when required, and allowed by the rules |
 
 P4, authorization, is net's kernel (`verify/net`, `h5i_app_std::authz::guard`).
@@ -44,7 +45,7 @@ P4, authorization, is net's kernel (`verify/net`, `h5i_app_std::authz::guard`).
 
 ## Proof sensitivity (`h5i app mutate`, 2026-11-16)
 
-17/17 mutants caught, 0 survived:
+20/20 mutants caught, 0 survived:
 
 | mutant | caught by |
 |---|---|
@@ -65,6 +66,9 @@ P4, authorization, is net's kernel (`verify/net`, `h5i_app_std::authz::guard`).
 | `read_checks_31_bytes` | accept_read_spec |
 | `header_skips_kind_check` | parse_header_spec |
 | `journal_truncates_history` | journal_step_spec |
+| `path_hex_lowercase` | hex_digit_spec (PathName.lean) |
+| `path_plus_kept_literally` | plain_spec (PathName.lean) |
+| `path_decode_skips_canonical_check` | decode_encode, decode_canonical, bytes_eq_spec (PathName.lean) |
 
 ## Toolchain (pinned)
 
