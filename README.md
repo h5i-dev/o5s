@@ -1,5 +1,7 @@
 # o5s
 
+`o5s` is the universal repository for any kind of data.
+
 **Motivation**
 
 - Why do we need a separate GitHub for source code, JFrog for build outputs, Docker Hub for container images,
