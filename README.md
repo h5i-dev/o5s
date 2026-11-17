@@ -1,25 +1,27 @@
 # o5s
 
-Why do we need a separate GitHub for source code, JFrog for build outputs, Docker Hub for container images,
-PyPI and npm for packages, Hugging Face for LLM weights, and so on? They are all just data: sequences of 0s
-and 1s. Why not treat them all the same way? All the operations we really have are push, pull, and overwrite.
+**Question**
 
-o5s is one content-addressed, immutable store for all of it: source code, packages, container images and model
-weights. The clients you already use (`git`, `docker`, `pip`, `npm`, `mvn`, `huggingface_hub`) talk to it
-unmodified.
+- Why do we need a separate GitHub for source code, JFrog for build outputs, Docker Hub for container images,
+PyPI and npm for packages, Hugging Face for LLM weights, and so on?
+- Why not treat them all the same way? They are all just data, just sequences of 0s and 1s. 
+
+**Our Answer**
+
+- `o5s` treats every kind of data with the same three operations, `put`, `get`, and `replace`.
+- It also ships adapters for popular tools such as Git, OCI, Hugging Face, PyPI, npm and Maven, so it fits into existing workflows as they are.
 
 ## Potential pushback
 
-- *"Merge in Git is necessary"* → Merge is just a special case of overwrite.
+- *"Merge in Git is necessary"* → Merge is just a special case of `replace`.
 - *"Git packs source code better"* → Then use it for every domain.
 - *"Hugging Face's Xet makes large weights fast"* → Then use it for every domain.
-- *"Registries need their own rules"* → They're per-namespace rules: `mutable`, `immutable`, `head-release`.
+- *"Registries need their own rules"* → They're just per-namespace rules (`mutable`, `immutable`, `head-release`).
 - *"One store means one bug breaks everything"* → Every decision is formally verified in Lean 4.
-- *"Separate systems are fine"* → Not for lineage: one store links commit → build → package → image → model.
 
 ## CLI example
 
-The `o5s` CLI is the low-level plumbing over the core (reference: `docs/CLI.md`).
+The `o5s` CLI is the low-level plumbing over the core (see `docs/CLI.md`).
 
 ```sh
 cargo build --release
