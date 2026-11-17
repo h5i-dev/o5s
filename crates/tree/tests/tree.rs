@@ -1,6 +1,6 @@
 //! Tree objects end to end: canonical form, the filesystem round trip, diff,
 //! and GC keeping a tree's children alive.
-use o5s_core::{Hash, Name, Observed, ObjectStore, ReplaceOutcome, Repository};
+use o5s_core::{Hash, Name, ObjectStore, Observed, ReplaceOutcome, Repository};
 use o5s_repo::gc::GcOptions;
 use o5s_repo::{FrontRegistry, LocalRepo, PackConfig};
 use o5s_tree::{Change, Entry, Mode, PutDirOpts, Status, Tree, TreeFront};
@@ -117,8 +117,7 @@ fn put_dir_checkout_roundtrip() {
     std::fs::write(src.join("a.txt"), b"hello\n").unwrap();
     std::fs::write(src.join("run.sh"), b"#!/bin/sh\n").unwrap();
     std::fs::set_permissions(src.join("run.sh"), std::fs::Permissions::from_mode(0o755)).unwrap();
-    std::fs::write(src.join("sub/deep/big.bin"), (0..200_000u32).map(|i| (i % 251) as u8).collect::<Vec<_>>())
-        .unwrap();
+    std::fs::write(src.join("sub/deep/big.bin"), (0..200_000u32).map(|i| (i % 251) as u8).collect::<Vec<_>>()).unwrap();
     std::os::unix::fs::symlink("a.txt", src.join("link")).unwrap();
     std::os::unix::fs::symlink("../../nowhere", src.join("sub/dangling")).unwrap();
     let raw = std::ffi::OsStr::from_bytes(b"\xff raw name");
@@ -207,7 +206,8 @@ fn diff_trees() {
         e(b"was-dir", Mode::Regular, b2),
         e(b"link", Mode::Symlink, b2),
     ]);
-    let got: Vec<(Vec<u8>, Status)> = o5s_tree::diff(&r, &a, &b).unwrap().into_iter().map(|c| (c.path, c.status)).collect();
+    let got: Vec<(Vec<u8>, Status)> =
+        o5s_tree::diff(&r, &a, &b).unwrap().into_iter().map(|c| (c.path, c.status)).collect();
     assert_eq!(
         got,
         vec![
@@ -240,8 +240,14 @@ fn gc_keeps_tree_children() {
     let fake = r.put(b"O5STREE1 but not canonical").unwrap();
     let garbage = r.put(b"unreferenced").unwrap();
     let n = |s: &str| Name::new(s).unwrap();
-    assert!(matches!(r.replace(&n("snap"), &[(n("snap"), Observed::Absent)], root).unwrap(), ReplaceOutcome::Ok { .. }));
-    assert!(matches!(r.replace(&n("fake"), &[(n("fake"), Observed::Absent)], fake).unwrap(), ReplaceOutcome::Ok { .. }));
+    assert!(matches!(
+        r.replace(&n("snap"), &[(n("snap"), Observed::Absent)], root).unwrap(),
+        ReplaceOutcome::Ok { .. }
+    ));
+    assert!(matches!(
+        r.replace(&n("fake"), &[(n("fake"), Observed::Absent)], fake).unwrap(),
+        ReplaceOutcome::Ok { .. }
+    ));
     r.flush().unwrap();
     let opts = GcOptions { grace: Duration::ZERO, allow_short_grace: true, repack_all: true, ..GcOptions::default() };
     for _ in 0..3 {

@@ -4,6 +4,30 @@ All notable changes. Format: [Keep a Changelog](https://keepachangelog.com/). Ve
 
 ## [Unreleased]
 
+### Added
+- **Tree objects: directory snapshots as a standard object** (ARCHITECTURE.md, "Trees").
+  - **Format:** `O5STREE1`, then canonical sorted entries (raw-byte name, mode regular/executable/symlink/subtree,
+    hash).
+  - **Kernel:** `o5s_kernel::tree`, with Lean proofs on the extracted code (`verify/core/proofs/Tree.lean`): the
+    decoder accepts exactly the canonical encodings, encode/decode round-trip, and the GC tracer returns exactly
+    the entry hashes.
+  - **Shell:** crate `o5s-tree` (`TreeFront` for GC, `put_tree`, `put_dir`, `checkout`, `diff`), the CLI
+    commands `o5s tree put|get|diff|ls`, and a fuzz target, `tree`.
+- **File paths as names: a canonical, reversible encoding** (ARCHITECTURE.md, "File paths as names").
+  - **The rule:** per `/`-separated segment, every byte outside `[A-Za-z0-9._-]` becomes `+XX` (uppercase hex),
+    and a `.`/`..` segment has its dots escaped. Decoding is strict, so the encoding is a bijection onto what
+    decoding accepts.
+  - **Where:** a kernel (`o5s_kernel::pathname`) with Lean proofs (`verify/core/proofs/PathName.lean`: the output
+    is always a valid name, decoding inverts encoding, only canonical names decode, the encoding is injective);
+    `Name::from_path` / `to_path` (and `_bytes`) in the core API; `o5s name encode PATH...` /
+    `o5s name decode NAME...` in the CLI; and a fuzz target, `name_path`.
+
+### Fixed
+- **A listing prefix with a trailing `/` now lists the same names** (`o5s refs f/` = `o5s refs f`). Prefixes are
+  segment-aligned, so `f/` used to match nothing locally, and `/v1/refs?prefix=f/` returned 400 (an empty
+  segment). This applies to the CLI, `/v1/refs` and remote clients; `/` lists everything. Search's `prefix=` is a
+  plain string prefix and already accepted it (now tested).
+
 ## [0.1.0-rc.1] - 2026-11-17
 
 The first release candidate. Benchmarks against `docs/BASELINE.md` (PLAN §6.8): BENCH.md, 2026-11-17 final batch.

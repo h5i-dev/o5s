@@ -19,4 +19,4 @@ lean_lib Generated where
 
 -- Hand-written specs and proofs.
 @[default_target] lean_lib Proofs where
-  roots := #[`Proofs, `Tree]
+  roots := #[`Proofs, `PathName, `Tree]

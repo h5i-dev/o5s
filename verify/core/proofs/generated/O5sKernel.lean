@@ -664,7 +664,7 @@ def gc.skip_lone_live
        else ok false
 
 /-- [o5s_kernel::Rule]
-    Source: 'crates/kernel/src/lib.rs', lines 29:0-37:1
+    Source: 'crates/kernel/src/lib.rs', lines 30:0-38:1
     Visibility: public -/
 @[discriminant isize]
 inductive Rule where
@@ -673,7 +673,7 @@ inductive Rule where
 | HeadRelease : Rule
 
 /-- [o5s_kernel::{impl core::cmp::PartialEq<o5s_kernel::Rule> for o5s_kernel::Rule}::eq]:
-    Source: 'crates/kernel/src/lib.rs', lines 28:29-28:38
+    Source: 'crates/kernel/src/lib.rs', lines 29:29-29:38
     Visibility: public -/
 def Rule.Insts.CoreCmpPartialEqRule.eq
   (self : Rule) (other : Rule) : Result Bool := do
@@ -682,7 +682,7 @@ def Rule.Insts.CoreCmpPartialEqRule.eq
   ok (self1 = other1)
 
 /-- [o5s_kernel::Why]
-    Source: 'crates/kernel/src/lib.rs', lines 41:0-48:1
+    Source: 'crates/kernel/src/lib.rs', lines 42:0-49:1
     Visibility: public -/
 @[discriminant isize]
 inductive Why where
@@ -691,7 +691,7 @@ inductive Why where
 | HeadReleaseOnly : Why
 
 /-- [o5s_kernel::Mobility]
-    Source: 'crates/kernel/src/lib.rs', lines 52:0-59:1
+    Source: 'crates/kernel/src/lib.rs', lines 53:0-60:1
     Visibility: public -/
 @[discriminant isize]
 inductive Mobility where
@@ -700,7 +700,7 @@ inductive Mobility where
 | Forbidden : Mobility
 
 /-- [o5s_kernel::Observed]
-    Source: 'crates/kernel/src/lib.rs', lines 63:0-68:1
+    Source: 'crates/kernel/src/lib.rs', lines 64:0-69:1
     Visibility: public -/
 @[discriminant isize]
 inductive Observed where
@@ -708,7 +708,7 @@ inductive Observed where
 | Version : Std.U64 → Observed
 
 /-- [o5s_kernel::{impl core::cmp::PartialEq<o5s_kernel::Observed> for o5s_kernel::Observed}::eq]:
-    Source: 'crates/kernel/src/lib.rs', lines 62:29-62:38
+    Source: 'crates/kernel/src/lib.rs', lines 63:29-63:38
     Visibility: public -/
 def Observed.Insts.CoreCmpPartialEqObserved.eq
   (self : Observed) (other : Observed) : Result Bool := do
@@ -726,7 +726,7 @@ def Observed.Insts.CoreCmpPartialEqObserved.eq
   else ok false
 
 /-- Trait implementation: [o5s_kernel::{impl core::cmp::PartialEq<o5s_kernel::Observed> for o5s_kernel::Observed}]
-    Source: 'crates/kernel/src/lib.rs', lines 62:29-62:38 -/
+    Source: 'crates/kernel/src/lib.rs', lines 63:29-63:38 -/
 @[reducible]
 impl_def Observed.Insts.CoreCmpPartialEqObserved : core.cmp.PartialEq Observed
   Observed := {
@@ -736,7 +736,7 @@ impl_def Observed.Insts.CoreCmpPartialEqObserved : core.cmp.PartialEq Observed
 }
 
 /-- [o5s_kernel::RefVal]
-    Source: 'crates/kernel/src/lib.rs', lines 72:0-77:1
+    Source: 'crates/kernel/src/lib.rs', lines 73:0-78:1
     Visibility: public -/
 structure RefVal where
   hash : Array Std.U8 32#usize
@@ -1301,6 +1301,379 @@ def objects.accept_read
   Result Bool
   := do
   objects.accept_read_loop key digest 0#usize
+
+/-- [o5s_kernel::pathname::PathError]
+    Source: 'crates/kernel/src/pathname.rs', lines 21:0-36:1
+    Visibility: public -/
+@[discriminant isize]
+inductive pathname.PathError where
+| Empty : pathname.PathError
+| EmptySegment : pathname.PathError
+| TooLong : pathname.PathError
+| BadByte : pathname.PathError
+| BadEscape : pathname.PathError
+| NonCanonical : pathname.PathError
+| Invalid : pathname.PathError
+
+/-- [o5s_kernel::pathname::plain]:
+    Source: 'crates/kernel/src/pathname.rs', lines 39:0-56:1
+    Visibility: public -/
+def pathname.plain (b : Std.U8) : Result Bool := do
+  if b >= 97#u8
+  then ok (b <= 122#u8)
+  else
+    if b >= 65#u8
+    then if b <= 90#u8
+         then ok true
+         else ok (b = 95#u8)
+    else
+      if b >= 48#u8
+      then ok (b <= 57#u8)
+      else if b = 46#u8
+           then ok true
+           else ok (b = 45#u8)
+
+/-- [o5s_kernel::pathname::literal]:
+    Source: 'crates/kernel/src/pathname.rs', lines 59:0-64:1
+    Visibility: public -/
+def pathname.literal (c : Std.U8) : Result Bool := do
+  if c = 47#u8
+  then ok true
+  else pathname.plain c
+
+/-- [o5s_kernel::pathname::hex_digit]:
+    Source: 'crates/kernel/src/pathname.rs', lines 67:0-72:1
+    Visibility: public -/
+def pathname.hex_digit (v : Std.U8) : Result Std.U8 := do
+  if v < 10#u8
+  then 48#u8 + v
+  else let i ← v - 10#u8
+       65#u8 + i
+
+/-- [o5s_kernel::pathname::hex_value]:
+    Source: 'crates/kernel/src/pathname.rs', lines 75:0-87:1
+    Visibility: public -/
+def pathname.hex_value (c : Std.U8) : Result Std.U8 := do
+  if c >= 48#u8
+  then
+    if c <= 57#u8
+    then c - 48#u8
+    else
+      if c >= 65#u8
+      then if c <= 70#u8
+           then let i ← c - 65#u8
+                i + 10#u8
+           else ok 16#u8
+      else ok 16#u8
+  else
+    if c >= 65#u8
+    then if c <= 70#u8
+         then let i ← c - 65#u8
+              i + 10#u8
+         else ok 16#u8
+    else ok 16#u8
+
+/-- [o5s_kernel::pathname::starts_segment]:
+    Source: 'crates/kernel/src/pathname.rs', lines 90:0-95:1 -/
+def pathname.starts_segment
+  (p : Slice Std.U8) (i : Std.Usize) : Result Bool := do
+  if i = 0#usize
+  then ok true
+  else let i1 ← i - 1#usize
+       let i2 ← Slice.index_usize p i1
+       ok (i2 = 47#u8)
+
+/-- [o5s_kernel::pathname::ends_segment]:
+    Source: 'crates/kernel/src/pathname.rs', lines 98:0-103:1 -/
+def pathname.ends_segment
+  (p : Slice Std.U8) (i : Std.Usize) : Result Bool := do
+  let i1 ← i + 1#usize
+  let i2 := Slice.len p
+  if i1 = i2
+  then ok true
+  else let i3 ← Slice.index_usize p i1
+       ok (i3 = 47#u8)
+
+/-- [o5s_kernel::pathname::dot_segment]:
+    Source: 'crates/kernel/src/pathname.rs', lines 106:0-127:1
+    Visibility: public -/
+def pathname.dot_segment (p : Slice Std.U8) (i : Std.Usize) : Result Bool := do
+  let i1 ← Slice.index_usize p i
+  if i1 != 46#u8
+  then ok false
+  else
+    let b ← pathname.starts_segment p i
+    if b
+    then
+      let b1 ← pathname.ends_segment p i
+      if b1
+      then ok true
+      else
+        let i2 ← i + 1#usize
+        let i3 := Slice.len p
+        if i2 < i3
+        then
+          let i4 ← Slice.index_usize p i2
+          if i4 = 46#u8
+          then pathname.ends_segment p i2
+          else ok false
+        else ok false
+    else
+      let i2 ← i - 1#usize
+      let i3 ← Slice.index_usize p i2
+      if i3 = 46#u8
+      then
+        let b1 ← pathname.starts_segment p i2
+        if b1
+        then pathname.ends_segment p i
+        else ok false
+      else ok false
+
+/-- [o5s_kernel::pathname::empty_segment_at]:
+    Source: 'crates/kernel/src/pathname.rs', lines 130:0-138:1 -/
+def pathname.empty_segment_at
+  (p : Slice Std.U8) (i : Std.Usize) : Result Bool := do
+  if i = 0#usize
+  then ok true
+  else
+    let i1 ← i + 1#usize
+    let i2 := Slice.len p
+    if i1 = i2
+    then ok true
+    else let i3 ← Slice.index_usize p i1
+         ok (i3 = 47#u8)
+
+/-- [o5s_kernel::pathname::keep]:
+    Source: 'crates/kernel/src/pathname.rs', lines 141:0-146:1 -/
+def pathname.keep (p : Slice Std.U8) (i : Std.Usize) : Result Bool := do
+  let i1 ← Slice.index_usize p i
+  let b ← pathname.plain i1
+  if b
+  then let b1 ← pathname.dot_segment p i
+       ok (¬ b1)
+  else ok false
+
+/-- [o5s_kernel::pathname::push_escape]:
+    Source: 'crates/kernel/src/pathname.rs', lines 149:0-155:1 -/
+def pathname.push_escape
+  (out : alloc.vec.Vec Std.U8) (b : Std.U8) :
+  Result (alloc.vec.Vec Std.U8)
+  := do
+  let out1 ← alloc.vec.Vec.push out 43#u8
+  let i ← b / 16#u8
+  let i1 ← pathname.hex_digit i
+  let out2 ← alloc.vec.Vec.push out1 i1
+  let i2 ← b % 16#u8
+  let i3 ← pathname.hex_digit i2
+  alloc.vec.Vec.push out2 i3
+
+/-- [o5s_kernel::pathname::encode]: loop body 0:
+    Source: 'crates/kernel/src/pathname.rs', lines 168:4-189:1
+    Visibility: public -/
+@[rust_loop_body]
+def pathname.encode_loop.body
+  (p : Slice Std.U8) (out : alloc.vec.Vec Std.U8) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.U8) × Std.Usize) (core.result.Result
+    (alloc.vec.Vec Std.U8) pathname.PathError))
+  := do
+  let i1 := Slice.len p
+  if i < i1
+  then
+    let b ← Slice.index_usize p i
+    if b = 47#u8
+    then
+      let b1 ← pathname.empty_segment_at p i
+      if b1
+      then ok (done (core.result.Result.Err pathname.PathError.EmptySegment))
+      else
+        let out1 ← alloc.vec.Vec.push out 47#u8
+        let i2 ← i + 1#usize
+        ok (cont (out1, i2))
+    else
+      let b1 ← pathname.keep p i
+      let out1 ←
+        if b1
+        then alloc.vec.Vec.push out b
+        else pathname.push_escape out b
+      let i2 ← i + 1#usize
+      ok (cont (out1, i2))
+  else
+    let i2 := alloc.vec.Vec.len out
+    if i2 > names.MAX_NAME
+    then ok (done (core.result.Result.Err pathname.PathError.TooLong))
+    else
+      let s := alloc.vec.Vec.deref out
+      let r ← names.validate s
+      match r with
+      | core.result.Result.Ok _ => ok (done (core.result.Result.Ok out))
+      | core.result.Result.Err _ =>
+        ok (done (core.result.Result.Err pathname.PathError.Invalid))
+
+/-- [o5s_kernel::pathname::encode]: loop 0:
+    Source: 'crates/kernel/src/pathname.rs', lines 168:4-189:1
+    Visibility: public -/
+@[rust_loop]
+def pathname.encode_loop
+  (p : Slice Std.U8) (out : alloc.vec.Vec Std.U8) (i : Std.Usize) :
+  Result (core.result.Result (alloc.vec.Vec Std.U8) pathname.PathError)
+  := do
+  loop
+    (fun (out1, i1) => pathname.encode_loop.body p out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::pathname::encode]:
+    Source: 'crates/kernel/src/pathname.rs', lines 158:0-189:1
+    Visibility: public -/
+def pathname.encode
+  (p : Slice Std.U8) :
+  Result (core.result.Result (alloc.vec.Vec Std.U8) pathname.PathError)
+  := do
+  let i := Slice.len p
+  if i = 0#usize
+  then ok (core.result.Result.Err pathname.PathError.Empty)
+  else
+    let i1 := Slice.len p
+    if i1 > names.MAX_NAME
+    then ok (core.result.Result.Err pathname.PathError.TooLong)
+    else pathname.encode_loop p (alloc.vec.Vec.new Std.U8) 0#usize
+
+/-- [o5s_kernel::pathname::decode_raw]: loop body 0:
+    Source: 'crates/kernel/src/pathname.rs', lines 198:4-227:1
+    Visibility: public -/
+@[rust_loop_body]
+def pathname.decode_raw_loop.body
+  (n : Slice Std.U8) (out : alloc.vec.Vec Std.U8) (st : Std.U8) (hi : Std.U8)
+  (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.U8) × Std.U8 × Std.U8 × Std.Usize)
+    (core.result.Result (alloc.vec.Vec Std.U8) pathname.PathError))
+  := do
+  let i1 := Slice.len n
+  if i < i1
+  then
+    let c ← Slice.index_usize n i
+    if st = 0#u8
+    then
+      if c = 43#u8
+      then let i2 ← i + 1#usize
+           ok (cont (out, 1#u8, hi, i2))
+      else
+        let b ← pathname.literal c
+        if b
+        then
+          let out1 ← alloc.vec.Vec.push out c
+          let i2 ← i + 1#usize
+          ok (cont (out1, st, hi, i2))
+        else ok (done (core.result.Result.Err pathname.PathError.BadByte))
+    else
+      let v ← pathname.hex_value c
+      if v >= 16#u8
+      then ok (done (core.result.Result.Err pathname.PathError.BadEscape))
+      else
+        let (out1, st1, hi1) ←
+          if st = 1#u8
+          then ok (out, 2#u8, v)
+          else
+            do
+            let i2 ← hi * 16#u8
+            let i3 ← i2 + v
+            let out2 ← alloc.vec.Vec.push out i3
+            ok (out2, 0#u8, hi)
+        let i2 ← i + 1#usize
+        ok (cont (out1, st1, hi1, i2))
+  else
+    if st != 0#u8
+    then ok (done (core.result.Result.Err pathname.PathError.BadEscape))
+    else ok (done (core.result.Result.Ok out))
+
+/-- [o5s_kernel::pathname::decode_raw]: loop 0:
+    Source: 'crates/kernel/src/pathname.rs', lines 198:4-227:1
+    Visibility: public -/
+@[rust_loop]
+def pathname.decode_raw_loop
+  (n : Slice Std.U8) (out : alloc.vec.Vec Std.U8) (st : Std.U8) (hi : Std.U8)
+  (i : Std.Usize) :
+  Result (core.result.Result (alloc.vec.Vec Std.U8) pathname.PathError)
+  := do
+  loop
+    (fun (out1, st1, hi1, i1) => pathname.decode_raw_loop.body n out1 st1 hi1
+      i1)
+    (out, st, hi, i)
+
+/-- [o5s_kernel::pathname::decode_raw]:
+    Source: 'crates/kernel/src/pathname.rs', lines 193:0-227:1
+    Visibility: public -/
+@[reducible]
+def pathname.decode_raw
+  (n : Slice Std.U8) :
+  Result (core.result.Result (alloc.vec.Vec Std.U8) pathname.PathError)
+  := do
+  pathname.decode_raw_loop n (alloc.vec.Vec.new Std.U8) 0#u8 0#u8 0#usize
+
+/-- [o5s_kernel::pathname::bytes_eq]: loop body 0:
+    Source: 'crates/kernel/src/pathname.rs', lines 235:4-242:1
+    Visibility: public -/
+@[rust_loop_body]
+def pathname.bytes_eq_loop.body
+  (a : Slice Std.U8) (b : Slice Std.U8) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let i1 := Slice.len a
+  if i < i1
+  then
+    let i2 ← Slice.index_usize a i
+    let i3 ← Slice.index_usize b i
+    if i2 != i3
+    then ok (done false)
+    else let i4 ← i + 1#usize
+         ok (cont i4)
+  else ok (done true)
+
+/-- [o5s_kernel::pathname::bytes_eq]: loop 0:
+    Source: 'crates/kernel/src/pathname.rs', lines 235:4-242:1
+    Visibility: public -/
+@[rust_loop]
+def pathname.bytes_eq_loop
+  (a : Slice Std.U8) (b : Slice Std.U8) (i : Std.Usize) : Result Bool := do
+  loop
+    (fun i1 => pathname.bytes_eq_loop.body a b i1)
+    i
+
+/-- [o5s_kernel::pathname::bytes_eq]:
+    Source: 'crates/kernel/src/pathname.rs', lines 230:0-242:1
+    Visibility: public -/
+def pathname.bytes_eq (a : Slice Std.U8) (b : Slice Std.U8) : Result Bool := do
+  let i := Slice.len a
+  let i1 := Slice.len b
+  if i != i1
+  then ok false
+  else pathname.bytes_eq_loop a b 0#usize
+
+/-- [o5s_kernel::pathname::decode]:
+    Source: 'crates/kernel/src/pathname.rs', lines 246:0-264:1
+    Visibility: public -/
+def pathname.decode
+  (n : Slice Std.U8) :
+  Result (core.result.Result (alloc.vec.Vec Std.U8) pathname.PathError)
+  := do
+  let i := Slice.len n
+  if i = 0#usize
+  then ok (core.result.Result.Err pathname.PathError.Empty)
+  else
+    let r ← pathname.decode_raw n
+    match r with
+    | core.result.Result.Ok p =>
+      let s := alloc.vec.Vec.deref p
+      let r1 ← pathname.encode s
+      match r1 with
+      | core.result.Result.Ok e =>
+        let s1 := alloc.vec.Vec.deref e
+        let b ← pathname.bytes_eq s1 n
+        if b
+        then ok r
+        else ok (core.result.Result.Err pathname.PathError.NonCanonical)
+      | core.result.Result.Err _ =>
+        ok (core.result.Result.Err pathname.PathError.NonCanonical)
+    | core.result.Result.Err _ => ok r
 
 /-- [o5s_kernel::promote::Attestation]
     Source: 'crates/kernel/src/promote.rs', lines 16:0-23:1

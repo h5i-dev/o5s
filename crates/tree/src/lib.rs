@@ -272,7 +272,10 @@ fn put_dir_rec(repo: &dyn Repository, dir: &Path, opts: &PutDirOpts, stats: &mut
             let mode = if md.permissions().mode() & 0o100 != 0 { Mode::Executable } else { Mode::Regular };
             (mode, repo.put_stream(&mut src).map_err(|e| in_path(&path, e))?)
         } else {
-            return Err(Error::Parse(format!("{}: unsupported file type (not a file, symlink or directory)", path.display())));
+            return Err(Error::Parse(format!(
+                "{}: unsupported file type (not a file, symlink or directory)",
+                path.display()
+            )));
         };
         entries.push(Entry { name, mode, hash });
     }
@@ -398,13 +401,15 @@ fn join(prefix: &[u8], name: &[u8]) -> Vec<u8> {
     p
 }
 
+/// One pending comparison in [`diff`]: path prefix, old tree, new tree, depth (a `None` side is empty).
+type DiffTask = (Vec<u8>, Option<Hash>, Option<Hash>, usize);
+
 /// The leaf-level differences from tree `a` to tree `b`, sorted by path.
 /// Subtrees with equal hashes are skipped without reading them; a directory
 /// that appears or disappears is listed file by file.
 pub fn diff(repo: &dyn ObjectStore, a: &Hash, b: &Hash) -> Result<Vec<Change>> {
     let mut out = Vec::new();
-    // (path prefix, old tree, new tree, depth); a `None` side is empty.
-    let mut stack: Vec<(Vec<u8>, Option<Hash>, Option<Hash>, usize)> = vec![(Vec::new(), Some(*a), Some(*b), 0)];
+    let mut stack: Vec<DiffTask> = vec![(Vec::new(), Some(*a), Some(*b), 0)];
     while let Some((prefix, ta, tb, depth)) = stack.pop() {
         if ta == tb {
             continue;

@@ -24,9 +24,11 @@ Commands:
   delete     Delete a name (OCC). Immutable/released names can't be deleted
   refs       List refs under a prefix
   ns         Namespace rules
+  name       File paths as names (needs no repository): the canonical, reversible encoding
   flush      Seal open packs (make written objects durable and visible)
   stat       Repository statistics
   fsck       Verify every stored object (CRC + content hash) and every ref. Exit 1 on problems
+  tree       Directory snapshots as tree objects: put a directory, check one out, diff two. A tree keeps file modes (regular, executable, symlink) and structure; GC keeps every object a live tree references
   prov       Provenance: record derivations; lineage, impact and why of a HASH or NAME
   attest     Signed attestations (in-toto Statement v1 in DSSE envelopes) about a HASH or NAME
   promote    Promote: move DST to the object SRC names, if the policy given by the flags holds (one OCC transaction, recorded as a `promote` provenance record). With --remote, the server's `[[promotion]]` policy applies instead (and the policy flags are refused)
@@ -266,6 +268,50 @@ Options:
   -h, --help  Print help
 ```
 
+## `name`
+
+```text
+File paths as names (needs no repository): the canonical, reversible encoding
+
+Usage: o5s name <COMMAND>
+
+Commands:
+  encode  Print the name of each file PATH (one per line, in order). Per `/`-separated segment, every byte outside `[A-Za-z0-9._-]` becomes `+XX` (uppercase hex), and a `.` or `..` segment has its dots escaped. Fails on an empty path or segment, or a name over 1024 bytes
+  decode  Print the file path each NAME encodes (one per line, in order). Strict: only the canonical encoding of a path decodes
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `name encode`
+
+```text
+Print the name of each file PATH (one per line, in order). Per `/`-separated segment, every byte outside `[A-Za-z0-9._-]` becomes `+XX` (uppercase hex), and a `.` or `..` segment has its dots escaped. Fails on an empty path or segment, or a name over 1024 bytes
+
+Usage: o5s name encode <PATHS>...
+
+Arguments:
+  <PATHS>...  
+
+Options:
+  -h, --help  Print help
+```
+
+### `name decode`
+
+```text
+Print the file path each NAME encodes (one per line, in order). Strict: only the canonical encoding of a path decodes
+
+Usage: o5s name decode <NAMES>...
+
+Arguments:
+  <NAMES>...  
+
+Options:
+  -h, --help  Print help
+```
+
 ## `flush`
 
 ```text
@@ -297,6 +343,86 @@ Usage: o5s fsck
 
 Options:
   -h, --help  Print help
+```
+
+## `tree`
+
+```text
+Directory snapshots as tree objects: put a directory, check one out, diff two. A tree keeps file modes (regular, executable, symlink) and structure; GC keeps every object a live tree references
+
+Usage: o5s tree <COMMAND>
+
+Commands:
+  put   Snapshot DIR (symlinks are stored, not followed) and print the root tree's hash. Everything is sealed once at the end, so the printed hash is durable
+  get   Write tree TREE (a HASH or NAME) out as DIR, which must not exist or be empty
+  diff  Paths that differ from tree A to tree B, one `<A|D|M|T>\t<path>` per line (added, deleted, modified, type changed). Exit 0 either way
+  ls    List a tree: `<f|x|l|d> <hash>\t<name>` per entry
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `tree put`
+
+```text
+Snapshot DIR (symlinks are stored, not followed) and print the root tree's hash. Everything is sealed once at the end, so the printed hash is durable
+
+Usage: o5s tree put [OPTIONS] <DIR>
+
+Arguments:
+  <DIR>  
+
+Options:
+      --exclude <NAME>  Skip entries with this name at any depth (e.g. `.git`). Repeatable
+  -h, --help            Print help
+```
+
+### `tree get`
+
+```text
+Write tree TREE (a HASH or NAME) out as DIR, which must not exist or be empty
+
+Usage: o5s tree get <TREE> <DIR>
+
+Arguments:
+  <TREE>  
+  <DIR>   
+
+Options:
+  -h, --help  Print help
+```
+
+### `tree diff`
+
+```text
+Paths that differ from tree A to tree B, one `<A|D|M|T>\t<path>` per line (added, deleted, modified, type changed). Exit 0 either way
+
+Usage: o5s tree diff [OPTIONS] <A> <B>
+
+Arguments:
+  <A>  
+  <B>  
+
+Options:
+  -z          NUL-terminate lines (paths are raw bytes)
+  -h, --help  Print help
+```
+
+### `tree ls`
+
+```text
+List a tree: `<f|x|l|d> <hash>\t<name>` per entry
+
+Usage: o5s tree ls [OPTIONS] <TREE>
+
+Arguments:
+  <TREE>  
+
+Options:
+  -r, --recursive  Every file, symlink and directory below, as paths
+  -z               NUL-terminate lines
+  -h, --help       Print help
 ```
 
 ## `prov`

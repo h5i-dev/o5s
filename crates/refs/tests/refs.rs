@@ -795,3 +795,22 @@ fn group_commit_fsync_failure_fails_the_batch_only() {
         ));
     });
 }
+
+/// A trailing `/` names the same listing prefix (`f/` lists what `f` lists); prefixes stay
+/// segment-aligned (`f/` never matches `foo`), and `/` lists everything.
+#[test]
+fn list_prefix_with_a_trailing_slash() {
+    let d = tempfile::tempdir().unwrap();
+    let r = RefStore::open(d.path()).unwrap();
+    for (i, name) in ["f/a", "f/b/c", "foo/x", "g"].into_iter().enumerate() {
+        let k = n(name);
+        r.replace(&k, &[(k.clone(), Observed::Absent)], h(i as u64), &yes).unwrap();
+    }
+    let names = |p: &str| r.list(p).unwrap().into_iter().map(|(k, _)| k.to_string()).collect::<Vec<_>>();
+    assert_eq!(names("f"), ["f/a", "f/b/c"]);
+    assert_eq!(names("f/"), names("f"));
+    assert_eq!(names("f//"), names("f"));
+    assert_eq!(names("f/b/"), ["f/b/c"]);
+    assert_eq!(names("/"), names(""));
+    assert_eq!(names("/").len(), 4);
+}

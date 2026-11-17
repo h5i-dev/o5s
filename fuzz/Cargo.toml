@@ -166,6 +166,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "name_path"
+path = "fuzz_targets/name_path.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "tree"
 path = "fuzz_targets/tree.rs"
 test = false
