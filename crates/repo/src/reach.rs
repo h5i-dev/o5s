@@ -91,9 +91,9 @@ struct Cell {
 #[derive(Default)]
 struct Members {
     set: HashSet<Hash>,
-    /// Members reached as objects (a ref target or a front child) whose front children were
-    /// traced. Hashes reached only as chunks of a stored object are members but not traced.
-    traced: HashSet<Hash>,
+    /// Members reached so far only as chunks of a stored object: not traced (they are not front
+    /// objects). An object edge to one of them traces it then. Only chunk hashes are kept here.
+    chunk_only: HashSet<Hash>,
     /// Recompute from the cell's names before the next answer.
     dirty: bool,
 }
@@ -148,7 +148,7 @@ impl ReachIndex {
         let states = (0..cells.len())
             .map(|_| {
                 Arc::new(Cell {
-                    members: Mutex::new(Members { set: HashSet::new(), traced: HashSet::new(), dirty: true }),
+                    members: Mutex::new(Members { set: HashSet::new(), chunk_only: HashSet::new(), dirty: true }),
                     ..Cell::default()
                 })
             })
@@ -223,14 +223,14 @@ impl ReachIndex {
             };
             m.dirty |= dirty;
             if m.dirty {
-                (m.set, m.traced) = self.mark_cell(cells, c)?;
+                (m.set, m.chunk_only) = self.mark_cell(cells, c)?;
                 m.dirty = false;
             } else if !roots.is_empty() {
                 let repo = &self.inner.repo;
                 let tracer = repo.fronts().tracer(repo)?;
-                let Members { set, traced, .. } = &mut *m;
+                let Members { set, chunk_only, .. } = &mut *m;
                 for h in roots {
-                    if let Err(e) = closure(repo, &tracer, h, set, traced) {
+                    if let Err(e) = closure(repo, &tracer, h, set, chunk_only) {
                         // Never guess: recompute exactly on the next answer.
                         m.dirty = true;
                         return Err(e);
@@ -246,15 +246,15 @@ impl ReachIndex {
     fn mark_cell(&self, cells: &[String], c: usize) -> Result<(HashSet<Hash>, HashSet<Hash>)> {
         let repo = &self.inner.repo;
         let mut members = HashSet::new();
-        let mut traced = HashSet::new();
+        let mut chunk_only = HashSet::new();
         let tracer = repo.fronts().tracer(repo)?;
         let prefix = &cells[c];
         for (name, v) in repo.list_refs(prefix.trim_end_matches('/'))? {
             if Self::cell_of(cells, name.as_str()) == Some(c as CellId) {
-                closure(repo, &tracer, v.hash, &mut members, &mut traced)?;
+                closure(repo, &tracer, v.hash, &mut members, &mut chunk_only)?;
             }
         }
-        Ok((members, traced))
+        Ok((members, chunk_only))
     }
 
     /// Every cell is recomputed by its next query (another writer replaced the whole ref state).
@@ -361,19 +361,19 @@ impl RefObserver for Observer {
 /// at a time so fronts can resolve a wave's children in one batch. Objects that
 /// are missing (a dangling ref) contribute nothing.
 ///
-/// Two kinds of edges, two sets. A *chunk* edge (`PackStore::chunks`) reaches
-/// a raw part of a stored object: a member, but not a front object, so the
-/// tracer is not run on it (that would read and decompress every chunk of a
-/// large file again). An *object* edge (a root or a front child) also traces
-/// the object, once (`traced`). A hash that is both a chunk and an object is
-/// traced when its object edge arrives, even if it became a member as a chunk
-/// first, so nothing a front references is ever missed.
+/// Two kinds of edges. A *chunk* edge (`PackStore::chunks`) reaches a raw part
+/// of a stored object: a member, but not a front object, so the tracer is not
+/// run on it (that would read and decompress every chunk of a large file
+/// again); it is remembered in `chunk_only`. An *object* edge (a root or a front
+/// child) traces the object if it is new, or if it was so far only a chunk. So a
+/// hash that is both a chunk and an object is traced when its object edge
+/// arrives, whichever came first, and nothing a front references is ever missed.
 fn closure(
     repo: &LocalRepo,
     tracer: &dyn Tracer,
     root: Hash,
     members: &mut HashSet<Hash>,
-    traced: &mut HashSet<Hash>,
+    chunk_only: &mut HashSet<Hash>,
 ) -> Result<()> {
     // (hash, reached as an object)
     let mut wave = vec![(root, true)];
@@ -381,7 +381,9 @@ fn closure(
         let mut objects = Vec::new();
         let mut next = Vec::new();
         for (h, object) in wave.drain(..) {
-            if !members.contains(&h) {
+            let new = if members.contains(&h) {
+                false
+            } else {
                 if !repo.packs().contains(&h)? {
                     continue;
                 }
@@ -389,13 +391,18 @@ fn closure(
                 if let Some(kids) = repo.packs().chunks(&h)? {
                     next.extend(kids.into_iter().filter(|k| !members.contains(k)).map(|k| (k, false)));
                 }
-            }
-            if object && traced.insert(h) {
-                objects.push(h);
+                true
+            };
+            if object {
+                if new || chunk_only.remove(&h) {
+                    objects.push(h);
+                }
+            } else if new {
+                chunk_only.insert(h);
             }
         }
         for kids in children_of_wave(tracer, &objects, repo)? {
-            next.extend(kids.into_iter().filter(|k| !traced.contains(k)).map(|k| (k, true)));
+            next.extend(kids.into_iter().filter(|k| !members.contains(k) || chunk_only.contains(k)).map(|k| (k, true)));
         }
         wave = next;
     }
