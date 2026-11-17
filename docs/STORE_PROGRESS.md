@@ -22,8 +22,32 @@ Third worker, next to core (`pico2peta`) and net (`pico2peta-net`). Task: /mnt/s
   object whose hash was already printed. Small packs are merged by GC (`small_pack_bytes`, 16 MiB).
 - Test: `crates/cli/tests/cli.rs::put_many_files_shares_one_pack`.
 
-**Measurement** (6,698-file django tree, `/mnt/scratch/pico2peta/tmp/store-bench/run.sh`, under the bench lock):
-pending, queued behind the SWE-bench run's lock.
+**Measurement** (2026-11-17 15:23–16:04 UTC, under the bench lock; host load 3.2–10.8, the SWE-bench run was
+still active; script and raw output in /mnt/scratch/pico2peta/tmp/store-bench/{run.sh,results.txt}). The input is
+the 6,698-file django tree from the SWE-bench pilot (`git archive` of its base). main = `a479528`, new = `2c1fc62` (before the merge of origin/main, `50a6e92`).
+
+| run | sealed packs | wall s | user s | sys s |
+|---|---|---|---|---|
+| main, one `o5s put` per file, sequential | 5,940 | 995.6 | 454.5 | 481.9 |
+| new, one `o5s put` per file, sequential | 5,940 | 679.2 | 331.7 | 293.4 |
+| main, one `o5s put` per file, 8 in parallel | 5,944 | 365.3 | 563.1 | 510.1 |
+| new, one `o5s put` per file, 8 in parallel | 5,962 | 231.6 | 412.7 | 303.3 |
+| new, `o5s put --batch` (cold page cache) | **1** | **1.57** | 0.47 | 0.27 |
+| new, `o5s put --batch` (warm) | **1** | **0.38** | 0.29 | 0.08 |
+
+- The hashes are identical across all runs: batch equals single puts, and main equals new. (There are 5,940
+  packs for 6,698 files because duplicate contents add no record, so no pack.)
+- Batch put vs main's per-file import: about 630× less wall time and 5,940 times fewer packs.
+- The open-cost fixes alone make single-file puts 32 % faster (sequential) and 37 % faster (8 parallel), with
+  39–41 % less sys time.
+
+**§6.8 no-regression: pending.** The ingest reps taken in that window are invalid: start load was 4.3–10.1 (the
+rule needs < 1.0) and the medians are noisy. Since the change touches every store open (`LocalBackend::list`,
+`refresh`, `recover_orphans`), the check covers the core-suite rows that open stores: small (put/get),
+ingest, and scale objects 1e7 (`open_s`, `get_p99`). They run interleaved main/new, 3 reps each, under the
+lock in a quiet window (start load < 1.0, no foreign process, 10 s process log), using
+/mnt/scratch/pico2peta/tmp/store-bench/regress.sh, and are judged against BASELINE.md. multi-put is not ready
+to merge until this passes.
 
 **Follow-ups**
 - Store open is still O(packs): one listing plus one index read per pack not yet loaded. A local merged-index
