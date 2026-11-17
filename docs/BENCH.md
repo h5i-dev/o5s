@@ -48,6 +48,45 @@ pre-registered metric was plain RSS, so it is reported as **missed**; the split 
   292 B/object projection was stopped early, as soon as the 10⁷ disk number showed it could not fit.
 - The bench's disk number now counts each inode once.
 
+## 2026-11-17: durable-write gap (PLAN amendment 2026-11-17 c): the put is device-bound
+**Verdict on `e9c0d7b`** (background fsync of a full pack while appends go on), in one exclusive window
+(22:44–23:12 UTC, load 1.47 at start; the bench's own I/O wait put the load at 2.3–4.8 during the run, with no
+foreign process). Raw data: `/mnt/scratch/pico2peta/bench-dw/verdict-e9c0d7b/`.
+
+| | rc.1 (interleaved) | e9c0d7b | rule | result |
+|---|---|---|---|---|
+| put/dd per run | 1.019, 0.881, 0.882, 0.881, 0.867 | 0.889, 0.877, 0.884, 0.867, 0.866 | median ≥ 0.90× | **FAIL: 0.877×** |
+| put MB/s, median (range) | 187 (184–188) | 187 (184–187) | §6.8 | PASS (equal) |
+| strict / eof read MB/s, median | 2604 / 3334 | 2660 / 3377 | §6.8 | PASS |
+| range4k p99, ms | 0.111 | 0.110 | §6.8 | PASS |
+| sizes (one copy, 10v scattered, 10v inserted) | identical | identical | identical | PASS |
+| ingest put, 3 reps (BASELINE 187) | | 194, 194, 194 | §6.8 | PASS |
+
+The change had no measurable effect and was reverted (`5309a03`). The diagnosis explains why:
+- **The put is not CPU-bound.** The same `generic 1024` on tmpfs puts 721 MB/s.
+- **The seal's fsyncs are small.** Each 256 MiB seal waited about 66–71 ms in `fsync`, which is device time:
+  overlapping it with appends changed nothing.
+- **The device has a fixed sustained write rate.** `iostat -x 1` (`bench-dw/iostat-2312/`) shows both `dd`
+  and our put writing at **155 MB/s, 100 % util**, with 128 KiB requests and a full queue. Each phase starts
+  with a one-second burst after idle: 338 MB/s for `dd`, 244 for the put that follows it.
+- **`dd` itself depends on the idle time before it** (`bench-dw/bucket.txt`, one window, load 0.6–1.0):
+
+  | idle before `dd` | MB/s |
+  |---|---|
+  | 30 s | 181.2 |
+  | none | 155.7 |
+  | none | 155.3 |
+  | 30 s | 209.5 |
+  | 5 s | 176.1 |
+
+  This is consistent with a burst budget on the NVMe instance store that refills while idle.
+
+**So the tier on this host measures the burst budget.** `generic` always runs `dd` first, on a rested device,
+and the put about 0.5 s later. Our durable put, 184–188 MB/s, is above the device's sustained 155 MB/s. A
+same-writer pair, back to back, would give a ratio of about 0.83 even for `dd` against itself. The baseline's
+1.002× was measured when `dd` itself ran at 153–187 MB/s. Changing the protocol (equal idle before each arm,
+or alternating the order) is the human's call: PROGRESS.md "Questions for human".
+
 ## 2026-11-17: final batch for v0.1.0-rc.1, core side, on `ba21b99` (PLAN §6.8 and amendments)
 
 **One commit:** `release/v0.1.0-rc.1` at `ba21b99`, dirty 0 in every header. It is `20f55ad` plus the lazy reach

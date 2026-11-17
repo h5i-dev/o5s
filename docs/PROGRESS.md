@@ -250,6 +250,15 @@ ruled on (BENCH.md 2026-11-17; raw data in `bench/final/rc1/ba21b99/` and `bench
 - **Earlier passes:** pass 1 (`78bf513`) found two memory regressions, fixed in `20f55ad`. Pass 2 (`20f55ad`)
   found net's git re-push FAIL, fixed in `ba21b99`. Both passes are kept in BENCH.md.
 
+## Durable-write gap (task from the human, 2026-11-17): status
+**Not closable in code on this host.** The durable put is at the device's limit, and the tier gap is how the
+benchmark orders `dd` and the put on a burst-budget NVMe. BENCH.md has the evidence; the protocol question is
+under "Questions for human".
+- **Pre-registered:** PLAN amendment 2026-11-17 c.
+- **Candidate `e9c0d7b`** (background fsync of full packs): tier FAIL at 0.877×, §6.8 PASS, no measurable
+  gain. Reverted in `5309a03`.
+- **Branch `perf/durable-put`:** pre-registration, the candidate, the revert, and these notes.
+
 ## Post-RC (agreed, not started)
 - Re-measure the §6.4 verified read on a many-core host (the human, 2026-11-16).
 - A double-buffered parallel Xet upload chunker: cut window i while window i+1 is read. The windowed version lost
@@ -258,6 +267,15 @@ ruled on (BENCH.md 2026-11-17; raw data in `bench/final/rc1/ba21b99/` and `bench
   tier. It was committed while measurements were stopped, so it is unmeasured.
 
 ## Questions for human
+- **Durable-write tier protocol (§6.4), 2026-11-17.** On this host the tier measures the NVMe's burst budget,
+  not the store (BENCH.md "durable-write gap"):
+  - **Device rate:** `dd conv=fsync` gets 155 MB/s back to back and up to 210 MB/s after 30 s idle.
+  - **Our put:** 184–188 MB/s, run 0.5 s after `dd`, so already above the sustained rate.
+  - **Background fsync:** measured, no effect, reverted.
+
+  May the protocol be amended so both arms get the same device state? For example, 30 s idle before each arm,
+  and alternating `dd`-first and put-first over the 5 runs. **The safe default until you rule:** the protocol
+  is unchanged and the tier stays recorded as FAIL (0.877× on `e9c0d7b`; 0.866–0.868× before).
 - **Disk budget:** `/mnt/scratch` has much less headroom than the ~31 GB in AGENT_TASK.md (24 GB → 13 GB → 0 during this session, partly from other directories). Could you free or extend space, or say which of these may be deleted: the Exp1 mirrors and spill (`bench-data`, ~1.5 GB), the fuzz build cache, the nightly toolchain (`rustup-nightly`)?
 - **Disk headroom** is still tight: it has dipped below 8 GB twice. Both sessions now clean their build caches regularly.
 - **Exp1 failed**, so grouped repack stays opt-in (`[gc] grouped = false` by default, per the pre-registered rule), and Exp1b is queued. Nothing is needed from you unless you want to override the pre-registered consequences.
