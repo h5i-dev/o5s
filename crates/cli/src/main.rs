@@ -165,6 +165,13 @@ enum Cmd {
     Stat,
     /// Verify every stored object (CRC + content hash) and every ref. Exit 1 on problems.
     Fsck,
+    /// Directory snapshots as tree objects: put a directory, check one out, diff two.
+    /// A tree keeps file modes (regular, executable, symlink) and structure; GC keeps
+    /// every object a live tree references.
+    Tree {
+        #[command(subcommand)]
+        cmd: TreeCmd,
+    },
     /// Provenance: record derivations; lineage, impact and why of a HASH or NAME.
     Prov {
         #[command(subcommand)]
@@ -218,6 +225,39 @@ enum Cmd {
         /// at a fast ingest level, e.g. `init --zstd-level 1`, into similarity frames).
         #[arg(long)]
         repack_all: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum TreeCmd {
+    /// Snapshot DIR (symlinks are stored, not followed) and print the root tree's hash.
+    /// Everything is sealed once at the end, so the printed hash is durable.
+    Put {
+        dir: PathBuf,
+        /// Skip entries with this name at any depth (e.g. `.git`). Repeatable.
+        #[arg(long, value_name = "NAME")]
+        exclude: Vec<String>,
+    },
+    /// Write tree TREE (a HASH or NAME) out as DIR, which must not exist or be empty.
+    Get { tree: String, dir: PathBuf },
+    /// Paths that differ from tree A to tree B, one `<A|D|M|T>\t<path>` per line
+    /// (added, deleted, modified, type changed). Exit 0 either way.
+    Diff {
+        a: String,
+        b: String,
+        /// NUL-terminate lines (paths are raw bytes).
+        #[arg(short = 'z')]
+        null: bool,
+    },
+    /// List a tree: `<f|x|l|d> <hash>\t<name>` per entry.
+    Ls {
+        tree: String,
+        /// Every file, symlink and directory below, as paths.
+        #[arg(short, long)]
+        recursive: bool,
+        /// NUL-terminate lines.
+        #[arg(short = 'z')]
+        null: bool,
     },
 }
 
@@ -624,6 +664,49 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
             }
         }
         Cmd::Flush => r.flush()?,
+        Cmd::Tree { cmd } => match cmd {
+            TreeCmd::Put { dir, exclude } => {
+                let opts =
+                    o5s_tree::PutDirOpts { exclude: exclude.into_iter().map(|n| n.into_bytes()).collect() };
+                let (h, _) = o5s_tree::put_dir(r, &dir, &opts)?;
+                writeln!(out, "{h}")?;
+            }
+            TreeCmd::Get { tree, dir } => {
+                let h = resolve_target(r, &tree)?;
+                o5s_tree::checkout(r, &h, &dir)?;
+            }
+            TreeCmd::Diff { a, b, null } => {
+                let (a, b) = (resolve_target(r, &a)?, resolve_target(r, &b)?);
+                for c in o5s_tree::diff(r, &a, &b)? {
+                    write!(out, "{}\t", c.status.letter())?;
+                    out.write_all(&c.path)?;
+                    out.write_all(if null { b"\0" } else { b"\n" })?;
+                }
+            }
+            TreeCmd::Ls { tree, recursive, null } => {
+                let h = resolve_target(r, &tree)?;
+                let mut stack = vec![(Vec::new(), h)];
+                while let Some((prefix, th)) = stack.pop() {
+                    let t = o5s_tree::get_tree(r, &th)?;
+                    let mut subs = Vec::new();
+                    for e in t.entries {
+                        let mut path = prefix.clone();
+                        if !path.is_empty() {
+                            path.push(b'/');
+                        }
+                        path.extend_from_slice(&e.name);
+                        write!(out, "{} {}\t", e.mode.tag(), e.hash)?;
+                        out.write_all(&path)?;
+                        out.write_all(if null { b"\0" } else { b"\n" })?;
+                        if recursive && e.mode == o5s_tree::Mode::Subtree {
+                            subs.push((path, e.hash));
+                        }
+                    }
+                    // Then each subdirectory, in name order.
+                    stack.extend(subs.into_iter().rev());
+                }
+            }
+        },
         Cmd::Prov { cmd } => {
             let log = Name::new(o5s_prov::DEFAULT_LOG_REF)?;
             let cmd_kind = match &cmd {
@@ -886,7 +969,9 @@ fn main() -> ExitCode {
 
 /// The fronts the CLI opens repositories with.
 fn builtin_fronts() -> o5s_core::Result<o5s_repo::FrontRegistry> {
-    o5s_repo::FrontRegistry::new().with(std::sync::Arc::new(o5s_weights::SafetensorsFront))
+    o5s_repo::FrontRegistry::new()
+        .with(std::sync::Arc::new(o5s_weights::SafetensorsFront))?
+        .with(std::sync::Arc::new(o5s_tree::TreeFront))
 }
 
 /// A HASH (64 hex digits) or a NAME (resolved to the object it points at).

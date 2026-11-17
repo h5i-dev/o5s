@@ -22,6 +22,7 @@ Every on-disk decoder and every input parser has a target:
 | `attestations` | DSSE envelopes and in-toto statements |
 | `provenance` | provenance records and log nodes |
 | `delta_config` | delta records (bounded decode) and repository config |
+| `tree` | tree objects: the kernel decoder, encoder and tracer on arbitrary bytes (accepted bytes re-encode identically; the tracer returns exactly the entry hashes) |
 | `search_index` | search index build, text/prefix queries and lineage/impact over attacker records and checkpoint index |
 
 Run (needs nightly; on this host it lives on scratch):

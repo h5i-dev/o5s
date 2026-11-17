@@ -147,6 +147,61 @@ Phases, each at least `grace` (≥ 10 min) apart:
 `replace` calls `ensure_live`, which rewrites a condemned-only target, so a slow writer can't create a
 dangling ref.
 
+## Trees (crates/tree; kernel `o5s_kernel::tree`)
+
+A **tree** is a standard, domain-agnostic object: a snapshot of one directory. The core stores bytes only, so
+keeping a directory as one name per file loses file modes and the directory structure, and moving N names is
+N ref writes. A tree is one object, and one name can point at it.
+
+**Format** (canonical; one encoding per directory, so equal directories have equal hashes):
+
+```
+"O5STREE1" | entry* ,  entry = mode u8 | name_len u16 LE | name | hash [32]
+```
+
+- **mode:** 0 regular file, 1 executable file, 2 symlink (the hash is a blob of the link target's bytes),
+  3 subtree (the hash is a tree).
+- **name:** one path segment as raw bytes, 1 to 65,535 bytes, no `/`, no NUL, not `.` or `..`. Names are not
+  ref names, so they need no name encoding; any byte string a filesystem allows works.
+- Entries are strictly increasing in byte order, so names are unique.
+- Nothing follows the last entry, and the whole object is at most 2 GiB.
+- The identity is the BLAKE3 of these bytes, like every object. Storage (packs, chunking, compression) is
+  unchanged.
+
+**Kernel and proofs.** `decode`, `encode`, the canonical-form `check` and the GC view `children` are h5i
+kernels, extracted with Charon/Aeneas. `verify/core/proofs/Tree.lean` proves, on the extracted code:
+- `decode_spec`: the decoder is total and equals its spec on every input. It accepts exactly the bytes that
+  are `encodeL es` for a canonical entry list `es`, and returns that `es`.
+- `encode_spec` / `check_spec`: the encoder produces exactly `encodeL es`, and refuses exactly the
+  non-canonical lists.
+- `decode_encode`, `encode_decode`, `encodeL_inj`: the two round trips, and that the encoding is unique.
+- `children_spec`: the tracer returns exactly the entry hashes, in order, and fails on anything that is not a
+  canonical tree.
+
+Mutants in `h5i-app.toml`: duplicate names accepted, mode 4 accepted, `.` accepted, the tracer drops an
+entry. The fuzz target `tree` is local only.
+
+**GC.** `TreeFront` (id `tree`, claims no names) reports a tree's entry hashes as its children, so blobs and
+subtrees referenced only by a live tree stay live. It reads the object only when its first 8 bytes are the
+magic. Bytes that merely start with the magic but are not canonical are leaves (never an error).
+- Like any front, it must be registered in every process that runs GC on the repository. The CLI registers
+  it. A GC without it collects tree-only blobs; `crates/tree/tests` keeps a control test for that.
+- The server registers it too (a request to net).
+- `put_tree` calls `ensure_live` on every entry first. So a tree never references a missing or condemned
+  object, which mark would report as corruption.
+
+**Filesystem side.**
+- `put_dir` (CLI `o5s tree put DIR [--exclude NAME]`) walks without following symlinks. It stores files with
+  `put_stream`, records the user-exec bit as mode 1, and refuses special files. Everything goes through one
+  writer with one seal at the end, so the printed hash is durable.
+- `checkout` (CLI `o5s tree get TREE DIR`) needs DIR absent or empty. It creates every file new, creates
+  symlinks without following them, and writes only below DIR, since names are single segments. Executables
+  are 0755 and other files 0644, under the umask. Reads are verified. A checkout is not fsynced: it is a
+  working copy, not the store.
+- `diff` (CLI `o5s tree diff A B`) merge-joins sorted entries. It skips equal subtree hashes without reading
+  them and lists leaf paths as A/D/M/T.
+- Checkout and diff are iterative, with a depth limit of 4,096.
+
 ## Provenance (crates/prov)
 
 - Records `O5SPROV1`: canonical `op | params? | inputs | outputs | meta`.

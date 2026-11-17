@@ -664,7 +664,7 @@ def gc.skip_lone_live
        else ok false
 
 /-- [o5s_kernel::Rule]
-    Source: 'crates/kernel/src/lib.rs', lines 28:0-36:1
+    Source: 'crates/kernel/src/lib.rs', lines 29:0-37:1
     Visibility: public -/
 @[discriminant isize]
 inductive Rule where
@@ -673,7 +673,7 @@ inductive Rule where
 | HeadRelease : Rule
 
 /-- [o5s_kernel::{impl core::cmp::PartialEq<o5s_kernel::Rule> for o5s_kernel::Rule}::eq]:
-    Source: 'crates/kernel/src/lib.rs', lines 27:29-27:38
+    Source: 'crates/kernel/src/lib.rs', lines 28:29-28:38
     Visibility: public -/
 def Rule.Insts.CoreCmpPartialEqRule.eq
   (self : Rule) (other : Rule) : Result Bool := do
@@ -682,7 +682,7 @@ def Rule.Insts.CoreCmpPartialEqRule.eq
   ok (self1 = other1)
 
 /-- [o5s_kernel::Why]
-    Source: 'crates/kernel/src/lib.rs', lines 40:0-47:1
+    Source: 'crates/kernel/src/lib.rs', lines 41:0-48:1
     Visibility: public -/
 @[discriminant isize]
 inductive Why where
@@ -691,7 +691,7 @@ inductive Why where
 | HeadReleaseOnly : Why
 
 /-- [o5s_kernel::Mobility]
-    Source: 'crates/kernel/src/lib.rs', lines 51:0-58:1
+    Source: 'crates/kernel/src/lib.rs', lines 52:0-59:1
     Visibility: public -/
 @[discriminant isize]
 inductive Mobility where
@@ -700,7 +700,7 @@ inductive Mobility where
 | Forbidden : Mobility
 
 /-- [o5s_kernel::Observed]
-    Source: 'crates/kernel/src/lib.rs', lines 62:0-67:1
+    Source: 'crates/kernel/src/lib.rs', lines 63:0-68:1
     Visibility: public -/
 @[discriminant isize]
 inductive Observed where
@@ -708,7 +708,7 @@ inductive Observed where
 | Version : Std.U64 → Observed
 
 /-- [o5s_kernel::{impl core::cmp::PartialEq<o5s_kernel::Observed> for o5s_kernel::Observed}::eq]:
-    Source: 'crates/kernel/src/lib.rs', lines 61:29-61:38
+    Source: 'crates/kernel/src/lib.rs', lines 62:29-62:38
     Visibility: public -/
 def Observed.Insts.CoreCmpPartialEqObserved.eq
   (self : Observed) (other : Observed) : Result Bool := do
@@ -726,7 +726,7 @@ def Observed.Insts.CoreCmpPartialEqObserved.eq
   else ok false
 
 /-- Trait implementation: [o5s_kernel::{impl core::cmp::PartialEq<o5s_kernel::Observed> for o5s_kernel::Observed}]
-    Source: 'crates/kernel/src/lib.rs', lines 61:29-61:38 -/
+    Source: 'crates/kernel/src/lib.rs', lines 62:29-62:38 -/
 @[reducible]
 impl_def Observed.Insts.CoreCmpPartialEqObserved : core.cmp.PartialEq Observed
   Observed := {
@@ -736,7 +736,7 @@ impl_def Observed.Insts.CoreCmpPartialEqObserved : core.cmp.PartialEq Observed
 }
 
 /-- [o5s_kernel::RefVal]
-    Source: 'crates/kernel/src/lib.rs', lines 71:0-76:1
+    Source: 'crates/kernel/src/lib.rs', lines 72:0-77:1
     Visibility: public -/
 structure RefVal where
   hash : Array Std.U8 32#usize
@@ -2457,5 +2457,630 @@ def retention.plan
   Result (core.result.Result (alloc.vec.Vec retention.Action) Unit)
   := do
   retention.plan_loop0 keep only_if_regenerable entries 1#usize
+
+/-- [o5s_kernel::tree::MAGIC_LEN]
+    Source: 'crates/kernel/src/tree.rs', lines 24:0-24:31
+    Visibility: public -/
+@[global_simps, irreducible] def tree.MAGIC_LEN : Std.Usize := 8#usize
+
+/-- [o5s_kernel::tree::MAX_TREE]
+    Source: 'crates/kernel/src/tree.rs', lines 26:0-26:40
+    Visibility: public -/
+@[global_simps, irreducible] def tree.MAX_TREE : Std.Usize := 2147483648#usize
+
+/-- [o5s_kernel::tree::MAX_NAME]
+    Source: 'crates/kernel/src/tree.rs', lines 28:0-28:34
+    Visibility: public -/
+@[global_simps, irreducible] def tree.MAX_NAME : Std.Usize := 65535#usize
+
+/-- [o5s_kernel::tree::Entry]
+    Source: 'crates/kernel/src/tree.rs', lines 40:0-47:1
+    Visibility: public -/
+structure tree.Entry where
+  mode : Std.U8
+  «name» : alloc.vec.Vec Std.U8
+  hash : Array Std.U8 32#usize
+
+/-- [o5s_kernel::tree::TreeError]
+    Source: 'crates/kernel/src/tree.rs', lines 51:0-64:1
+    Visibility: public -/
+@[discriminant isize]
+inductive tree.TreeError where
+| BadMagic : tree.TreeError
+| TooLarge : tree.TreeError
+| Truncated : tree.TreeError
+| BadMode : tree.TreeError
+| BadName : tree.TreeError
+| Unsorted : tree.TreeError
+
+/-- [o5s_kernel::tree::magic_ok]:
+    Source: 'crates/kernel/src/tree.rs', lines 67:0-76:1
+    Visibility: public -/
+def tree.magic_ok (b : Slice Std.U8) : Result Bool := do
+  let i ← Slice.index_usize b 0#usize
+  if i = 79#u8
+  then
+    let i1 ← Slice.index_usize b 1#usize
+    if i1 = 53#u8
+    then
+      let i2 ← Slice.index_usize b 2#usize
+      if i2 = 83#u8
+      then
+        let i3 ← Slice.index_usize b 3#usize
+        if i3 = 84#u8
+        then
+          let i4 ← Slice.index_usize b 4#usize
+          if i4 = 82#u8
+          then
+            let i5 ← Slice.index_usize b 5#usize
+            if i5 = 69#u8
+            then
+              let i6 ← Slice.index_usize b 6#usize
+              if i6 = 69#u8
+              then let i7 ← Slice.index_usize b 7#usize
+                   ok (i7 = 49#u8)
+              else ok false
+            else ok false
+          else ok false
+        else ok false
+      else ok false
+    else ok false
+  else ok false
+
+/-- [o5s_kernel::tree::no_bad_byte]: loop body 0:
+    Source: 'crates/kernel/src/tree.rs', lines 96:4-106:1
+    Visibility: public -/
+@[rust_loop_body]
+def tree.no_bad_byte_loop.body
+  («name» : alloc.vec.Vec Std.U8) (i : Std.Usize) :
+  Result (ControlFlow Std.Usize Bool)
+  := do
+  let i1 := alloc.vec.Vec.len «name»
+  if i < i1
+  then
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8)
+        «name» i
+    if i2 = 0#u8
+    then ok (done false)
+    else
+      if i2 = 47#u8
+      then ok (done false)
+      else let i3 ← i + 1#usize
+           ok (cont i3)
+  else ok (done true)
+
+/-- [o5s_kernel::tree::no_bad_byte]: loop 0:
+    Source: 'crates/kernel/src/tree.rs', lines 96:4-106:1
+    Visibility: public -/
+@[rust_loop]
+def tree.no_bad_byte_loop
+  («name» : alloc.vec.Vec Std.U8) (i : Std.Usize) : Result Bool := do
+  loop
+    (fun i1 => tree.no_bad_byte_loop.body «name» i1)
+    i
+
+/-- [o5s_kernel::tree::no_bad_byte]:
+    Source: 'crates/kernel/src/tree.rs', lines 94:0-106:1
+    Visibility: public -/
+@[reducible]
+def tree.no_bad_byte («name» : alloc.vec.Vec Std.U8) : Result Bool := do
+  tree.no_bad_byte_loop «name» 0#usize
+
+/-- [o5s_kernel::tree::name_ok]:
+    Source: 'crates/kernel/src/tree.rs', lines 79:0-91:1
+    Visibility: public -/
+def tree.name_ok («name» : alloc.vec.Vec Std.U8) : Result Bool := do
+  let n := alloc.vec.Vec.len «name»
+  if n = 0#usize
+  then ok false
+  else
+    if n > tree.MAX_NAME
+    then ok false
+    else
+      if n = 1#usize
+      then
+        let i ←
+          alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8)
+            «name» 0#usize
+        if i = 46#u8
+        then ok false
+        else
+          if n = 2#usize
+          then
+            if i = 46#u8
+            then
+              let i1 ←
+                alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+                  Std.U8) «name» 1#usize
+              if i1 = 46#u8
+              then ok false
+              else tree.no_bad_byte «name»
+            else tree.no_bad_byte «name»
+          else tree.no_bad_byte «name»
+      else
+        if n = 2#usize
+        then
+          let i ←
+            alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8)
+              «name» 0#usize
+          if i = 46#u8
+          then
+            let i1 ←
+              alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+                Std.U8) «name» 1#usize
+            if i1 = 46#u8
+            then ok false
+            else tree.no_bad_byte «name»
+          else tree.no_bad_byte «name»
+        else tree.no_bad_byte «name»
+
+/-- [o5s_kernel::tree::copy_range]: loop body 0:
+    Source: 'crates/kernel/src/tree.rs', lines 112:4-115:5
+    Visibility: public -/
+@[rust_loop_body]
+def tree.copy_range_loop.body
+  (b : Slice Std.U8) (start : Std.Usize) (n : Std.Usize)
+  (out : alloc.vec.Vec Std.U8) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.U8) × Std.Usize) (alloc.vec.Vec
+    Std.U8))
+  := do
+  if i < n
+  then
+    let i1 ← start + i
+    let i2 ← Slice.index_usize b i1
+    let out1 ← alloc.vec.Vec.push out i2
+    let i3 ← i + 1#usize
+    ok (cont (out1, i3))
+  else ok (done out)
+
+/-- [o5s_kernel::tree::copy_range]: loop 0:
+    Source: 'crates/kernel/src/tree.rs', lines 112:4-115:5
+    Visibility: public -/
+@[rust_loop]
+def tree.copy_range_loop
+  (b : Slice Std.U8) (start : Std.Usize) (n : Std.Usize)
+  (out : alloc.vec.Vec Std.U8) (i : Std.Usize) :
+  Result (alloc.vec.Vec Std.U8)
+  := do
+  loop
+    (fun (out1, i1) => tree.copy_range_loop.body b start n out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::tree::copy_range]:
+    Source: 'crates/kernel/src/tree.rs', lines 109:0-117:1
+    Visibility: public -/
+@[reducible]
+def tree.copy_range
+  (b : Slice Std.U8) (start : Std.Usize) (n : Std.Usize) :
+  Result (alloc.vec.Vec Std.U8)
+  := do
+  tree.copy_range_loop b start n (alloc.vec.Vec.new Std.U8) 0#usize
+
+/-- [o5s_kernel::tree::hash_from]: loop body 0:
+    Source: 'crates/kernel/src/tree.rs', lines 123:4-126:5
+    Visibility: public -/
+@[rust_loop_body]
+def tree.hash_from_loop.body
+  (b : Slice Std.U8) («at» : Std.Usize) (h : Array Std.U8 32#usize)
+  (i : Std.Usize) :
+  Result (ControlFlow ((Array Std.U8 32#usize) × Std.Usize) (Array Std.U8
+    32#usize))
+  := do
+  if i < 32#usize
+  then
+    let i1 ← «at» + i
+    let i2 ← Slice.index_usize b i1
+    let a ← Array.update h i i2
+    let i3 ← i + 1#usize
+    ok (cont (a, i3))
+  else ok (done h)
+
+/-- [o5s_kernel::tree::hash_from]: loop 0:
+    Source: 'crates/kernel/src/tree.rs', lines 123:4-126:5
+    Visibility: public -/
+@[rust_loop]
+def tree.hash_from_loop
+  (b : Slice Std.U8) («at» : Std.Usize) (h : Array Std.U8 32#usize)
+  (i : Std.Usize) :
+  Result (Array Std.U8 32#usize)
+  := do
+  loop
+    (fun (h1, i1) => tree.hash_from_loop.body b «at» h1 i1)
+    (h, i)
+
+/-- [o5s_kernel::tree::hash_from]:
+    Source: 'crates/kernel/src/tree.rs', lines 120:0-128:1
+    Visibility: public -/
+def tree.hash_from
+  (b : Slice Std.U8) («at» : Std.Usize) :
+  Result (Array Std.U8 32#usize)
+  := do
+  let h := Array.repeat 32#usize 0#u8
+  tree.hash_from_loop b «at» h 0#usize
+
+/-- [o5s_kernel::tree::parse_entry]:
+    Source: 'crates/kernel/src/tree.rs', lines 132:0-154:1
+    Visibility: public -/
+def tree.parse_entry
+  (b : Slice Std.U8) («at» : Std.Usize) :
+  Result (core.result.Result (tree.Entry × Std.Usize) tree.TreeError)
+  := do
+  let i := Slice.len b
+  if «at» > i
+  then ok (core.result.Result.Err tree.TreeError.Truncated)
+  else
+    let i1 := Slice.len b
+    let rest ← i1 - «at»
+    if rest < 3#usize
+    then ok (core.result.Result.Err tree.TreeError.Truncated)
+    else
+      let mode ← Slice.index_usize b «at»
+      let i2 ← «at» + 1#usize
+      let i3 ← Slice.index_usize b i2
+      let i4 ← lift (UScalar.cast .Usize i3)
+      let i5 ← «at» + 2#usize
+      let i6 ← Slice.index_usize b i5
+      let i7 ← lift (UScalar.cast .Usize i6)
+      let i8 ← i7 * 256#usize
+      let n ← i4 + i8
+      let i9 ← rest - 3#usize
+      if n > i9
+      then ok (core.result.Result.Err tree.TreeError.Truncated)
+      else
+        let i10 ← i9 - n
+        if 32#usize > i10
+        then ok (core.result.Result.Err tree.TreeError.Truncated)
+        else
+          if mode > 3#u8
+          then ok (core.result.Result.Err tree.TreeError.BadMode)
+          else
+            let i11 ← «at» + 3#usize
+            let «name» ← tree.copy_range b i11 n
+            let b1 ← tree.name_ok «name»
+            if b1
+            then
+              let i12 ← i11 + n
+              let hash ← tree.hash_from b i12
+              let i13 ← i11 + n
+              let i14 ← i13 + 32#usize
+              ok (core.result.Result.Ok ({ mode, «name», hash }, i14))
+            else ok (core.result.Result.Err tree.TreeError.BadName)
+
+/-- [o5s_kernel::tree::decode]: loop body 0:
+    Source: 'crates/kernel/src/tree.rs', lines 166:4-181:1
+    Visibility: public -/
+@[rust_loop_body]
+def tree.decode_loop.body
+  (b : Slice Std.U8) (out : alloc.vec.Vec tree.Entry) («at» : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec tree.Entry) × Std.Usize)
+    (core.result.Result (alloc.vec.Vec tree.Entry) tree.TreeError))
+  := do
+  let i := Slice.len b
+  if «at» < i
+  then
+    let r ← tree.parse_entry b «at»
+    match r with
+    | core.result.Result.Ok p =>
+      let (e, next) := p
+      let i1 := alloc.vec.Vec.len out
+      if i1 > 0#usize
+      then
+        let i2 := alloc.vec.Vec.len out
+        let i3 ← i2 - 1#usize
+        let e1 ←
+          alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+            tree.Entry) out i3
+        let i4 ← names.cmp e1.name e.name
+        if i4 >= 0#i8
+        then ok (done (core.result.Result.Err tree.TreeError.Unsorted))
+        else let out1 ← alloc.vec.Vec.push out e
+             ok (cont (out1, next))
+      else let out1 ← alloc.vec.Vec.push out e
+           ok (cont (out1, next))
+    | core.result.Result.Err e => ok (done (core.result.Result.Err e))
+  else ok (done (core.result.Result.Ok out))
+
+/-- [o5s_kernel::tree::decode]: loop 0:
+    Source: 'crates/kernel/src/tree.rs', lines 166:4-181:1
+    Visibility: public -/
+@[rust_loop]
+def tree.decode_loop
+  (b : Slice Std.U8) (out : alloc.vec.Vec tree.Entry) («at» : Std.Usize) :
+  Result (core.result.Result (alloc.vec.Vec tree.Entry) tree.TreeError)
+  := do
+  loop
+    (fun (out1, at1) => tree.decode_loop.body b out1 at1)
+    (out, «at»)
+
+/-- [o5s_kernel::tree::decode]:
+    Source: 'crates/kernel/src/tree.rs', lines 157:0-181:1
+    Visibility: public -/
+def tree.decode
+  (b : Slice Std.U8) :
+  Result (core.result.Result (alloc.vec.Vec tree.Entry) tree.TreeError)
+  := do
+  let i := Slice.len b
+  if i < tree.MAGIC_LEN
+  then ok (core.result.Result.Err tree.TreeError.BadMagic)
+  else
+    let b1 ← tree.magic_ok b
+    if b1
+    then
+      let i1 := Slice.len b
+      if i1 > tree.MAX_TREE
+      then ok (core.result.Result.Err tree.TreeError.TooLarge)
+      else tree.decode_loop b (alloc.vec.Vec.new tree.Entry) tree.MAGIC_LEN
+    else ok (core.result.Result.Err tree.TreeError.BadMagic)
+
+/-- [o5s_kernel::tree::check]: loop body 0:
+    Source: 'crates/kernel/src/tree.rs', lines 189:4-211:1
+    Visibility: public -/
+@[rust_loop_body]
+def tree.check_loop.body
+  (es : alloc.vec.Vec tree.Entry) (size : Std.Usize) (i : Std.Usize) :
+  Result (ControlFlow (Std.Usize × Std.Usize) (core.result.Result Std.Usize
+    tree.TreeError))
+  := do
+  let i1 := alloc.vec.Vec.len es
+  if i < i1
+  then
+    let e ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice tree.Entry) es
+        i
+    if e.mode > 3#u8
+    then ok (done (core.result.Result.Err tree.TreeError.BadMode))
+    else
+      let b ← tree.name_ok e.name
+      if b
+      then
+        if i > 0#usize
+        then
+          let i2 ← i - 1#usize
+          let e1 ←
+            alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice
+              tree.Entry) es i2
+          let i3 ← names.cmp e1.name e.name
+          if i3 >= 0#i8
+          then ok (done (core.result.Result.Err tree.TreeError.Unsorted))
+          else
+            let i4 := alloc.vec.Vec.len e.name
+            let len ← 35#usize + i4
+            let i5 ← tree.MAX_TREE - size
+            if len > i5
+            then ok (done (core.result.Result.Err tree.TreeError.TooLarge))
+            else
+              let size1 ← size + len
+              let i6 ← i + 1#usize
+              ok (cont (size1, i6))
+        else
+          let i2 := alloc.vec.Vec.len e.name
+          let len ← 35#usize + i2
+          let i3 ← tree.MAX_TREE - size
+          if len > i3
+          then ok (done (core.result.Result.Err tree.TreeError.TooLarge))
+          else
+            let size1 ← size + len
+            let i4 ← i + 1#usize
+            ok (cont (size1, i4))
+      else ok (done (core.result.Result.Err tree.TreeError.BadName))
+  else ok (done (core.result.Result.Ok size))
+
+/-- [o5s_kernel::tree::check]: loop 0:
+    Source: 'crates/kernel/src/tree.rs', lines 189:4-211:1
+    Visibility: public -/
+@[rust_loop]
+def tree.check_loop
+  (es : alloc.vec.Vec tree.Entry) (size : Std.Usize) (i : Std.Usize) :
+  Result (core.result.Result Std.Usize tree.TreeError)
+  := do
+  loop
+    (fun (size1, i1) => tree.check_loop.body es size1 i1)
+    (size, i)
+
+/-- [o5s_kernel::tree::check]:
+    Source: 'crates/kernel/src/tree.rs', lines 186:0-211:1
+    Visibility: public -/
+@[reducible]
+def tree.check
+  (es : alloc.vec.Vec tree.Entry) :
+  Result (core.result.Result Std.Usize tree.TreeError)
+  := do
+  tree.check_loop es tree.MAGIC_LEN 0#usize
+
+/-- [o5s_kernel::tree::extend]: loop body 0:
+    Source: 'crates/kernel/src/tree.rs', lines 216:4-219:5
+    Visibility: public -/
+@[rust_loop_body]
+def tree.extend_loop.body
+  (src : alloc.vec.Vec Std.U8) (out : alloc.vec.Vec Std.U8) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.U8) × Std.Usize) (alloc.vec.Vec
+    Std.U8))
+  := do
+  let i1 := alloc.vec.Vec.len src
+  if i < i1
+  then
+    let i2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Std.U8) src i
+    let out1 ← alloc.vec.Vec.push out i2
+    let i3 ← i + 1#usize
+    ok (cont (out1, i3))
+  else ok (done out)
+
+/-- [o5s_kernel::tree::extend]: loop 0:
+    Source: 'crates/kernel/src/tree.rs', lines 216:4-219:5
+    Visibility: public -/
+@[rust_loop]
+def tree.extend_loop
+  (out : alloc.vec.Vec Std.U8) (src : alloc.vec.Vec Std.U8) (i : Std.Usize) :
+  Result (alloc.vec.Vec Std.U8)
+  := do
+  loop
+    (fun (out1, i1) => tree.extend_loop.body src out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::tree::extend]:
+    Source: 'crates/kernel/src/tree.rs', lines 214:0-221:1
+    Visibility: public -/
+@[reducible]
+def tree.extend
+  (out : alloc.vec.Vec Std.U8) (src : alloc.vec.Vec Std.U8) :
+  Result (alloc.vec.Vec Std.U8)
+  := do
+  tree.extend_loop out src 0#usize
+
+/-- [o5s_kernel::tree::extend_hash]: loop body 0:
+    Source: 'crates/kernel/src/tree.rs', lines 226:4-229:5
+    Visibility: public -/
+@[rust_loop_body]
+def tree.extend_hash_loop.body
+  (h : Array Std.U8 32#usize) (out : alloc.vec.Vec Std.U8) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Std.U8) × Std.Usize) (alloc.vec.Vec
+    Std.U8))
+  := do
+  if i < 32#usize
+  then
+    let i1 ← Array.index_usize h i
+    let out1 ← alloc.vec.Vec.push out i1
+    let i2 ← i + 1#usize
+    ok (cont (out1, i2))
+  else ok (done out)
+
+/-- [o5s_kernel::tree::extend_hash]: loop 0:
+    Source: 'crates/kernel/src/tree.rs', lines 226:4-229:5
+    Visibility: public -/
+@[rust_loop]
+def tree.extend_hash_loop
+  (out : alloc.vec.Vec Std.U8) (h : Array Std.U8 32#usize) (i : Std.Usize) :
+  Result (alloc.vec.Vec Std.U8)
+  := do
+  loop
+    (fun (out1, i1) => tree.extend_hash_loop.body h out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::tree::extend_hash]:
+    Source: 'crates/kernel/src/tree.rs', lines 224:0-231:1
+    Visibility: public -/
+@[reducible]
+def tree.extend_hash
+  (out : alloc.vec.Vec Std.U8) (h : Array Std.U8 32#usize) :
+  Result (alloc.vec.Vec Std.U8)
+  := do
+  tree.extend_hash_loop out h 0#usize
+
+/-- [o5s_kernel::tree::encode]: loop body 0:
+    Source: 'crates/kernel/src/tree.rs', lines 249:4-258:5
+    Visibility: public -/
+@[rust_loop_body]
+def tree.encode_loop.body
+  (es : alloc.vec.Vec tree.Entry) (out : alloc.vec.Vec Std.U8) (i : Std.Usize)
+  :
+  Result (ControlFlow ((alloc.vec.Vec Std.U8) × Std.Usize) (alloc.vec.Vec
+    Std.U8))
+  := do
+  let i1 := alloc.vec.Vec.len es
+  if i < i1
+  then
+    let e ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice tree.Entry) es
+        i
+    let n := alloc.vec.Vec.len e.name
+    let out1 ← alloc.vec.Vec.push out e.mode
+    let i2 ← n % 256#usize
+    let i3 ← lift (UScalar.cast .U8 i2)
+    let out2 ← alloc.vec.Vec.push out1 i3
+    let i4 ← n / 256#usize
+    let i5 ← lift (UScalar.cast .U8 i4)
+    let out3 ← alloc.vec.Vec.push out2 i5
+    let out4 ← tree.extend out3 e.name
+    let out5 ← tree.extend_hash out4 e.hash
+    let i6 ← i + 1#usize
+    ok (cont (out5, i6))
+  else ok (done out)
+
+/-- [o5s_kernel::tree::encode]: loop 0:
+    Source: 'crates/kernel/src/tree.rs', lines 249:4-258:5
+    Visibility: public -/
+@[rust_loop]
+def tree.encode_loop
+  (es : alloc.vec.Vec tree.Entry) (out : alloc.vec.Vec Std.U8) (i : Std.Usize)
+  :
+  Result (alloc.vec.Vec Std.U8)
+  := do
+  loop
+    (fun (out1, i1) => tree.encode_loop.body es out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::tree::encode]:
+    Source: 'crates/kernel/src/tree.rs', lines 234:0-260:1
+    Visibility: public -/
+def tree.encode
+  (es : alloc.vec.Vec tree.Entry) :
+  Result (core.result.Result (alloc.vec.Vec Std.U8) tree.TreeError)
+  := do
+  let r ← tree.check es
+  match r with
+  | core.result.Result.Ok _ =>
+    let out ← alloc.vec.Vec.push (alloc.vec.Vec.new Std.U8) 79#u8
+    let out1 ← alloc.vec.Vec.push out 53#u8
+    let out2 ← alloc.vec.Vec.push out1 83#u8
+    let out3 ← alloc.vec.Vec.push out2 84#u8
+    let out4 ← alloc.vec.Vec.push out3 82#u8
+    let out5 ← alloc.vec.Vec.push out4 69#u8
+    let out6 ← alloc.vec.Vec.push out5 69#u8
+    let out7 ← alloc.vec.Vec.push out6 49#u8
+    let out8 ← tree.encode_loop es out7 0#usize
+    ok (core.result.Result.Ok out8)
+  | core.result.Result.Err e => ok (core.result.Result.Err e)
+
+/-- [o5s_kernel::tree::children]: loop body 0:
+    Source: 'crates/kernel/src/tree.rs', lines 269:12-272:13
+    Visibility: public -/
+@[rust_loop_body]
+def tree.children_loop.body
+  (es : alloc.vec.Vec tree.Entry) (out : alloc.vec.Vec (Array Std.U8 32#usize))
+  (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec (Array Std.U8 32#usize)) × Std.Usize)
+    (alloc.vec.Vec (Array Std.U8 32#usize)))
+  := do
+  let i1 := alloc.vec.Vec.len es
+  if i < i1
+  then
+    let e ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice tree.Entry) es
+        i
+    let out1 ← alloc.vec.Vec.push out e.hash
+    let i2 ← i + 1#usize
+    ok (cont (out1, i2))
+  else ok (done out)
+
+/-- [o5s_kernel::tree::children]: loop 0:
+    Source: 'crates/kernel/src/tree.rs', lines 269:12-272:13
+    Visibility: public -/
+@[rust_loop]
+def tree.children_loop
+  (es : alloc.vec.Vec tree.Entry) (out : alloc.vec.Vec (Array Std.U8 32#usize))
+  (i : Std.Usize) :
+  Result (alloc.vec.Vec (Array Std.U8 32#usize))
+  := do
+  loop
+    (fun (out1, i1) => tree.children_loop.body es out1 i1)
+    (out, i)
+
+/-- [o5s_kernel::tree::children]:
+    Source: 'crates/kernel/src/tree.rs', lines 263:0-276:1
+    Visibility: public -/
+def tree.children
+  (b : Slice Std.U8) :
+  Result (core.result.Result (alloc.vec.Vec (Array Std.U8 32#usize))
+    tree.TreeError)
+  := do
+  let r ← tree.decode b
+  match r with
+  | core.result.Result.Ok es =>
+    let out ←
+      tree.children_loop es (alloc.vec.Vec.new (Array Std.U8 32#usize)) 0#usize
+    ok (core.result.Result.Ok out)
+  | core.result.Result.Err e => ok (core.result.Result.Err e)
 
 end o5s_kernel

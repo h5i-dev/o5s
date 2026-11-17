@@ -4,7 +4,7 @@
 [extract]
 crate = "../../crates/kernel"
 # Charon starts here and extracts what it reaches.
-start-from = ["refs::decide", "refs::decide_set_rule", "names::validate", "fronts::may_write", "fronts::may_set_rule", "gc::is_victim", "gc::delete_ok", "gc::skip_lone_live", "promote::decide_promote", "retention::plan", "retention::version_cmp", "objects::put_action", "objects::accept_read", "codec::parse_header", "codec::journal_step"]
+start-from = ["refs::decide", "refs::decide_set_rule", "names::validate", "fronts::may_write", "fronts::may_set_rule", "gc::is_victim", "gc::delete_ok", "gc::skip_lone_live", "promote::decide_promote", "retention::plan", "retention::version_cmp", "objects::put_action", "objects::accept_read", "codec::parse_header", "codec::journal_step", "tree::decode", "tree::encode", "tree::children"]
 
 [check]
 # Must exist and use only Lean's standard axioms (every theorem in a
@@ -29,6 +29,13 @@ theorems = [
     "o5s_kernel.Proofs.put_never_overwrites",
     "o5s_kernel.Proofs.parse_header_spec",
     "o5s_kernel.Proofs.journal_step_spec",
+    "o5s_kernel.TreeProofs.decode_spec",
+    "o5s_kernel.TreeProofs.encode_spec",
+    "o5s_kernel.TreeProofs.check_spec",
+    "o5s_kernel.TreeProofs.children_spec",
+    "o5s_kernel.TreeProofs.decode_encode",
+    "o5s_kernel.TreeProofs.encode_decode",
+    "o5s_kernel.TreeProofs.encodeL_inj",
 ]
 
 # Bugs the proofs must reject (`h5i app mutate`).
@@ -134,3 +141,27 @@ name = "journal_truncates_history"
 file = "../../crates/kernel/src/codec.rs"
 old = "        if end == rest_len {"
 new = "        if end <= rest_len {"
+
+[[mutant]]
+name = "tree_duplicate_names"
+file = "../../crates/kernel/src/tree.rs"
+old = "if cmp(&out[out.len() - 1].name, &e.name) >= 0 {"
+new = "if cmp(&out[out.len() - 1].name, &e.name) > 0 {"
+
+[[mutant]]
+name = "tree_mode_4_accepted"
+file = "../../crates/kernel/src/tree.rs"
+old = "if mode > 3 {"
+new = "if mode > 4 {"
+
+[[mutant]]
+name = "tree_dot_name_accepted"
+file = "../../crates/kernel/src/tree.rs"
+old = "if n == 1 && name[0] == b'.' {"
+new = "if n == 1 && name[0] == b',' {"
+
+[[mutant]]
+name = "tree_tracer_drops_first"
+file = "../../crates/kernel/src/tree.rs"
+old = "out.push(es[i].hash);"
+new = "if i > 0 { out.push(es[i].hash); }"

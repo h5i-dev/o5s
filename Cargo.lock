@@ -1634,6 +1634,7 @@ dependencies = [
  "o5s-core",
  "o5s-prov",
  "o5s-repo",
+ "o5s-tree",
  "o5s-weights",
  "serde_json",
  "tempfile",
@@ -1840,6 +1841,17 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "o5s-tree"
+version = "0.1.0"
+dependencies = [
+ "o5s-core",
+ "o5s-kernel",
+ "o5s-repo",
+ "proptest",
+ "tempfile",
 ]
 
 [[package]]

@@ -20,6 +20,8 @@ o5s-backend-s3 = { path = "../crates/backend-s3" }
 o5s-attest = { path = "../crates/attest" }
 o5s-prov = { path = "../crates/prov" }
 o5s-repo = { path = "../crates/repo" }
+o5s-kernel = { path = "../crates/kernel" }
+o5s-tree = { path = "../crates/tree" }
 tempfile = "3"
 
 [[bin]]
@@ -159,6 +161,13 @@ bench = false
 [[bin]]
 name = "search_index"
 path = "fuzz_targets/search_index.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tree"
+path = "fuzz_targets/tree.rs"
 test = false
 doc = false
 bench = false

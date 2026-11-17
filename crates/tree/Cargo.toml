@@ -1,0 +1,15 @@
+[package]
+name = "o5s-tree"
+description = "Directory snapshots as standard objects: canonical tree objects, their GC front, put/checkout/diff"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+o5s-core.workspace = true
+o5s-kernel.workspace = true
+o5s-repo.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true

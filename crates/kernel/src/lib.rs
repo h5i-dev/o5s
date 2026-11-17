@@ -19,6 +19,7 @@ pub mod objects;
 pub mod promote;
 pub mod refs;
 pub mod retention;
+pub mod tree;
 
 /// A BLAKE3-256 content address.
 pub type Hash = [u8; 32];
