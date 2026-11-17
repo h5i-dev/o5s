@@ -13,7 +13,7 @@ PyPI and npm for packages, Hugging Face for LLM weights, and so on?
 
 - `o5s` treats every kind of data with the same three operations, `put`, `get`, and `replace`.
 - Shared infrastructure handles versioning, access control, garbage collection, and per-namespace policies.
-- It also ships adapters for popular tools such as Git, OCI, Hugging Face, PyPI, npm and Maven, so it fits into existing workflows as they are.
+- Protocol adapters for Git, OCI, Hugging Face, PyPI, npm, and Maven let existing tools work without modification.
 
 **Potential pushback**
 
