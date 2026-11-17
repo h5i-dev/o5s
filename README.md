@@ -39,10 +39,6 @@ Numbers are o5s divided by the specialist, so lower is better.
 | npm | Verdaccio | | cold 1.06×, hot 1.06× | 0.11× |
 | Maven | Reposilite | | cold 0.99×, hot 1.03× | 0.93× |
 
-Where o5s is still slower, OCI pull pays for verifying every byte against its hash on read, and a first Git push
-into an empty server is 1.1–1.4×, mostly a fixed per-push cost that shows on small repos. Full results and methodology are in `docs/BENCH.md` and
-`bench/results/fronts-rc1-ba21b99-report.md`.
-
 ## CLI example
 
 The `o5s` CLI is the low-level plumbing over the core (see `docs/CLI.md`).
