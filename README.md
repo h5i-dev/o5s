@@ -106,3 +106,14 @@ Numbers are o5s divided by the specialist, so lower is better.
 | PyPI | devpi | | cold 1.10×, hot 1.18× | 0.47× |
 | npm | Verdaccio | | cold 1.06×, hot 1.06× | 0.11× |
 | Maven | Reposilite | | cold 0.99×, hot 1.03× | 0.93× |
+
+## Formally verified in Lean 4
+
+Proved on the Rust code itself, extracted to Lean with Charon and Aeneas (`verify/core`, `verify/net`).
+
+- **Verified reads.** A read returns bytes only if they hash to the requested address.
+- **Immutable objects.** A `put` never overwrites a stored object.
+- **No lost updates.** A `replace` commits only if nothing it read has changed since.
+- **Published names never move.** Writes and deletes under an immutable namespace are rejected.
+- **GC never loses live data.** A pack is deleted only if no live object depends on it.
+- **Authorization.** Only permitted principals can read or move a name.
