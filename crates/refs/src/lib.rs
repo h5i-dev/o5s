@@ -330,8 +330,9 @@ impl RefState {
         })
     }
 
-    /// Refs under `prefix` ("" = all), sorted.
+    /// Refs under `prefix` ("" = all), sorted. A trailing `/` names the same prefix.
     pub fn list(&self, prefix: &str) -> Vec<(Name, RefValue)> {
+        let prefix = o5s_core::list_prefix(prefix);
         self.refs.iter().filter(|(n, _)| is_under(n.as_str(), prefix)).map(|(n, v)| (n.clone(), *v)).collect()
     }
 }

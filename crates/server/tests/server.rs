@@ -93,6 +93,13 @@ fn names_rules_and_typed_errors() {
     assert!(matches!(admin.set_rule("alice/releases", Rule::Mutable), Err(Error::RuleChangeOnNonEmpty(_))));
     let refs = alice.list_refs("alice").unwrap();
     assert_eq!(refs.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["alice/main", "alice/releases/1.0"]);
+    // A trailing `/` names the same prefix, for /v1 listing and search alike.
+    assert_eq!(alice.list_refs("alice/").unwrap(), refs);
+    assert_eq!(alice.list_refs("alice/releases/").unwrap().len(), 1);
+    let hits = alice.search(o5s_client::Search::Prefix("alice/".into())).unwrap();
+    let mut found: Vec<String> = hits.into_iter().flat_map(|h| h.names).collect();
+    found.sort();
+    assert_eq!(found, ["alice/main", "alice/releases/1.0"]);
 }
 
 #[test]
