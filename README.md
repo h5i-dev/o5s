@@ -16,7 +16,7 @@ PyPI and npm for packages, Hugging Face for LLM weights, and so on?
 **Potential pushback**
 
 - *"Why should I use o5s?"* → Less infrastructure to manage and no need to change the tools you already use.
-- *"Isn't this just S3 with adapters?"* → S3 stores data. o5s manages how any kind of data is versioned, referenced, and released.
+- *"Isn't this just S3 with adapters?"* → S3 stores data. o5s manages how data is versioned, referenced, and released.
 - *"Merge in Git is necessary"* → Merge is just a special case of `replace`.
 - *"Git packs source code better"* → Then use it for every domain.
 - *"Hugging Face's Xet makes large weights fast"* → Then use it for every domain.
