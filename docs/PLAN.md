@@ -629,7 +629,7 @@ metric still regresses, it is a real regression, found and fixed before H4, not 
 **Amendment 2026-11-17 (human ruling, written before these runs).** Three Exp3 FAILs on `20f55ad` (rc.1 batch,
 BENCH 2026-11-17) stay recorded as FAIL by the letter: jq A3 read p99 +14.5 %, jq A3 peak RSS +6.5 %, and git A3
 peak RSS +20.4 % (6.17 GB, over the ≤ 6 GB tier). They are decided by **one** pre-declared re-measurement on
-`20f55ad`, in one exclusive window: load < 1.0 at start, no foreign process, 10 s process log.
+the final rc.1 commit (the whole batch reruns there, per the human, 2026-11-17), in one exclusive window: load < 1.0 at start, no foreign process, 10 s process log.
 - **Runs.** `exp3 run <work dir> a3 4 10000`, git then jq, **3 reps each** with the `baseline-pre-h5i` and the
   rc.1 `exp3` binaries, interleaved: baseline, then rc.1.
 - **Verdict.** For git A3 `peak_rss_kb`, jq A3 `peak_rss_kb` and jq A3 `read_p99_ms`: rc.1 median against

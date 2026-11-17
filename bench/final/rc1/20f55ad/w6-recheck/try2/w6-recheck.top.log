@@ -1,0 +1,1971 @@
+## 2026-11-17T05:18:44+00:00 load 0.94 2.80 3.19
+%CPU USER     COMMAND
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.7 ec2-user claude
+ 0.6 root     codex
+ 0.4 root     bun
+ 0.1 root     kcompactd0
+## 2026-11-17T05:18:54+00:00 load 0.95 2.74 3.16
+%CPU USER     COMMAND
+ 100 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.7 ec2-user claude
+ 0.6 root     codex
+ 0.4 root     bun
+## 2026-11-17T05:19:04+00:00 load 1.03 2.70 3.15
+%CPU USER     COMMAND
+ 100 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:19:14+00:00 load 1.10 2.66 3.13
+%CPU USER     COMMAND
+ 122 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:19:24+00:00 load 1.24 2.63 3.11
+%CPU USER     COMMAND
+ 107 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:19:34+00:00 load 1.20 2.58 3.09
+%CPU USER     COMMAND
+ 104 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:19:44+00:00 load 1.09 2.51 3.06
+%CPU USER     COMMAND
+ 119 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:19:54+00:00 load 1.08 2.46 3.04
+%CPU USER     COMMAND
+ 105 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:20:04+00:00 load 1.06 2.41 3.02
+%CPU USER     COMMAND
+ 122 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:20:14+00:00 load 1.35 2.43 3.02
+%CPU USER     COMMAND
+ 103 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:20:25+00:00 load 1.37 2.40 3.00
+%CPU USER     COMMAND
+ 102 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:20:35+00:00 load 1.63 2.42 3.00
+%CPU USER     COMMAND
+ 112 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:20:45+00:00 load 1.53 2.37 2.98
+%CPU USER     COMMAND
+ 103 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:20:55+00:00 load 1.45 2.33 2.96
+%CPU USER     COMMAND
+ 119 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 1.0 ec2-user ps
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+## 2026-11-17T05:21:05+00:00 load 1.67 2.35 2.96
+%CPU USER     COMMAND
+94.4 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:21:15+00:00 load 1.65 2.32 2.94
+%CPU USER     COMMAND
+97.8 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:21:25+00:00 load 2.31 2.44 2.97
+%CPU USER     COMMAND
+ 101 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:21:35+00:00 load 2.10 2.39 2.95
+%CPU USER     COMMAND
+ 100 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:21:45+00:00 load 2.01 2.36 2.94
+%CPU USER     COMMAND
+ 117 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:21:55+00:00 load 2.22 2.40 2.94
+%CPU USER     COMMAND
+98.2 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:22:05+00:00 load 2.03 2.35 2.92
+%CPU USER     COMMAND
+99.6 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:22:15+00:00 load 2.11 2.36 2.92
+%CPU USER     COMMAND
+ 100 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:22:25+00:00 load 1.94 2.31 2.90
+%CPU USER     COMMAND
+ 100 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:22:35+00:00 load 1.80 2.27 2.87
+%CPU USER     COMMAND
+ 119 ec2-user o5s-bench-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:22:45+00:00 load 2.04 2.31 2.88
+%CPU USER     COMMAND
+99.8 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:22:55+00:00 load 1.88 2.27 2.86
+%CPU USER     COMMAND
+ 100 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:23:05+00:00 load 1.99 2.27 2.86
+%CPU USER     COMMAND
+23.2 ec2-user o5s-bench
+12.6 ec2-user dd
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+## 2026-11-17T05:23:15+00:00 load 1.83 2.23 2.84
+%CPU USER     COMMAND
+65.9 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:23:25+00:00 load 1.93 2.24 2.83
+%CPU USER     COMMAND
+92.3 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:23:35+00:00 load 2.02 2.25 2.83
+%CPU USER     COMMAND
+ 115 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:23:45+00:00 load 1.87 2.21 2.81
+%CPU USER     COMMAND
+ 131 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:23:55+00:00 load 2.40 2.31 2.84
+%CPU USER     COMMAND
+ 141 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:24:05+00:00 load 3.00 2.45 2.88
+%CPU USER     COMMAND
+ 145 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:24:15+00:00 load 3.06 2.48 2.88
+%CPU USER     COMMAND
+ 146 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:24:25+00:00 load 2.82 2.45 2.87
+%CPU USER     COMMAND
+ 151 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:24:35+00:00 load 3.34 2.57 2.90
+%CPU USER     COMMAND
+ 156 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:24:45+00:00 load 2.98 2.52 2.88
+%CPU USER     COMMAND
+ 151 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:24:55+00:00 load 2.67 2.47 2.86
+%CPU USER     COMMAND
+ 147 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:25:05+00:00 load 2.90 2.52 2.87
+%CPU USER     COMMAND
+ 143 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:25:15+00:00 load 2.68 2.48 2.86
+%CPU USER     COMMAND
+ 148 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:25:25+00:00 load 3.27 2.62 2.90
+%CPU USER     COMMAND
+ 156 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:25:35+00:00 load 2.92 2.57 2.88
+%CPU USER     COMMAND
+ 164 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:25:45+00:00 load 3.36 2.68 2.91
+%CPU USER     COMMAND
+46.0 ec2-user o5s-bench
+37.0 ec2-user dd
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+## 2026-11-17T05:25:55+00:00 load 3.46 2.72 2.92
+%CPU USER     COMMAND
+47.0 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:26:05+00:00 load 3.24 2.70 2.91
+%CPU USER     COMMAND
+84.0 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:26:15+00:00 load 2.90 2.65 2.89
+%CPU USER     COMMAND
+ 114 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:26:25+00:00 load 2.69 2.61 2.88
+%CPU USER     COMMAND
+ 127 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:26:35+00:00 load 2.51 2.57 2.86
+%CPU USER     COMMAND
+ 136 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:26:46+00:00 load 2.27 2.52 2.84
+%CPU USER     COMMAND
+ 142 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:26:56+00:00 load 2.24 2.50 2.83
+%CPU USER     COMMAND
+ 147 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:27:06+00:00 load 2.93 2.65 2.88
+%CPU USER     COMMAND
+ 152 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:27:16+00:00 load 2.63 2.59 2.86
+%CPU USER     COMMAND
+ 157 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:27:26+00:00 load 2.38 2.54 2.83
+%CPU USER     COMMAND
+ 152 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:27:36+00:00 load 2.39 2.54 2.83
+%CPU USER     COMMAND
+ 147 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:27:46+00:00 load 2.26 2.50 2.82
+%CPU USER     COMMAND
+ 143 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:27:56+00:00 load 2.53 2.55 2.83
+%CPU USER     COMMAND
+ 146 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:28:06+00:00 load 3.56 2.77 2.90
+%CPU USER     COMMAND
+ 154 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:28:16+00:00 load 4.81 3.06 2.99
+%CPU USER     COMMAND
+ 162 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:28:26+00:00 load 4.38 3.02 2.98
+%CPU USER     COMMAND
+92.0 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:28:36+00:00 load 3.86 2.95 2.96
+%CPU USER     COMMAND
+43.0 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:28:46+00:00 load 3.50 2.91 2.94
+%CPU USER     COMMAND
+80.6 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:28:56+00:00 load 3.27 2.88 2.93
+%CPU USER     COMMAND
+ 114 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:29:06+00:00 load 2.92 2.81 2.91
+%CPU USER     COMMAND
+ 127 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:29:16+00:00 load 2.62 2.75 2.89
+%CPU USER     COMMAND
+ 136 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:29:26+00:00 load 2.45 2.71 2.87
+%CPU USER     COMMAND
+ 142 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:29:36+00:00 load 2.38 2.69 2.86
+%CPU USER     COMMAND
+ 148 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:29:46+00:00 load 2.47 2.70 2.86
+%CPU USER     COMMAND
+ 153 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:29:56+00:00 load 3.29 2.86 2.91
+%CPU USER     COMMAND
+ 156 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:30:06+00:00 load 2.93 2.80 2.89
+%CPU USER     COMMAND
+ 153 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:30:16+00:00 load 2.64 2.74 2.87
+%CPU USER     COMMAND
+ 149 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:30:26+00:00 load 2.38 2.68 2.85
+%CPU USER     COMMAND
+ 145 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:30:36+00:00 load 2.40 2.67 2.85
+%CPU USER     COMMAND
+ 147 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:30:46+00:00 load 2.41 2.67 2.84
+%CPU USER     COMMAND
+ 154 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:30:56+00:00 load 3.57 2.91 2.92
+%CPU USER     COMMAND
+ 161 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:31:06+00:00 load 3.47 2.91 2.92
+%CPU USER     COMMAND
+ 168 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:31:16+00:00 load 3.09 2.85 2.90
+%CPU USER     COMMAND
+40.5 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:31:26+00:00 load 3.17 2.87 2.91
+%CPU USER     COMMAND
+72.0 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:31:36+00:00 load 3.60 2.97 2.94
+%CPU USER     COMMAND
+ 106 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:31:46+00:00 load 3.28 2.92 2.92
+%CPU USER     COMMAND
+ 124 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:31:56+00:00 load 3.45 2.98 2.94
+%CPU USER     COMMAND
+ 134 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:32:06+00:00 load 3.44 2.99 2.95
+%CPU USER     COMMAND
+ 141 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:32:16+00:00 load 3.73 3.07 2.97
+%CPU USER     COMMAND
+ 147 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:32:26+00:00 load 3.31 3.00 2.95
+%CPU USER     COMMAND
+ 152 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:32:36+00:00 load 3.68 3.09 2.98
+%CPU USER     COMMAND
+ 151 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:32:46+00:00 load 3.26 3.02 2.96
+%CPU USER     COMMAND
+ 152 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:32:56+00:00 load 2.92 2.95 2.94
+%CPU USER     COMMAND
+ 148 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:33:06+00:00 load 2.62 2.89 2.92
+%CPU USER     COMMAND
+ 145 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:33:16+00:00 load 2.84 2.92 2.93
+%CPU USER     COMMAND
+ 145 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:33:26+00:00 load 3.72 3.11 2.99
+%CPU USER     COMMAND
+ 152 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:33:37+00:00 load 3.52 3.09 2.98
+%CPU USER     COMMAND
+ 159 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:33:47+00:00 load 3.76 3.15 3.01
+%CPU USER     COMMAND
+ 167 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:33:57+00:00 load 3.48 3.11 2.99
+%CPU USER     COMMAND
+35.8 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:34:07+00:00 load 3.33 3.09 2.99
+%CPU USER     COMMAND
+73.5 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:34:17+00:00 load 3.29 3.09 2.99
+%CPU USER     COMMAND
+97.3 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 1.0 ec2-user ps
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+## 2026-11-17T05:34:27+00:00 load 2.93 3.02 2.97
+%CPU USER     COMMAND
+ 121 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:34:37+00:00 load 2.78 2.99 2.96
+%CPU USER     COMMAND
+ 132 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:34:47+00:00 load 2.88 3.00 2.96
+%CPU USER     COMMAND
+ 139 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:34:57+00:00 load 2.59 2.94 2.94
+%CPU USER     COMMAND
+ 146 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:35:07+00:00 load 2.75 2.96 2.95
+%CPU USER     COMMAND
+ 151 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:35:17+00:00 load 2.63 2.92 2.94
+%CPU USER     COMMAND
+ 148 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:35:27+00:00 load 2.38 2.86 2.92
+%CPU USER     COMMAND
+ 152 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:35:37+00:00 load 2.17 2.80 2.89
+%CPU USER     COMMAND
+ 148 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:35:47+00:00 load 1.99 2.74 2.87
+%CPU USER     COMMAND
+ 144 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:35:57+00:00 load 2.30 2.78 2.89
+%CPU USER     COMMAND
+ 143 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:36:07+00:00 load 2.25 2.75 2.88
+%CPU USER     COMMAND
+ 150 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:36:17+00:00 load 2.89 2.88 2.92
+%CPU USER     COMMAND
+ 158 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:36:27+00:00 load 3.56 3.02 2.96
+%CPU USER     COMMAND
+ 165 ec2-user o5s-bench
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:36:37+00:00 load 3.62 3.05 2.97
+%CPU USER     COMMAND
+ 334 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:36:47+00:00 load 3.22 2.98 2.95
+%CPU USER     COMMAND
+ 223 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:36:57+00:00 load 2.88 2.91 2.93
+%CPU USER     COMMAND
+ 177 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:37:07+00:00 load 2.59 2.85 2.91
+%CPU USER     COMMAND
+ 156 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:37:17+00:00 load 2.88 2.90 2.93
+%CPU USER     COMMAND
+ 198 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:37:27+00:00 load 3.05 2.94 2.94
+%CPU USER     COMMAND
+ 232 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:37:37+00:00 load 3.20 2.98 2.95
+%CPU USER     COMMAND
+ 256 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:37:47+00:00 load 3.32 3.01 2.96
+%CPU USER     COMMAND
+ 274 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:37:57+00:00 load 3.43 3.04 2.97
+%CPU USER     COMMAND
+ 288 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:38:07+00:00 load 3.59 3.09 2.99
+%CPU USER     COMMAND
+ 299 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:38:17+00:00 load 3.65 3.12 3.00
+%CPU USER     COMMAND
+ 308 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:38:27+00:00 load 3.71 3.15 3.01
+%CPU USER     COMMAND
+ 315 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:38:38+00:00 load 3.83 3.20 3.03
+%CPU USER     COMMAND
+ 321 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:38:48+00:00 load 4.02 3.26 3.05
+%CPU USER     COMMAND
+ 324 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:38:58+00:00 load 4.02 3.28 3.06
+%CPU USER     COMMAND
+ 329 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:39:08+00:00 load 4.01 3.31 3.07
+%CPU USER     COMMAND
+ 333 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:39:18+00:00 load 4.01 3.33 3.08
+%CPU USER     COMMAND
+ 337 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:39:28+00:00 load 3.85 3.32 3.08
+%CPU USER     COMMAND
+ 338 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:39:38+00:00 load 3.63 3.29 3.08
+%CPU USER     COMMAND
+ 175 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:39:48+00:00 load 3.53 3.28 3.08
+%CPU USER     COMMAND
+ 288 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:39:58+00:00 load 3.14 3.21 3.05
+%CPU USER     COMMAND
+ 199 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:40:08+00:00 load 2.88 3.15 3.04
+%CPU USER     COMMAND
+ 167 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:40:18+00:00 load 2.83 3.13 3.03
+%CPU USER     COMMAND
+ 172 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:40:28+00:00 load 3.01 3.16 3.04
+%CPU USER     COMMAND
+ 216 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:40:38+00:00 load 3.16 3.19 3.05
+%CPU USER     COMMAND
+ 245 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:40:48+00:00 load 3.29 3.21 3.06
+%CPU USER     COMMAND
+ 266 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:40:58+00:00 load 3.40 3.24 3.07
+%CPU USER     COMMAND
+ 282 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:41:08+00:00 load 3.50 3.26 3.08
+%CPU USER     COMMAND
+ 294 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:41:18+00:00 load 3.65 3.31 3.10
+%CPU USER     COMMAND
+ 303 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:41:28+00:00 load 3.78 3.35 3.11
+%CPU USER     COMMAND
+ 307 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:41:38+00:00 load 3.81 3.37 3.12
+%CPU USER     COMMAND
+ 314 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:41:48+00:00 load 3.84 3.39 3.13
+%CPU USER     COMMAND
+ 320 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:41:59+00:00 load 3.87 3.41 3.14
+%CPU USER     COMMAND
+ 325 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:42:09+00:00 load 3.89 3.43 3.15
+%CPU USER     COMMAND
+ 329 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:42:19+00:00 load 3.91 3.45 3.16
+%CPU USER     COMMAND
+ 331 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:42:29+00:00 load 4.08 3.50 3.18
+%CPU USER     COMMAND
+ 335 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:42:39+00:00 load 3.83 3.47 3.18
+%CPU USER     COMMAND
+ 335 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:42:49+00:00 load 3.85 3.49 3.19
+%CPU USER     COMMAND
+ 276 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:42:59+00:00 load 3.56 3.44 3.17
+%CPU USER     COMMAND
+ 263 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:43:09+00:00 load 3.32 3.39 3.16
+%CPU USER     COMMAND
+ 192 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:43:19+00:00 load 2.96 3.31 3.14
+%CPU USER     COMMAND
+ 164 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:43:29+00:00 load 2.98 3.30 3.13
+%CPU USER     COMMAND
+ 181 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:43:39+00:00 load 3.13 3.32 3.14
+%CPU USER     COMMAND
+ 222 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:43:49+00:00 load 3.27 3.35 3.15
+%CPU USER     COMMAND
+ 249 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:43:59+00:00 load 3.70 3.43 3.19
+%CPU USER     COMMAND
+ 269 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:44:09+00:00 load 3.75 3.45 3.19
+%CPU USER     COMMAND
+ 284 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:44:19+00:00 load 3.79 3.47 3.20
+%CPU USER     COMMAND
+ 296 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.6 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:44:29+00:00 load 3.82 3.49 3.21
+%CPU USER     COMMAND
+ 305 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:44:39+00:00 load 3.85 3.51 3.22
+%CPU USER     COMMAND
+ 313 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:44:49+00:00 load 3.87 3.52 3.23
+%CPU USER     COMMAND
+ 320 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:44:59+00:00 load 3.89 3.54 3.24
+%CPU USER     COMMAND
+ 325 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:45:09+00:00 load 3.91 3.56 3.25
+%CPU USER     COMMAND
+ 330 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:45:20+00:00 load 4.14 3.62 3.27
+%CPU USER     COMMAND
+ 334 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:45:30+00:00 load 4.20 3.65 3.29
+%CPU USER     COMMAND
+ 336 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:45:40+00:00 load 4.16 3.66 3.29
+%CPU USER     COMMAND
+ 339 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:45:50+00:00 load 4.07 3.66 3.30
+%CPU USER     COMMAND
+ 339 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:46:00+00:00 load 4.06 3.67 3.30
+%CPU USER     COMMAND
+ 356 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:46:10+00:00 load 3.66 3.60 3.28
+%CPU USER     COMMAND
+ 231 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:46:20+00:00 load 3.25 3.51 3.26
+%CPU USER     COMMAND
+ 180 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:46:30+00:00 load 2.90 3.43 3.23
+%CPU USER     COMMAND
+ 158 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:46:40+00:00 load 3.15 3.46 3.25
+%CPU USER     COMMAND
+ 197 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:46:50+00:00 load 3.28 3.48 3.26
+%CPU USER     COMMAND
+ 232 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:47:00+00:00 load 3.47 3.51 3.27
+%CPU USER     COMMAND
+ 257 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:47:10+00:00 load 3.55 3.53 3.28
+%CPU USER     COMMAND
+ 275 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:47:20+00:00 load 3.62 3.55 3.29
+%CPU USER     COMMAND
+ 289 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:47:30+00:00 load 3.68 3.56 3.29
+%CPU USER     COMMAND
+ 299 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:47:40+00:00 load 3.89 3.61 3.31
+%CPU USER     COMMAND
+ 308 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:47:50+00:00 load 3.91 3.62 3.32
+%CPU USER     COMMAND
+ 316 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:48:00+00:00 load 4.00 3.65 3.33
+%CPU USER     COMMAND
+ 322 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:48:10+00:00 load 4.00 3.66 3.34
+%CPU USER     COMMAND
+ 327 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:48:21+00:00 load 4.00 3.68 3.35
+%CPU USER     COMMAND
+ 332 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:48:31+00:00 load 4.00 3.69 3.36
+%CPU USER     COMMAND
+ 334 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 1.0 ec2-user ps
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+## 2026-11-17T05:48:41+00:00 load 4.00 3.70 3.37
+%CPU USER     COMMAND
+ 338 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:48:51+00:00 load 4.00 3.71 3.37
+%CPU USER     COMMAND
+ 340 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:49:01+00:00 load 3.78 3.67 3.36
+%CPU USER     COMMAND
+ 340 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:49:11+00:00 load 3.89 3.70 3.38
+%CPU USER     COMMAND
+ 320 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:49:21+00:00 load 3.45 3.61 3.35
+%CPU USER     COMMAND
+ 210 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:49:31+00:00 load 3.07 3.52 3.32
+%CPU USER     COMMAND
+ 172 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:49:41+00:00 load 2.91 3.47 3.31
+%CPU USER     COMMAND
+ 162 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:49:51+00:00 load 3.15 3.51 3.32
+%CPU USER     COMMAND
+ 209 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:50:01+00:00 load 3.28 3.52 3.33
+%CPU USER     COMMAND
+ 241 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:50:11+00:00 load 3.39 3.54 3.34
+%CPU USER     COMMAND
+ 263 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:50:21+00:00 load 3.49 3.55 3.35
+%CPU USER     COMMAND
+ 280 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:50:31+00:00 load 3.56 3.57 3.35
+%CPU USER     COMMAND
+ 292 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:50:41+00:00 load 3.63 3.58 3.36
+%CPU USER     COMMAND
+ 303 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:50:51+00:00 load 3.69 3.60 3.37
+%CPU USER     COMMAND
+ 311 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:51:01+00:00 load 3.81 3.63 3.38
+%CPU USER     COMMAND
+ 318 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:51:11+00:00 load 3.92 3.66 3.39
+%CPU USER     COMMAND
+ 324 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:51:21+00:00 load 3.93 3.67 3.40
+%CPU USER     COMMAND
+ 328 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:51:32+00:00 load 4.02 3.70 3.41
+%CPU USER     COMMAND
+ 331 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:51:42+00:00 load 4.01 3.71 3.42
+%CPU USER     COMMAND
+ 333 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:51:52+00:00 load 4.08 3.73 3.43
+%CPU USER     COMMAND
+ 336 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:52:02+00:00 load 4.07 3.74 3.44
+%CPU USER     COMMAND
+ 337 ec2-user exp3-base
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:52:12+00:00 load 4.06 3.75 3.45
+%CPU USER     COMMAND
+36.0 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:52:22+00:00 load 3.97 3.74 3.45
+%CPU USER     COMMAND
+ 291 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:52:32+00:00 load 3.51 3.65 3.42
+%CPU USER     COMMAND
+ 200 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:52:42+00:00 load 3.13 3.56 3.39
+%CPU USER     COMMAND
+ 168 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:52:52+00:00 load 2.80 3.48 3.37
+%CPU USER     COMMAND
+ 173 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:53:02+00:00 load 3.06 3.51 3.38
+%CPU USER     COMMAND
+ 216 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:53:12+00:00 load 3.21 3.53 3.39
+%CPU USER     COMMAND
+ 246 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:53:22+00:00 load 3.33 3.55 3.39
+%CPU USER     COMMAND
+ 267 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:53:32+00:00 load 3.43 3.56 3.40
+%CPU USER     COMMAND
+ 283 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:53:42+00:00 load 3.59 3.59 3.41
+%CPU USER     COMMAND
+ 295 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:53:52+00:00 load 3.66 3.61 3.42
+%CPU USER     COMMAND
+ 305 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:54:02+00:00 load 3.71 3.62 3.43
+%CPU USER     COMMAND
+ 312 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:54:12+00:00 load 3.76 3.63 3.43
+%CPU USER     COMMAND
+ 319 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:54:22+00:00 load 3.79 3.65 3.44
+%CPU USER     COMMAND
+ 325 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:54:32+00:00 load 3.83 3.66 3.45
+%CPU USER     COMMAND
+ 330 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:54:42+00:00 load 3.85 3.67 3.45
+%CPU USER     COMMAND
+ 334 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:54:53+00:00 load 3.88 3.68 3.46
+%CPU USER     COMMAND
+ 338 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:55:03+00:00 load 3.90 3.69 3.47
+%CPU USER     COMMAND
+ 339 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun
+## 2026-11-17T05:55:13+00:00 load 3.67 3.65 3.45
+%CPU USER     COMMAND
+ 339 ec2-user exp3
+ 2.9 ec2-user claude
+ 2.8 ec2-user claude
+ 0.7 root     nv-hostengine
+ 0.6 root     codex
+ 0.5 ec2-user claude
+ 0.4 root     bun

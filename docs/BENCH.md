@@ -48,6 +48,53 @@ pre-registered metric was plain RSS, so it is reported as **missed**; the split 
   292 B/object projection was stopped early, as soon as the 10⁷ disk number showed it could not fit.
 - The bench's disk number now counts each inode once.
 
+## 2026-11-17: final batch for v0.1.0-rc.1, pass 2, core side, on `20f55ad` (superseded)
+
+**Superseded.** Net's windows A and B on `20f55ad` found one more FAIL: the git push tier for jq fell from STRONG
+PASS to PASS (re-push 0.608 vs 0.476 s). The reach index walked each new history in a background thread while the
+next push ran. The fix is a code change: pending additions are settled lazily, by the next query. Per the human,
+the whole batch reruns on the new head. These results are kept as the record of pass 2.
+
+
+**One commit:** `release/v0.1.0-rc.1` at `20f55ad`, dirty 0 in every header. It is origin/main `303deb9`, plus
+net's `fuzz-auth-header`, the new-workflow docs, and the fix for two regressions that an earlier pass of this
+batch found (below). The bench data was regenerated first: the six Exp3 inputs, byte-identical to the previous
+ones, and the old-format stores under `bench-micro` deleted.
+- **Windows:** one at a time, under the lock, each starting at load < 1.0, with a 10 s process sampler. A window
+  with any foreign process over 20 % CPU was discarded and rerun.
+- **Discarded:** W3 tries 1 and 2 (a root `nix` at 03:03:54, then `dnf` from `update-motd` at 03:27); W6 try 1
+  (`nix` again at 05:03:54).
+- **Raw data:** `bench/final/rc1/20f55ad/` (clean tries named in each window's directory).
+
+| part | result |
+|---|---|
+| core suite (W1; load 0.62–1.71) | **77/77 metrics within the allowance** (`core-verdict.md`) |
+| §6.4 generic (W2) | every metric within allowance; durable write 0.95, 0.909, 0.916× (median 0.916×: tier PASS in this run); range p99 0.108 ms; sizes identical; verified read strict 0.322–0.383×, eof 0.408–0.485× of warm `cat`: **the 0.50× target is missed** (ruled by the human: recorded as missed) |
+| Exp3 (W3–W5), 28 rows | **sizes 28/28 byte-identical**; 0 failed reads; every A3 build faster (ripgrep 5.98 → 5.33 s, jq 12.19 → 11.10, redis 190.4 → 178.1, git 401.0 → 333.6) |
+| Exp3 A3 reads and RSS | ripgrep and redis A3 equal or better. **FAIL: jq A3 read p99 14.43 → 16.52 ms (+14.5 %), jq A3 peak RSS 513 → 547 MB (+6.5 %), git A3 peak RSS 5.13 → 6.17 GB (+20.4 %), which also misses the ≤ 6 GB RSS tier.** One rep each, allowance 3 %. Not ruled. |
+| Exp3 build re-time | ripgrep 0.911, jq 1.054 (baseline 0.944 and decisive 1.179): no tier worse |
+| Recheck 1: ingest put | baseline 183/181/190/190/191, rc.1 194/192/185/194/194 MB/s; medians 190 vs 194 (+2.1 %): **PASS** |
+| Recheck 2: durable-write tier | per-run put/dd 0.899, 0.866, 0.866, 0.865, 0.867; median 0.866 vs 0.90: **FAIL** (ruled FAIL) |
+| Recheck 3: redis A3 peak RSS | baseline 2.24/2.78/3.45 GB, rc.1 2.61/2.84/2.36 GB; medians 2.78 vs 2.61 GB: **PASS** |
+| 95f6a4a check (W7): put/dd, before (7387883) vs rc.1, interleaved | before 188/184/184 MB/s (ratios 0.948, 0.869, 0.867); rc.1 184/184/184 (0.869, 0.867, 0.869): **no measurable effect**. The staging-file writeback did not explain the durable-write gap. Our put has been 184 MB/s since the baseline; `dd conv=fsync` on this volume moved from 153–187 to about 211 MB/s. |
+
+**Regressions found and fixed on the way** (pass 1 of this batch, on `78bf513`; its raw data is kept in
+`bench/final/rc1/78bf513-superseded/`):
+- Scale names 1e6: RSS 148 → 238 MB, open +16 %. The ref journal cloned every replayed record for the new
+  foreign feed even with no observer.
+- Scale GC 1e7: peak RSS +25 %, time +9 %. GC's mark kept a second set of every traced object.
+
+Both are fixed in `20f55ad`, which is why the whole batch reran on it. Pass 1 also had process-guard false
+positives on our own baseline binaries (`o5s-bench-base`, `exp3-base`). I checked those logs by hand and fixed
+the guard's pattern.
+
+**Disclosures.**
+- Peak RSS of the 4-thread Exp3 build scatters between runs. git A3 measured 5.13 GB (baseline), 5.09 GB
+  (`cbbbb8a`), 4.94 GB (`9914209`) and 6.17 GB (this run). That doesn't decide the FAIL; a controlled
+  re-measurement would, like the redis A3 recheck.
+- The guard reads `ps` CPU, which is averaged over a process's lifetime, so a short burst inside a long-lived
+  process could go unseen. The load at each window's start is recorded beside it.
+
 ## 2026-11-16: final batch after H4 (PLAN §6.8), core side, on `9914209`: incomplete
 
 **Status: incomplete.** Exp3, the build re-time, §6.4 and the three controlled re-measurements ran to the end.
