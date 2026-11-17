@@ -947,11 +947,12 @@ async fn list_refs(
     Extension(p): Extension<Principal>,
     Query(q): Query<ListQuery>,
 ) -> ApiResult<Json<wire::RefList>> {
-    if !q.prefix.is_empty() {
-        validate_path(&q.prefix).map_err(ApiError::from)?;
+    // A trailing `/` names the same prefix (`f/` lists what `f` lists).
+    let prefix = o5s_core::list_prefix(&q.prefix).to_string();
+    if !prefix.is_empty() {
+        validate_path(&prefix).map_err(ApiError::from)?;
     }
     let repo = st.repo.clone();
-    let prefix = q.prefix.clone();
     let all = blocking(move || repo.list_refs(&prefix)).await?;
     let refs = all
         .iter()
