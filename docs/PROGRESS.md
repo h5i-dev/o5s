@@ -240,6 +240,13 @@ ruled on (BENCH.md 2026-11-17; raw data in `bench/final/rc1/ba21b99/` and `bench
   - §6.4 verified read: strict 0.355×, eof 0.45× vs 0.50×.
   - HF LFS upload: 1.35× vs 1.2×.
   - OCI pull vs Distribution was a FAIL in the baseline too, so it isn't a regression.
+- **Release checklist (RELEASE.md):**
+  - gate green (exit code checked) on `f691647` and on the tag commit;
+  - `h5i app prove` ok (core 182 theorems, standard axioms; net with both obligations proven);
+  - fuzz smoke `ref_journal` clean on `f691647` (356,998 runs in 76 s under ASan), per the human's rc.1 ruling;
+  - CHANGELOG `[0.1.0-rc.1] - 2026-11-17`; docs current.
+- **Tagged** `v0.1.0-rc.1` on the head of `release/v0.1.0-rc.1` (the commit that records this). The human opens
+  the PR and merges.
 - **Earlier passes:** pass 1 (`78bf513`) found two memory regressions, fixed in `20f55ad`. Pass 2 (`20f55ad`)
   found net's git re-push FAIL, fixed in `ba21b99`. Both passes are kept in BENCH.md.
 

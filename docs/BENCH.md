@@ -71,7 +71,8 @@ drain (net's pass-2 git re-push FAIL). The human chose a full rerun on it.
 | **W9 (amendment 2026-11-17 b): stream peak RSS, 5+5 interleaved** | baseline 22/21/21/22/22 MB, rc.1 24/22/23/20/22 MB; medians 22 vs 22 MB (0 %, allowed max(3 %, the baseline binary's range 4.5 %)): **PASS**. The baseline binary itself moves by 1 MB between runs. |
 
 **Fuzz smoke (RELEASE.md step 5, the human's ruling for rc.1):** `ref_journal` only, ≥ 60 s under ASan on the
-tag commit: FUZZ_RESULT. The other 19 targets are skipped for rc.1 and run before v0.1.0 final.
+tag commit's code (`f691647`; the tag commit adds only docs): 356,998 runs in 76 s, exit 0, no sanitizer
+report, no crash artifact: **clean**. The other 19 targets are skipped for rc.1 and run before v0.1.0 final.
 
 **Disclosures.**
 - W8's baseline binary spans 4.91–6.68 GB for git A3 peak RSS: the 4-thread build's RSS scatters by itself.
