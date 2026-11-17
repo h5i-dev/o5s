@@ -46,6 +46,11 @@ Every denial is audited.
 
 ## Native API (`/v1`)
 
+Names in URLs and bodies follow the name grammar (`[A-Za-z0-9._+-]` segments, ARCHITECTURE.md "Names").
+A name that stands for a file path uses the path-name convention (ARCHITECTURE.md, "File paths as names"):
+`src/a b.py` is the name `src/a+20b.py`. The core API (`Name::from_path` / `Name::to_path`) and the CLI
+(`o5s name encode|decode`) implement it; clients in other languages follow the same rules.
+
 All bodies are JSON unless noted. Every error has the form `{"error":{"code","message","rule?","subject?"}}`, where `code` is a stable string:
 
 | code | HTTP | meaning |
@@ -113,6 +118,9 @@ curl -X POST -H "Authorization: Bearer $T" $S/v1/replace -d '{
   "new":"<hash>"}'
 # -> 200 {"outcome":"ok","version":4}  or  409 {"outcome":"conflict","stale":[{"name":...,"observed":5}]}
 ```
+
+`prefix` is segment-aligned (`team/app` lists `team/app` and `team/app/...`, not `team/apples`). A trailing `/`
+names the same prefix (`team/app/` = `team/app`).
 - `POST /v1/replace_many` takes `{"updates":[{"name","new"}],"read_set":[...]}`. All updates commit atomically, or none do.
 - `POST /v1/update_many` is the same, but `"new": null` deletes the name.
 - `DELETE /v1/refs/<name>` takes `{"read_set":[...]}`. It is OCC; create-once names cannot be deleted. Re-creating a name continues its version sequence.

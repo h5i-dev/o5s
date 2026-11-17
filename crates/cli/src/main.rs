@@ -168,6 +168,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: NsCmd,
     },
+    /// File paths as names (needs no repository): the canonical, reversible encoding.
+    Name {
+        #[command(subcommand)]
+        cmd: NameCmd,
+    },
     /// Seal open packs (make written objects durable and visible).
     Flush,
     /// Repository statistics.
@@ -227,6 +232,24 @@ enum Cmd {
         /// at a fast ingest level, e.g. `init --zstd-level 1`, into similarity frames).
         #[arg(long)]
         repack_all: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum NameCmd {
+    /// Print the name of each file PATH (one per line, in order). Per `/`-separated
+    /// segment, every byte outside `[A-Za-z0-9._-]` becomes `+XX` (uppercase hex),
+    /// and a `.` or `..` segment has its dots escaped. Fails on an empty path or
+    /// segment, or a name over 1024 bytes.
+    Encode {
+        #[arg(required = true)]
+        paths: Vec<std::ffi::OsString>,
+    },
+    /// Print the file path each NAME encodes (one per line, in order). Strict: only
+    /// the canonical encoding of a path decodes.
+    Decode {
+        #[arg(required = true)]
+        names: Vec<String>,
     },
 }
 
@@ -443,6 +466,25 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
         println!("initialized {}", cli.repo.display());
         return Ok(Outcome::Ok);
     }
+    if let Cmd::Name { cmd } = &cli.cmd {
+        let mut out = std::io::stdout().lock();
+        match cmd {
+            NameCmd::Encode { paths } => {
+                use std::os::unix::ffi::OsStrExt;
+                for p in paths {
+                    writeln!(out, "{}", Name::from_path_bytes(p.as_bytes())?)?;
+                }
+            }
+            NameCmd::Decode { names } => {
+                for n in names {
+                    let n = Name::new(n.as_str())?;
+                    out.write_all(&n.to_path_bytes()?)?;
+                    out.write_all(b"\n")?;
+                }
+            }
+        }
+        return Ok(Outcome::Ok);
+    }
     let remote = match &cli.remote {
         Some(url) => Some(o5s_client::RemoteRepo::connect(url, cli.token.clone())?),
         None => None,
@@ -457,7 +499,7 @@ fn run(cli: Cli) -> Result<Outcome, Error> {
         |what: &'static str| -> Result<&LocalRepo, Error> { local.as_ref().ok_or(Error::Unsupported(what)) };
     let mut out = std::io::stdout().lock();
     match cli.cmd {
-        Cmd::Init { .. } => unreachable!("handled above"),
+        Cmd::Init { .. } | Cmd::Name { .. } => unreachable!("handled above"),
         Cmd::Put { files, batch, null, for_name, encoding } => {
             let mut paths = files;
             if batch {

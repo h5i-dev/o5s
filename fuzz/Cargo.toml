@@ -162,3 +162,10 @@ path = "fuzz_targets/search_index.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "name_path"
+path = "fuzz_targets/name_path.rs"
+test = false
+doc = false
+bench = false

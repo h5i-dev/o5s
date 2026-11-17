@@ -24,6 +24,7 @@ Commands:
   delete     Delete a name (OCC). Immutable/released names can't be deleted
   refs       List refs under a prefix
   ns         Namespace rules
+  name       File paths as names (needs no repository): the canonical, reversible encoding
   flush      Seal open packs (make written objects durable and visible)
   stat       Repository statistics
   fsck       Verify every stored object (CRC + content hash) and every ref. Exit 1 on problems
@@ -275,6 +276,50 @@ Options:
 List rules
 
 Usage: o5s ns list
+
+Options:
+  -h, --help  Print help
+```
+
+## `name`
+
+```text
+File paths as names (needs no repository): the canonical, reversible encoding
+
+Usage: o5s name <COMMAND>
+
+Commands:
+  encode  Print the name of each file PATH (one per line, in order). Per `/`-separated segment, every byte outside `[A-Za-z0-9._-]` becomes `+XX` (uppercase hex), and a `.` or `..` segment has its dots escaped. Fails on an empty path or segment, or a name over 1024 bytes
+  decode  Print the file path each NAME encodes (one per line, in order). Strict: only the canonical encoding of a path decodes
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+### `name encode`
+
+```text
+Print the name of each file PATH (one per line, in order). Per `/`-separated segment, every byte outside `[A-Za-z0-9._-]` becomes `+XX` (uppercase hex), and a `.` or `..` segment has its dots escaped. Fails on an empty path or segment, or a name over 1024 bytes
+
+Usage: o5s name encode <PATHS>...
+
+Arguments:
+  <PATHS>...  
+
+Options:
+  -h, --help  Print help
+```
+
+### `name decode`
+
+```text
+Print the file path each NAME encodes (one per line, in order). Strict: only the canonical encoding of a path decodes
+
+Usage: o5s name decode <NAMES>...
+
+Arguments:
+  <NAMES>...  
 
 Options:
   -h, --help  Print help
