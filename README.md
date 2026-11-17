@@ -103,8 +103,8 @@ Numbers are o5s divided by the specialist, so lower is better.
 | Adapter | Specialist | Push / upload | Pull / download | Stored bytes |
 |---|---|---|---|---|
 | Git (jq, ripgrep, redis) | `git daemon` | 0.80–1.02× | clone 0.73–0.97×, fetch 0.71–0.83× | clone wire 0.58–1.10× |
-| OCI | Distribution | 0.60× | 1.74× | 1.00× |
-| Hugging Face | Xet dedup | server time 0.37× | server CPU 0.99× | 0.91× |
+| OCI | Distribution (`registry`) | 0.60× | 1.74× | 1.00× |
+| Hugging Face (Xet) | Xet dedup | server time 0.37× of a plain upload | server CPU 0.99× of a plain download | 0.91× |
 | PyPI | devpi | | cold 1.10×, hot 1.18× | 0.47× |
 | npm | Verdaccio | | cold 1.06×, hot 1.06× | 0.11× |
 | Maven | Reposilite | | cold 0.99×, hot 1.03× | 0.93× |
