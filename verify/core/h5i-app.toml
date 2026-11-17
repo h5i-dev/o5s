@@ -4,7 +4,7 @@
 [extract]
 crate = "../../crates/kernel"
 # Charon starts here and extracts what it reaches.
-start-from = ["refs::decide", "refs::decide_set_rule", "names::validate", "fronts::may_write", "fronts::may_set_rule", "gc::is_victim", "gc::delete_ok", "gc::skip_lone_live", "promote::decide_promote", "retention::plan", "retention::version_cmp", "objects::put_action", "objects::accept_read", "codec::parse_header", "codec::journal_step"]
+start-from = ["refs::decide", "refs::decide_set_rule", "names::validate", "fronts::may_write", "fronts::may_set_rule", "gc::is_victim", "gc::delete_ok", "gc::skip_lone_live", "promote::decide_promote", "retention::plan", "retention::version_cmp", "objects::put_action", "objects::accept_read", "codec::parse_header", "codec::journal_step", "pathname::encode", "pathname::decode"]
 
 [check]
 # Must exist and use only Lean's standard axioms (every theorem in a
@@ -29,6 +29,10 @@ theorems = [
     "o5s_kernel.Proofs.put_never_overwrites",
     "o5s_kernel.Proofs.parse_header_spec",
     "o5s_kernel.Proofs.journal_step_spec",
+    "o5s_kernel.PathName.encode_valid",
+    "o5s_kernel.PathName.decode_encode",
+    "o5s_kernel.PathName.decode_canonical",
+    "o5s_kernel.PathName.encode_injective",
 ]
 
 # Bugs the proofs must reject (`h5i app mutate`).
@@ -134,3 +138,21 @@ name = "journal_truncates_history"
 file = "../../crates/kernel/src/codec.rs"
 old = "        if end == rest_len {"
 new = "        if end <= rest_len {"
+
+[[mutant]]
+name = "path_hex_lowercase"
+file = "../../crates/kernel/src/pathname.rs"
+old = "    b'A' + (v - 10)"
+new = "    b'a' + (v - 10)"
+
+[[mutant]]
+name = "path_plus_kept_literally"
+file = "../../crates/kernel/src/pathname.rs"
+old = "    b == b'-'\n}"
+new = "    b == b'-' || b == b'+'\n}"
+
+[[mutant]]
+name = "path_decode_skips_canonical_check"
+file = "../../crates/kernel/src/pathname.rs"
+old = "            if bytes_eq(&e, n) {"
+new = "            if true {"

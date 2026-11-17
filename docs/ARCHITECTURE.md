@@ -114,6 +114,35 @@ the tombstone switch generations.
 `head-release` (`heads/*` mutable, `releases/*` create-once, anything else forbidden). A rule can only be
 set on a prefix that has no refs, so immutability can never be retracted.
 
+### File paths as names (the path-name convention)
+
+A name is `/`-separated segments of `[A-Za-z0-9._+-]`, at most 1024 bytes, with no empty, `.` or `..`
+segment. Arbitrary file paths (spaces, `[ ]`, `~`, `%`, non-ASCII, `.`/`..` segments) don't fit, so
+o5s defines one canonical, reversible encoding. Use it whenever a name stands for a file path; the CLI's
+`o5s name encode|decode` and the core API's `Name::from_path` / `Name::to_path` implement it.
+- **Encoding, per `/`-separated segment:** every byte outside `[A-Za-z0-9._-]` becomes `+XX` (two
+  uppercase hex digits), so `+` itself is `+2B` and a space is `+20`. A segment that is exactly `.` or `..`
+  has its dots escaped (`+2E`, `+2E+2E`); other dots stay (`.hidden`, `...`, `a.b`). `/` separates segments
+  and is never escaped.
+- **Refused:** the empty path, an empty segment (a leading, trailing or doubled `/`), and a result over 1024
+  bytes.
+- **Decoding is strict:** an escape is `+` and two uppercase hex digits, and a name decodes only if it is
+  exactly the encoding of its result. Refused: lowercase hex, an escape of a byte that needn't be escaped
+  (`+61`, `+2F`), and a literal `.`/`..` segment. So encoding is a bijection onto what decoding accepts.
+
+Examples: `src/a b.py` → `src/a+20b.py`, `x/[1]~%.txt` → `x/+5B1+5D+7E+25.txt`, `é/ü` →
+`+C3+A9/+C3+BC`, `a/../b` → `a/+2E+2E/b`. The bytes of the path are encoded, so non-UTF-8 paths work
+(`Name::from_path_bytes`).
+
+The encoder and decoder are a kernel (`o5s_kernel::pathname`), extracted to Lean and proved
+(`verify/core/proofs/PathName.lean`):
+- every encoding is a valid name (`encode_valid`);
+- decoding inverts encoding (`decode_encode`);
+- whatever decodes is the encoding of its result (`decode_canonical`);
+- the encoding is injective (`encode_injective`).
+
+`fuzz/fuzz_targets/name_path.rs` exercises both directions.
+
 ## Fronts (crates/repo/src/front.rs; docs/VISION.md)
 
 The core is domain-agnostic. Domain behaviour comes from **fronts** registered when a repository is opened
@@ -168,6 +197,7 @@ are about the extracted code (`verify/core`, docs/H5I_PLAN.md). Authorization (P
 | P4 unauthorized principals can't move/read | net: `guarded_transition.authorized` (`verify/net`) | server authz tests |
 | P5 GC never deletes a live object's only copy | `delete_keeps_live` (+ `is_victim_spec`) | GC crash sweep, concurrent-writer GC, SIGKILL test, Frame3 reference GC test |
 | P6 a front's names (and rule prefixes) are written only through its handle | `guard_owner`, `may_set_rule_spec` | nested-claims and every-write-path tests (`crates/repo/tests/front.rs`) |
+| file paths as names: valid, reversible, canonical, injective | `encode_valid`, `decode_encode`, `decode_canonical`, `encode_injective` (`PathName.lean`) | kernel proptests (`crates/kernel/tests/pathname.rs`), fuzz target `name_path` |
 | P7 promotion moves only `dst`, never from a stale `src` | `promote_plan`, `promote_src_fresh` | `crates/attest` promotion test |
 | retention keeps the newest N and deletes only what rules and provenance allow | `plan_spec` | `crates/prov/tests/retention.rs` |
 

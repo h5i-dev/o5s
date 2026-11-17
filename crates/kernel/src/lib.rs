@@ -16,6 +16,7 @@ pub mod fronts;
 pub mod gc;
 pub mod names;
 pub mod objects;
+pub mod pathname;
 pub mod promote;
 pub mod refs;
 pub mod retention;
