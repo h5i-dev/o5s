@@ -1,5 +1,12 @@
 # Net session progress (backends & server, branch `net`)
 
+## OCI pull 1.74× → 0.91× of Distribution: TCP_NODELAY (2026-11-17, branch net-oci-pull-nodelay)
+
+- **Cause:** the plain-HTTP listener did not set `TCP_NODELAY` (the TLS listener did). A pull is many small responses (4 images, 25 requests); with Nagle, a response written as headers then body waited on the client's delayed ACK, about 5 ms per request. Server CPU was the same either way (0.25 s), and strict against eof read verification made no difference.
+- **How it was found:** an OCI split profile (per-route server busy time, server CPU, client wall). It was fast (0.19 s) at the bench server's INFO log level, where the timing middleware wraps response bodies, and slow (0.32–0.42 s) at the default WARN.
+- **Fix:** `o5s_server::nodelay()` wraps the plain `TcpListener` (`serve`) with `tap_io(set_nodelay(true))`. Test `nodelay_tests::accepted_connections_have_nodelay`.
+- **Dev check** (quiet window, start load 0.78, bench lock, `oci_bench.py`): o5s pull 0.174 s median (0.165–0.185) against Distribution 0.192 s, i.e. **0.91×**. On the rc.1 commit it was 0.328 s against 0.189 s. Push is unchanged (0.110 s). Other fronts with many small responses may gain too; the next batch will show it.
+
 ## Final batch for v0.1.0-rc.1: net §6.5 windows A and B (2026-11-17, on release/v0.1.0-rc.1 ba21b99)
 
 - **Runs.** A (git, oci, hf, pypi, npm) ran 10:59–11:17 and B (maven) 11:18–11:44. Release build from a clean worktree at ba21b99.
