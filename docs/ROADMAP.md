@@ -28,6 +28,47 @@
    - CHANGELOG, README rewrite (what it is, quick start for each front), ARCHITECTURE/API docs current, upgrade and format-compatibility policy.
    - Tag a release candidate (`v0.1.0-rc.N`) on its release branch (`release/v0.1.0-rc.N`, cut from `main`).
    - Write `docs/RELEASE.md` with the merge-to-main checklist. The human merges to `main`.
+8. **Line-level combine for concurrent edits of one file (from the SWE-bench pilot, 2026-11-17).**
+   - **Evidence.** In the pilot (two agents sharing a working copy through o5s, one name per file), the o5s arm
+     solved 7/10 against git's 6/10. Same-file edits to different hunks became manual conflicts, though:
+     django-13344 took 1068 s against 388 s with git.
+   - **Prototype.** In the experiment's client (`/mnt/scratch/swe-o5s/bin/ws`, with `harness/merge3.py` and
+     tests next to it), `ws pull` now combines base, ours and theirs line by line. Base is the version last
+     synced, from `.ws/state.json`. It reports a conflict only when hunks overlap or touch; the combined file is
+     a local change, pushed with the usual OCC `update`. The pilot run kept no store, so its conflicts can't be
+     replayed exactly; the rerun below is the test.
+   - **To make it a product feature:**
+     - **Where it lives:** a workspace front and CLI (`o5s ws`), not the core. The store keeps bytes and
+       names; combining is client-side and stays domain-agnostic. The core already provides what it needs:
+       per-name versions, OCC multi-name `update`, and reads by hash.
+     - **A merge kernel with theorems** (`crates/kernel`, `verify/core`), proved over a specified diff:
+       - with no conflict, the result applies both sides' hunks;
+       - `merge3(b, o, b) = o` and `merge3(b, b, t) = t`;
+       - merging is symmetric up to which side is "ours";
+       - a conflict is reported exactly when hunks overlap or touch.
+
+       The diff itself (Myers or histogram) is either extracted and proved, or a spec'd trusted component.
+     - **Merge base from the store, not from client state.** Each replace could carry the parent hash it
+       replaced, as a provenance record (`prov record replace --in parent=…`), so any client, or a fresh clone,
+       finds the base of a name's two versions. Today the base exists only in the client's state file.
+     - **Limits and safety:**
+       - cap the size and line count of files to combine, since diffing is superlinear, and fall back to a
+         conflict above the cap;
+       - treat binary or NUL content as a conflict;
+       - define line endings (CRLF, a missing final newline) and decoding (bytes, never lossy UTF-8);
+       - make the result deterministic.
+     - **Conflict presentation:** keep ours untouched and stash theirs (agents did well with that), with an
+       optional `diff3`-style marker mode for humans, and a machine-readable conflict list (base ranges) for
+       tools.
+     - **Per-front merge drivers.** A front can supply a structure-aware combine for its formats (JSON and TOML
+       keys, notebooks, lockfiles) through the `Front` trait, falling back to lines. This is where domain
+       expertise wins without leaking into the core.
+     - **Path-level cases:** renames and moves, add/add, modify/delete, and directory structure. These build on
+       the tree object (ARCHITECTURE.md), so a workspace snapshot is one tree with per-entry combines.
+     - **Evaluation,** pre-registered in PLAN.md: rerun the SWE-bench pilot with the combine enabled.
+       Metrics are manual conflicts per task, wall time against the git arm (django-13344 above all), and
+       solved count. No silent mis-merge is allowed: every combined file must pass the task's tests or be
+       re-reviewed.
 
 ## Net session (`o5s-net`)
 1. **Finish in-flight work:** the idmap ranged-lookup fix (agreed with core), and the server side of `read_verify`.
