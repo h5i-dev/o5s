@@ -1,5 +1,16 @@
 # Net session progress (backends & server, branch `net`)
 
+## LFS upload 1.35× → ≤ 1.2× of `/v1`: the Xet chunker off the put path's feeding thread (2026-11-17, branch net-xet-parallel-chunker)
+
+- **Cause:** for `hf/` content (Xet profile, kept for LFS↔Xet chunk dedup) the store's put path ran the serial Xet chunker inline on the thread that also reads the stream (about 1.4 GB/s). That made it the put's serial bottleneck. The first parallel try, 32 MiB windows cut on several threads, was slower (0.49 s) because nothing was handed out while a window filled, and it was reverted.
+- **Fix:** `PipelinedXetChunks` in `crates/pack/src/store.rs`. The serial `XetChunker` runs on its own thread, fed 1 MiB blocks through a bounded channel (8 deep). The put thread keeps reading and hands out each chunk as soon as its length comes back. The cuts are the serial chunker's by construction: it sees the same bytes in order, and streaming cuts don't depend on how the input is split.
+  - The existing exactness test `put_stream_xet_parallel_windows_cut_exactly_like_serial` passes (jagged reads; sizes around 32 MiB boundaries; a constant run with forced max-size cuts). The unused `LengthChunks` is removed.
+- **Dev check** (quiet windows, start load < 1, bench lock; LFS upload server busy against `/v1` PUT of the same 270 MB on one server, median of 4):
+  - 0.343 vs 0.312 s, **1.10×** (22:10);
+  - 0.320 vs 0.273 s, **1.17×** (23:28).
+  - It was 1.35× on rc.1. Server CPU is 0.92 vs 0.70 s (SHA-256 and the Xet chunker still cost CPU, now off the critical path).
+  - Not yet combined with the TCP_NODELAY fix (branch net-oci-pull-nodelay); the next batch measures both.
+
 ## Final batch for v0.1.0-rc.1: net §6.5 windows A and B (2026-11-17, on release/v0.1.0-rc.1 ba21b99)
 
 - **Runs.** A (git, oci, hf, pypi, npm) ran 10:59–11:17 and B (maven) 11:18–11:44. Release build from a clean worktree at ba21b99.
